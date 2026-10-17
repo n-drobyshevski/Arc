@@ -14,6 +14,9 @@
 //   long click is on Android); Enter or Space is a tap.
 // - The column's sizes are CSS (FunctionRow.css, on the column's own height).
 // - TEMPO's LED blink is a CSS animation started on each beat when it is heard.
+// - TEMPO held on the drawn EP-133 ([TempoHold]): knob X turns the tempo, as
+//   on the device; a turn spends the press, so letting go neither clicks nor
+//   opens the sheet.
 import { createContext, type ButtonHTMLAttributes, type CSSProperties, type JSX } from 'preact'
 import { useContext, useEffect, useRef } from 'preact/hooks'
 import { signal, type ReadonlySignal } from '@preact/signals'
@@ -156,6 +159,39 @@ export class ProjectHold {
   }
 }
 
+/**
+ * TEMPO held on the drawn EP-133 (web only): while [held], knob X turns the
+ * tempo ([turn]); a press that turned it does nothing more, neither the click
+ * nor the tempo sheet.
+ */
+export class TempoHold {
+  private readonly _held = signal(false)
+  /** TEMPO is held down. */
+  readonly held: ReadonlySignal<boolean> = this._held
+  private turned = false
+
+  down(): void {
+    this._held.value = true
+    this.turned = false
+  }
+
+  /** Knob X turned the tempo while TEMPO is held. */
+  turn(): void {
+    if (this._held.peek()) this.turned = true
+  }
+
+  /** Whether the press has turned the tempo (its tap and hold are spent). */
+  get spent(): boolean {
+    return this.turned
+  }
+
+  /** TEMPO let go of (or its press taken away). */
+  up(): void {
+    this._held.value = false
+    this.turned = false
+  }
+}
+
 /** PROJECT's hold, shared by the row's key and the pads it takes. */
 export const ProjectHoldContext = createContext<ProjectHold | null>(null)
 
@@ -226,14 +262,36 @@ export function useTapHold(onTap: () => void, onHold: () => void, enabled = true
 /**
  * TEMPO's press, for any key that is TEMPO (the row's, the drawn EP-133's):
  * a tap turns the click on or off; held (or right-clicked), the tempo sheet.
+ * With [hold] (the drawn EP-133's), the press is told to it, and one that
+ * turned the tempo with knob X does neither.
  */
-export function useTempoPress(t: TempoUi): PressHandlers {
+export function useTempoPress(t: TempoUi, hold?: TempoHold): PressHandlers {
   const latest = useRef(t)
   latest.current = t
-  return useTapHold(
-    () => latest.current.onClick(!latest.current.clickOn),
-    () => latest.current.onSheet(),
+  const press = useTapHold(
+    () => {
+      if (!hold?.spent) latest.current.onClick(!latest.current.clickOn)
+    },
+    () => {
+      if (!hold?.spent) latest.current.onSheet()
+    },
   )
+  if (hold === undefined) return press
+  return {
+    ...press,
+    onPointerDown: (e) => {
+      if (e.button === 0) hold.down()
+      press.onPointerDown?.(e)
+    },
+    onPointerUp: (e) => {
+      press.onPointerUp?.(e)
+      hold.up()
+    },
+    onPointerCancel: (e) => {
+      press.onPointerCancel?.(e)
+      hold.up()
+    },
+  }
 }
 
 /**
@@ -431,11 +489,11 @@ export function ProjectKey(props: { p: ProjectUi; hold: ProjectHold; drawn?: Dra
  * While the EP-133 sends MIDI clock its tempo is the one shown (and the one
  * the click follows). Its LED blinks on each beat, longer on a bar's first.
  */
-export function TempoKey(props: { t: TempoUi; drawn?: DrawnKey }): JSX.Element {
+export function TempoKey(props: { t: TempoUi; drawn?: DrawnKey; hold?: TempoHold | undefined }): JSX.Element {
   const { t } = props
   const bpm = t.deviceBpm !== null ? roundTempo(t.deviceBpm) : t.bpm
   const led = useRef<HTMLSpanElement | null>(null)
-  const press = useTempoPress(t)
+  const press = useTempoPress(t, props.hold)
   // The LED: lit when the beat is heard, fading in 110 ms (220 on a bar's first).
   const beat = t.beat
   useEffect(() => {

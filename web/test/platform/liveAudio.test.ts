@@ -8,6 +8,7 @@ import {
   LATENCY_GLITCHES,
   CHOICE_KEY,
   HINT_KEY,
+  VOLUME_KEY,
   LiveAudio,
   MixerHost,
   REPLACE_QUIET_MS,
@@ -41,6 +42,7 @@ import { PhaseAnchors } from '../../src/core/features/sequencer'
 import { VoiceMixer, VoiceShape } from '../../src/core/formats/voiceMixer'
 import { decodeWav } from '../../src/core/formats/wav'
 import { FxControl } from '../../src/core/formats/fx/fxBus'
+import { levelGain } from '../../src/core/features/fxSettings'
 import { WebText } from '../../src/core/text/webText'
 import type { LiveAudioDeps } from '../../src/state/deps'
 
@@ -96,6 +98,11 @@ class FakeLink implements MixerLink {
   }
   close(): void {
     this.closed = true
+  }
+  /** The speakers' gains set (VOLUME), in order. */
+  readonly gains: number[] = []
+  volume(gain: number): void {
+    this.gains.push(gain)
   }
   /** One render quantum (128 frames) starting at context time [time]. */
   render(time: number, frames = 128): { left: Float32Array; right: Float32Array } {
@@ -153,6 +160,8 @@ class FakeBackend implements LiveBackend {
   saveHint?: (hint: LiveLatencyHint) => void
   savedChoice?: () => WebLatencyHint
   saveChoice?: (choice: WebLatencyHint) => void
+  savedVolume?: () => number
+  saveVolume?: (volume: number) => void
   get ctx(): FakeContext {
     return this.contexts[this.contexts.length - 1]!
   }
@@ -1410,6 +1419,85 @@ describe('browserLiveBackend latency choice', () => {
       }
       expect(backend.savedChoice?.()).toBe(WebLatencyHint.ZERO)
       expect(() => backend.saveChoice?.(WebLatencyHint.INTERACTIVE)).not.toThrow()
+    } finally {
+      store.localStorage = before
+    }
+  })
+})
+
+describe("LiveAudio VOLUME (web only: the drawn EP-133's knob)", () => {
+  it('is heard on a square curve: even to the ear, 0 silent, 1 whole', () => {
+    expect(levelGain(1)).toBe(1)
+    expect(levelGain(0)).toBe(0)
+    expect(levelGain(0.5)).toBe(0.25)
+    expect(levelGain(0.7)).toBe(Math.fround(Math.fround(0.7) * Math.fround(0.7)))
+    // Held to 0..1.
+    expect(levelGain(-1)).toBe(0)
+    expect(levelGain(3)).toBe(1)
+    expect(levelGain(Number.NaN)).toBe(0)
+    // Rising all the way.
+    for (let v = 0.01; v <= 1; v += 0.01) expect(levelGain(v)).toBeGreaterThan(levelGain(v - 0.01))
+  })
+
+  it('sets the open output and each new one, and is kept', async () => {
+    const backend = new FakeBackend()
+    const kept: number[] = []
+    backend.savedVolume = () => 0.5
+    backend.saveVolume = (v) => kept.push(v)
+    const { live } = await opened(backend)
+    expect(live.volume.value).toBe(0.5)
+    expect(backend.link.gains).toEqual([0.25])
+    live.setOutputVolume(0.8)
+    expect(live.volume.value).toBe(0.8)
+    expect(backend.link.gains).toEqual([0.25, levelGain(0.8)])
+    // The same again changes nothing; out of range is held.
+    live.setOutputVolume(0.8)
+    live.setOutputVolume(4)
+    expect(kept).toEqual([0.8, 1])
+    // A new output starts at it.
+    live.close()
+    live.open()
+    await flush()
+    expect(backend.link.gains).toEqual([1])
+    // No mixer command: takes record the mix before it.
+    expect(backend.link.sent.some((m) => m.t === 'control' && m.what === FxControl.GROUP_LEVEL)).toBe(false)
+  })
+
+  it('starts at 1 with nothing kept', () => {
+    expect(new LiveAudio(new FakeBackend()).volume.value).toBe(1)
+  })
+
+  it('browserLiveBackend keeps it in localStorage (1 by removing it), and carries on where storage is blocked', () => {
+    const store = globalThis as unknown as { localStorage?: unknown }
+    const before = store.localStorage
+    try {
+      const items = new Map<string, string>()
+      store.localStorage = {
+        getItem: (k: string) => items.get(k) ?? null,
+        setItem: (k: string, v: string) => items.set(k, v),
+        removeItem: (k: string) => items.delete(k),
+      }
+      const backend = browserLiveBackend()
+      expect(backend.savedVolume?.()).toBe(1)
+      backend.saveVolume?.(0.35)
+      expect(items.get(VOLUME_KEY)).toBe('0.35')
+      expect(browserLiveBackend().savedVolume?.()).toBe(0.35)
+      backend.saveVolume?.(1)
+      expect(items.has(VOLUME_KEY)).toBe(false)
+      items.set(VOLUME_KEY, 'loud')
+      expect(backend.savedVolume?.()).toBe(1)
+      items.set(VOLUME_KEY, '7')
+      expect(backend.savedVolume?.()).toBe(1)
+      store.localStorage = {
+        getItem: () => {
+          throw new Error('SecurityError')
+        },
+        setItem: () => {
+          throw new Error('SecurityError')
+        },
+      }
+      expect(backend.savedVolume?.()).toBe(1)
+      expect(() => backend.saveVolume?.(0.5)).not.toThrow()
     } finally {
       store.localStorage = before
     }

@@ -103,6 +103,55 @@ describe('FxBus', () => {
     expect(dryAt(FxControl.NONE, 0.8)).toBeNull()
   })
 
+  it("(web) takes a group's level on its dry and its send, gliding, the other groups whole", () => {
+    const bus = new FxBus(1000)
+    bus.control(FxControl.FX_TYPE, FxControl.DELAY, 0.5, 0.5)
+    bus.control(FxControl.SEND, 1, 0.5, 0)
+    bus.control(FxControl.SEND, 2, 0.5, 0)
+    bus.control(FxControl.GROUP_LEVEL, 1, 0.25, 0)
+    bus.begin(2000)
+    bus.gains(0, 2000, 0)
+    // Group B: the level on both, after the dry law.
+    expect(bus.dry(1)![1999]).toBe(f(f(1 - f(f(0.3) * 0.5)) * 0.25))
+    expect(bus.send(1)![1999]).toBe(f(f(0.5) * 0.25))
+    // Gliding down from 1, not jumping.
+    expect(bus.dry(1)![0]).toBeGreaterThan(bus.dry(1)![1999]!)
+    for (let i = 1; i < 2000; i++) expect(bus.dry(1)![i]! <= bus.dry(1)![i - 1]!).toBe(true)
+    // Group C at 1: as without levels.
+    expect(bus.dry(2)![1999]).toBe(f(1 - f(f(0.3) * 0.5)))
+    expect(bus.send(2)![1999]).toBe(0.5)
+    // Group A, no send: only silenced once its level is 0; back at 1 it is whole again (no gains to read).
+    expect(bus.dry(0)).toBeNull()
+    bus.control(FxControl.GROUP_LEVEL, 0, 0, 0)
+    bus.control(FxControl.GROUP_LEVEL, 7, 0, 0)
+    bus.begin(2000)
+    bus.gains(0, 2000, 2000)
+    expect(bus.dry(0)![1999]).toBe(0)
+    expect(bus.send(0)).toBeNull()
+    expect(bus.dry(3)).toBeNull()
+    bus.control(FxControl.GROUP_LEVEL, 0, 1, 0)
+    bus.begin(2000)
+    bus.gains(0, 2000, 4000)
+    bus.begin(2000)
+    bus.gains(0, 2000, 6000)
+    expect(bus.dry(0)).toBeNull()
+  })
+
+  it("(web) a group's level turns its voices down, and at 1 leaves the mix exactly as it was", () => {
+    const plain = play(new VoiceMixer(48000), 5)
+    const whole = play(new VoiceMixer(48000), 5, (m, r) => m.control(FxControl.GROUP_LEVEL, int(r, 0, 4), 1, 0))
+    expect(whole).toEqual(plain)
+    // A voice on group D at a level of 0.25: a quarter as loud, once it has glided there.
+    const m = new VoiceMixer(1000)
+    m.control(FxControl.GROUP_LEVEL, 3, 0.25, 0)
+    m.start('d', steady(4000), 1, 1000, 0, 0, VoiceShape.of({ bus: 3 }), VoiceMixer.NOW)
+    const out = left(render(m, 1000))
+    const ref = new VoiceMixer(1000)
+    ref.start('d', steady(4000), 1, 1000, 0, 0, VoiceShape.of({ bus: 3 }), VoiceMixer.NOW)
+    const full = left(render(ref, 1000))
+    expect(out[999]! / full[999]!).toBeCloseTo(0.25, 2)
+  })
+
   it('glides a send to its new value and lands on it', () => {
     const bus = new FxBus(48000)
     bus.control(FxControl.SEND, 0, 1, 0)

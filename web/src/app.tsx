@@ -97,7 +97,8 @@ import { useAppKeys } from './ui/useAppKeys'
 import { KeyboardKeysSheet } from './ui/sheets/KeyboardKeysSheet'
 import { PatternSheet } from './ui/sheets/PatternSheet'
 import { TransportContext, type TransportUi } from './ui/live/PatternLine'
-import { FunctionKeysContext, ProjectHold, ProjectHoldContext, TempoContext, type FunctionKeysUi, type ProjectUi, type TempoUi } from './ui/live/FunctionRow'
+import { FunctionKeysContext, ProjectHold, ProjectHoldContext, TempoContext, TempoHold, type FunctionKeysUi, type ProjectUi, type TempoUi } from './ui/live/FunctionRow'
+import { DeviceControlsContext, type DeviceControlsUi } from './ui/live/DeviceControls'
 import { PunchContext, type PunchUi } from './ui/live/LivePunch'
 import { StepContext, type StepActions } from './ui/live/StepPanel'
 import { SceneContext, type SceneActions } from './ui/live/ScenePanel'
@@ -222,6 +223,8 @@ function Root(): JSX.Element {
   // PATTERN: RECORD and PLAY on Live's display lines, read through the context (its signal re-renders the lines only).
   const transport = useMemo(() => transportUi(c, () => nav.open(sheetLayer(PATTERN_SHEET))), [c])
   const tempo = useMemo(() => tempoUi(c, () => nav.open(sheetLayer(TEMPO_SHEET))), [c])
+  // The drawn EP-133's knobs and fader (web only), read where each is drawn.
+  const controls = useMemo(() => deviceControlsUi(c), [c])
   const step = useMemo(() => stepUi(c), [c])
   const scenes = useMemo(() => sceneUi(c), [c])
   const arp = useMemo(() => arpUi(c), [c])
@@ -496,6 +499,7 @@ function Root(): JSX.Element {
     <ClaudeContext.Provider value={claude}>
     <TempoContext.Provider value={tempo}>
     <FunctionKeysContext.Provider value={fnKeys}>
+    <DeviceControlsContext.Provider value={controls}>
     <ProjectHoldContext.Provider value={projectHold}>
     <PunchContext.Provider value={punch}>
     <div class={desk ? 'app is-desk' : 'app'}>
@@ -550,6 +554,7 @@ function Root(): JSX.Element {
     </div>
     </PunchContext.Provider>
     </ProjectHoldContext.Provider>
+    </DeviceControlsContext.Provider>
     </FunctionKeysContext.Provider>
     </TempoContext.Provider>
     </ClaudeContext.Provider>
@@ -581,6 +586,34 @@ function tempoUi(c: ArcController, openSheet: () => void): TempoUi | null {
     },
     onClick: (on) => p.setClick(on),
     onSheet: openSheet,
+  }
+}
+
+/**
+ * The drawn EP-133's VOLUME, X and Y knobs and fader (web only): arc's own
+ * volume, the effect's knobs and the groups' levels, the pad sheet, the tempo,
+ * each read as a control renders.
+ */
+function deviceControlsUi(c: ArcController): DeviceControlsUi {
+  return {
+    get volume() {
+      return c.liveVolume.value
+    },
+    setVolume: (v) => c.setLiveVolume(v),
+    get fx() {
+      return c.fx.desk.fx.value
+    },
+    get bpm() {
+      return patternBpm(c.state.value.mirror?.state.bpm, c.pattern.metronome.value.bpm)
+    },
+    setFxXY: (x, y) => c.fx.desk.setXY(x, y),
+    setGroupLevel: (g, v) => c.fx.desk.setGroupLevel(g, v),
+    get padEdit() {
+      return c.padEdit.edit.value
+    },
+    adjustPad: (s) => c.adjustPad(s),
+    setTempo: (bpm) => c.pattern.setTempo(bpm),
+    tempoHold: new TempoHold(),
   }
 }
 

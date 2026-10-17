@@ -3,7 +3,7 @@
 // written once the knobs rest) and the controller's FX: the voices' bus, the tempo, the project.
 import 'fake-indexeddb/auto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { FxBook, FxSettings } from '../../src/core/features/fxSettings'
+import { FxBook, FxSettings, levelGain } from '../../src/core/features/fxSettings'
 import { physicalPad } from '../../src/core/features/padNotes'
 import { FxControl } from '../../src/core/formats/fx/fxBus'
 import { memoryStorage } from '../../src/platform/storage/settings'
@@ -122,10 +122,52 @@ describe('FxDesk', () => {
     sent.length = 0
     d.switchTo(1)
     expect(d.fx.value.x).toBeCloseTo(0.2)
-    // Whole: the effect, four sends, the compressor, the sidechain.
-    expect(sent.map((s) => s[0])).toEqual([FxControl.FX_TYPE, FxControl.SEND, FxControl.SEND, FxControl.SEND, FxControl.SEND, FxControl.COMP, FxControl.SIDECHAIN])
+    // Whole: the effect, four sends, the compressor, the sidechain (and the web's four levels).
+    expect(sent.map((s) => s[0])).toEqual([
+      FxControl.FX_TYPE,
+      FxControl.SEND,
+      FxControl.SEND,
+      FxControl.SEND,
+      FxControl.SEND,
+      FxControl.COMP,
+      FxControl.SIDECHAIN,
+      FxControl.GROUP_LEVEL,
+      FxControl.GROUP_LEVEL,
+      FxControl.GROUP_LEVEL,
+      FxControl.GROUP_LEVEL,
+    ])
     expect([...d.kept().keys()]).toEqual([1])
     d.setXY(0.5, 0.5)
+    expect(d.json()).toBeNull()
+  })
+
+  it("(web) a group's level goes to the bus as its gain, is kept with the project, and leaves the others alone", () => {
+    const { d, sent, edits } = desk()
+    d.load(null)
+    d.switchTo(1)
+    sent.length = 0
+    d.setGroupLevel(1, 0.5)
+    expect(sent).toEqual([[FxControl.GROUP_LEVEL, 1, levelGain(0.5), 0]])
+    expect(d.fx.value.levels).toEqual([1, 0.5, 1, 1])
+    expect(edits[0]).toBe(1)
+    // The same again, or no such group: nothing.
+    d.setGroupLevel(1, 0.5)
+    d.setGroupLevel(4, 0)
+    d.setGroupLevel(-1, 0)
+    expect(sent).toHaveLength(1)
+    // Held to 0..1.
+    d.setGroupLevel(2, 3)
+    expect(d.fx.value.levels[2]).toBe(1)
+    // Kept, and back when the project is shown again; another project has its own.
+    expect([...d.kept().keys()]).toEqual([1])
+    d.switchTo(2)
+    expect(d.fx.value.levels).toEqual([1, 1, 1, 1])
+    expect(sent.filter((c) => c[0] === FxControl.GROUP_LEVEL).slice(-4)).toEqual([0, 1, 2, 3].map((g) => [FxControl.GROUP_LEVEL, g, 1, 0]))
+    d.switchTo(1)
+    expect(sent.filter((c) => c[0] === FxControl.GROUP_LEVEL).slice(-4)).toEqual([0, 1, 2, 3].map((g) => [FxControl.GROUP_LEVEL, g, g === 1 ? levelGain(0.5) : 1, 0]))
+    expect(FxBook.fromJson(d.json()!)?.get(1)?.levels).toEqual([1, 0.5, 1, 1])
+    // Back at 1: nothing left to keep.
+    d.setGroupLevel(1, 1)
     expect(d.json()).toBeNull()
   })
 
@@ -183,6 +225,18 @@ describe('FxKeeper', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('(web) settings kept before the levels read with every group at 1', async () => {
+    const before = '{"v":1,"projects":[{"project":3,"type":"DELAY","x":0.25,"y":0.75,"sends":[0.5,0,0,0]}]}'
+    const sent: Sent[] = []
+    const k = new FxKeeper((w, i, x, y) => sent.push([w, i, x, y]), memoryFx(before), globalThis)
+    await k.load()
+    k.desk.switchTo(3)
+    expect(k.desk.fx.value.type).toBe('DELAY')
+    expect(k.desk.fx.value.levels).toEqual([1, 1, 1, 1])
+    expect(sent.filter((c) => c[0] === FxControl.GROUP_LEVEL).slice(-4)).toEqual([0, 1, 2, 3].map((g) => [FxControl.GROUP_LEVEL, g, 1, 0]))
+    k.dispose()
   })
 
   it('unreadable settings are the defaults', async () => {

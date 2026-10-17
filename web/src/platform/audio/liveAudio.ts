@@ -84,6 +84,11 @@
 //   resends to a native stream reopened on a new route too). A press's shape
 //   ([LivePressOptions.shape]) is VoiceShape's fields over the defaults, sent
 //   as they are (Kotlin hands over a whole VoiceShape).
+// - [setOutputVolume] (the drawn EP-133's VOLUME, web only): a GainNode
+//   between the mixer and the speakers, at the volume's levelGain. It is
+//   monitoring only: a take records the mix before it, as the device's own
+//   volume leaves its sampling alone. Kept in this browser's localStorage
+//   ([VOLUME_KEY]), as the debug screen's latencyHint choice is.
 
 import { signal, type ReadonlySignal, type Signal } from '@preact/signals'
 import { REC_ARMED, REC_IDLE, type RecState } from '../../core/features/takeRecorder'
@@ -98,6 +103,7 @@ import type { PhaseAnchors, TransportClock } from '../../core/features/sequencer
 import type { Beat, BeatGrid } from '../../core/features/tempo'
 import type { FrameGrid } from './clickScheduler'
 import { FxSetup } from './fxSetup'
+import { levelGain } from '../../core/features/fxSettings'
 import { OutputDelay } from '../../core/features/outputDelay'
 import { LIVE_PROCESSOR, MixerHost, transferable, type FromMixer, type PlanVoice, type ToMixer } from './liveMixer'
 import type { ArpStep } from './patternScheduler'
@@ -218,6 +224,8 @@ export interface MixerLink {
   close(): void
   /** The mixer's input from [media] (SAMPLE's mic), or none (null); absent: the mixer takes no input. */
   listen?(media: MediaStream | null): void
+  /** The speakers' gain after the mixer (0..1, the volume's levelGain); absent: none to set. */
+  volume?(gain: number): void
 }
 
 /** What opening the mic for SAMPLE came to: its channels, or why not. */
@@ -263,6 +271,10 @@ export interface LiveBackend {
   savedChoice?(): WebLatencyHint
   /** Keeps the debug screen's choice (across sessions). */
   saveChoice?(choice: WebLatencyHint): void
+  /** VOLUME as kept (0..1); absent or unreadable: 1. */
+  savedVolume?(): number
+  /** Keeps VOLUME (across sessions). */
+  saveVolume?(volume: number): void
 }
 
 /** [LiveAudio.press]'s options (state/deps.ts LivePress). */
@@ -507,6 +519,9 @@ export class LiveAudio {
   private readonly _latencyHint: Signal<WebLatencyHint>
   /** The debug screen's latencyHint choice ([setLatencyHint]); ZERO unless changed there. */
   readonly latencyHint: ReadonlySignal<WebLatencyHint>
+  private readonly _volume: Signal<number>
+  /** Live's VOLUME (0..1, the drawn EP-133's knob; [setOutputVolume]): 1 unless turned. */
+  readonly volume: ReadonlySignal<number>
   private readonly _engine = signal<OutputEngine | null>(null)
   /** The open output's row in the latency test, once it is set up; null before, or with none open. */
   readonly engine: ReadonlySignal<OutputEngine | null> = this._engine
@@ -558,6 +573,21 @@ export class LiveAudio {
     this.steppedBack = backend.savedHint?.() === 'interactive'
     this._latencyHint = signal(backend.savedChoice?.() ?? WebLatencyHint.ZERO)
     this.latencyHint = this._latencyHint
+    this._volume = signal(volumeOf(backend.savedVolume?.()))
+    this.volume = this._volume
+  }
+
+  /**
+   * VOLUME: what the speakers get of the mix, [v] 0..1 heard at its
+   * levelGain, at once on the open output and on each new one; kept. Takes
+   * record the mix before it.
+   */
+  setOutputVolume(v: number): void {
+    const next = volumeOf(v)
+    if (next === this._volume.peek()) return
+    this._volume.value = next
+    this.backend.saveVolume?.(next)
+    this.stream?.link?.volume?.(levelGain(next))
   }
 
   /** The latencyHint the next output asks for: the choice, or 'interactive' after a step back from 0. */
@@ -1246,6 +1276,7 @@ export class LiveAudio {
           return
         }
         s.link = link
+        link.volume?.(levelGain(this._volume.peek()))
         flush(s, link)
         // SAMPLE's mic into the new mixer.
         if (this.mic !== null && (!link.listen || !tryListen(link, this.mic.media))) this.note('sample mic: this output takes no input')
@@ -1523,6 +1554,17 @@ export const HINT_KEY = 'arc.liveLatencyHint'
 /** Where it keeps the debug screen's latencyHint choice (localStorage: a debug option, not in library.json). */
 export const CHOICE_KEY = 'arc.liveLatencyChoice'
 
+/** Where it keeps VOLUME (localStorage: this browser's, like the latencyHint choice; not in library.json). */
+export const VOLUME_KEY = 'arc.liveVolume'
+
+/** A volume as kept: 0..1, 1 where it is missing or not a number. */
+export function volumeOf(v: number | null | undefined): number {
+  return typeof v === 'number' && Number.isFinite(v) ? Math.min(Math.max(v, 0), 1) : 1
+}
+
+/** How quickly the speakers' gain follows VOLUME (a time constant, s): a turn without zipper noise. */
+const VOLUME_GLIDE_S = 0.01
+
 /** ScriptProcessorNode's buffer where there is no AudioWorklet: its smallest. */
 export const FALLBACK_FRAMES = 256
 
@@ -1536,7 +1578,10 @@ async function workletLink(ctx: AudioContext, onMessage: (m: FromMixer) => void)
     outputChannelCount: [2],
   })
   node.port.onmessage = (e: MessageEvent<FromMixer>) => onMessage(e.data)
-  node.connect(ctx.destination)
+  // VOLUME, after the mixer (a take is recorded inside it, before this).
+  const out = ctx.createGain()
+  node.connect(out)
+  out.connect(ctx.destination)
   let source: MediaStreamAudioSourceNode | null = null
   const unlisten = (): void => {
     source?.disconnect()
@@ -1552,6 +1597,7 @@ async function workletLink(ctx: AudioContext, onMessage: (m: FromMixer) => void)
       unlisten()
       node.port.onmessage = null
       node.disconnect()
+      out.disconnect()
       node.port.close()
     },
     listen: (media) => {
@@ -1560,6 +1606,7 @@ async function workletLink(ctx: AudioContext, onMessage: (m: FromMixer) => void)
       source = ctx.createMediaStreamSource(media)
       source.connect(node)
     },
+    volume: (g) => out.gain.setTargetAtTime(g, ctx.currentTime, VOLUME_GLIDE_S),
   }
 }
 
@@ -1578,7 +1625,10 @@ function scriptLink(ctx: AudioContext, onMessage: (m: FromMixer) => void): Mixer
     }
     host.render(out.getChannelData(0), out.getChannelData(1), out.length, e.playbackTime)
   }
-  node.connect(ctx.destination)
+  // VOLUME, after the mixer (a take is recorded inside it, before this).
+  const gain = ctx.createGain()
+  node.connect(gain)
+  gain.connect(ctx.destination)
   const unlisten = (): void => {
     source?.disconnect()
     source = null
@@ -1590,6 +1640,7 @@ function scriptLink(ctx: AudioContext, onMessage: (m: FromMixer) => void): Mixer
       unlisten()
       node.onaudioprocess = null
       node.disconnect()
+      gain.disconnect()
     },
     listen: (media) => {
       unlisten()
@@ -1597,6 +1648,7 @@ function scriptLink(ctx: AudioContext, onMessage: (m: FromMixer) => void): Mixer
       source = ctx.createMediaStreamSource(media)
       source.connect(node)
     },
+    volume: (g) => gain.gain.setTargetAtTime(g, ctx.currentTime, VOLUME_GLIDE_S),
   }
 }
 
@@ -1680,6 +1732,22 @@ export function browserLiveBackend(): LiveBackend {
         globalThis.localStorage?.setItem(CHOICE_KEY, choice)
       } catch {
         // Storage blocked or full: the choice lasts the page.
+      }
+    },
+    savedVolume: () => {
+      try {
+        const v = globalThis.localStorage?.getItem(VOLUME_KEY)
+        return volumeOf(v == null ? null : Number(v))
+      } catch {
+        return 1
+      }
+    },
+    saveVolume: (volume) => {
+      try {
+        if (volume === 1) globalThis.localStorage?.removeItem(VOLUME_KEY)
+        else globalThis.localStorage?.setItem(VOLUME_KEY, String(volume))
+      } catch {
+        // Storage blocked or full: the volume lasts the page.
       }
     },
   }

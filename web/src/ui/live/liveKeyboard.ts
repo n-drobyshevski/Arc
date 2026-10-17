@@ -16,6 +16,9 @@
 //   on a dead key's place step), and nothing the piano plays while it shows
 //   (its letters, Z and X, by code). Letters by what they type, by place
 //   only for another script's letters.
+// - Not here: the drawn EP-133's knobs and fader (DeviceControls.tsx) take
+//   the arrows, PageUp / PageDown, Home, End and Enter on their own, only
+//   while one has the focus, so none of Live's keys is taken from it.
 
 import { COMPUTER_KEYS } from './keyboard'
 import type { KeyInput } from '../keyGuard'

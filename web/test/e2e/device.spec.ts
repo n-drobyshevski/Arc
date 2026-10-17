@@ -1,7 +1,9 @@
 // The device view (web only): on the desk Live draws the EP-133 K.O. II by
 // default (Live tools' View: All groups, One group, Device), which the
 // simulated device drives; its keys are Live's (SOUND, MAIN as PROJECT, TEMPO,
-// SAMPLE, FX, ERASE, KEYS, RECORD, PLAY) or show their shortcuts.
+// SAMPLE, FX, ERASE, KEYS, RECORD, PLAY) or show their shortcuts, and its knobs
+// and fader turn arc's own sound (VOLUME, the effect's X and Y or what is open,
+// the shown group's level), a tap still showing their shortcuts.
 import { demo, expect, test } from './fixtures'
 
 test.use({ viewport: { width: 1440, height: 1000 } })
@@ -149,4 +151,159 @@ test('the 1–99 grid lies over the drawn device, and A–D carry the numbers', 
   await grid.getByRole('button', { name: /^Pattern 7\b/ }).click()
   await expect(grid).toHaveCount(0)
   await expect(ep.getByRole('tab', { name: /^Group C, pattern 7$/ })).toContainText('07')
+})
+
+test("the knobs turn the effect's X and Y, and show it on the plate; a tap shows their shortcuts", async ({ page }) => {
+  await page.goto('/?demo')
+  const ep = page.getByRole('group', { name: 'EP-133 K.O. II' })
+  await expect(page.locator('.ep-plate__status')).toHaveText(/project 1/i)
+
+  // An effect on, at its knobs' defaults.
+  await ep.getByRole('button', { name: 'Effects' }).click()
+  const sheet = page.getByRole('dialog', { name: 'FX' })
+  await sheet.getByRole('radio', { name: /^Reverb/ }).click()
+  const xy = sheet.getByRole('group', { name: 'X and Y' })
+  await expect(xy).toHaveAttribute('aria-description', /^Reverb, Size 50%/)
+  await sheet.getByRole('button', { name: 'Done' }).click()
+  await expect(sheet).toBeHidden()
+
+  // A drag up and to the right turns knob X up: the plate's hit line says so, and so does the FX sheet.
+  const knobX = ep.getByRole('slider', { name: 'Knob X' })
+  await expect(knobX).toHaveAttribute('aria-valuenow', '0.5')
+  await expect(knobX).toHaveAttribute('aria-valuetext', 'Reverb size, 50%')
+  const b = (await knobX.boundingBox())!
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(b.x + b.width / 2 + 20, b.y + b.height / 2 - 20, { steps: 4 })
+  await page.mouse.move(b.x + b.width / 2 + 40, b.y + b.height / 2 - 40, { steps: 8 })
+  await page.mouse.up()
+  const turned = Number(await knobX.getAttribute('aria-valuenow'))
+  expect(turned).toBeGreaterThan(0.6)
+  await expect(page.locator('.ep-plate__hit')).toHaveText(`SIZE · ${Math.round(turned * 100)}%`)
+  // No card for a turn.
+  await expect(page.getByRole('dialog', { name: 'Knob X on the EP-133' })).toHaveCount(0)
+  await ep.getByRole('button', { name: 'Effects' }).click()
+  await expect(xy).toHaveAttribute('aria-description', new RegExp(`^Reverb, Size ${Math.round(turned * 100)}%`))
+  await sheet.getByRole('button', { name: 'Done' }).click()
+  await expect(sheet).toBeHidden()
+
+  // The keys step the focused knob: arrows, then its ends; a double click puts it back.
+  const knobY = ep.getByRole('slider', { name: 'Knob Y' })
+  await knobY.focus()
+  await page.keyboard.press('ArrowUp')
+  await expect(knobY).toHaveAttribute('aria-valuenow', '0.51')
+  await page.keyboard.press('ArrowLeft')
+  await page.keyboard.press('ArrowLeft')
+  await expect(knobY).toHaveAttribute('aria-valuenow', '0.49')
+  await page.keyboard.press('End')
+  await expect(knobY).toHaveAttribute('aria-valuenow', '1')
+  await knobY.dblclick()
+  await expect(knobY).toHaveAttribute('aria-valuenow', '0.5')
+  // Not Live's keys: the group stays.
+  await expect(ep.getByRole('tab', { name: 'Group A' })).toHaveAttribute('aria-selected', 'true')
+
+  // A tap, or Enter, still shows a control's shortcuts.
+  await knobX.click()
+  const cardX = page.getByRole('dialog', { name: 'Knob X on the EP-133' })
+  await expect(cardX).toBeVisible()
+  await expect(cardX).toContainText("Turn it for the effect's X in arc")
+  await cardX.getByRole('button', { name: 'Close' }).click()
+  await ep.getByRole('slider', { name: 'Volume' }).click()
+  await expect(page.getByRole('dialog', { name: 'VOLUME on the EP-133' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await ep.getByRole('slider', { name: 'Fader' }).focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('dialog', { name: 'FADER on the EP-133' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog', { name: 'FADER on the EP-133' })).toHaveCount(0)
+})
+
+test("the fader is the shown group's level, and moves with the group", async ({ page }) => {
+  await page.goto('/?demo')
+  const ep = page.getByRole('group', { name: 'EP-133 K.O. II' })
+  await expect(page.locator('.ep-plate__status')).toHaveText(/project 1/i)
+  const fader = ep.getByRole('slider', { name: 'Fader' })
+  const cap = page.locator('.ep-fader__cap')
+  await expect(fader).toHaveAttribute('aria-valuenow', '1')
+
+  // Group B's: the cap dragged down lowers it, and it says so.
+  await ep.getByRole('tab', { name: 'Group B' }).click()
+  const top = (await cap.boundingBox())!
+  await page.mouse.move(top.x + top.width / 2, top.y + top.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(top.x + top.width / 2, top.y + top.height / 2 + 10, { steps: 3 })
+  await page.mouse.move(top.x + top.width / 2, top.y + top.height / 2 + 40, { steps: 8 })
+  await page.mouse.up()
+  const level = Number(await fader.getAttribute('aria-valuenow'))
+  expect(level).toBeLessThan(0.9)
+  expect(level).toBeGreaterThan(0.2)
+  expect((await cap.boundingBox())!.y).toBeGreaterThan(top.y + 20)
+  await expect(fader).toHaveAttribute('aria-valuetext', `group B's level, ${Math.round(level * 100)}%`)
+  await expect(page.locator('.ep-plate__hit')).toHaveText(`GROUP B · ${Math.round(level * 100)}`)
+
+  // Group A keeps its own; B's comes back with B.
+  await ep.getByRole('tab', { name: 'Group A' }).click()
+  await expect(fader).toHaveAttribute('aria-valuenow', '1')
+  expect((await cap.boundingBox())!.y).toBeCloseTo(top.y, 0)
+  await ep.getByRole('tab', { name: 'Group B' }).click()
+  await expect(fader).toHaveAttribute('aria-valuenow', String(level))
+  // The keys: ten steps down, then the bottom.
+  await fader.focus()
+  await page.keyboard.press('PageDown')
+  await expect(fader).toHaveAttribute('aria-valuenow', String(Math.round((level - 0.1) * 100) / 100))
+  await page.keyboard.press('Home')
+  await expect(fader).toHaveAttribute('aria-valuenow', '0')
+})
+
+test('with the pad sheet open, knob X and Y follow its page', async ({ page }) => {
+  await page.goto('/?demo')
+  const ep = page.getByRole('group', { name: 'EP-133 K.O. II' })
+  await expect(page.locator('.ep-plate__status')).toHaveText(/project 1/i)
+  const knobX = page.locator('.ep-knob--x')
+  const knobY = page.locator('.ep-knob--y')
+  await expect(knobX).toHaveAttribute('aria-valuetext', 'effect X, 50%')
+
+  await ep.getByRole('switch', { name: 'Sound' }).click()
+  await ep.locator('[data-pad="9"]').click()
+  const sheet = page.getByRole('dialog', { name: /^Pad A 7/ })
+  await expect(sheet).toBeVisible()
+  const mode = sheet.getByRole('slider', { name: 'Mode' })
+  await expect(mode).toBeEnabled()
+  // SOUND's page: X is the play mode, Y the pan.
+  await expect(knobX).toHaveAttribute('aria-valuetext', new RegExp(`^Mode, ${await mode.getAttribute('aria-valuetext')}$`))
+  await expect(knobY).toHaveAttribute('aria-valuetext', /^Pan, /)
+  const before = await knobX.getAttribute('aria-valuenow')
+  await mode.focus()
+  await page.keyboard.press(before === '0' ? 'ArrowRight' : 'ArrowLeft')
+  await expect(knobX).not.toHaveAttribute('aria-valuenow', before!)
+  await expect(knobX).toHaveAttribute('aria-valuetext', new RegExp(`^Mode, ${await mode.getAttribute('aria-valuetext')}$`))
+  // ENV's: attack and release; MIDI has no Y.
+  await sheet.getByRole('radio', { name: /^Env/i }).click()
+  await expect(knobX).toHaveAttribute('aria-valuetext', /^Attack, /)
+  await expect(knobY).toHaveAttribute('aria-valuetext', /^Release, /)
+  await sheet.getByRole('radio', { name: /^Midi/i }).click()
+  await expect(knobX).toHaveAttribute('aria-valuetext', /^Channel, /)
+  await expect(knobY).toHaveAttribute('aria-disabled', 'true')
+  // Closed: the effect's again.
+  await page.keyboard.press('Escape')
+  await expect(sheet).toHaveCount(0)
+  await expect(knobX).toHaveAttribute('aria-valuetext', 'effect X, 50%')
+})
+
+test('VOLUME is kept in this browser', async ({ page }) => {
+  await page.goto('/?demo')
+  const ep = page.getByRole('group', { name: 'EP-133 K.O. II' })
+  await expect(page.locator('.ep-plate__status')).toHaveText(/project 1/i)
+  const volume = ep.getByRole('slider', { name: 'Volume' })
+  await expect(volume).toHaveAttribute('aria-valuenow', '1')
+  await volume.focus()
+  await page.keyboard.press('PageDown')
+  await page.keyboard.press('PageDown')
+  await page.keyboard.press('ArrowDown')
+  await expect(volume).toHaveAttribute('aria-valuenow', '0.79')
+  await expect(volume).toHaveAttribute('aria-valuetext', "arc's volume, 79%")
+  await expect(page.locator('.ep-plate__hit')).toHaveText('VOLUME · 79')
+  await page.reload()
+  await expect(page.locator('.ep-plate__status')).toHaveText(/project 1/i)
+  await expect(ep.getByRole('slider', { name: 'Volume' })).toHaveAttribute('aria-valuenow', '0.79')
 })

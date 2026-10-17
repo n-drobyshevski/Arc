@@ -72,6 +72,9 @@
 // - The web's Live (platform/audio/liveMixer.ts) plays every voice with the
 //   default shape for now.
 // - control rounds its values to floats (Kotlin takes Floats).
+// - The FX bus also takes a level per group (FxControl.GROUP_LEVEL, the drawn
+//   EP-133's fader): a voice on a group's bus is heard and sent at its
+//   level, through dry and send as above. A voice on bus -1 has no level.
 
 import { FxBus, FxControl } from './fx/fxBus'
 

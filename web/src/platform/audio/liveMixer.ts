@@ -70,7 +70,7 @@ export type ToMixer =
   /** VoiceMixer.cut: the voice ends in CHOKE_MS, minimum gate or not (a press that became a scroll). */
   | { readonly t: 'cut'; readonly key: string }
   | { readonly t: 'stopAll' }
-  /** VoiceMixer.control: FxControl command [what] (FX_TYPE to PUNCH) with its [index], [x] and [y]. */
+  /** VoiceMixer.control: FxControl command [what] (FX_TYPE to GROUP_LEVEL) with its [index], [x] and [y]. */
   | { readonly t: 'control'; readonly what: number; readonly index: number; readonly x: number; readonly y: number }
   /** Arms TAKE: the next sound (or the device's PLAY) starts a take. */
   | { readonly t: 'arm' }

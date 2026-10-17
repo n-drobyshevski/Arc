@@ -18,6 +18,10 @@
 //   JSON.stringify writes the same exact numbers Kotlin does.
 // - FxBook's map is a ReadonlyMap; fromJson reads through JSON.parse, with
 //   kotlinx's intOrNull as in pattern.ts.
+// - Each group also has a level ([FxSettings.levels], the drawn EP-133's
+//   fader, web only), 1 by default: the book writes "levels" only when one
+//   isn't 1, so its text stays the Kotlin twin's otherwise, and settings
+//   written without them read at 1. [levelGain] is how a level is heard.
 
 import { clamp01, knobHz, lerp } from '../formats/fx/fxMath'
 import { DEFAULT as DEFAULT_BPM } from './tempo'
@@ -102,6 +106,8 @@ export interface FxSettings {
   readonly sends: readonly number[]
   readonly comp: Comp
   readonly sidechain: Sidechain
+  /** Each group's level (A..D, 0..1; web only: the drawn EP-133's fader), 1 by default. */
+  readonly levels: readonly number[]
 }
 
 /** The send groups, A..D. */
@@ -111,15 +117,15 @@ const ALL_GROUPS = (1 << GROUPS) - 1
 
 /** Settings: [fields] over the defaults (Kotlin's FxSettings constructor). */
 function of(fields: Partial<FxSettings> = {}): FxSettings {
-  const s = { type: FxType.NONE as FxType, x: 0.5, y: 0.5, sends: [0, 0, 0, 0], comp: comp(), sidechain: sidechain(), ...fields }
-  return { type: s.type, x: f(s.x), y: f(s.y), sends: s.sends.map(f), comp: s.comp, sidechain: s.sidechain }
+  const s = { type: FxType.NONE as FxType, x: 0.5, y: 0.5, sends: [0, 0, 0, 0], comp: comp(), sidechain: sidechain(), levels: [1, 1, 1, 1], ...fields }
+  return { type: s.type, x: f(s.x), y: f(s.y), sends: s.sends.map(f), comp: s.comp, sidechain: s.sidechain, levels: s.levels.map(f) }
 }
 
 const DEFAULT: FxSettings = of()
 
 const coerceIn = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 
-/** Every knob and send held to 0..1 (NaN to 0), four sends, the sidechain's pad, group and groups in range. */
+/** Every knob, send and level held to 0..1 (NaN to 0), four sends and levels, the sidechain's pad, group and groups in range. */
 function clamped(s: FxSettings): FxSettings {
   const sc = s.sidechain
   return {
@@ -136,6 +142,7 @@ function clamped(s: FxSettings): FxSettings {
       x: clamp01(f(sc.x)),
       y: clamp01(f(sc.y)),
     },
+    levels: Array.from({ length: GROUPS }, (_, g) => clamp01(f(s.levels[g] ?? 1))),
   }
 }
 
@@ -151,6 +158,21 @@ function withXY(s: FxSettings, x: number, y: number): FxSettings {
 /** Group [g]'s send at [v] (0..1). */
 function withSend(s: FxSettings, g: number, v: number): FxSettings {
   return { ...s, sends: s.sends.map((old, i) => (i === g ? clamp01(f(v)) : old)) }
+}
+
+/** Group [g]'s level at [v] (0..1). */
+function withLevel(s: FxSettings, g: number, v: number): FxSettings {
+  return { ...s, levels: s.levels.map((old, i) => (i === g ? clamp01(f(v)) : old)) }
+}
+
+/**
+ * The gain a level (0..1: a group's, or Live's VOLUME) is heard at: its
+ * square, so the fader and the knob turn evenly to the ear (half way is
+ * about -12 dB), and 0 is silence.
+ */
+export function levelGain(level: number): number {
+  const v = clamp01(f(level))
+  return f(v * v)
 }
 
 function withComp(s: FxSettings, c: Comp): FxSettings {
@@ -285,6 +307,7 @@ export const FxSettings = {
   withType,
   withXY,
   withSend,
+  withLevel,
   withComp,
   withSidechain,
   xLabel,
@@ -456,6 +479,8 @@ function toJson(map: ReadonlyMap<number, FxSettings>): string {
         sends: s.sends,
         comp: { on: s.comp.on, x: s.comp.x, y: s.comp.y },
         sidechain: { on: sc.on, group: sc.group, pad: sc.pad, dests: sc.dests, x: sc.x, y: sc.y },
+        // The levels only where one isn't 1 (web only): otherwise the Kotlin twin's text.
+        ...(s.levels.some((v) => v !== 1) ? { levels: s.levels } : {}),
       }
     })
   return JSON.stringify({ v: 1, projects })
@@ -521,7 +546,19 @@ function entry(o: Record<string, unknown>): FxSettings | null {
     if (on === null || group === null || pad === null || dests === null || sx === null || sy === null) return null
     sc = { on, group, pad, dests, x: sx, y: sy }
   }
-  return clamped({ type, x, y, sends, comp: c, sidechain: sc })
+  let levels: readonly number[] = d.levels
+  if ('levels' in o) {
+    const list = o['levels']
+    if (!Array.isArray(list)) return null
+    const read: number[] = []
+    for (let g = 0; g < GROUPS; g++) {
+      const v = g < list.length ? floatOrNull(list[g]) : 1
+      if (v === null) return null
+      read.push(v)
+    }
+    levels = read
+  }
+  return clamped({ type, x, y, sends, comp: c, sidechain: sc, levels })
 }
 
 /**

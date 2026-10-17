@@ -148,6 +148,21 @@ describe('FxSettingsTest', () => {
     expect(FxBook.fromJson(FxBook.toJson(new Map([[3, odd]])))).toEqual(new Map([[3, odd]]))
   })
 
+  it('(web) the groups\' levels: 1 by default, written only when one is not, read back exactly', () => {
+    expect(FxSettings.DEFAULT.levels).toEqual([1, 1, 1, 1])
+    const s = FxSettings.withLevel(FxSettings.withLevel(FxSettings.DEFAULT, 1, 0.3), 3, -2)
+    expect(s.levels).toEqual([1, f(0.3), 1, 0])
+    expect(FxSettings.clamped(FxSettings.of({ levels: [2, Number.NaN] }))).toEqual(FxSettings.of({ levels: [1, 0, 1, 1] }))
+    // At 1 the book is the Kotlin twin's text (above); otherwise it carries them.
+    const json = FxBook.toJson(new Map([[4, s]]))
+    expect(json).toContain('"levels":[1,0.30000001192092896,1,0]')
+    expect(FxBook.fromJson(json)).toEqual(new Map([[4, s]]))
+    // Settings written before them (or by Android) read at 1; short lists are filled with 1, junk skips the entry.
+    expect(FxBook.fromJson('{"v":1,"projects":[{"project":1,"type":"REVERB"}]}')?.get(1)?.levels).toEqual([1, 1, 1, 1])
+    expect(FxBook.fromJson('{"v":1,"projects":[{"project":1,"levels":[0.5]}]}')?.get(1)?.levels).toEqual([0.5, 1, 1, 1])
+    expect(FxBook.fromJson('{"v":1,"projects":[{"project":1,"levels":0.5},{"project":2,"levels":["1"]}]}')).toEqual(new Map())
+  })
+
   it("junk reads as nothing, and entries it can't read are skipped", () => {
     expect(FxBook.fromJson('not json')).toBeNull()
     expect(FxBook.fromJson('[]')).toBeNull()
