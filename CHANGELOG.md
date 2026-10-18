@@ -6,6 +6,9 @@ version fixes bugs. The version itself is set in `version.properties`.
 
 ## [Unreleased]
 
+### Added
+- Live on Android: **a short swipe on KEYS' scale or octave word steps it**, without opening the list: right for the next scale or the octave up, left for the one before (on a phone on its side, where the words are turned, up and down), stopping at either end. A tap still opens the list, and TalkBack has the same as the words' **Next** and **Previous** actions. Under the grid, over the piano and in the sideways column alike; the key word and the web are unchanged.
+
 ## [0.4.0] - 2026-10-18
 
 ### Added

@@ -41,6 +41,7 @@ import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.layout.Arrangement
@@ -2681,6 +2682,7 @@ private fun ModeRow(
                 name = MirrorText::scaleName,
                 onPick = actions.onScale,
                 description = MirrorText.scaleChoice(keys.scale),
+                swipe = true,
                 mark = Modifier.coachMark("live.scale", CoachText.SCALE, c.navy, c.onNavy),
                 // With the switch's caps in the row, the words keep to its middle.
                 top = viewSwitch == null,
@@ -2692,6 +2694,7 @@ private fun ModeRow(
                 name = MirrorText::octave,
                 onPick = actions.onOctave,
                 description = MirrorText.octaveChoice(keys.octave),
+                swipe = true,
                 mark = Modifier.coachMark("live.octave", CoachText.OCTAVE, c.navy, c.onNavy),
                 // At the row's end: the list opens leftward, staying on screen.
                 alignEnd = true,
@@ -2762,6 +2765,7 @@ private fun SidewaysRow(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwit
                 name = MirrorText::scaleName,
                 onPick = actions.onScale,
                 description = MirrorText.scaleChoice(keys.scale),
+                swipe = true,
                 mark = Modifier.coachMark("live.scale", CoachText.SCALE, c.navy, c.onNavy),
                 top = false,
             )
@@ -2787,6 +2791,7 @@ private fun SidewaysRow(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwit
                 name = MirrorText::octave,
                 onPick = actions.onOctave,
                 description = MirrorText.octaveChoice(keys.octave),
+                swipe = true,
                 mark = Modifier.coachMark("live.octave", CoachText.OCTAVE, c.navy, c.onNavy),
                 alignEnd = true,
                 top = false,
@@ -2905,6 +2910,7 @@ private fun SidewaysKeysPicks(keys: KeysUi, actions: KeysActions) {
             name = MirrorText::scaleName,
             onPick = actions.onScale,
             description = MirrorText.scaleChoice(keys.scale),
+            swipe = true,
             mark = Modifier.rotateVertical().coachMark("live.scale", CoachText.SCALE, c.navy, c.onNavy),
             alignEnd = true,
             top = false,
@@ -2916,6 +2922,7 @@ private fun SidewaysKeysPicks(keys: KeysUi, actions: KeysActions) {
             name = MirrorText::octave,
             onPick = actions.onOctave,
             description = MirrorText.octaveChoice(keys.octave),
+            swipe = true,
             mark = Modifier.rotateVertical().coachMark("live.octave", CoachText.OCTAVE, c.navy, c.onNavy),
             alignEnd = true,
             top = false,
@@ -2981,6 +2988,12 @@ private fun <T> PickWord(
     columns: Int? = null,
     /** The word at the top of its touch area, hugging the grid above. */
     top: Boolean = true,
+    /**
+     * A short swipe along the word steps the choice without the list: right the next, left the
+     * one before (up and down on a word turned on its side, as it reads), stopping at either
+     * end. TalkBack has the same as the word's Next and Previous actions.
+     */
+    swipe: Boolean = false,
 ) {
     val c = LocalArcColors.current
     val window = LocalArcWindow.current
@@ -2988,8 +3001,43 @@ private fun <T> PickWord(
     var open by remember(window.landscape) { mutableStateOf(false) }
     // Where the word is, read when the list opens.
     val anchor = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
+    // The choice [delta] from the one picked, if there is one there (the gesture outlives a recomposition).
+    val stepTo: (Int) -> Boolean = { delta ->
+        val i = options.indexOf(selected) + delta
+        if (i in options.indices) {
+            onPick(options[i])
+            true
+        } else {
+            false
+        }
+    }
+    val step by androidx.compose.runtime.rememberUpdatedState(stepTo)
+    val swiping = if (!swipe) {
+        Modifier
+    } else {
+        Modifier
+            .pointerInput(Unit) {
+                val far = PickSwipe.toPx()
+                var moved = 0f
+                // Past the touch slop the drag is the word's (the tap that opens the list is cancelled).
+                // In the word's own frame, so a word turned on its side ([rotateVertical]) steps up and down.
+                detectHorizontalDragGestures(
+                    onDragStart = { moved = 0f },
+                    onDragEnd = { if (moved >= far) step(1) else if (moved <= -far) step(-1) },
+                ) { change, d ->
+                    change.consume()
+                    moved += d
+                }
+            }
+            .semantics {
+                customActions = listOf(
+                    androidx.compose.ui.semantics.CustomAccessibilityAction(MirrorText.PICK_NEXT) { step(1) },
+                    androidx.compose.ui.semantics.CustomAccessibilityAction(MirrorText.PICK_PREVIOUS) { step(-1) },
+                )
+            }
+    }
     Box(Modifier.onGloballyPositioned { anchor[0] = it }) {
-        dev.arc.ep133.ui.components.WordButton("$label \u25BE", { open = true }, mark, description = description, top = top)
+        dev.arc.ep133.ui.components.WordButton("$label \u25BE", { open = true }, mark.then(swiping), description = description, top = top)
         if (open) {
             val density = LocalDensity.current
             val safe = WindowInsets.safeDrawing
@@ -3057,6 +3105,9 @@ private fun <T> PickWord(
 
 /** A choice's row in a [PickWord] list (a word's touch height). */
 private val PickRow = 44.dp
+
+/** How far a [PickWord] swipe goes to step the choice: short, about the word's height. */
+private val PickSwipe = 32.dp
 private val ListPadding = 8.dp
 
 /**

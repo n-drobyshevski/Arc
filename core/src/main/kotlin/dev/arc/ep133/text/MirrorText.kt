@@ -164,6 +164,9 @@ object MirrorText {
     // The piano in landscape: − and + step the octave, and the key gets its own word.
     const val OCTAVE_DOWN = "Octave down"
     const val OCTAVE_UP = "Octave up"
+    /** A pick word's TalkBack actions, the same as a short swipe along it (right, left). */
+    const val PICK_NEXT = "Next"
+    const val PICK_PREVIOUS = "Previous"
 
     /** "KEY DO", the key word above the piano. */
     fun keyWord(root: Int, names: dev.arc.ep133.features.NoteNames) = "$KEY ${dev.arc.ep133.features.Keys.name(root, names)}"
