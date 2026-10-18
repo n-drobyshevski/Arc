@@ -6,6 +6,10 @@ version fixes bugs. The version itself is set in `version.properties`.
 
 ## [Unreleased]
 
+### Added
+- Live on Android: **a short swipe on KEYS' scale or octave word steps it**, without opening the list: right for the next scale or the octave up, left for the one before (on a phone on its side, where the words are turned, up and down), stopping at either end. **Hold the word to pick from the list without opening it**: its choices fan out in a half-circle beside your thumb, toward the screen's middle, in the list's order (the octaves high to low, so up is higher); a small move toward one lights it and letting go picks it, while letting go under your thumb keeps what you had. A tick as the fan opens and as each choice lights (with Live's haptics on); where the window is too short for the fan, the hold opens the list instead. A tap still opens the list, and TalkBack has the swipe as the words' **Next** and **Previous** actions and hears of the hold in their description. Under the grid, over the piano and in the sideways column alike; the key word and the web are unchanged.
+- Live on Android: **a tap on KEYS' scale, key or octave word opens the KEYS sheet** instead of a list: a sheet slides up with a row for each scale showing its twelve notes as dots (the root orange, the scale's notes filled, the rest rings), so you see what Dorian is before you pick it, the current scale in navy; then the twelve keys as caps in two rows of six (the key, until now only in Live tools upright and over the piano); then the octaves 0 to 8 as a strip. A tap applies at once with a tick (with Live's haptics on) and the sheet stays open to change another; the ✕, a swipe down, Back or a tap outside closes it. Opened from the key or the octave word it scrolls to that section; on a phone on its side the scales take two columns and the keys and octaves sit side by side, and it scrolls. Screen readers hear each scale with its number of notes (**Major, 7 notes**), each choice as selected or not, and the sheet's title. The swipe and the hold on the words are unchanged.
+
 ## [0.4.0] - 2026-10-18
 
 ### Added

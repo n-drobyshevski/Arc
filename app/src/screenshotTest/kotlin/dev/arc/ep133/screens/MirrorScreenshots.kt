@@ -63,6 +63,7 @@ import dev.arc.ep133.protocol.ProjectEntry
 import dev.arc.ep133.protocol.SoundEntry
 import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.ui.screens.MirrorScreen
+import dev.arc.ep133.ui.screens.KeysSheetContent
 import dev.arc.ep133.ui.screens.FunctionKeysUi
 import dev.arc.ep133.ui.screens.SampleUi
 import dev.arc.ep133.controller.SampleUiState
@@ -489,6 +490,72 @@ fun LiveKeysDarkPreview() = Live(keysPlaying, dark = true, keys = keysUi)
 @Preview(name = "Live keys small", widthDp = 360, heightDp = 668, showBackground = true)
 @Composable
 fun LiveKeysSmallPreview() = Live(keysPlaying, keys = keysUi.copy(scale = dev.arc.ep133.features.Scale.MINOR_PENTATONIC))
+
+// KEYS' scale word held (MAJOR, ringed): the scales fan out up the screen beside the thumb, toward the
+// middle, and the thumb's small move up and out lights DORIAN. The gesture can't run here, so the fan
+// is laid over the screen with the thumb on the word (where it went down is the fan's middle).
+@PreviewTest
+@Preview(name = "KEYS hold to pick", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LiveKeysHoldToPickPreview() {
+    val scales = dev.arc.ep133.features.Scale.entries
+    val density = LocalDensity.current.density
+    val fan = dev.arc.ep133.ui.screens.QuickPick.fan(scales.size, HELD_X * density, HELD_Y * density, Rect(0f, 0f, 360f * density, 668f * density), density)!!
+    val lit = scales.indexOf(dev.arc.ep133.features.Scale.DORIAN)
+    // The finger a little way toward the lit chip, past the dead zone.
+    val toward = fan.at(fan.slots[lit])
+    val way = androidx.compose.ui.geometry.Offset(toward.x - fan.x, toward.y - fan.y)
+    val finger = androidx.compose.ui.geometry.Offset(fan.x, fan.y) + way * (34f * density / way.getDistance())
+    Box(Modifier.fillMaxSize()) {
+        Live(keysPlaying, keys = keysUi)
+        ArcTheme(dark = false) {
+            dev.arc.ep133.ui.screens.QuickPickFan(
+                fan,
+                names = scales.map(MirrorText::scaleName),
+                current = scales.indexOf(keysUi.scale),
+                lit = lit,
+                finger = { finger },
+                fade = false,
+            )
+        }
+    }
+}
+
+/** A thumb on "MAJOR ▾" on KEYS at 360 x 668: the word's middle (dp from the window's top left, measured off this screen). */
+private const val HELD_X = 61f
+private const val HELD_Y = 621f
+
+// KEYS' scale word tapped: the KEYS sheet over Live, as MainActivity lays it over the frame. MINOR is the
+// scale (navy), each scale's notes as dots from the root (orange); the keys, DO picked; the octaves, 5 picked.
+@Composable
+private fun KeysSheetOver(state: MirrorState, keys: dev.arc.ep133.ui.screens.KeysUi, dark: Boolean = false, piano: IntRange? = null) {
+    Box(Modifier.fillMaxSize()) {
+        Live(state, dark = dark, keys = keys, piano = piano)
+        ArcTheme(dark = dark) {
+            ArcSheet(visible = true, onDismiss = {}, swipe = true, widest = 720.dp, title = MirrorText.KEYS_SHEET) {
+                KeysSheetContent(keys, dev.arc.ep133.ui.screens.KeysActions(), onDone = {})
+            }
+        }
+    }
+}
+
+private val sheetKeys = keysUi.copy(scale = dev.arc.ep133.features.Scale.MINOR, octave = 5)
+
+@PreviewTest
+@Preview(name = "KEYS sheet", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveKeysSheetPreview() = KeysSheetOver(keysPlaying, sheetKeys)
+
+@PreviewTest
+@Preview(name = "KEYS sheet dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveKeysSheetDarkPreview() = KeysSheetOver(keysPlaying, sheetKeys, dark = true)
+
+// On its side, from the piano row: the scales in two columns, the keys and octaves side by side under them; it scrolls.
+@PreviewTest
+@Preview(name = "KEYS sheet sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveKeysSheetSidewaysPreview() = KeysSheetOver(sideways, chord.copy(scale = dev.arc.ep133.features.Scale.MINOR, octave = 5), piano = 48..72)
 
 @PreviewTest
 @Preview(name = "Live keys tools", widthDp = 412, heightDp = 843, showBackground = true)

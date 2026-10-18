@@ -73,6 +73,10 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.Modifier
@@ -95,6 +99,7 @@ import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -554,11 +559,29 @@ private val SheetEasing = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)
 /**
  * A bottom sheet over a scrim (the web version's <dialog class="sheet">).
  * [onDismiss] null makes it modal: no scrim tap, no back (the progress sheet).
+ * [swipe]: a drag down from the top of its content pulls the sheet down, and
+ * let go far or fast enough it closes ([onDismiss]); otherwise it settles back.
+ * [widest]: the widest it gets. [title]: what screen readers call it.
  */
 @Composable
-fun ArcSheet(visible: Boolean, onDismiss: (() -> Unit)?, grip: Boolean = true, content: @Composable ColumnScope.() -> Unit) {
+fun ArcSheet(
+    visible: Boolean,
+    onDismiss: (() -> Unit)?,
+    grip: Boolean = true,
+    swipe: Boolean = false,
+    widest: Dp = 560.dp,
+    title: String? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     val c = LocalArcColors.current
     BackHandler(enabled = visible) { onDismiss?.invoke() }
+    // How far a [swipe] has pulled the sheet down (px); back to 0 as it closes, so each opening starts in place.
+    val pulled = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    val dismiss by androidx.compose.runtime.rememberUpdatedState(onDismiss)
+    val density = LocalDensity.current
+    val pull = remember(swipe, density) {
+        if (!swipe) null else SheetPull(pulled, { dismiss?.invoke() }, with(density) { 96.dp.toPx() }, with(density) { 900.dp.toPx() })
+    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 640.dp
         val rise = with(LocalDensity.current) { 40.dp.roundToPx() }
@@ -588,13 +611,16 @@ fun ArcSheet(visible: Boolean, onDismiss: (() -> Unit)?, grip: Boolean = true, c
                     val shape = if (wide) RoundedCornerShape(22.dp) else RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
                     Column(
                         Modifier
-                            .widthIn(max = 560.dp)
+                            .widthIn(max = widest)
                             .fillMaxWidth()
                             .heightIn(max = screenHeight * 0.92f)
+                            .then(if (pull == null) Modifier else Modifier.graphicsLayer { translationY = pulled.floatValue })
                             .clip(shape)
                             .background(c.shell)
                             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+                            .then(if (title == null) Modifier else Modifier.semantics { paneTitle = title })
                             .imePadding()
+                            .then(if (pull == null) Modifier else Modifier.nestedScroll(pull))
                             .verticalScroll(rememberScrollState())
                             // Nothing left to add in the dialog: its box took the bars.
                             .windowInsetsPadding(WindowInsets.navigationBars)
@@ -615,6 +641,43 @@ fun ArcSheet(visible: Boolean, onDismiss: (() -> Unit)?, grip: Boolean = true, c
                 }
             }
         }
+    }
+}
+
+/**
+ * [ArcSheet]'s swipe down: what its content doesn't scroll of a drag down (it is at its top) pulls the
+ * sheet down by [pulled], a drag back up takes that back first, and on letting go a pull past [far] or
+ * a fling down faster than [fast] closes it ([onClose]); anything less settles back.
+ */
+private class SheetPull(
+    private val pulled: androidx.compose.runtime.MutableFloatState,
+    private val onClose: () -> Unit,
+    private val far: Float,
+    private val fast: Float,
+) : NestedScrollConnection {
+    override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+        if (available.y >= 0f || pulled.floatValue <= 0f) return Offset.Zero
+        val back = maxOf(available.y, -pulled.floatValue)
+        pulled.floatValue += back
+        return Offset(0f, back)
+    }
+
+    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+        if (source != NestedScrollSource.UserInput || available.y <= 0f) return Offset.Zero
+        pulled.floatValue += available.y
+        return Offset(0f, available.y)
+    }
+
+    override suspend fun onPreFling(available: Velocity): Velocity {
+        if (pulled.floatValue <= 0f) return Velocity.Zero
+        if (pulled.floatValue > far || available.y > fast) {
+            onClose()
+            // Gone with the same frame, so the next opening starts in place.
+            pulled.floatValue = 0f
+        } else {
+            androidx.compose.animation.core.animate(pulled.floatValue, 0f, animationSpec = tween(160)) { v, _ -> pulled.floatValue = v }
+        }
+        return available
     }
 }
 
