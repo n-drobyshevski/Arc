@@ -17,6 +17,7 @@ import dev.arc.ep133.features.Tempo
 import dev.arc.ep133.features.Timing
 import dev.arc.ep133.features.TimingSettings
 import dev.arc.ep133.text.LiveEngine
+import dev.arc.ep133.text.SkinChoice
 import dev.arc.ep133.text.ThemeChoice
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,6 +26,8 @@ import kotlinx.coroutines.flow.asStateFlow
 /** The settings page's choices (an addition to the web version). */
 data class AppSettings(
     val theme: ThemeChoice = ThemeChoice.SYSTEM,
+    /** The EP the app is dressed as, light or dark as [theme] says. */
+    val skin: SkinChoice = SkinChoice.EP133,
     val autoConnect: Boolean = true,
     val keepScreenOn: Boolean = true,
     /** How many backups to keep; null keeps all. */
@@ -180,6 +183,7 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
 
     private fun read() = AppSettings(
         theme = runCatching { ThemeChoice.valueOf(prefs.getString("theme", null) ?: "") }.getOrDefault(ThemeChoice.SYSTEM),
+        skin = runCatching { SkinChoice.valueOf(prefs.getString("skin", null) ?: "") }.getOrDefault(SkinChoice.EP133),
         autoConnect = prefs.getBoolean("autoConnect", true),
         keepScreenOn = prefs.getBoolean("keepScreenOn", true),
         keepLast = prefs.getInt("keepLast", 0).takeIf { it > 0 },
@@ -245,7 +249,7 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
             }
             for ((k, v) in changed) {
                 when (k) {
-                    "theme", "keysScale", "keysNames", "keysViewWide", "keysViewTall", "sampleSource", "sampleThreshold", "patternTiming",
+                    "theme", "skin", "keysScale", "keysNames", "keysViewWide", "keysViewTall", "sampleSource", "sampleThreshold", "patternTiming",
                     "timingInterval", "arpOrder", "sceneSwitch", "factoryKit" -> putString(k, v)
                     "keepLast", "keysRoot", "keysOctave", "pianoWhites", "liveTempo", "sampleBars",
                     "timingSwing", "arpOctaves", "arpGate" -> putInt(k, v.toInt())
@@ -301,6 +305,7 @@ internal fun sampleThresholdOf(stored: String?): Float? = stored?.toFloatOrNull(
  */
 internal fun AppSettings.values(): Map<String, String> = linkedMapOf(
     "theme" to theme.name,
+    "skin" to skin.name,
     "autoConnect" to autoConnect.toString(),
     "keepScreenOn" to keepScreenOn.toString(),
     "keepLast" to (keepLast ?: 0).toString(),
@@ -353,6 +358,7 @@ internal fun AppSettings.values(): Map<String, String> = linkedMapOf(
 /** These settings with what library.json held ("app.*" keys) taken back; anything missing or unreadable stays as it is. */
 internal fun AppSettings.withIndex(map: Map<String, String>): AppSettings = copy(
     theme = map["app.theme"]?.let { v -> runCatching { ThemeChoice.valueOf(v) }.getOrNull() } ?: theme,
+    skin = map["app.skin"]?.let { v -> runCatching { SkinChoice.valueOf(v) }.getOrNull() } ?: skin,
     autoConnect = map["app.autoConnect"]?.toBooleanStrictOrNull() ?: autoConnect,
     keepScreenOn = map["app.keepScreenOn"]?.toBooleanStrictOrNull() ?: keepScreenOn,
     keepLast = map["app.keepLast"]?.toIntOrNull()?.let { n -> n.takeIf { it > 0 } } ?: if (map.containsKey("app.keepLast")) null else keepLast,

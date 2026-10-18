@@ -47,10 +47,6 @@ import dev.arc.ep133.ui.theme.LocalArcColors
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/** The pocket operator app's yellow tip tags, for hints that aren't one key. */
-val CoachYellow = Color(0xFFD4A300)
-val CoachYellowInk = Color(0xFF1E1F21)
-
 /** A control the guide overlay points at: where it is on screen and its coloured tag. */
 data class Mark(val bounds: Rect, val label: String, val face: Color, val ink: Color)
 

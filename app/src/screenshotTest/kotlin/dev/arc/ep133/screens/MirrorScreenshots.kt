@@ -49,6 +49,7 @@ import dev.arc.ep133.ui.components.LocalArcWindow
 import dev.arc.ep133.ui.components.LocalBarSlot
 import dev.arc.ep133.controller.UploadDraftItem
 import dev.arc.ep133.text.MirrorText
+import dev.arc.ep133.text.SkinChoice
 import dev.arc.ep133.ui.screens.LivePill
 import dev.arc.ep133.ui.screens.TrimSheetContent
 import dev.arc.ep133.ui.screens.liveInBar
@@ -176,6 +177,7 @@ private fun Framed(
     tab: Tab,
     connected: Boolean = true,
     dark: Boolean = false,
+    skin: SkinChoice = SkinChoice.EP133,
     guide: Boolean = false,
     menu: Boolean = false,
     guideOpen: Boolean = false,
@@ -193,7 +195,7 @@ private fun Framed(
     holdProgress: Float = 0f,
     content: @Composable () -> Unit,
 ) {
-    ArcTheme(dark = dark) {
+    ArcTheme(dark = dark, skin = skin) {
         val density = LocalDensity.current
         val slot = LocalBarSlot.current
         val placed = remember(barMiddle) {
@@ -226,7 +228,7 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f, claude: ClaudeUi? = null, toolsPage: ToolsPage? = null, factoryKit: dev.arc.ep133.features.FactoryKit? = null, factoryKits: List<dev.arc.ep133.features.FactoryKit> = listOf(dev.arc.ep133.features.FactoryKit.EP133, dev.arc.ep133.features.FactoryKit.EP1320)) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, skin: SkinChoice = SkinChoice.EP133, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f, claude: ClaudeUi? = null, toolsPage: ToolsPage? = null, factoryKit: dev.arc.ep133.features.FactoryKit? = null, factoryKits: List<dev.arc.ep133.features.FactoryKit> = listOf(dev.arc.ep133.features.FactoryKit.EP133, dev.arc.ep133.features.FactoryKit.EP1320)) {
     // As the controller has it: the last read's day alone for a short line ("Seen Oct 5").
     val offlineShort = offline?.takeIf { it.startsWith("Last seen ") }?.let { MirrorText.seen(it.removePrefix("Last seen ").substringBefore(",")) }
     // [factoryKit]: [factoryKits] saved (two or more), that one shown (its switch on the factory line).
@@ -250,7 +252,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
     // SCENES, as MainActivity always has it with the pattern's transport: its chip on the stopped line, the panel where [scene] opens it.
     val sceneUi = scene ?: transport?.let { LiveScene(still = true) }
     Framed(
-        Tab.LIVE, connected = offline == null && error == null, dark = dark, guide = guide,
+        Tab.LIVE, connected = offline == null && error == null, dark = dark, skin = skin, guide = guide,
         pill = { LivePill(mirror, keys, transport, takeUi, still = true, pianoRange = pianoRange, editing = edit == true, sample = sampleUi, punch = punch?.held.orEmpty(), arp = arp?.ui?.line, voices = voiceFlow, step = stepUi, scene = sceneUi, sceneOpens = oneGroup && !keys.on) }, toast = toast, barMiddle = barMiddle,
         toastAction = toastAction,
         sample = SampleKey(sampleUi.state.on && !keys.on) {},
@@ -486,6 +488,16 @@ fun LiveKeysPreview() = Live(keysPlaying, keys = keysUi)
 fun LiveKeysDarkPreview() = Live(keysPlaying, dark = true, keys = keysUi)
 
 @PreviewTest
+@Preview(name = "Live keys EP-40 dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveKeysEp40DarkPreview() = Live(keysPlaying, dark = true, skin = SkinChoice.EP40, keys = keysUi)
+
+@PreviewTest
+@Preview(name = "Live keys EP-1320 dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveKeysEp1320DarkPreview() = Live(keysPlaying, dark = true, skin = SkinChoice.EP1320, keys = keysUi)
+
+@PreviewTest
 @Preview(name = "Live keys small", widthDp = 360, heightDp = 668, showBackground = true)
 @Composable
 fun LiveKeysSmallPreview() = Live(keysPlaying, keys = keysUi.copy(scale = dev.arc.ep133.features.Scale.MINOR_PENTATONIC))
@@ -547,6 +559,19 @@ fun LivePlayingDarkPreview() = Live(playing, dark = true)
 @Preview(name = "Live first open", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
 fun LiveFirstOpenPreview() = Live(MirrorState(activeProject = 3, lastHit = Hit(PhysicalPad(0, 0), 36, 1, 96, null, null), pads = mapOf(PhysicalPad(0, 0) to PadLight(96, 1, NOW))))
+
+// The same in the skins: the EP-40's cream pads, the EP-1320's oxblood ones.
+private val firstOpen = MirrorState(activeProject = 3, lastHit = Hit(PhysicalPad(0, 0), 36, 1, 96, null, null), pads = mapOf(PhysicalPad(0, 0) to PadLight(96, 1, NOW)))
+
+@PreviewTest
+@Preview(name = "Live first open EP-40", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LiveFirstOpenEp40Preview() = Live(firstOpen, skin = SkinChoice.EP40)
+
+@PreviewTest
+@Preview(name = "Live first open EP-1320", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LiveFirstOpenEp1320Preview() = Live(firstOpen, skin = SkinChoice.EP1320)
 
 @PreviewTest
 @Preview(name = "Live tablet", widthDp = 840, heightDp = 900, showBackground = true)
@@ -1901,8 +1926,8 @@ private val connectedState = UiState(
 )
 
 @Composable
-private fun Main(state: UiState, dark: Boolean = false, guide: Boolean = false) {
-    Framed(Tab.BACKUPS, connected = state.connected, dark = dark, guide = guide) {
+private fun Main(state: UiState, dark: Boolean = false, skin: SkinChoice = SkinChoice.EP133, guide: Boolean = false) {
+    Framed(Tab.BACKUPS, connected = state.connected, dark = dark, skin = skin, guide = guide) {
         MainScreen(
             state = state,
             fmtDay = { if (it > 1_790_900_000_000L) "Oct 4, 2026" else if (it > 1_790_500_000_000L) "Oct 2, 2026" else "Sep 25, 2026" },
@@ -1920,6 +1945,16 @@ fun MainConnectedPreview() = Main(connectedState)
 @Preview(name = "Main connected dark", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
 fun MainConnectedDarkPreview() = Main(connectedState, dark = true)
+
+@PreviewTest
+@Preview(name = "Main connected EP-40", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun MainConnectedEp40Preview() = Main(connectedState, skin = SkinChoice.EP40)
+
+@PreviewTest
+@Preview(name = "Main connected EP-1320", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun MainConnectedEp1320Preview() = Main(connectedState, skin = SkinChoice.EP1320)
 
 // A 360 dp phone: the BACKUPS caption row holds Back up, search and import.
 @PreviewTest
@@ -2059,7 +2094,7 @@ fun TrimSidewaysPreview() {
 
 @Composable
 private fun Settings(dark: Boolean, state: UiState = connectedState, settings: AppSettings = AppSettings(keepLast = 10)) {
-    ArcTheme(dark = dark) {
+    ArcTheme(dark = dark, skin = settings.skin) {
         SettingsScreen(
             settings = settings,
             state = state,
@@ -2086,6 +2121,17 @@ fun SettingsDarkPreview() = Settings(dark = true)
 @Preview(name = "Settings sideways", widthDp = 867, heightDp = 388, showBackground = true)
 @Composable
 fun SettingsSidewaysPreview() = Settings(dark = false)
+
+// The skins (Settings → Appearance → Skin): the EP-40 Riddim's and the EP-1320 Medieval's, light and dark.
+@PreviewTest
+@Preview(name = "Settings EP-40", widthDp = 393, heightDp = 1500, showBackground = true)
+@Composable
+fun SettingsEp40Preview() = Settings(dark = false, settings = AppSettings(keepLast = 10, skin = SkinChoice.EP40))
+
+@PreviewTest
+@Preview(name = "Settings EP-1320 dark", widthDp = 393, heightDp = 1500, showBackground = true)
+@Composable
+fun SettingsEp1320DarkPreview() = Settings(dark = true, settings = AppSettings(keepLast = 10, skin = SkinChoice.EP1320))
 
 // Both factory kits saved: the EP-1320's row says Saved, and the kit row switches Live between them.
 private val bothKitsState = connectedState.copy(

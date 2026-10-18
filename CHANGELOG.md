@@ -6,6 +6,9 @@ version fixes bugs. The version itself is set in `version.properties`.
 
 ## [Unreleased]
 
+### Added
+- Android: **skins after the EP family.** Settings → Appearance → **Skin** (under Theme) dresses arc as the **EP-133** (as before), the **EP-40** Riddim (a cream page, dub green ink and choice keys, the RECORD key's orange, a dark green display with mint figures, cream pads with green figures, a sky blue section tag) or the **EP-1320** Medieval (an olive gold page, parchment keys and sheets with brown ink, bottle green choice keys, vermilion for the signal and a deeper crimson for delete, the smoked display with red figures, oxblood pads with parchment figures). Each skin has a light and a dark version, as Theme says. Live's pads, function keys and piano, the drawn device (Live's and the Guide's: body, keys, PLAY, the knobs), the section tag and the guide's tips follow the skin. The choice is kept with the settings. The web doesn't have skins yet.
+
 ## [0.4.0] - 2026-10-18
 
 ### Added

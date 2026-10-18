@@ -2,8 +2,6 @@ package dev.arc.ep133.ui.screens
 
 import dev.arc.ep133.ui.components.EdgeTabWidth
 import dev.arc.ep133.text.CoachText
-import dev.arc.ep133.ui.components.CoachYellowInk
-import dev.arc.ep133.ui.components.CoachYellow
 import dev.arc.ep133.ui.components.coachMark
 import dev.arc.ep133.ui.components.ArcIcon
 import dev.arc.ep133.ui.components.IconBlock
@@ -133,7 +131,7 @@ fun MainScreen(
                     )
                 }
                 if (state.backups.isNotEmpty()) {
-                    BackupList(state.backups, state.freshId, fmtDay, onOpen, Modifier.coachMark("backups.open", CoachText.OPEN_BACKUP, CoachYellow, CoachYellowInk))
+                    BackupList(state.backups, state.freshId, fmtDay, onOpen, Modifier.coachMark("backups.open", CoachText.OPEN_BACKUP, c.coach, c.onCoach))
                 } else if (state.libraryLoaded) {
                     // #empty starts hidden and only shows once the library has loaded.
                     DashedBox {

@@ -11,8 +11,6 @@ import dev.arc.ep133.ui.components.MiniPiano
 import dev.arc.ep133.ui.components.SideStripWidth
 import dev.arc.ep133.ui.components.SideZone
 import dev.arc.ep133.text.CoachText
-import dev.arc.ep133.ui.components.CoachYellowInk
-import dev.arc.ep133.ui.components.CoachYellow
 import dev.arc.ep133.ui.components.coachMark
 import dev.arc.ep133.ui.components.coachClear
 import dev.arc.ep133.ui.components.wordInk
@@ -1094,7 +1092,7 @@ fun MirrorScreen(
                                     .fillMaxWidth()
                                     .weight(1f, fill = false)
                                     .then(if (window.short) Modifier else Modifier.heightIn(max = PianoMaxTablet))
-                                    .coachMark("live.keys", CoachText.PIANO, CoachYellow, CoachYellowInk),
+                                    .coachMark("live.keys", CoachText.PIANO, c.coach, c.onCoach),
                                 haptics = haptics,
                                 pressure = notePressure,
                                 step = keysStep,
@@ -1153,7 +1151,7 @@ fun MirrorScreen(
                         val body: @Composable (Modifier) -> Unit = { m ->
                             Group(
                                 group, st, nameOf, now,
-                                m.coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
+                                m.coachMark("live.pads", CoachText.PADS, c.coach, c.onCoach),
                                 big = true,
                                 onPad = padPress,
                                 onPadKept = padKept,
@@ -1311,7 +1309,7 @@ fun MirrorScreen(
                                                 PadsGlide(panel, Modifier.weight(1f).fillMaxHeight().then(swipe), scaleOf = { w, h -> koUnit(w, h, 3) }) {
                                                     KeysGrid(
                                                         st, keysNow, now, keysPlay,
-                                                        Modifier.fillMaxSize().coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
+                                                        Modifier.fillMaxSize().coachMark("live.keys", CoachText.PADS, c.coach, c.onCoach),
                                                         haptics = haptics,
                                                         hold = hold,
                                                         functions = functions,
@@ -1330,7 +1328,7 @@ fun MirrorScreen(
                                             KeysGrid(
                                                 st, keysNow, now, keysPlay,
                                                 Modifier.width(k.width(3)).fillMaxHeight()
-                                                    .coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
+                                                    .coachMark("live.keys", CoachText.PADS, c.coach, c.onCoach),
                                                 haptics = haptics,
                                                 hold = hold,
                                                 functions = functions,
@@ -1347,7 +1345,7 @@ fun MirrorScreen(
                                 val grid: @Composable (Modifier) -> Unit = { m ->
                                     KeysGrid(
                                         st, keysNow, now, keysPlay,
-                                        m.coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
+                                        m.coachMark("live.keys", CoachText.PADS, c.coach, c.onCoach),
                                         haptics = haptics,
                                         hold = hold,
                                         functions = functions,
@@ -1381,7 +1379,7 @@ fun MirrorScreen(
                                 val body: @Composable (Modifier) -> Unit = { m ->
                                     Group(
                                         group, st, nameOf, now,
-                                        m.coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
+                                        m.coachMark("live.pads", CoachText.PADS, c.coach, c.onCoach),
                                         big = true,
                                         onPad = padPress,
                                         onPadKept = padKept,

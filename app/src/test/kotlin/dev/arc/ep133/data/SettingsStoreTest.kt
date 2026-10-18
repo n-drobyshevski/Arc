@@ -7,6 +7,7 @@ import dev.arc.ep133.features.SwitchTime
 import dev.arc.ep133.features.Timing
 import dev.arc.ep133.features.TimingSettings
 import dev.arc.ep133.text.LiveEngine
+import dev.arc.ep133.text.SkinChoice
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -157,6 +158,20 @@ class SettingsStoreTest {
         assertEquals("ep1320", prefs.getString("factoryKit", null))
         assertEquals(dev.arc.ep133.features.FactoryKit.EP1320, SettingsStore(prefs).settings.value.factoryKit)
         assertEquals(mapOf("app.factoryKit" to "ep1320"), store.toIndex())
+    }
+
+    @Test
+    fun `the skin is kept once chosen, goes into library json, and an unknown one reads as the EP-133's`() {
+        val prefs = MemoryPrefs()
+        val store = SettingsStore(prefs)
+        assertEquals(SkinChoice.EP133, store.settings.value.skin)
+        assertFalse(prefs.contains("skin"))
+        store.update { it.copy(skin = SkinChoice.EP40) }
+        assertEquals("EP40", prefs.getString("skin", null))
+        assertEquals(SkinChoice.EP40, SettingsStore(prefs).settings.value.skin)
+        assertEquals(mapOf("app.skin" to "EP40"), store.toIndex())
+        prefs.edit().putString("skin", "OP1").apply()
+        assertEquals(SkinChoice.EP133, SettingsStore(prefs).settings.value.skin)
     }
 
     /** SharedPreferences in a map: enough for [SettingsStore]. */

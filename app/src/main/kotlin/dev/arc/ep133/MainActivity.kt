@@ -204,7 +204,7 @@ class MainActivity : ComponentActivity() {
                 dev.arc.ep133.text.ThemeChoice.LIGHT -> false
                 dev.arc.ep133.text.ThemeChoice.DARK -> true
             }
-            ArcTheme(dark = dark) { Root() }
+            ArcTheme(dark = dark, skin = settings.skin) { Root() }
         }
     }
 
@@ -1026,6 +1026,7 @@ class MainActivity : ComponentActivity() {
                     padOrder = controller.padOrder(),
                     version = BuildConfigCompat.versionName(this@MainActivity),
                     onTheme = controller::setTheme,
+                    onSkin = controller::setSkin,
                     onAutoConnect = controller::setAutoConnect,
                     onKeepScreenOn = controller::setKeepScreenOn,
                     pruneCount = controller::pruneCount,
