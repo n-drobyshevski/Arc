@@ -13,6 +13,7 @@ import {
   LiveAudio,
   MixerHost,
   REPLACE_QUIET_MS,
+  FLUSH_SLICE_BYTES,
   SLOW_OUTPUT_MS,
   TAKE_END_WAIT_MS,
   takeWav,
@@ -150,6 +151,19 @@ class FakeBackend implements LiveBackend {
   }
   settle(): void {
     for (const w of this.waiting.splice(0)) w()
+  }
+  /** [later]'s tasks wait for [runLater] (else each runs in a microtask). */
+  holdLater = false
+  private tasks: (() => void)[] = []
+  later(fn: () => void): void {
+    if (this.holdLater) this.tasks.push(fn)
+    else queueMicrotask(fn)
+  }
+  /** Runs the tasks [later] holds (one slice of a backlog each); false when there were none. */
+  runLater(): boolean {
+    const tasks = this.tasks.splice(0)
+    for (const t of tasks) t()
+    return tasks.length !== 0
   }
   now(): number {
     return this.clock
@@ -556,6 +570,7 @@ describe('LiveAudio', () => {
   it("while the mixer starts, a press's own sample and its start go over before the others", async () => {
     const backend = new FakeBackend()
     backend.deferred = true
+    backend.holdLater = true
     const live = new LiveAudio(backend)
     live.preload('a', tone(), 1, RATE)
     live.preload('b', tone(), 1, RATE)
@@ -564,8 +579,58 @@ describe('LiveAudio', () => {
     live.press('k', 'c', PAD)
     backend.settle()
     await flush()
+    const sent = () => backend.link.sent.map((m) => (m.t === 'load' ? `load ${m.id}` : m.t))
+    // The others in a later task (web only).
+    expect(sent()).toEqual(['load 3', 'start'])
+    while (backend.runLater());
+    expect(sent()).toEqual(['load 3', 'start', 'load 1', 'load 2'])
+  })
+
+  /** An output whose mixer is ready with four samples of [FLUSH_SLICE_BYTES] * 0.6 still to send: two slices. */
+  async function backlog() {
+    const backend = new FakeBackend()
+    backend.holdLater = true
+    const live = new LiveAudio(backend)
+    const frames = Math.ceil((FLUSH_SLICE_BYTES * 0.6) / 2)
+    for (const k of ['a', 'b', 'c', 'd']) live.preload(k, tone(frames), 1, RATE)
+    live.open()
+    await flush()
+    const loads = () => backend.link.sent.flatMap((m) => (m.t === 'load' ? [m.id] : []))
+    return { backend, live, loads }
+  }
+
+  it('a reopened output sends its sample backlog a slice per task, in order (web only)', async () => {
+    const { backend, loads } = await backlog()
+    expect(loads()).toEqual([])
+    backend.runLater()
+    expect(loads()).toEqual([1, 2])
+    backend.runLater()
+    expect(loads()).toEqual([1, 2, 3, 4])
+    expect(backend.runLater()).toBe(false)
+  })
+
+  it("a press while the backlog drains sends its sample at once, and it isn't sent again", async () => {
+    const { backend, live, loads } = await backlog()
+    backend.runLater()
+    expect(live.press('k', 'd', PAD)).toBe(true)
     const sent = backend.link.sent.map((m) => (m.t === 'load' ? `load ${m.id}` : m.t))
-    expect(sent).toEqual(['load 3', 'start', 'load 1', 'load 2'])
+    expect(sent.slice(-2)).toEqual(['load 4', 'start'])
+    backend.link.render(0)
+    expect([...live.voices.value]).toEqual(['k'])
+    while (backend.runLater());
+    expect(loads()).toEqual([1, 2, 4, 3])
+  })
+
+  it('a sample dropped, or the output closed, while the backlog drains is never sent', async () => {
+    const { backend, live, loads } = await backlog()
+    backend.runLater()
+    live.unload('c')
+    backend.runLater()
+    expect(loads()).toEqual([1, 2, 4])
+    const second = await backlog()
+    second.live.close()
+    while (second.backend.runLater());
+    expect(second.loads()).toEqual([])
   })
 
   it('while the mixer starts, the commands keep their order, and a sample dropped meanwhile never goes over', async () => {
@@ -1786,6 +1851,22 @@ describe('LiveAudio PATTERN', () => {
     live.seqStop()
     expect(live.timeline.value).toBeNull()
     expect(b.link.sent.at(-1)).toEqual({ t: 'stopSeq' })
+  })
+
+  it("a plan while the backlog drains sends its sounds' loads first", async () => {
+    const b = new FakeBackend()
+    b.holdLater = true
+    const live = new LiveAudio(b)
+    const frames = Math.ceil((FLUSH_SLICE_BYTES * 0.6) / 2)
+    for (const k of ['a', 'b', 'kick']) live.preload(k, tone(frames), 1, RATE)
+    live.open()
+    await flush()
+    b.runLater()
+    live.seqPlan(plan(new Map([[0, 'kick']])))
+    const sent = b.link.sent.map((m) => (m.t === 'load' ? `load ${m.id}` : m.t))
+    expect(sent).toEqual(['load 1', 'load 2', 'load 3', 'plan'])
+    while (b.runLater());
+    expect(b.link.sent).toHaveLength(sent.length)
   })
 
   it('a new tempo goes alone, and the next play sends the plan at it (web only)', async () => {

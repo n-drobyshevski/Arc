@@ -158,6 +158,13 @@ export const LATENCY_GLITCHES = 3
  */
 export const REPLACE_QUIET_MS = 100
 
+/**
+ * About how much of an output's sample backlog crosses to the mixer per task
+ * once it is ready (bytes), so a reopened output doesn't hold up the next
+ * press for one long copy of every sample (web only).
+ */
+export const FLUSH_SLICE_BYTES = 2 * 1024 * 1024
+
 /** The latencyHint Live asks for: 0 (the smallest buffer the browser allows), or 'interactive' after glitches. */
 export type LiveLatencyHint = 0 | 'interactive'
 
@@ -284,6 +291,8 @@ export interface LiveBackend {
   savedClickLevel?(): number
   /** Keeps the metronome level (across sessions). */
   saveClickLevel?(level: number): void
+  /** Runs [fn] in a later task of its own; absent: a MessageChannel's (web only, tests pass their own). */
+  later?(fn: () => void): void
 }
 
 /** [LiveAudio.press]'s options (state/deps.ts LivePress). */
@@ -468,7 +477,7 @@ interface Stream {
   link: MixerLink | null
   /** Commands sent before the mixer was ready, in order (samples' loads apart, below). */
   readonly pending: ToMixer[]
-  /** Samples' loads waiting for the mixer, by sample id. */
+  /** Samples' loads waiting for the mixer (or, once it is ready, for their slice of the backlog), by sample id. */
   readonly pendingLoads: Map<number, ToMixer>
   /** Of those, the ones a press waits for: they go over first. */
   readonly urgent: Set<number>
@@ -999,6 +1008,7 @@ export class LiveAudio {
       const sample = this.samples.get(key)
       if (!sample || !(sample.channels >= 1 && sample.channels <= 2)) continue
       this.load(s, sample)
+      ensureSent(s, sample.id)
       const bus: Partial<VoiceShape> = { bus: Math.floor(pad / 12) }
       const shape = plan.shapes?.get(pad) ?? bus
       const keysShape = plan.keysShapes?.get(pad) ?? bus
@@ -1014,6 +1024,7 @@ export class LiveAudio {
       const sample = this.samples.get(key)
       if (!sample || !(sample.channels >= 1 && sample.channels <= 2)) continue
       this.load(s, sample)
+      ensureSent(s, sample.id)
       const bus: Partial<VoiceShape> = { bus: Math.floor(pad / 12) }
       voices.push({ pad, id: sample.id, channels: sample.channels, sampleRate: sample.sampleRate, shape: plan.shapes?.get(pad) ?? bus, keysShape: plan.keysShapes?.get(pad) ?? bus })
     }
@@ -1189,7 +1200,7 @@ export class LiveAudio {
     s.parked = false
     wake(s.ctx)
     this.load(s, sample)
-    first(s, sample.id)
+    ensureSent(s, sample.id)
     if (options.gate) this.ungated.delete(id)
     else this.ungated.add(id)
     const pressedAt = options.pressedAt ?? this.backend.now()
@@ -1259,6 +1270,25 @@ export class LiveAudio {
     else s.pendingLoads.set(sample.id, m)
   }
 
+  /** The samples [flush] left, a slice per task, so a reopened output isn't one long task (web only). */
+  private drainLater(s: Stream): void {
+    if (s.pendingLoads.size === 0) return
+    const slice = (): void => {
+      const link = s.link
+      if (s.closed || this.stream !== s || !link) return
+      let bytes = 0
+      for (const [id, m] of s.pendingLoads) {
+        if (bytes >= FLUSH_SLICE_BYTES) break
+        s.pendingLoads.delete(id)
+        link.send(m)
+        if (m.t === 'load') bytes += m.pcm.byteLength
+      }
+      this.drainLater(s)
+    }
+    if (this.backend.later) this.backend.later(slice)
+    else nextTask(slice)
+  }
+
   /** The open output, set up first if there is none (suspended until a tap wakes it). */
   private ensure(): Stream | null {
     if (this.stream) return this.stream
@@ -1313,6 +1343,7 @@ export class LiveAudio {
         s.link = link
         link.volume?.(levelGain(this._volume.peek()))
         flush(s, link)
+        this.drainLater(s)
         // SAMPLE's mic into the new mixer.
         if (this.mic !== null && (!link.listen || !tryListen(link, this.mic.media))) this.note('sample mic: this output takes no input')
         this._description = describeOutput(ctx, link.kind)
@@ -1538,15 +1569,27 @@ function send(s: Stream, m: ToMixer): void {
   else s.pending.push(m)
 }
 
-/** While the mixer is still starting, sample [id]'s load goes first (a press waits for it, not for every sample). */
-function first(s: Stream, id: number): void {
-  if (!s.link && s.pendingLoads.has(id)) s.urgent.add(id)
+/**
+ * Sample [id]'s load goes over before what names it (the mixer drops a start
+ * for a sample it hasn't): while the mixer starts it goes first (a press waits
+ * for it, not for every sample); after, at once if it still waits in the backlog.
+ */
+function ensureSent(s: Stream, id: number): void {
+  const m = s.pendingLoads.get(id)
+  if (m === undefined) return
+  if (!s.link) {
+    s.urgent.add(id)
+    return
+  }
+  s.pendingLoads.delete(id)
+  s.link.send(m)
 }
 
 /**
  * The mixer is ready: the loads presses wait for, then the commands in their
- * order (a stopAll still before a later start), then the other samples, so a
- * press's start crosses (and is mixed) before every other sample is copied over.
+ * order (a stopAll still before a later start). The other samples stay in
+ * pendingLoads for [LiveAudio.drainLater], so a press's start crosses (and is
+ * mixed) before every other sample is copied over.
  */
 function flush(s: Stream, link: MixerLink): void {
   for (const id of s.urgent) {
@@ -1557,8 +1600,20 @@ function flush(s: Stream, link: MixerLink): void {
   }
   s.urgent.clear()
   for (const m of s.pending.splice(0)) link.send(m)
-  for (const m of s.pendingLoads.values()) link.send(m)
-  s.pendingLoads.clear()
+}
+
+/** [fn] in a task of its own: a MessageChannel's message, which a nested setTimeout's 4 ms clamp doesn't hold back. */
+function nextTask(fn: () => void): void {
+  if (typeof MessageChannel === 'undefined') {
+    setTimeout(fn, 0)
+    return
+  }
+  const c = new MessageChannel()
+  c.port1.onmessage = () => {
+    c.port1.close()
+    fn()
+  }
+  c.port2.postMessage(null)
 }
 
 function wake(ctx: LiveContextLike): void {
