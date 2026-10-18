@@ -31,10 +31,10 @@ object Files {
     private const val MAX_IMPORT = 128L * 1024 * 1024
     const val TOO_LARGE = "This file is too large to be a backup"
 
-    /** A copy of [bytes] under cache/share/, named [name], as a content URI. */
-    fun shareableUri(context: Context, name: String, bytes: ByteArray): Uri {
+    /** A copy of [bytes] under cache/share/, named [name], as a content URI. The share before's copies go, unless [keep]. */
+    fun shareableUri(context: Context, name: String, bytes: ByteArray, keep: Boolean = false): Uri {
         val dir = File(context.cacheDir, "share").apply {
-            deleteRecursively()
+            if (!keep) deleteRecursively()
             mkdirs()
         }
         val f = File(dir, name)

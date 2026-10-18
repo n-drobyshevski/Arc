@@ -66,7 +66,7 @@ private val KeyGap = 7.dp
 
 internal enum class DeckStyle { NORMAL, SIGNAL, NAVY }
 
-internal enum class DeckGlyph { DOT, PLAY, STOP, SHARE, VOICE, SAVE, SEND, DELETE, SCENE, PATTERN, CHAIN, PASTE }
+internal enum class DeckGlyph { DOT, PLAY, STOP, SHARE, TRIM, DUP, START, END, RESET, DONE, SAVE, SEND, DELETE, SCENE, PATTERN, CHAIN, PASTE }
 
 /**
  * A key of the strip: a cap with [glyph] over its [label], read as
@@ -151,10 +151,34 @@ internal fun DrawScope.drawGlyph(glyph: DeckGlyph, color: Color) {
             line(Offset(w * 0.38f, w * 0.22f), Offset(w * 0.78f, w * 0.22f))
             line(Offset(w * 0.78f, w * 0.22f), Offset(w * 0.78f, w * 0.62f))
         }
-        // A voice message's waveform.
-        DeckGlyph.VOICE -> floatArrayOf(0.28f, 0.6f, 0.84f, 0.48f, 0.68f).forEachIndexed { i, h ->
-            val x = w * (0.14f + i * 0.18f)
-            line(Offset(x, w * (0.5f - h / 2)), Offset(x, w * (0.5f + h / 2)))
+        // Scissors: two blades crossing above two rings.
+        DeckGlyph.TRIM -> {
+            line(Offset(w * 0.3f, w * 0.12f), Offset(w * 0.62f, w * 0.62f))
+            line(Offset(w * 0.7f, w * 0.12f), Offset(w * 0.38f, w * 0.62f))
+            drawCircle(color, w * 0.14f, Offset(w * 0.28f, w * 0.76f), style = Stroke(s))
+            drawCircle(color, w * 0.14f, Offset(w * 0.72f, w * 0.76f), style = Stroke(s))
+        }
+        // Two sheets, one over the other.
+        DeckGlyph.DUP -> {
+            drawRoundRect(color, Offset(w * 0.12f, w * 0.12f), Size(w * 0.5f, w * 0.5f), CornerRadius(w * 0.07f), style = Stroke(s))
+            drawRoundRect(color, Offset(w * 0.38f, w * 0.38f), Size(w * 0.5f, w * 0.5f), CornerRadius(w * 0.07f))
+        }
+        // A bracket opening right, and one closing.
+        DeckGlyph.START, DeckGlyph.END -> {
+            val (x0, x1) = if (glyph == DeckGlyph.START) w * 0.32f to w * 0.62f else w * 0.68f to w * 0.38f
+            line(Offset(x0, w * 0.12f), Offset(x0, w * 0.88f))
+            line(Offset(x0, w * 0.12f), Offset(x1, w * 0.12f))
+            line(Offset(x0, w * 0.88f), Offset(x1, w * 0.88f))
+        }
+        // A ring nearly closed, with its arrow's head.
+        DeckGlyph.RESET -> {
+            drawArc(color, -60f, 290f, false, Offset(w * 0.18f, w * 0.18f), Size(w * 0.64f, w * 0.64f), style = Stroke(s, cap = StrokeCap.Round))
+            line(Offset(w * 0.66f, w * 0.06f), Offset(w * 0.68f, w * 0.26f))
+            line(Offset(w * 0.68f, w * 0.26f), Offset(w * 0.86f, w * 0.18f))
+        }
+        DeckGlyph.DONE -> {
+            line(Offset(w * 0.16f, w * 0.52f), Offset(w * 0.4f, w * 0.76f))
+            line(Offset(w * 0.4f, w * 0.76f), Offset(w * 0.86f, w * 0.26f))
         }
         DeckGlyph.SAVE -> {
             line(Offset(w * 0.5f, w * 0.1f), Offset(w * 0.5f, w * 0.66f))

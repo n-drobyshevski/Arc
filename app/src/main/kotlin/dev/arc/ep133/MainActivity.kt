@@ -316,11 +316,16 @@ class MainActivity : ComponentActivity() {
         if (uri == null) return
         lifecycleScope.launch {
             try {
-                // A take is copied straight from its file: it can be long.
+                // A take is copied straight from its file (it can be long), or its trimmed part written.
                 if (what != null && what.startsWith("take:")) {
-                    val f = controller.takes.value.firstOrNull { it.name == what.removePrefix("take:") }?.let(controller::takeFile)
+                    val t = controller.takes.value.firstOrNull { it.name == what.removePrefix("take:") }
                         ?: throw java.io.IOException(Strings.FILE_MISSING)
-                    withContext(Dispatchers.IO) { Files.copyTo(this@MainActivity, uri, f) }
+                    if (t.trim == null) {
+                        withContext(Dispatchers.IO) { Files.copyTo(this@MainActivity, uri, controller.takeFile(t)) }
+                    } else {
+                        val wav = controller.takeWav(t)
+                        withContext(Dispatchers.IO) { Files.writeTo(this@MainActivity, uri, wav) }
+                    }
                     return@launch
                 }
                 val bytes = when {
@@ -493,14 +498,20 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * SHARE: the take's WAV, except to Telegram's apps when there are any here:
-     * they get its voice message (made first), which they send as one. A voice
-     * message that can't be made leaves them the WAV too.
+     * SHARE: the take's WAV (its trimmed part, if it has one), except to
+     * Telegram's apps when there are any here: they get its voice message
+     * (made first), which they send as one. A voice message that can't be
+     * made leaves them the WAV too.
      */
     private fun shareTake(t: dev.arc.ep133.data.TakeInfo) {
         lifecycleScope.launch {
             try {
-                val uri = androidx.core.content.FileProvider.getUriForFile(this@MainActivity, Files.AUTHORITY, controller.takeFile(t))
+                val uri = if (t.trim == null) {
+                    androidx.core.content.FileProvider.getUriForFile(this@MainActivity, Files.AUTHORITY, controller.takeFile(t))
+                } else {
+                    val wav = controller.takeWav(t)
+                    withContext(Dispatchers.IO) { Files.shareableUri(this@MainActivity, t.name, wav) }
+                }
                 val telegram = dev.arc.ep133.files.Telegram.installed(this@MainActivity)
                 val voice = if (telegram.isEmpty()) {
                     null
@@ -508,7 +519,7 @@ class MainActivity : ComponentActivity() {
                     try {
                         val bytes = controller.takeVoice(t)
                         val name = dev.arc.ep133.text.MirrorText.voiceFileName(t.name)
-                        withContext(Dispatchers.IO) { Files.shareableUri(this@MainActivity, name, bytes) }
+                        withContext(Dispatchers.IO) { Files.shareableUri(this@MainActivity, name, bytes, keep = true) }
                     } catch (e: java.io.IOException) {
                         null
                     }
@@ -525,12 +536,6 @@ class MainActivity : ComponentActivity() {
                 controller.toast(dev.arc.ep133.text.MirrorText.SHARE_TAKE_FAILED, error = true)
             }
         }
-    }
-
-    /** VOICE: the take as Ogg Opus, which Telegram sends as a voice message; no text, which it would add as a caption. */
-    private fun shareTakeVoice(t: dev.arc.ep133.data.TakeInfo) {
-        val name = dev.arc.ep133.text.MirrorText.voiceFileName(t.name)
-        shareBytes(name, dev.arc.ep133.formats.OggOpus.MIME, name, text = null) { controller.takeVoice(t) }
     }
 
     private fun saveTake(t: dev.arc.ep133.data.TakeInfo) {
@@ -1248,7 +1253,11 @@ class MainActivity : ComponentActivity() {
                                 onPlay = { controller.playTake(it) },
                                 onStop = controller::stopPlayback,
                                 onShare = ::shareTake,
-                                onVoice = ::shareTakeVoice,
+                                onDuplicate = { controller.duplicateTake(it) },
+                                trimKeyOf = controller::takeTrimKey,
+                                onTrimPlay = { t, from, to -> controller.playTakeTrim(t, from, to) },
+                                onSetTrim = { t, trim -> controller.setTakeTrim(t, trim) },
+                                loadSound = controller::takeSound,
                                 onSave = ::saveTake,
                                 onToDevice = {
                                     controller.takeToDevice(it)

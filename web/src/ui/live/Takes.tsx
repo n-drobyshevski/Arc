@@ -150,7 +150,7 @@ export function TakesSection(props: { takes: TakesUi; take: TakeUi }): JSX.Eleme
                         <div class="take__keys">
                           {t.canShare && <Key text={FeatureText.SHARE_WAV} size="small" onClick={() => t.onShare(take)} />}
                           {t.canVoice && t.onVoice && (
-                            <Key text={MirrorText.VOICE_MESSAGE} size="small" onClick={() => t.onVoice?.(take)} />
+                            <Key text={WebText.VOICE_MESSAGE} size="small" onClick={() => t.onVoice?.(take)} />
                           )}
                           <Key text={FeatureText.SAVE_WAV} size="small" onClick={() => t.onSave(take)} />
                         </div>
