@@ -398,6 +398,7 @@ function Root(): JSX.Element {
         padOrder={c.padOrder()}
         version={APP_BUILD}
         onTheme={(t) => c.setTheme(t)}
+        onSkin={(s) => c.setSkin(s)}
         onAutoConnect={(on) => c.setAutoConnect(on)}
         onKeepScreenOn={(on) => c.setKeepScreenOn(on)}
         pruneCount={(keep) => c.pruneCount(keep)}

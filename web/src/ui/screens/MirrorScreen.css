@@ -491,7 +491,7 @@
   stroke-opacity: 0.8;
 }
 .live-keys__key.is-on {
-  --cap-ink: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--ko-dark-face));
+  --cap-ink: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--ko-picked-ink));
 }
 /* The group's pattern in the glyph's place (Kotlin GroupKey's number): "03", or "03→05" blinking
  * while a pick waits, the key ringed in signal orange. */
@@ -1305,7 +1305,7 @@
     justify-content: center;
     padding: 0 calc(var(--side-strip-width) + var(--space-4)) 0 0;
   }
-  /* The panel is the drawn EP-133's body (live/DeviceView.css .ep), the same in both themes: matte
+  /* The panel is the drawn device's body (live/DeviceView.css .ep, the skin's), the same in both themes: matte
    * grey plastic with its grain (one noise tile, soft-light) and its lit and shaded rims; the light
    * theme's tokens inside it, so the row prints dark on it and the display is the device's black glass. */
   .live-piano--desk .live-piano__body {
@@ -1328,7 +1328,7 @@
     background:
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.95' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0.22'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 256px 256px,
       radial-gradient(120% 70% at 45% 38%, rgb(255 255 255 / 0.1), transparent 70%),
-      linear-gradient(180deg, #C9C8C5 0%, #C5C4C1 55%, #B2B1AE 100%);
+      linear-gradient(180deg, var(--ep-body-1) 0%, var(--ep-body-2) 55%, var(--ep-body-3) 100%);
     background-blend-mode: soft-light, normal, normal;
     box-shadow:
       inset 1px 1px 0 rgb(255 255 255 / 0.55),

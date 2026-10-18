@@ -55,7 +55,8 @@ function reloadWhenIdle(): void {
 async function boot(): Promise<void> {
   const demo = new URLSearchParams(location.search).has('demo')
   const storage = pageStorage(demo)
-  applyTheme(new SettingsStore(storage).settings.theme)
+  const stored = new SettingsStore(storage).settings
+  applyTheme(stored.theme, undefined, stored.skin)
   // Settings → Computer keyboard: this page's storage, and another tab's change (not for ?demo).
   initKeyPrefs(storage)
   if (!demo) followStorage(window)
@@ -71,9 +72,10 @@ async function boot(): Promise<void> {
   })
   const c = createController(deps)
   controller = c
-  // Settings → Theme, and another tab's change.
+  // Settings → Theme and Skin, and another tab's change.
   effect(() => {
-    applyTheme(c.settings.value.theme)
+    const s = c.settings.value
+    applyTheme(s.theme, undefined, s.skin)
   })
   root.textContent = ''
   render(<App controller={c} />, root)

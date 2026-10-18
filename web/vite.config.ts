@@ -87,12 +87,15 @@ const pwa = VitePWA({
       '**/manrope-cyrillic-*',
       '**/manrope-greek-*',
       '**/manrope-vietnamese-*',
+      // The skins' names on the drawn device's plate (EP-40, EP-1320): fetched when a skin shows them.
+      '**/fredoka-*',
+      '**/unifrakturmaguntia-*',
     ],
     cleanupOutdatedCaches: true,
     runtimeCaching: [
       {
-        // Hashed, so never stale: the demo chunk and the other font subsets, kept once fetched.
-        urlPattern: /\/assets\/(?:demo-[\w-]+\.js|manrope-[\w-]+\.woff2)$/,
+        // Hashed, so never stale: the demo chunk, the other font subsets and the skins' plate fonts, kept once fetched.
+        urlPattern: /\/assets\/(?:demo-[\w-]+\.js|(?:manrope|fredoka|unifrakturmaguntia)-[\w-]+\.woff2)$/,
         handler: 'CacheFirst',
         options: {
           cacheName: 'arc-assets',

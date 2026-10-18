@@ -311,6 +311,12 @@ fun LiveOneGroupPreview() = Live(playing, oneGroup = true)
 @Composable
 fun LiveOneGroupDarkPreview() = Live(playing, dark = true, oneGroup = true)
 
+// The EP-40's group keys: the picked one's letter in the pads' green, not their cream.
+@PreviewTest
+@Preview(name = "Live one group EP-40", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveOneGroupEp40Preview() = Live(playing, skin = SkinChoice.EP40, oneGroup = true)
+
 @PreviewTest
 @Preview(name = "Live tools open", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable

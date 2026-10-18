@@ -2348,7 +2348,7 @@ private fun GroupKey(g: Int, group: Int, st: MirrorState, now: Long, onSelect: (
     val sounding = st.pads.filterKeys { it.group == g }.values.maxOfOrNull { glow(it, now) } ?: 0f
     val face = lerp(hw.ko.lightFace, c.signal, sounding)
     val edge = lerp(hw.ko.lightEdge, c.signalEdge, sounding)
-    val ink = if (sounding > 0.3f) c.onSignal else if (on) hw.ko.darkFace else hw.ko.lightInk
+    val ink = if (sounding > 0.3f) c.onSignal else if (on) hw.ko.pickedInk else hw.ko.lightInk
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
     val density = LocalDensity.current
