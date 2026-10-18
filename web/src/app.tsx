@@ -409,9 +409,14 @@ function Root(): JSX.Element {
         factorySounds={
           c.canGetFactory ? { saved: FactorySounds.inLibrary(state.backups, FactoryKit.EP133) !== null, onGet: () => void c.getFactorySounds() } : undefined
         }
+        factorySounds40={
+          c.canGetFactory
+            ? { saved: FactorySounds.inLibrary(state.backups, FactoryKit.EP40) !== null, onGet: () => void c.getFactorySounds(FactoryKit.EP40) }
+            : undefined
+        }
         factoryKits={{
           saved1320: FactorySounds.inLibrary(state.backups, FactoryKit.EP1320) !== null,
-          both: FactoryKit.entries.every((k) => FactorySounds.inLibrary(state.backups, k) !== null),
+          saved: FactorySounds.savedKits(state.backups),
           kit: c.factoryKit,
           onKit: (k) => c.setFactoryKit(k),
         }}
@@ -1661,8 +1666,8 @@ function TabScreen(props: {
           }}
           onGetFactory={c.canGetFactory && FactorySounds.inLibrary(state.backups, FactoryKit.EP133) === null ? () => void c.getFactorySounds() : null}
           factoryKit={
-            FactoryKit.entries.every((k) => FactorySounds.inLibrary(state.backups, k) !== null)
-              ? { kit: c.factoryKit, onKit: (k) => c.setFactoryKit(k) }
+            FactorySounds.savedKits(state.backups).length >= 2
+              ? { kit: c.factoryKit, kits: FactorySounds.savedKits(state.backups), onKit: (k) => c.setFactoryKit(k) }
               : null
           }
           offlinePads={state.offlinePads > 0 ? { count: state.offlinePads, onReset: () => void c.resetOfflinePads() } : null}

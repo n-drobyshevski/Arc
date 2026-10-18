@@ -1034,7 +1034,7 @@ class MainActivity : ComponentActivity() {
                     onForgetNames = controller::forgetLearned,
                     padSoundsSize = controller::padSoundsSize,
                     onClearPadSounds = { controller.clearPadSounds() },
-                    onGetFactory = { controller.getFactorySounds() },
+                    onGetFactory = { kit -> controller.getFactorySounds(kit) },
                     onFactoryKit = controller::setFactoryKit,
                     onNoteNames = controller::setKeysNames,
                     onShowNames = controller::setKeysShowNames,
@@ -1148,9 +1148,10 @@ class MainActivity : ComponentActivity() {
                             mirror = mirror,
                             nameOf = controller::mirrorName,
                             onGetFactory = if (dev.arc.ep133.features.FactorySounds.inLibrary(state.backups) == null) ({ controller.getFactorySounds() }) else null,
-                            // Both kits saved: the factory line switches between them.
+                            // Two or more kits saved: the factory line switches among them.
                             factoryKit = dev.arc.ep133.controller.activeKitOf(appSettings.factoryKit, state.backups)
                                 .takeIf { dev.arc.ep133.controller.kitsSaved(state.backups) },
+                            factoryKits = dev.arc.ep133.controller.savedKits(state.backups),
                             onFactoryKit = controller::setFactoryKit,
                             offlinePads = state.offlinePads,
                             onResetPads = { controller.resetOfflinePads() },

@@ -5,16 +5,21 @@ import dev.arc.ep133.text.BackupRecord
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * A factory pack arc can keep (an addition): the EP-133's, downloaded from
- * teenage engineering, or the EP-1320 Medieval's, which teenage engineering
- * doesn't offer, so it is a copy of the user's own Medieval backup. Each is a
- * library entry of its own [source]; Live shows one kit at a time.
+ * A factory pack arc can keep (an addition): the EP-133's and the EP-40
+ * Riddim's, downloaded from teenage engineering, or the EP-1320 Medieval's,
+ * which teenage engineering doesn't offer, so it is a copy of the user's own
+ * Medieval backup. Each is a library entry of its own [source]; Live shows one
+ * kit at a time.
  */
 enum class FactoryKit(val id: String, val source: String, val sku: String, val model: String) {
     EP133("ep133", "factory", "TE032AS001", "EP-133"),
-    EP1320("ep1320", "factory-ep1320", "TE032AS005", "EP-1320");
+    EP1320("ep1320", "factory-ep1320", "TE032AS005", "EP-1320"),
+    EP40("ep40", "factory-ep40", "TE032AS006", "EP-40");
 
     companion object {
+        /** The kits in the order arc offers them (Settings' rows, the kit switch): the downloads first. */
+        val SHOWN: List<FactoryKit> = listOf(EP133, EP40, EP1320)
+
         fun ofId(id: String?): FactoryKit? = entries.firstOrNull { it.id == id }
 
         /** The kit a library entry's source keeps; null for a backup or an import. */
@@ -36,6 +41,7 @@ enum class FactoryKit(val id: String, val source: String, val sku: String, val m
  * rebuilt, so it is looked up in the tool's page and script ([locate]); the
  * last name known ([KNOWN_PAK]) stands in when that fails.
  *
+ * The EP-40 Riddim's pack is served beside it ([FactoryKit.EP40], [download]).
  * teenage engineering offers no pack for the EP-1320 Medieval, so its kit
  * ([FactoryKit.EP1320]) is a copy of a Medieval backup the user made, kept
  * beside the EP-133's under a source of its own ([fitsKit], [canUseAsFactory]).
@@ -61,52 +67,88 @@ object FactorySounds {
     /** The EP-1320's copy's file name. */
     const val FILE_NAME_1320 = "ep-1320-factory-content.pak"
 
-    /** The project Live shows first, in either kit: the factory kit (drums on A, bass on B, keys on C). */
+    /** The EP-40's pack's path when last looked at (pak_release 0.2.0), beside the EP-133's. */
+    const val KNOWN_PAK_40 = "/apps/ep-sample-tool/assets/ep-40-factory-content-C42FyxWp.pak"
+
+    /** Its size then. */
+    const val KNOWN_SIZE_40 = 68_853_737L
+
+    /** The EP-40's library entry's file name. */
+    const val FILE_NAME_40 = "ep-40-factory-content.pak"
+
+    /** The project Live shows first, in any kit: the factory kit (drums on A, bass on B, keys on C). */
     const val PROJECT = 1
 
     private val SCRIPT = Regex("""src="(/apps/ep-sample-tool/assets/[A-Za-z0-9_.-]+\.js)"""")
     private val PAK = Regex("""/apps/ep-sample-tool/assets/ep-133-factory-content-[A-Za-z0-9_-]+\.pak""")
+    private val PAK_40 = Regex("""/apps/ep-sample-tool/assets/ep-40-factory-content-[A-Za-z0-9_-]+\.pak""")
+
+    /**
+     * Where a downloadable kit's pack is: its path when last looked at
+     * ([knownPak]) and [knownSize], the library entry's [fileName], and the
+     * [pattern] its path has in the tool's script.
+     */
+    class Download(val knownPak: String, val knownSize: Long, val fileName: String, internal val pattern: Regex)
+
+    private val EP133_DOWNLOAD = Download(KNOWN_PAK, KNOWN_SIZE, FILE_NAME, PAK)
+    private val EP40_DOWNLOAD = Download(KNOWN_PAK_40, KNOWN_SIZE_40, FILE_NAME_40, PAK_40)
+
+    /** [kit]'s download from teenage engineering; null for the EP-1320's, which they don't offer. */
+    fun download(kit: FactoryKit): Download? = when (kit) {
+        FactoryKit.EP133 -> EP133_DOWNLOAD
+        FactoryKit.EP40 -> EP40_DOWNLOAD
+        FactoryKit.EP1320 -> null
+    }
+
+    /** [kit]'s library entry's file name. */
+    fun fileName(kit: FactoryKit): String = download(kit)?.fileName ?: FILE_NAME_1320
 
     /** The tool's script in its page, if found. */
     fun scriptPath(html: String): String? = SCRIPT.find(html)?.groupValues?.get(1)
 
-    /** The EP-133 pack's path in the tool's script, if found (not the EP-40's beside it). */
-    fun pakPath(script: String): String? = PAK.find(script)?.value
+    /** [kit]'s pack's path in the tool's script, if found (the EP-133's, not the EP-40's beside it, unless asked). */
+    fun pakPath(script: String, kit: FactoryKit = FactoryKit.EP133): String? = download(kit)?.pattern?.find(script)?.value
 
     /**
-     * The pack's path on [ORIGIN]: from the tool's page and script, read with
-     * [text], else [KNOWN_PAK].
+     * [kit]'s pack's path on [ORIGIN]: from the tool's page and script, read
+     * with [text], else its last known path ([Download.knownPak]). [kit] is
+     * one teenage engineering offers ([download]).
      */
-    suspend fun locate(text: suspend (path: String) -> String): String {
+    suspend fun locate(kit: FactoryKit = FactoryKit.EP133, text: suspend (path: String) -> String): String {
+        val d = requireNotNull(download(kit)) { "No download for ${kit.model}" }
         val found = try {
-            scriptPath(text(PAGE))?.let { pakPath(text(it)) }
+            scriptPath(text(PAGE))?.let { pakPath(text(it), kit) }
         } catch (e: kotlin.coroutines.cancellation.CancellationException) {
             throw e
         } catch (_: Exception) {
             null
         }
-        return found ?: KNOWN_PAK
+        return found ?: d.knownPak
     }
 
-    /** Whether [pak] is an EP-133 factory pack (its meta.json says so). */
-    fun isFactory(pak: Pak): Boolean =
-        meta(pak, "pak_type") == "factory" && meta(pak, "device_name") == "EP-133" && pak.sounds.isNotEmpty()
+    /** Whether [pak] is [kit]'s factory pack (its meta.json says so), the EP-133's unless asked. */
+    fun isFactory(pak: Pak, kit: FactoryKit = FactoryKit.EP133): Boolean =
+        meta(pak, "pak_type") == "factory" && meta(pak, "device_name") == kit.model && pak.sounds.isNotEmpty()
 
     /**
-     * Whether [pak] can be [kit]'s pack: the EP-133's download ([isFactory]),
-     * or for the EP-1320 a pack with sounds made on one (its meta.json's sku
+     * Whether [pak] can be [kit]'s pack: the EP-133's or the EP-40's download
+     * ([isFactory]), or for the EP-1320 a pack with sounds made on one (its meta.json's sku
      * or name says so), a factory or a user pack alike: a Medieval reset to
      * its factory sounds backs up as a user pack.
      */
     fun fitsKit(pak: Pak, kit: FactoryKit): Boolean = when (kit) {
-        FactoryKit.EP133 -> isFactory(pak)
+        FactoryKit.EP133, FactoryKit.EP40 -> isFactory(pak, kit)
         FactoryKit.EP1320 -> pak.sounds.isNotEmpty() &&
             (meta(pak, "device_sku") == FactoryKit.EP1320.sku || meta(pak, "device_name")?.contains("1320") == true)
     }
 
-    /** The kit an imported [pak] is saved as: an EP-1320 factory pack goes straight in as that kit; anything else is an import (null). */
+    /**
+     * The kit an imported [pak] is saved as: an EP-1320 or EP-40 factory pack
+     * goes straight in as that kit; anything else is an import (null), the
+     * EP-133's pack too, as before.
+     */
     fun importKit(pak: Pak): FactoryKit? =
-        FactoryKit.EP1320.takeIf { meta(pak, "pak_type") == "factory" && fitsKit(pak, it) }
+        listOf(FactoryKit.EP1320, FactoryKit.EP40).firstOrNull { meta(pak, "pak_type") == "factory" && fitsKit(pak, it) }
 
     /** Whether [b] can be copied in as the EP-1320's factory sounds: a Medieval's backup, not a factory pack already. */
     fun canUseAsFactory(b: BackupRecord): Boolean =

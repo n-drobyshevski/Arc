@@ -190,7 +190,31 @@ class FeatureTextTest {
             MirrorText.offlineNote(MirrorText.FACTORY, 2, dev.arc.ep133.features.FactoryKit.EP1320),
         )
         assertEquals(MirrorText.OFFLINE_NOTE, MirrorText.offlineNote(MirrorText.lastSeen("5 Oct, 14:02"), 3, dev.arc.ep133.features.FactoryKit.EP1320))
-        assertEquals(listOf("EP-133", "EP-1320"), dev.arc.ep133.features.FactoryKit.entries.map(MirrorText::kit))
+        assertEquals(listOf("EP-133", "EP-40", "EP-1320"), dev.arc.ep133.features.FactoryKit.SHOWN.map(MirrorText::kit))
+        // The EP-40 Riddim's kit: the same sentences, naming it.
+        assertEquals(
+            "Not connected: these are the EP-40's factory sounds, project 3 as it ships. Connect your EP-133 to see it live.",
+            MirrorText.offlineNote(MirrorText.FACTORY, 3, dev.arc.ep133.features.FactoryKit.EP40),
+        )
+        assertEquals("EP-40 Riddim factory sounds", FeatureText.FACTORY_TITLE_40)
+        assertEquals("EP-40 Riddim", FeatureText.FACTORY_40)
+        assertEquals(
+            "The EP-40's factory sounds (471 sounds, about 69 MB), from teenage engineering's EP Sample Tool. Live plays them when you pick the EP-40 kit.",
+            FeatureText.FACTORY_40_NOTE,
+        )
+        assertEquals("In your backups. Live plays them when you pick the EP-40 kit.", FeatureText.FACTORY_40_SAVED)
+        assertEquals("teenage engineering's file isn't an EP-40 factory pack.", FeatureText.NOT_FACTORY_40)
+        assertEquals(
+            "EP-40 factory sounds saved: 471 sounds. Live plays them until it has read your EP-40.",
+            FeatureText.factory40Saved(471),
+        )
+        assertEquals(FeatureText.factory40Saved(2), FeatureText.factorySaved(dev.arc.ep133.features.FactoryKit.EP40, 2))
+        assertEquals(FeatureText.factorySaved(2), FeatureText.factorySaved(dev.arc.ep133.features.FactoryKit.EP133, 2))
+        assertEquals(FeatureText.factory1320Saved(2), FeatureText.factorySaved(dev.arc.ep133.features.FactoryKit.EP1320, 2))
+        assertEquals(
+            listOf(FeatureText.FACTORY_TITLE, FeatureText.FACTORY_TITLE_1320, FeatureText.FACTORY_TITLE_40),
+            listOf(dev.arc.ep133.features.FactoryKit.EP133, dev.arc.ep133.features.FactoryKit.EP1320, dev.arc.ep133.features.FactoryKit.EP40).map(FeatureText::factoryTitle),
+        )
         assertEquals(
             "EP-1320 factory sounds saved: 1 sound. Live plays them until it has read your EP-1320.",
             FeatureText.factory1320Saved(1),

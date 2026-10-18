@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Pak } from '../../../src/core/backup/pak'
 import { FactoryKit, FactorySounds } from '../../../src/core/features/factorySounds'
 import { FeatureText } from '../../../src/core/text/featureText'
+import { MirrorText } from '../../../src/core/text/mirrorText'
 import { BackupDevice, LibraryRules, type BackupRecord } from '../../../src/core/text/libraryRules'
 import { pad, tarFile } from '../../helpers/bytes'
 
@@ -121,8 +122,8 @@ describe('FactorySounds', () => {
     expect(new Map(LibraryRules.facts(factory, '')).get('From')).toBe(LibraryRules.FACTORY_FROM)
   })
 
-  it('names the two kits by id, library source and device sku', () => {
-    expect(FactoryKit.entries).toEqual([FactoryKit.EP133, FactoryKit.EP1320])
+  it('names the kits by id, library source and device sku', () => {
+    expect(FactoryKit.entries).toEqual([FactoryKit.EP133, FactoryKit.EP1320, FactoryKit.EP40])
     expect(FactoryKit.EP133).toEqual({ id: 'ep133', source: 'factory', sku: 'TE032AS001', model: 'EP-133' })
     expect(FactoryKit.EP1320).toEqual({ id: 'ep1320', source: 'factory-ep1320', sku: 'TE032AS005', model: 'EP-1320' })
     // The EP-133's source is the one the library has always had.
@@ -137,6 +138,106 @@ describe('FactorySounds', () => {
     expect(FactoryKit.ofSource('device')).toBeNull()
     expect(['factory', 'factory-ep1320', 'device', 'import'].map(FactorySounds.isFactorySource)).toEqual([true, true, false, false])
     expect(FactorySounds.FILE_NAME_1320).toBe('ep-1320-factory-content.pak')
+  })
+
+  it("names the EP-40's kit, and finds it by its sku", () => {
+    expect(FactoryKit.EP40).toEqual({ id: 'ep40', source: 'factory-ep40', sku: 'TE032AS006', model: 'EP-40' })
+    expect(FactoryKit.ofSku('TE032AS006')).toBe(FactoryKit.EP40)
+    expect(FactoryKit.ofId('ep40')).toBe(FactoryKit.EP40)
+    expect(FactoryKit.ofSource('factory-ep40')).toBe(FactoryKit.EP40)
+    expect(FactorySounds.isFactorySource('factory-ep40')).toBe(true)
+    expect(FactorySounds.KNOWN_PAK_40).toBe('/apps/ep-sample-tool/assets/ep-40-factory-content-C42FyxWp.pak')
+    expect(FactorySounds.KNOWN_SIZE_40).toBe(68_853_737)
+    expect(FactorySounds.FILE_NAME_40).toBe('ep-40-factory-content.pak')
+    // Each downloadable kit's facts; the EP-1320's has none.
+    expect(FactorySounds.download(FactoryKit.EP133)).toMatchObject({ knownPak: FactorySounds.KNOWN_PAK, knownSize: FactorySounds.KNOWN_SIZE, fileName: FactorySounds.FILE_NAME })
+    expect(FactorySounds.download(FactoryKit.EP40)).toMatchObject({ knownPak: FactorySounds.KNOWN_PAK_40, knownSize: FactorySounds.KNOWN_SIZE_40, fileName: FactorySounds.FILE_NAME_40 })
+    expect(FactorySounds.download(FactoryKit.EP1320)).toBeNull()
+  })
+
+  it("finds the EP-40's pack beside the EP-133's in the tool's script, else its last known path", async () => {
+    expect(FactorySounds.pakPath(script, FactoryKit.EP40)).toBe('/apps/ep-sample-tool/assets/ep-40-factory-content-C42FyxWp.pak')
+    expect(FactorySounds.pakPath(script, FactoryKit.EP133)).toBe('/apps/ep-sample-tool/assets/ep-133-factory-content-DRyE_DHC.pak')
+    expect(FactorySounds.pakPath(script, FactoryKit.EP1320)).toBeNull()
+    // Only the EP-133's in the script: none for the EP-40.
+    expect(FactorySounds.pakPath('b="/apps/ep-sample-tool/assets/ep-133-factory-content-DRyE_DHC.pak"', FactoryKit.EP40)).toBeNull()
+    const located = await FactorySounds.locate(async (p) => (p === FactorySounds.PAGE ? page : script.replace('C42FyxWp', 'N3w_40')), FactoryKit.EP40)
+    expect(located).toBe('/apps/ep-sample-tool/assets/ep-40-factory-content-N3w_40.pak')
+    await expect(FactorySounds.locate(() => Promise.reject(new Error('offline')), FactoryKit.EP40)).resolves.toBe(FactorySounds.KNOWN_PAK_40)
+    await expect(FactorySounds.locate(async (p) => (p === FactorySounds.PAGE ? page : 'nothing here'), FactoryKit.EP40)).resolves.toBe(
+      FactorySounds.KNOWN_PAK_40,
+    )
+    // The EP-133's lookup is as it was.
+    await expect(FactorySounds.locate(async (p) => (p === FactorySounds.PAGE ? page : script))).resolves.toBe(FactorySounds.KNOWN_PAK)
+  })
+
+  const ep40Meta = { pak_type: 'factory', device_name: 'EP-40', device_sku: 'TE032AS006' }
+
+  it("counts an EP-40 factory pack as the EP-40's only", () => {
+    expect(FactorySounds.isFactory(pak(ep40Meta, new Map()), FactoryKit.EP40)).toBe(true)
+    expect(FactorySounds.isFactory(pak(ep40Meta, new Map()), FactoryKit.EP133)).toBe(false)
+    expect(FactorySounds.isFactory(pak(ep40Meta, new Map()))).toBe(false)
+    expect(FactorySounds.isFactory(pak(factoryMeta, new Map()), FactoryKit.EP40)).toBe(false)
+    expect(FactorySounds.isFactory(pak({ ...ep40Meta, pak_type: 'user' }, new Map()), FactoryKit.EP40)).toBe(false)
+    expect(FactorySounds.isFactory({ ...pak(ep40Meta, new Map()), sounds: new Map() }, FactoryKit.EP40)).toBe(false)
+    expect(FactorySounds.fitsKit(pak(ep40Meta, new Map()), FactoryKit.EP40)).toBe(true)
+    expect(FactorySounds.fitsKit(pak(ep40Meta, new Map()), FactoryKit.EP1320)).toBe(false)
+    expect(FactorySounds.fitsKit(pak(factoryMeta, new Map()), FactoryKit.EP40)).toBe(false)
+    // Imported, an EP-40 factory pack is saved as its kit; a user pack of one is an ordinary import.
+    expect(FactorySounds.importKit(pak(ep40Meta, new Map()))).toBe(FactoryKit.EP40)
+    expect(FactorySounds.importKit(pak({ ...ep40Meta, pak_type: 'user' }, new Map()))).toBeNull()
+    // Its backups aren't offered as factory sounds: its pack is downloaded.
+    expect(FactorySounds.canUseAsFactory({ ...rec('x', 1, 'device'), device: BackupDevice('EP-40', 'TE032AS006', 'S1', '0.0.0') })).toBe(false)
+  })
+
+  it('keeps all three kits, never prunes one, and says where the EP-40 pack came from', () => {
+    const ep133 = rec('f', 1, FactoryKit.EP133.source)
+    const medieval = rec('m', 2, FactoryKit.EP1320.source)
+    const riddim = rec('r', 3, FactoryKit.EP40.source)
+    const backups = [rec('a', 10, 'device'), ep133, riddim, medieval, rec('b', 20, 'import')]
+    expect(FactorySounds.inLibrary(backups, FactoryKit.EP40)).toBe(riddim)
+    expect(FactorySounds.inLibrary([ep133, medieval], FactoryKit.EP40)).toBeNull()
+    expect(LibraryRules.toPrune(backups, 1).map((b) => b.id)).toEqual(['a'])
+    expect(LibraryRules.toPrune(backups, 0).map((b) => b.id).sort()).toEqual(['a', 'b'])
+    expect(new Map(LibraryRules.facts(riddim, '')).get('From')).toBe(LibraryRules.FACTORY_FROM)
+  })
+
+  it('lists the saved kits EP-133, EP-40, EP-1320, and plays the chosen one while saved, else the first', () => {
+    const ep133 = rec('f', 1, FactoryKit.EP133.source)
+    const medieval = rec('m', 2, FactoryKit.EP1320.source)
+    const riddim = rec('r', 3, FactoryKit.EP40.source)
+    const own = rec('a', 10, 'device')
+    expect(FactorySounds.savedKits([own])).toEqual([])
+    expect(FactorySounds.savedKits([medieval, riddim, ep133, own])).toEqual([FactoryKit.EP133, FactoryKit.EP40, FactoryKit.EP1320])
+    expect(FactorySounds.savedKits([medieval, riddim])).toEqual([FactoryKit.EP40, FactoryKit.EP1320])
+    // Chosen and saved.
+    expect(FactorySounds.activeKitOf(FactoryKit.EP1320, [ep133, riddim, medieval])).toBe(FactoryKit.EP1320)
+    expect(FactorySounds.activeKitOf(FactoryKit.EP40, [ep133, riddim])).toBe(FactoryKit.EP40)
+    // Chosen but not saved: the first saved, EP-133, EP-40, EP-1320 in that order.
+    expect(FactorySounds.activeKitOf(FactoryKit.EP1320, [riddim, ep133])).toBe(FactoryKit.EP133)
+    expect(FactorySounds.activeKitOf(FactoryKit.EP1320, [riddim])).toBe(FactoryKit.EP40)
+    expect(FactorySounds.activeKitOf(FactoryKit.EP133, [medieval, riddim])).toBe(FactoryKit.EP40)
+    expect(FactorySounds.activeKitOf(FactoryKit.EP40, [medieval])).toBe(FactoryKit.EP1320)
+    // None saved: the EP-133's.
+    expect(FactorySounds.activeKitOf(FactoryKit.EP40, [own])).toBe(FactoryKit.EP133)
+  })
+
+  it("words the EP-40's kit as the spec has it", () => {
+    expect(FeatureText.FACTORY_TITLE_40).toBe('EP-40 Riddim factory sounds')
+    expect(FeatureText.FACTORY_40).toBe('EP-40 Riddim')
+    expect(FeatureText.FACTORY_40_NOTE).toBe(
+      "The EP-40's factory sounds (471 sounds, about 69 MB), from teenage engineering's EP Sample Tool. Live plays them when you pick the EP-40 kit.",
+    )
+    expect(FeatureText.FACTORY_40_SAVED).toBe('In your backups. Live plays them when you pick the EP-40 kit.')
+    expect(FeatureText.NOT_FACTORY_40).toBe("teenage engineering's file isn't an EP-40 factory pack.")
+    expect(FeatureText.factory40Saved(471)).toBe('EP-40 factory sounds saved: 471 sounds. Live plays them until it has read your EP-40.')
+    expect(FeatureText.factory40Saved(1)).toBe('EP-40 factory sounds saved: 1 sound. Live plays them until it has read your EP-40.')
+    expect(MirrorText.kit(FactoryKit.EP40)).toBe('EP-40')
+    expect(MirrorText.kit(FactoryKit.EP133)).toBe('EP-133')
+    expect(MirrorText.kit(FactoryKit.EP1320)).toBe('EP-1320')
+    expect(MirrorText.factoryNote(2, FactoryKit.EP40)).toBe(
+      "Not connected: these are the EP-40's factory sounds, project 2 as it ships. Connect your EP-133 to see it live.",
+    )
   })
 
   it("finds each kit's pack apart, and prunes neither", () => {

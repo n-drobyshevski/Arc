@@ -50,7 +50,9 @@ describe('OfflinePadsTest', () => {
     expect(OfflinePads.fromJson(OfflinePads.toJson(p))!.list).toEqual([medieval, snare])
     // Written without it (before kits), or with a kit arc doesn't know: the EP-133's.
     expect(OfflinePads.fromJson('{"v":1,"pads":[{"project":1,"group":0,"pad":5,"slot":343,"name":"kick","source":"factory"}]}')!.list).toEqual([kick])
-    expect(OfflinePads.fromJson('{"v":1,"pads":[{"project":1,"group":0,"pad":5,"slot":343,"name":"kick","source":"factory","kit":"ep40"}]}')!.list).toEqual([kick])
+    expect(OfflinePads.fromJson('{"v":1,"pads":[{"project":1,"group":0,"pad":5,"slot":343,"name":"kick","source":"factory","kit":"ep99"}]}')!.list).toEqual([kick])
+    // The EP-40's kit is one it knows.
+    expect(OfflinePads.fromJson('{"v":1,"pads":[{"project":1,"group":0,"pad":5,"slot":343,"name":"kick","source":"factory","kit":"ep40"}]}')!.list).toEqual([{ ...kick, kit: 'ep40' }])
     expect(OfflinePads.fromJson('{"v":1,"pads":[{"project":1,"group":0,"pad":5,"slot":343,"name":"kick","source":"factory","kit":"ep133"}]}')!.list).toEqual([kick])
     // Whatever its kit, a factory sound fits where the device has it.
     expect(OfflinePads.fits(medieval, 1, new Map([[343, 'kick']]))).toBe(true)

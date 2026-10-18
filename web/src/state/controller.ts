@@ -2239,19 +2239,20 @@ export class ArcController {
       const bytes = await read()
       const pak = await openPak(bytes)
       const d = describePak(pak)
-      // An EP-1320 factory pack (someone's shared one) is kept as that kit's straight away.
-      if (FactorySounds.importKit(pak) === FactoryKit.EP1320) {
+      // An EP-1320 or EP-40 factory pack (someone's shared one, or one saved from the tool) is kept as that kit's straight away.
+      const imported = FactorySounds.importKit(pak)
+      if (imported !== null) {
         const kit = await this.saveKit(
-          FactoryKit.EP1320,
+          imported,
           bytes,
           d,
           d.generatedAt ?? (lastModified !== null && lastModified !== 0 ? lastModified : this.deps.now()),
           BackupDevice(d.device.product, d.device.sku, '', d.device.osVersion),
         )
         this.store.update((st) => ({ ...st, freshId: kit.record.id }))
-        this.toastSaved(FeatureText.factory1320Saved(kit.record.soundCount), kit.copyError)
+        this.toastSaved(kitSaved(imported, kit.record.soundCount), kit.copyError)
         // As with Use as factory sounds: else, with no EP-133 pack beside it, nothing would offer it.
-        this.setFactoryKit(FactoryKit.EP1320)
+        this.setFactoryKit(imported)
         return
       }
       const saved = await this.deps.library.save(
@@ -2280,33 +2281,35 @@ export class ArcController {
   }
 
   /**
-   * Downloads the EP-133's factory sounds from teenage engineering's EP
-   * Sample Tool and keeps them in the library (FactorySounds), as a task:
-   * the progress sheet shows how much has come, and Cancel stops it.
+   * Downloads [kit]'s factory sounds (the EP-133's or the EP-40's) from
+   * teenage engineering's EP Sample Tool and keeps them in the library
+   * (FactorySounds), as a task: the progress sheet shows how much has come,
+   * and Cancel stops it. The EP-40's are Live's kit from then on.
    */
-  async getFactorySounds(): Promise<void> {
+  async getFactorySounds(kit: FactoryKit = FactoryKit.EP133): Promise<void> {
     const net = this.deps.factory
-    // The EP-133's pack only: the EP-1320's has no download (useAsFactory).
-    if (net === undefined || FactorySounds.inLibrary(this.store.get().backups, FactoryKit.EP133) !== null) return
+    // A downloadable kit only: the EP-1320's has none (useAsFactory).
+    const dl = FactorySounds.download(kit)
+    if (net === undefined || dl === null || FactorySounds.inLibrary(this.store.get().backups, kit) !== null) return
     // Tapped while something else runs (a read as the page starts, a transfer): it goes next, not never.
     if (this.store.get().busy) await this.store.waitFor((st) => !st.busy)
-    if (FactorySounds.inLibrary(this.store.get().backups, FactoryKit.EP133) !== null) return
+    if (FactorySounds.inLibrary(this.store.get().backups, kit) !== null) return
     const saved = await this.tasks.runTask(FeatureText.GETTING_FACTORY, async (onProgress, signal) => {
       try {
-        const path = await FactorySounds.locate((p) => net.text(p, signal))
+        const path = await FactorySounds.locate((p) => net.text(p, signal), kit)
         const bytes = await net.bytes(path, signal, (done, total) => {
-          const all = Math.max(total ?? FactorySounds.KNOWN_SIZE, done)
+          const all = Math.max(total ?? dl.knownSize, done)
           onProgress({ fraction: done / all, label: FeatureText.factoryProgress(done, all) })
         })
         const pak = await openPak(bytes)
-        if (!FactorySounds.isFactory(pak)) throw new Error(FeatureText.NOT_FACTORY)
+        if (!FactorySounds.isFactory(pak, kit)) throw new Error(kit === FactoryKit.EP40 ? FeatureText.NOT_FACTORY_40 : FeatureText.NOT_FACTORY)
         const d = describePak(pak)
         return await this.deps.library.save(
           this.record(
-            FeatureText.FACTORY_TITLE,
+            kitTitle(kit),
             d.generatedAt ?? this.deps.now(),
-            FactorySounds.SOURCE,
-            FactorySounds.FILE_NAME,
+            kit.source,
+            dl.fileName,
             BackupDevice(d.device.product, d.device.sku, '', d.device.osVersion),
             d,
           ),
@@ -2320,7 +2323,9 @@ export class ArcController {
     }, { device: false })
     if (saved === null) return
     this.store.update((st) => ({ ...st, freshId: saved.record.id }))
-    this.toastSaved(FeatureText.factorySaved(saved.record.soundCount), saved.copyError)
+    this.toastSaved(kitSaved(kit, saved.record.soundCount), saved.copyError)
+    // The EP-133's leave the kit as it is; the EP-40's were asked for to be played.
+    if (kit === FactoryKit.EP40) this.setFactoryKit(kit)
   }
 
   /** The factory kit Live plays offline (FactoryKit): the one chosen while its pack is saved, else the EP-133's. */
@@ -2379,7 +2384,8 @@ export class ArcController {
 
   /**
    * Saves [bytes] as [kit]'s factory pack (the EP-1320's: a copy of a backup,
-   * or an imported pack), then deletes any older one of that kit.
+   * or an imported pack; the EP-40's: an imported pack), then deletes any
+   * older one of that kit.
    */
   private async saveKit(
     kit: FactoryKit,
@@ -2390,7 +2396,7 @@ export class ArcController {
   ): Promise<{ record: BackupRecord; copyError: string | null }> {
     const older = this.store.get().backups.filter((r) => r.source === kit.source)
     const saved = await this.deps.library.save(
-      this.record(FeatureText.FACTORY_TITLE_1320, createdAt, kit.source, FactorySounds.FILE_NAME_1320, device, d),
+      this.record(kitTitle(kit), createdAt, kit.source, kitFileName(kit), device, d),
       bytes,
       d.soundNames,
     )
@@ -2900,4 +2906,23 @@ function sameChange(a: OfflinePad, b: OfflinePad): boolean {
     a.source === b.source &&
     (a.file ?? null) === (b.file ?? null)
   )
+}
+
+/** [kit]'s factory pack's title in the library. */
+function kitTitle(kit: FactoryKit): string {
+  return kit === FactoryKit.EP1320 ? FeatureText.FACTORY_TITLE_1320 : kit === FactoryKit.EP40 ? FeatureText.FACTORY_TITLE_40 : FeatureText.FACTORY_TITLE
+}
+
+/** [kit]'s factory pack's file name in the library. */
+function kitFileName(kit: FactoryKit): string {
+  return FactorySounds.download(kit)?.fileName ?? FactorySounds.FILE_NAME_1320
+}
+
+/** The toast once [kit]'s factory pack is saved, with its [sounds]. */
+function kitSaved(kit: FactoryKit, sounds: number): string {
+  return kit === FactoryKit.EP1320
+    ? FeatureText.factory1320Saved(sounds)
+    : kit === FactoryKit.EP40
+      ? FeatureText.factory40Saved(sounds)
+      : FeatureText.factorySaved(sounds)
 }

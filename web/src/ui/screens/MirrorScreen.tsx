@@ -270,7 +270,7 @@ export interface MirrorScreenProps {
   onStop?: () => void
   /** Not connected: download the factory sounds (FactorySounds); null when they can't be, or are in the library. */
   onGetFactory?: (() => void) | null
-  /** Both factory kits saved (FactoryKit): the one Live plays offline, and its switch on the factory line; null otherwise. */
+  /** Two or more factory kits saved (FactoryKit): the one Live plays offline, and its switch on the factory line; null otherwise. */
   factoryKit?: FactoryKitUi | null
   /**
    * Opens Settings, from the first row of Live tools (an addition; the caller
@@ -670,24 +670,21 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   )
   // Not connected (nothing read, or offline from the last read): the factory sounds to get, after it.
   const getFactory = mirror?.error === MirrorText.NOT_CONNECTED || mirror?.offline != null ? (props.onGetFactory ?? null) : null
-  // Showing the factory sounds with both kits saved: which kit, instead.
+  // Showing the factory sounds with two or more kits saved: which kit (beside the EP-133's Get, while it isn't saved).
   const kitSwitch = mirror?.offline === MirrorText.FACTORY ? (props.factoryKit ?? null) : null
-  const factoryRow =
-    getFactory !== null ? (
-      <RowCard>
+  const factoryRow = (getFactory !== null || kitSwitch !== null) && (
+    <RowCard>
+      {getFactory !== null && (
         <SettingRow
           title={FeatureText.FACTORY_SOUNDS}
           note={FeatureText.FACTORY_NOTE}
           control={(ids) => <RowAction text={FeatureText.GET} describedBy={ids.titleId} onClick={getFactory} />}
         />
-      </RowCard>
-    ) : (
-      kitSwitch !== null && (
-        <RowCard>
-          <SettingRow title={FeatureText.FACTORY_KIT} control={(ids) => <KitSwitch kit={kitSwitch} labelledBy={ids.titleId} />} />
-        </RowCard>
-      )
-    )
+      )}
+      {/* Stacked as View is, so three kits fit a phone's tools on one line. */}
+      {kitSwitch !== null && <SettingRow title={FeatureText.FACTORY_KIT} stack control={(ids) => <KitSwitch kit={kitSwitch} fill labelledBy={ids.titleId} />} />}
+    </RowCard>
+  )
   // Pads changed offline in arc only: how many, and Reset pads.
   const offlinePads = props.offlinePads ?? null
   const offlinePadsRow = offlinePads !== null && offlinePads.count > 0 && (
@@ -1732,7 +1729,7 @@ function Display(props: {
   const { st, mirror } = props
   const offline = showOffline(st, mirror)
   const getFactory = mirror?.error === MirrorText.NOT_CONNECTED ? props.onGetFactory : null
-  // The factory sounds shown, both kits saved: the kit switch on their line.
+  // The factory sounds shown, two or more kits saved: the kit switch on their line.
   const kit = offline && mirror?.offline === MirrorText.FACTORY ? props.factoryKit : null
   // The arp playing names the line, in signal orange.
   const arpLine = useArpLine()
@@ -1774,7 +1771,7 @@ function Display(props: {
       </div>
       <PatternRow still={props.still} />
       {kit !== null ? (
-        <div class="live-display__kit">
+        <div class={`live-display__kit${kit.kits.length >= 3 ? ' live-display__kit--three' : ''}`}>
           <p class={`live-display__line t-stat-free${arpLine !== null ? ' live-display__line--small live-display__line--arp' : displayLineSmall(st, mirror) ? ' live-display__line--small' : ''}`} aria-hidden="true">
             {line}
           </p>
@@ -1803,9 +1800,10 @@ function Display(props: {
   )
 }
 
-/** The factory kit Live plays offline and its switch (FactoryKit), with both kits saved. */
+/** The factory kit Live plays offline and its switch (FactoryKit), with two or more kits saved ([kits], in the order listed). */
 export interface FactoryKitUi {
   readonly kit: FactoryKit
+  readonly kits: readonly FactoryKit[]
   readonly onKit: (kit: FactoryKit) => void
 }
 
@@ -1814,17 +1812,18 @@ function kitShown(mirror: MirrorUi | null): FactoryKit {
   return FactoryKit.ofId(mirror?.kit ?? null) ?? FactoryKit.EP133
 }
 
-/** EP-133 / EP-1320: the factory kit Live plays offline, as in Settings. */
-function KitSwitch(props: { kit: FactoryKitUi; label?: string; labelledBy?: string }): JSX.Element {
+/** EP-133 / EP-40 / EP-1320 (the saved ones): the factory kit Live plays offline, as in Settings. */
+function KitSwitch(props: { kit: FactoryKitUi; label?: string; labelledBy?: string; fill?: boolean }): JSX.Element {
   const { kit } = props
   return (
     <Segmented
       compact
+      fill={props.fill ?? false}
       class="live-kit"
-      options={FactoryKit.entries.map((k) => MirrorText.kit(k))}
-      selected={Math.max(0, FactoryKit.entries.indexOf(kit.kit))}
+      options={kit.kits.map((k) => MirrorText.kit(k))}
+      selected={Math.max(0, kit.kits.indexOf(kit.kit))}
       onSelect={(i) => {
-        const k = FactoryKit.entries[i]
+        const k = kit.kits[i]
         if (k !== undefined && k !== kit.kit) kit.onKit(k)
       }}
       {...(props.labelledBy !== undefined ? { labelledBy: props.labelledBy } : { label: props.label ?? FeatureText.FACTORY_KIT })}

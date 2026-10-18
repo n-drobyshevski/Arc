@@ -87,7 +87,7 @@ export interface AppSettings {
   readonly sampleTrimSilence: boolean
   /** BARS on PTN: a hands-free take lasts the pattern's length, from its next loop start. */
   readonly samplePattern: boolean
-  /** The factory kit Live plays offline (FactoryKit.id): the EP-133's, or the EP-1320's once saved. */
+  /** The factory kit Live plays offline (FactoryKit.id): the EP-133's, or the EP-40's or the EP-1320's once saved. */
   readonly factoryKit: FactoryKitId
 }
 

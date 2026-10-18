@@ -1425,6 +1425,236 @@ describe('Factory sounds: the EP-1320 kit beside the EP-133', () => {
   })
 })
 
+describe('Factory sounds: the EP-40 kit beside the EP-133 and the EP-1320', () => {
+  const PAGE_HTML = '<script type="module" crossorigin src="/apps/ep-sample-tool/assets/index-C1wBjhTa.js"></script>'
+  const PAK_133 = '/apps/ep-sample-tool/assets/ep-133-factory-content-T3st.pak'
+  const PAK_40 = '/apps/ep-sample-tool/assets/ep-40-factory-content-T3st40.pak'
+  // The tool's script holds both packs' paths, the EP-40's first (as served).
+  const SCRIPT = `ep40factoryContent="${PAK_40}",ep133factoryContent="${PAK_133}"`
+  const EP40_GREET = 'chip_id:0;mode:normal;os_version:0.0.0;product:EP-40;serial:MOCK0040;sku:TE032AS006;sw_version:0.0.0'
+  const EP133_GREET = 'chip_id:0;mode:normal;os_version:2.0.5;product:EP-133;serial:MOCK0001;sku:TE032AS001;sw_version:2.0.5'
+  const EP40_META = { pak_type: 'factory', device_name: 'EP-40', device_sku: 'TE032AS006', device_version: '0.0.0' }
+
+  /**
+   * A small pack: [names] in slots 1 and 5 on a/p01 and a/p05 of project 1,
+   * each a tone [len] samples long. [folder]: every file under that folder,
+   * with macOS's resource forks beside it, as the EP-40's pack is zipped.
+   */
+  async function pack(meta: Record<string, string>, names: [string, string], len: number, folder = ''): Promise<Uint8Array> {
+    const wav = encodeWav(tone(len, 220), 1, 46875)
+    const fork = new Uint8Array([0, 5, 22, 7, 0, 2, 0, 0])
+    const files = [
+      { path: `${folder}meta.json`, data: new TextEncoder().encode(JSON.stringify({ ...meta, generated_at: '2025-10-24T00:00:00.000Z' })), compress: false },
+      { path: `${folder}sounds/001 ${names[0]}.wav`, data: wav, compress: false },
+      { path: `${folder}sounds/005 ${names[1]}.wav`, data: wav, compress: false },
+      { path: `${folder}projects/P01.tar`, data: tarFile([['pads/a/p01', pad(1)], ['pads/a/p05', pad(5)]]), compress: false },
+    ]
+    const forks =
+      folder === ''
+        ? []
+        : [
+            { path: `__MACOSX/${folder}._meta.json`, data: fork, compress: false },
+            { path: `__MACOSX/${folder}sounds/._001 ${names[0]}.wav`, data: fork, compress: false },
+            { path: `__MACOSX/${folder}projects/._P01.tar`, data: fork, compress: false },
+          ]
+    return writeZip([...files, ...forks], { date: 0, offsetMin: 0 })
+  }
+
+  const ep133Pak = (): Promise<Uint8Array> => pack({ pak_type: 'factory', device_name: 'EP-133', device_sku: 'TE032AS001' }, ['micro kick', 'nt clap'], 2000)
+  /** The EP-40's pack as teenage engineering zips it: in a folder, with __MACOSX entries. */
+  const ep40Pak = (names: [string, string] = ['riddim kick', 'riddim snare']): Promise<Uint8Array> =>
+    pack(EP40_META, names, 4000, 'ep-40-factory-content/')
+  const medievalPak = (): Promise<Uint8Array> =>
+    pack({ pak_type: 'factory', device_name: 'EP-1320', device_sku: 'TE032AS005', device_version: '1.0.0' }, ['med kick', 'med clap'], 3000)
+
+  /**
+   * teenage engineering's site: each pack at its own path ([paks]); [asked]
+   * lists the paths read, and [labels] the progress shown while the server
+   * gives no length.
+   */
+  function site(paks: Record<string, Uint8Array>, asked: string[] = [], labels: Array<() => string | undefined> = []): FactoryDeps {
+    return {
+      text: async (path) => {
+        asked.push(path)
+        return path === FactorySounds.PAGE ? PAGE_HTML : SCRIPT
+      },
+      bytes: async (path, _signal, onProgress) => {
+        asked.push(path)
+        const pak = paks[path]
+        if (pak === undefined) throw new Error('HTTP 404')
+        onProgress(1000, null)
+        for (const l of labels) l()
+        onProgress(pak.length, pak.length)
+        return pak
+      },
+    }
+  }
+
+  const kitPack = (h: LiveHarness, kit: FactoryKit): BackupRecord | null => FactorySounds.inLibrary(h.c.state.value.backups, kit)
+
+  it("Get downloads the EP-40's pack, saves it as its kit, and Live plays it from then on", async () => {
+    const asked: string[] = []
+    const seen: string[] = []
+    let h: LiveHarness | null = null
+    const label = (): string | undefined => {
+      const l = h?.c.state.value.task?.label
+      if (l !== undefined) seen.push(l)
+      return l
+    }
+    h = await liveHarness({ storage: memoryStorage(ORDER), unplugged: true, factory: site({ [PAK_40]: await ep40Pak(), [PAK_133]: await ep133Pak() }, asked, [label]) })
+    h.c.setLive(true)
+    await until(h, (s) => s.mirror?.error === MirrorText.NOT_CONNECTED)
+    await h.c.getFactorySounds(FactoryKit.EP40)
+    // The EP-40's path from the script, not the EP-133's beside it.
+    expect(asked).toEqual([FactorySounds.PAGE, '/apps/ep-sample-tool/assets/index-C1wBjhTa.js', PAK_40])
+    // No length from the server: the progress counts against the EP-40's size.
+    expect(seen).toEqual([FeatureText.factoryProgress(1000, FactorySounds.KNOWN_SIZE_40)])
+    await until(h, (s) => s.backups.length === 1)
+    const b = kitPack(h, FactoryKit.EP40)!
+    expect(b).toMatchObject({
+      title: FeatureText.FACTORY_TITLE_40,
+      source: 'factory-ep40',
+      fileName: FactorySounds.FILE_NAME_40,
+      soundCount: 2,
+      projectCount: 1,
+      device: { product: 'EP-40', sku: 'TE032AS006' },
+    })
+    expect(h.c.state.value.freshId).toBe(b.id)
+    expect(h.toasts.at(-1)?.text).toBe(FeatureText.factory40Saved(2))
+    // The EP-40's kit is Live's from now on.
+    expect(h.deps.settings.settings.factoryKit).toBe(FactoryKit.EP40.id)
+    expect(h.c.factoryKit).toBe(FactoryKit.EP40)
+    await until(h, (s) => s.mirror?.offline === MirrorText.FACTORY && s.mirror.kit === FactoryKit.EP40.id)
+    expect(h.c.mirrorName(A1)).toBe('riddim kick')
+    expect(h.c.mirrorName(A5)).toBe('riddim snare')
+    await vi.waitFor(() => expect(h.liveAudio.loaded.get(packKey(b.id, 5, 'riddim snare'))?.pcm.length).toBe(4000))
+    await h.c.playPad(A5)
+    expect(h.liveAudio.presses.at(-1)?.key).toBe(packKey(b.id, 5, 'riddim snare'))
+    // Not downloaded twice; never pruned.
+    await h.c.getFactorySounds(FactoryKit.EP40)
+    expect(asked).toHaveLength(3)
+    expect(toPrune(h.c.state.value.backups, 0)).toEqual([])
+
+    // The EP-133's next: saved beside it, the kit stays the EP-40's.
+    await h.c.getFactorySounds()
+    expect(asked.at(-1)).toBe(PAK_133)
+    await until(h, (s) => kitPack(h!, FactoryKit.EP133) !== null)
+    expect(h.toasts.at(-1)?.text).toBe(FeatureText.factorySaved(2))
+    expect(h.deps.settings.settings.factoryKit).toBe(FactoryKit.EP40.id)
+    expect(FactorySounds.savedKits(h.c.state.value.backups)).toEqual([FactoryKit.EP133, FactoryKit.EP40])
+    expect(h.c.mirrorName(A1)).toBe('riddim kick')
+    h.c.setFactoryKit(FactoryKit.EP133)
+    await until(h, (s) => s.mirror?.kit === FactoryKit.EP133.id)
+    expect(h.c.mirrorName(A1)).toBe('micro kick')
+  })
+
+  it("the EP-1320's kit isn't downloaded: Get for it does nothing", async () => {
+    const asked: string[] = []
+    const h = await liveHarness({ unplugged: true, factory: site({}, asked) })
+    await until(h, (s) => s.libraryLoaded)
+    await h.c.getFactorySounds(FactoryKit.EP1320)
+    expect(asked).toEqual([])
+    expect(h.c.state.value.task).toBeNull()
+  })
+
+  it("refuses a file that isn't an EP-40 factory pack, and keeps nothing", async () => {
+    const h = await liveHarness({ unplugged: true, factory: site({ [PAK_40]: await ep133Pak() }) })
+    await until(h, (s) => s.libraryLoaded)
+    await h.c.getFactorySounds(FactoryKit.EP40)
+    expect(h.toasts.at(-1)).toMatchObject({ text: FeatureText.factoryFailed(FeatureText.NOT_FACTORY_40), error: true })
+    expect(h.c.state.value.backups).toEqual([])
+    expect(h.c.state.value.task).toBeNull()
+    expect(h.deps.settings.settings.factoryKit).toBe(FactoryKit.EP133.id)
+  })
+
+  it("falls back to the EP-40's last known path when the tool's page can't be read", async () => {
+    const asked: string[] = []
+    const h = await liveHarness({
+      unplugged: true,
+      factory: { ...site({ [FactorySounds.KNOWN_PAK_40]: await ep40Pak() }, asked), text: () => Promise.reject(new Error('HTTP 404')) },
+    })
+    await until(h, (s) => s.libraryLoaded)
+    await h.c.getFactorySounds(FactoryKit.EP40)
+    expect(asked).toEqual([FactorySounds.KNOWN_PAK_40])
+    await until(h, (s) => s.backups.length === 1)
+    expect(h.c.state.value.backups.map((r) => r.source)).toEqual([FactoryKit.EP40.source])
+  })
+
+  it('an imported EP-40 factory pack is saved as the kit straight away', async () => {
+    const h = await liveHarness({ unplugged: true })
+    await until(h, (s) => s.libraryLoaded)
+    await h.c.import('ep-40-factory-content-C42FyxWp.pak', null, async () => ep40Pak())
+    await until(h, (s) => kitPack(h, FactoryKit.EP40) !== null)
+    expect(h.c.state.value.backups).toHaveLength(1)
+    expect(kitPack(h, FactoryKit.EP40)).toMatchObject({ title: FeatureText.FACTORY_TITLE_40, fileName: FactorySounds.FILE_NAME_40 })
+    expect(h.toasts.at(-1)?.text).toBe(FeatureText.factory40Saved(2))
+    expect(h.deps.settings.settings.factoryKit).toBe(FactoryKit.EP40.id)
+  })
+
+  it('with three kits saved the switch offers them in order; a kit whose pack goes falls back on the first saved', async () => {
+    const h = await liveHarness({ storage: memoryStorage(ORDER), unplugged: true, factory: site({ [PAK_40]: await ep40Pak(), [PAK_133]: await ep133Pak() }) })
+    await until(h, (s) => s.libraryLoaded)
+    await h.c.getFactorySounds()
+    await until(h, (s) => kitPack(h, FactoryKit.EP133) !== null)
+    // One kit: no switch.
+    expect(FactorySounds.savedKits(h.c.state.value.backups)).toEqual([FactoryKit.EP133])
+    await h.c.import('medieval.pak', null, async () => medievalPak())
+    await until(h, (s) => kitPack(h, FactoryKit.EP1320) !== null)
+    expect(FactorySounds.savedKits(h.c.state.value.backups)).toEqual([FactoryKit.EP133, FactoryKit.EP1320])
+    await h.c.getFactorySounds(FactoryKit.EP40)
+    await until(h, (s) => kitPack(h, FactoryKit.EP40) !== null)
+    // EP-133, EP-40, EP-1320: the downloadable ones first.
+    expect(FactorySounds.savedKits(h.c.state.value.backups)).toEqual([FactoryKit.EP133, FactoryKit.EP40, FactoryKit.EP1320])
+    h.c.setLive(true)
+    await until(h, (s) => s.mirror?.kit === FactoryKit.EP40.id)
+    expect(h.c.mirrorName(A1)).toBe('riddim kick')
+
+    // The EP-1320's chosen, then its copy deleted: the first saved, the EP-133's.
+    h.c.setFactoryKit(FactoryKit.EP1320)
+    await until(h, (s) => s.mirror?.kit === FactoryKit.EP1320.id)
+    expect(h.c.mirrorName(A1)).toBe('med kick')
+    expect(await h.c.delete(kitPack(h, FactoryKit.EP1320)!)).toBe(true)
+    await until(h, (s) => s.mirror?.kit === FactoryKit.EP133.id)
+    expect(h.c.factoryKit).toBe(FactoryKit.EP133)
+    // Without the EP-133's either: the EP-40's.
+    expect(await h.c.delete(kitPack(h, FactoryKit.EP133)!)).toBe(true)
+    await until(h, (s) => s.mirror?.kit === FactoryKit.EP40.id)
+    expect(h.c.factoryKit).toBe(FactoryKit.EP40)
+    expect(h.c.mirrorName(A1)).toBe('riddim kick')
+  })
+
+  it('connecting a TE032AS006 device makes the EP-40 the kit, once its pack is saved', async () => {
+    const h = await liveHarness({ factory: site({ [PAK_40]: await ep40Pak(), [PAK_133]: await ep133Pak() }) })
+    await until(h, (s) => s.libraryLoaded)
+    await h.c.getFactorySounds()
+    await until(h, (s) => kitPack(h, FactoryKit.EP133) !== null)
+    h.mock.greet = EP40_GREET
+    await h.c.connect()
+    await until(h, (s) => s.device !== null && !s.busy)
+    expect(h.c.state.value.device!.info.sku).toBe('TE032AS006')
+    // No EP-40 pack: the kit stays.
+    expect(h.deps.settings.settings.factoryKit).toBe(FactoryKit.EP133.id)
+
+    await h.c.getFactorySounds(FactoryKit.EP40)
+    await until(h, (s) => kitPack(h, FactoryKit.EP40) !== null)
+    h.c.setFactoryKit(FactoryKit.EP133)
+    h.ep.access.unplug(h.ep.input, h.ep.output)
+    await until(h, (s) => s.device === null)
+    h.ep.access.plug(h.ep.input, h.ep.output)
+    await until(h, (s) => s.device !== null && !s.busy)
+    expect(h.deps.settings.settings.factoryKit).toBe(FactoryKit.EP40.id)
+    expect(h.deps.settings.toIndex()['app.factoryKit']).toBe('ep40')
+
+    // An EP-133 next: its kit again.
+    h.ep.access.unplug(h.ep.input, h.ep.output)
+    await until(h, (s) => s.device === null)
+    h.mock.greet = EP133_GREET
+    h.ep.access.plug(h.ep.input, h.ep.output)
+    await until(h, (s) => s.device !== null && !s.busy)
+    expect(h.deps.settings.settings.factoryKit).toBe(FactoryKit.EP133.id)
+  })
+})
+
 describe('Live offline: pads changed in arc only', () => {
   const PAGE_HTML = '<script type="module" crossorigin src="/apps/ep-sample-tool/assets/index-C1wBjhTa.js"></script>'
   const SCRIPT = 'x="/apps/ep-sample-tool/assets/ep-133-factory-content-T3st.pak"'

@@ -323,8 +323,31 @@ object FeatureText {
     const val USE_AS_FACTORY = "Use as factory sounds"
     const val SAVING_FACTORY = "Saving factory sounds"
     const val NOT_MEDIEVAL = "This backup isn't from an EP-1320 Medieval, or it has no sounds."
-    /** Which kit Live plays offline, when both are saved: Settings' row and Live's switch. */
+    /** Which kit Live plays offline, when two or more are saved: Settings' row and Live's switch. */
     const val FACTORY_KIT = "Factory kit"
 
     fun factory1320Saved(sounds: Int) = "EP-1320 factory sounds saved: ${plural(sounds, "sound")}. Live plays them until it has read your EP-1320."
+
+    // The EP-40 Riddim's kit (FactoryKit.EP40): downloaded like the EP-133's, from beside it.
+    const val FACTORY_TITLE_40 = "EP-40 Riddim factory sounds"
+    const val FACTORY_40 = "EP-40 Riddim"
+    const val FACTORY_40_NOTE = "The EP-40's factory sounds (471 sounds, about 69 MB), from teenage engineering's EP Sample Tool. Live plays them when you pick the EP-40 kit."
+    const val FACTORY_40_SAVED = "In your backups. Live plays them when you pick the EP-40 kit."
+    const val NOT_FACTORY_40 = "teenage engineering's file isn't an EP-40 factory pack."
+
+    fun factory40Saved(sounds: Int) = "EP-40 factory sounds saved: ${plural(sounds, "sound")}. Live plays them until it has read your EP-40."
+
+    /** [kit]'s library title. */
+    fun factoryTitle(kit: dev.arc.ep133.features.FactoryKit) = when (kit) {
+        dev.arc.ep133.features.FactoryKit.EP133 -> FACTORY_TITLE
+        dev.arc.ep133.features.FactoryKit.EP1320 -> FACTORY_TITLE_1320
+        dev.arc.ep133.features.FactoryKit.EP40 -> FACTORY_TITLE_40
+    }
+
+    /** What saving [kit]'s pack says. */
+    fun factorySaved(kit: dev.arc.ep133.features.FactoryKit, sounds: Int) = when (kit) {
+        dev.arc.ep133.features.FactoryKit.EP133 -> factorySaved(sounds)
+        dev.arc.ep133.features.FactoryKit.EP1320 -> factory1320Saved(sounds)
+        dev.arc.ep133.features.FactoryKit.EP40 -> factory40Saved(sounds)
+    }
 }

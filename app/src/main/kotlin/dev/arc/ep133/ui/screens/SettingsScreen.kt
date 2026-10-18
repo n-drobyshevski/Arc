@@ -57,6 +57,7 @@ import dev.arc.ep133.audio.OutputDelay
 import dev.arc.ep133.controller.UiState
 import dev.arc.ep133.controller.activeKitOf
 import dev.arc.ep133.controller.kitsSaved
+import dev.arc.ep133.controller.savedKits
 import dev.arc.ep133.data.AppSettings
 import dev.arc.ep133.features.FactoryKit
 import dev.arc.ep133.features.FactorySounds
@@ -124,9 +125,9 @@ fun SettingsScreen(
     latency: StateFlow<Int?> = MutableStateFlow(null),
     /** SAMPLE's review sheet after each take, or straight onto the pad (an addition). */
     onReviewSamples: (Boolean) -> Unit = {},
-    /** Downloads the factory sounds (FactorySounds); null hides the row. */
-    onGetFactory: (() -> Unit)? = null,
-    /** The factory kit Live plays offline, offered once both kits are saved. */
+    /** Downloads a kit's factory sounds (FactorySounds: the EP-133's or the EP-40's); null hides the rows. */
+    onGetFactory: ((FactoryKit) -> Unit)? = null,
+    /** The factory kit Live plays offline, offered once two or more kits are saved. */
     onFactoryKit: (FactoryKit) -> Unit = {},
     onSource: () -> Unit,
     onFontLicence: () -> Unit,
@@ -239,10 +240,22 @@ fun SettingsScreen(
                     SettingRow(FeatureText.FACTORY_SOUNDS, note = if (saved) FeatureText.FACTORY_SAVED else FeatureText.FACTORY_NOTE) {
                         ArcKey(
                             if (saved) FeatureText.SAVED else FeatureText.GET,
-                            onGetFactory,
+                            { onGetFactory(FactoryKit.EP133) },
                             size = KeySize.Small,
                             style = KeyStyle.Quiet,
                             enabled = !saved && !state.busy,
+                        )
+                    }
+                    // The EP-40's: downloaded from beside the EP-133's, the same way.
+                    val saved40 = FactorySounds.inLibrary(state.backups, FactoryKit.EP40) != null
+                    PlateLine()
+                    SettingRow(FeatureText.FACTORY_40, note = if (saved40) FeatureText.FACTORY_40_SAVED else FeatureText.FACTORY_40_NOTE) {
+                        ArcKey(
+                            if (saved40) FeatureText.SAVED else FeatureText.GET,
+                            { onGetFactory(FactoryKit.EP40) },
+                            size = KeySize.Small,
+                            style = KeyStyle.Quiet,
+                            enabled = !saved40 && !state.busy,
                         )
                     }
                     // The EP-1320's: no download, a copy of the user's own Medieval backup (from Backups' detail sheet).
@@ -255,13 +268,15 @@ fun SettingsScreen(
                         noteShown = !saved1320,
                         control = if (saved1320) ({ ArcKey(FeatureText.SAVED, {}, size = KeySize.Small, style = KeyStyle.Quiet, enabled = false) }) else null,
                     )
+                    // Two or more saved: the ones saved, to pick from.
                     if (kitsSaved(state.backups)) {
+                        val kits = savedKits(state.backups)
                         PlateLine()
                         SettingRow(FeatureText.FACTORY_KIT) {
                             Segmented(
-                                FactoryKit.entries.map(MirrorText::kit),
-                                selected = activeKitOf(settings.factoryKit, state.backups).ordinal,
-                                onSelect = { onFactoryKit(FactoryKit.entries[it]) },
+                                kits.map(MirrorText::kit),
+                                selected = kits.indexOf(activeKitOf(settings.factoryKit, state.backups)),
+                                onSelect = { onFactoryKit(kits[it]) },
                                 compact = true,
                             )
                         }

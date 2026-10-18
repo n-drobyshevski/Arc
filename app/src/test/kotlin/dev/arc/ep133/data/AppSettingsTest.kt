@@ -224,7 +224,7 @@ class AppSettingsTest {
         assertEquals("ep1320", chosen.values()["factoryKit"])
         assertEquals(chosen, AppSettings().withIndex(chosen.values().mapKeys { "app." + it.key }))
         // A kit arc doesn't know, from another version: left as it is.
-        assertEquals(chosen, chosen.withIndex(mapOf("app.factoryKit" to "ep40")))
+        assertEquals(chosen, chosen.withIndex(mapOf("app.factoryKit" to "ep9")))
     }
 
     @Test

@@ -471,10 +471,24 @@ export const FeatureText = {
   USE_AS_FACTORY: 'Use as factory sounds',
   SAVING_FACTORY: 'Saving factory sounds',
   NOT_MEDIEVAL: "This backup isn't from an EP-1320 Medieval, or it has no sounds.",
-  /** Which kit Live plays offline, when both are saved (Settings, and the switch on Live's factory line). */
+  /** Which kit Live plays offline, when two or more are saved (Settings, and the switch on Live's factory line). */
   FACTORY_KIT: 'Factory kit',
 
   factory1320Saved(sounds: number): string {
     return `EP-1320 factory sounds saved: ${plural(sounds, 'sound')}. Live plays them until it has read your EP-1320.`
+  },
+
+  // ---------- the EP-40 Riddim's factory sounds (FactoryKit.EP40), from the EP Sample Tool ----------
+  /** The pack's title in the library. */
+  FACTORY_TITLE_40: 'EP-40 Riddim factory sounds',
+  /** Settings › Live › Factory sounds: the EP-40's row. */
+  FACTORY_40: 'EP-40 Riddim',
+  FACTORY_40_NOTE:
+    "The EP-40's factory sounds (471 sounds, about 69 MB), from teenage engineering's EP Sample Tool. Live plays them when you pick the EP-40 kit.",
+  FACTORY_40_SAVED: 'In your backups. Live plays them when you pick the EP-40 kit.',
+  NOT_FACTORY_40: "teenage engineering's file isn't an EP-40 factory pack.",
+
+  factory40Saved(sounds: number): string {
+    return `EP-40 factory sounds saved: ${plural(sounds, 'sound')}. Live plays them until it has read your EP-40.`
   },
 } as const
