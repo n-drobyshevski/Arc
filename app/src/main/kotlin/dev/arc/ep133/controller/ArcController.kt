@@ -5275,7 +5275,7 @@ class ArcController(
      * What SHARE sends: [group]'s playing pattern, or (null) the scene playing, as an ARC BEAT card at the tempo Live
      * plays at and the TIMING swing, with the pads' names and a sound line for each pad it uses (the slot and name Live
      * shows on it); null when there are no notes in it. The project's FX and the settings of the pads it uses are written
-     * as the card's effect and `pad` lines, and the used pads with no sound as a comment. With "With my sound list" on, the sounds Arc knows follow the card ([soundSetOf]). The patterns are the project's as they stand, a pattern still recording included.
+     * as the card's effect and `pad` lines, the used pads with no sound as a comment, and the kit Live plays before the card when it isn't the EP-133's ([activeKit], [ClaudeText.kitLine]). With "With my sound list" on, the sounds Arc knows follow the card ([soundSetOf]). The patterns are the project's as they stand, a pattern still recording included.
      */
     fun beatShare(group: Int?): BeatShare? {
         if (group != null && group !in 0..3) return null
@@ -5291,7 +5291,7 @@ class ArcController(
         val shaping = { pad: dev.arc.ep133.features.PhysicalPad -> m?.target(pad)?.let { padSettings[padKey(it)] } }
         // The pads the notes use that have no sound are named in a comment, once the pads are read (the share's "# no sound on:").
         val held = { pad: dev.arc.ep133.features.PhysicalPad -> m?.soundSlot(pad) }
-        return beatShare(projectSeq, group, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true)
+        return beatShare(projectSeq, group, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true, activeKit())
     }
 
     /**
@@ -5311,7 +5311,7 @@ class ArcController(
         val list = if (settings.value.shareSounds) set else null
         val shaping = { pad: dev.arc.ep133.features.PhysicalPad -> m?.target(pad)?.let { padSettings[padKey(it)] } }
         val held = { pad: dev.arc.ep133.features.PhysicalPad -> m?.soundSlot(pad) }
-        return beatShareChain(projectSeq, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true)
+        return beatShareChain(projectSeq, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true, activeKit())
     }
 
     private val _claudeWaiting = MutableStateFlow<String?>(null)

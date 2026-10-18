@@ -67,6 +67,10 @@ class BeatPlanTest {
         assertEquals("Arc beat S01", scene.subject)
         assertTrue(scene.text.startsWith(ClaudeText.SHARE_PROMPT + "\n\n```\nARC BEAT 1\nname S01\ntempo 92\nswing 50\n# tidied"))
         assertTrue(scene.text.endsWith("\n```\n"))
+        // The EP-40 kit is named before the card; the EP-133's adds nothing.
+        val riddim = beatShare(seq, null, 92.0, 50, nameOf, kit = dev.arc.ep133.features.FactoryKit.EP40)!!
+        assertTrue(riddim.text.startsWith(ClaudeText.SHARE_PROMPT + "\n\nMy EP-133 plays the EP-40 Riddim factory kit.\n\n```\nARC BEAT 1\n"))
+        assertEquals(scene.text, beatShare(seq, null, 92.0, 50, nameOf, kit = dev.arc.ep133.features.FactoryKit.EP133)!!.text)
         // The blank groups (B, D) are left out; the pad's name is on its row.
         val card = BeatCards.read(scene.text).card!!
         assertEquals(listOf(0, 2), card.sections.map { it.group })
@@ -370,6 +374,11 @@ B8 bass | X... .... .... .... | .... .... .... .... |
         assertEquals(2, card.scenes.size)
         // Scene 2 (S02) plays first, so it is the card's scene 1.
         assertEquals(listOf(1 to 2, 2 to 1, 1 to 2), card.chain)
+        // The kit is named in the chain's share too.
+        assertTrue(
+            beatShareChain(seq, 120.0, 50, nameOf, kit = dev.arc.ep133.features.FactoryKit.EP40)!!.text
+                .startsWith(ClaudeText.SHARE_CHAIN_PROMPT + "\n\nMy EP-133 plays the EP-40 Riddim factory kit.\n\n```\n"),
+        )
         // No chain, nothing to share.
         assertNull(beatShareChain(ProjectSeq.DEFAULT, 120.0, 50, nameOf))
     }

@@ -5,8 +5,8 @@ Reads the text card format of references/beat-card.md the way Arc does (the
 reading rules there are the spec) and works on it. Python 3.9+, standard
 library only.
 
-    beatcard.py check   [CARD|-] [--json] [--sounds SOUNDS.txt]
-    beatcard.py analyse [CARD|-] [--json] [--recipes genres.md]
+    beatcard.py check   [CARD|-] [--json] [--sounds SOUNDS.txt] [--kit ep133|ep40]
+    beatcard.py analyse [CARD|-] [--json] [--recipes genres.md] [--kit ep133|ep40]
     beatcard.py midi    [CARD|-] [-o OUT.mid] [--loops N] [--channel 1-16]
     beatcard.py grid    [CARD|-]
 
@@ -28,6 +28,14 @@ them. SOUNDS.txt is the user's sound list as Arc's share adds it after the card
 optional; so is the note after it about names like 200.pcm, which is skipped).
 With it, check warns about each sound line whose slot or name isn't in the
 list, and notes each one that uses a slot the EP-133 keeps without a name.
+
+The factory kit decides what a slot's block says a sound is: the EP-133's
+(kicks 1-99 ... melodic 500-599) or the EP-40 Riddim's (the same up to 599,
+then chord stabs 600-699, vocals and FX 700-799 and tempo-named loops
+800-899). It is "ep40" when Arc's share says "EP-40 Riddim factory kit", when
+the sound list's names are the EP-40 pack's, or when the card's sound lines
+name its loops; --kit sets it. check also warns about a sound line on a loop
+named with a tempo ("jammy drms a 85") that isn't the card's.
 """
 
 from __future__ import annotations
@@ -92,6 +100,23 @@ ASSUMED_KIT = {
     "A.": "cowbell",
     "A0": "perc",
     "AENTER": "crash",
+}
+
+#: The pads of the EP-40 Riddim pack's first project (P01, which Arc's Live plays offline with that kit): group A's
+#: drum loops on 7-9 and fills on . 0 ENTER, its one-shots below them. The same table is in references/ep40-kit.md.
+ASSUMED_KIT_EP40 = {
+    "A7": "drum loop a",
+    "A8": "drum loop b",
+    "A9": "drum loop c",
+    "A4": "closed hat",
+    "A5": "open hat",
+    "A6": "tom",
+    "A1": "kick",
+    "A2": "rimshot",
+    "A3": "rim",
+    "A.": "fill a",
+    "A0": "fill b",
+    "AENTER": "fill c",
 }
 
 #: The master effects an fx line names, in the order Arc offers them.
@@ -282,6 +307,8 @@ class Card:
     #: The `chain` line as (card scene number from 1, passes) steps, None when the card has none; its line number.
     chain: Optional[List[Tuple[int, int]]] = None
     chain_line: int = 0
+    #: The factory kit its slots are read by: "ep133" or "ep40" ([card_kit] from its sound lines; the command line or the sound list may say otherwise).
+    kit: str = "ep133"
 
     @property
     def all_patterns(self) -> List[Pattern]:
@@ -1146,6 +1173,7 @@ def parse_card(text: str) -> Card:
     card = _Reader(text).read()
     card.problems.sort(key=lambda p: p.line)  # stable, as Arc's reader sorts them
     card.silent_pads = silent_pads_of(text)
+    card.kit = card_kit(card)
     return card
 
 
@@ -1204,6 +1232,70 @@ def parse_sound_list(text: str) -> Dict[int, str]:
         if m and SLOT_MIN <= int(m.group(1)) <= SLOT_MAX:
             out[int(m.group(1))] = clean_text(m.group(2) or "")
     return out
+
+
+#: The factory kits a sound list or a card can be read by.
+KITS = ("ep133", "ep40")
+#: An EP-40 loop's name: a producer, the part, a letter and its tempo ("jammy drms a 85", "mpc melo b 82").
+_EP40_LOOP = re.compile(r"\b(drms|fill|bass|mel|melo)\s+[a-d]\s+([0-9]{2,3})\s*$", re.IGNORECASE)
+#: What Arc's share says when Live plays the EP-40 Riddim's sounds (ClaudeText.kitLine).
+_EP40_SENTENCE = re.compile(r"EP-40 Riddim factory kit", re.IGNORECASE)
+
+
+def loop_tempo(slot: int, name: Optional[str]) -> Optional[int]:
+    """The tempo an EP-40 loop is named with ("jammy drms a 85" is 85), when [name] is one and [slot] is in its loops block (800-899); else None."""
+    if not name or not 800 <= slot <= 899:
+        return None
+    m = _EP40_LOOP.search(name)
+    return int(m.group(2)) if m else None
+
+
+def _ep40_names(names: Dict[int, str]) -> bool:
+    """Whether slot -> name looks like the EP-40 pack's: its "ep 40" sounds, or three of its tempo-named loops."""
+    if any(re.match(r"\s*ep[ -]?40\b", n, re.IGNORECASE) for n in names.values()):
+        return True
+    return sum(1 for slot, n in names.items() if loop_tempo(slot, n) is not None) >= 3
+
+
+def detect_kit(text: str) -> Optional[str]:
+    """The kit a share's text or a sound list says: "ep40" for Arc's EP-40 sentence or the EP-40 pack's names, else None (no telling: the EP-133's)."""
+    if _EP40_SENTENCE.search(text):
+        return "ep40"
+    return "ep40" if _ep40_names(parse_sound_list(text)) else None
+
+
+def card_kit(card: Card) -> str:
+    """The kit a card's sound lines suggest: "ep40" when one names an EP-40 loop or an "ep 40" sound, else "ep133"."""
+    names = {s.slot: s.name for p in card.all_patterns for s in p.sounds.values() if s.name}
+    if any(loop_tempo(slot, n) is not None for slot, n in names.items()):
+        return "ep40"
+    return "ep40" if _ep40_names(names) else "ep133"
+
+
+def check_loops(card: Card, available: Optional[Dict[int, str]] = None) -> List[Problem]:
+    """
+    A warning for each sound line on an EP-40 loop (named with its tempo, slot 800-899; the name from the line or,
+    without one, from [available]) whose tempo is more than 0.5 BPM from the card's: the loop would drift.
+    """
+    out: List[Problem] = []
+    if card.tempo is None:
+        return out
+    for pattern in card.all_patterns:
+        for pad in KEYPAD_ORDER:
+            sound = pattern.sounds.get(pad)
+            if sound is None:
+                continue
+            name = sound.name or (available or {}).get(sound.slot, "")
+            bpm = loop_tempo(sound.slot, name)
+            if bpm is None or abs(bpm - card.tempo) <= 0.5:
+                continue
+            out.append(Problem(sound.line, WARNING, "loop-tempo", "%s plays loop '%s' (%d BPM) but the card's tempo is %s: it will drift; set tempo %d" % (
+                pad_label(pattern.group, pad), name, bpm, _num(card.tempo), bpm)))
+    return out
+
+
+def _num(x: float) -> str:
+    return str(int(x)) if float(x).is_integer() else str(x)
 
 
 def unnamed_slot(slot: int, name: Optional[str]) -> bool:
@@ -1285,10 +1377,25 @@ BACKBEAT_ROLES = ("snare", "clap", "rim")
 TIMEKEEPER_ROLES = ("hat", "cymbal", "perc")
 
 
-def role_of(name: str) -> Optional[str]:
-    """The role a sound name suggests (kick, snare, clap, rim, hat, cymbal, tom, perc, bass), or None."""
+#: The EP-40 pack's own words, read before the others with its kit: "sn" and "kik", "oh" for an open hat, its loops'
+#: parts (drms, fill, mel) and its keys, so "clavinet" is melodic and "sub kik" a kick.
+_EP40_ROLE_PATTERNS = [
+    ("hat", r"\boh\b"),
+    ("drums", r"\b(drms|drums?)\b"),
+    ("fill", r"\bfill\b"),
+    ("melodic", r"\b(mel|melo|clavinet|clav|clav wah|hammond|organ|melodica|piano\w*|horns?|trombone|strings?|\w*pluc?k\w*|lead|guitar|syn|pad|leroy|carillon)\b"),
+    ("kick", r"\b(kick|kik)\b"),
+    ("snare", r"\bsn\b"),
+]
+
+
+def role_of(name: str, kit: str = "ep133") -> Optional[str]:
+    """
+    The role a sound name suggests (kick, snare, clap, rim, hat, cymbal, tom, perc, bass), or None. With the EP-40
+    kit, also its words: drums and fill (loops), melodic (keys, horns and melody loops).
+    """
     low = name.lower()
-    for role, pattern in _ROLE_PATTERNS:
+    for role, pattern in (_EP40_ROLE_PATTERNS + _ROLE_PATTERNS if kit == "ep40" else _ROLE_PATTERNS):
         if re.search(pattern, low):
             return role
     return None
@@ -1296,36 +1403,41 @@ def role_of(name: str) -> Optional[str]:
 
 #: The factory pack's slot blocks (FeatureText.FACTORY_BLOCKS): the role a slot suggests when its sound has no name. 500-599 is melodic, no drum role.
 FACTORY_ROLES = ((1, 99, "kick", "kicks"), (100, 199, "snare", "snares"), (200, 299, "hat", "hats"), (300, 399, "perc", "percussion"), (400, 499, "bass", "bass"), (500, 599, None, "melodic"))
+#: The EP-40 Riddim pack's blocks: the EP-133's up to 599, then chord stabs, vocals and dub FX, and loops (whose role is in their names).
+EP40_ROLES = FACTORY_ROLES + ((600, 699, "chord", "chords"), (700, 799, "fx", "vocals and FX"), (800, 899, None, "loops"))
 #: Roles that count as the same kind of sound when a row's label and its sound line's slot are compared.
-_FAMILY = {"kick": "kick", "snare": "backbeat", "clap": "backbeat", "rim": "backbeat", "hat": "hat", "cymbal": "hat", "perc": "perc", "tom": "perc", "bass": "bass"}
+_FAMILY = {"kick": "kick", "snare": "backbeat", "clap": "backbeat", "rim": "backbeat", "hat": "hat", "cymbal": "hat", "perc": "perc", "tom": "perc", "bass": "bass",
+           "drums": "drums", "fill": "drums", "chord": "melodic", "melodic": "melodic", "fx": "fx"}
 
 
-def factory_block(slot: int) -> Optional[Tuple[Optional[str], str]]:
-    """(role, block name) of the factory block [slot] is in, or None outside 1-599."""
-    for lo, hi, role, block in FACTORY_ROLES:
+def factory_block(slot: int, kit: str = "ep133") -> Optional[Tuple[Optional[str], str]]:
+    """(role, block name) of the factory block [slot] is in, or None outside the kit's blocks (1-599 for the EP-133's, 1-899 for the EP-40's)."""
+    for lo, hi, role, block in (EP40_ROLES if kit == "ep40" else FACTORY_ROLES):
         if lo <= slot <= hi:
             return role, block
     return None
 
 
-def _sound_role(sound: Optional[Sound]) -> Tuple[Optional[str], Optional[str]]:
-    """The role a sound line suggests and how: by its name ("name"), or by its factory block when it has no real name ("slot")."""
+def _sound_role(sound: Optional[Sound], kit: str = "ep133") -> Tuple[Optional[str], Optional[str]]:
+    """The role a sound line suggests and how: by its name ("name"), or by its factory block when it has no real name or the name says nothing ("slot")."""
     if sound is None:
         return None, None
     if sound.name and not unnamed_slot(sound.slot, sound.name):
-        role = role_of(sound.name)
+        role = role_of(sound.name, kit)
         if role:
             return role, "name"
-    block = factory_block(sound.slot)
+    block = factory_block(sound.slot, kit)
     return (block[0], "slot") if block and block[0] else (None, None)
 
 
-def pad_roles(pattern: Pattern) -> Dict[int, Tuple[Optional[str], bool, str]]:
+def pad_roles(pattern: Pattern, kit: str = "ep133") -> Dict[int, Tuple[Optional[str], bool, str]]:
     """
     For each pad of [pattern] with pad hits: (role, assumed, name), the role its rhythm is read with. It comes from the
     pad's sound line's name, else its row's label, else (group A) the assumed kit's pad, else the factory block of the
     sound line's slot (a sound named like "200.pcm" says nothing by its name). The name shown is the first real one.
+    [kit] is the factory kit: the EP-40's has its own assumed pads and slot blocks.
     """
+    assumed_kit = ASSUMED_KIT_EP40 if kit == "ep40" else ASSUMED_KIT
     rows = pattern.pad_names()
     out: Dict[int, Tuple[Optional[str], bool, str]] = {}
     for hit in pattern.hits:
@@ -1336,38 +1448,38 @@ def pad_roles(pattern: Pattern) -> Dict[int, Tuple[Optional[str], bool, str]]:
         row = rows.get(hit.pad, "")
         if row and unnamed_slot(sound.slot if sound else -1, row):
             row = ""  # Arc labels a row with the pad's sound name, "343.pcm" for an unnamed one: no more telling
-        by_sound, how = _sound_role(sound)
-        kit = ASSUMED_KIT.get(pad_label(pattern.group, hit.pad), "") if pattern.group == 0 else ""
+        by_sound, how = _sound_role(sound, kit)
+        assumed = assumed_kit.get(pad_label(pattern.group, hit.pad), "") if pattern.group == 0 else ""
         if real and how == "name":
             out[hit.pad] = (by_sound, False, real)
-        elif row and role_of(row):
-            out[hit.pad] = (role_of(row), False, real or row)
-        elif kit and not real and not row:
-            out[hit.pad] = (role_of(kit), True, kit)
+        elif row and role_of(row, kit):
+            out[hit.pad] = (role_of(row, kit), False, real or row)
+        elif assumed and not real and not row:
+            out[hit.pad] = (role_of(assumed, kit), True, assumed)
         elif how == "slot":
-            out[hit.pad] = (by_sound, False, real or row or "slot %d (%s)" % (sound.slot, factory_block(sound.slot)[1]))
+            out[hit.pad] = (by_sound, False, real or row or "slot %d (%s)" % (sound.slot, factory_block(sound.slot, kit)[1]))
         else:
             name = real or row
-            out[hit.pad] = (role_of(name) if name else None, False, name)
+            out[hit.pad] = (role_of(name, kit) if name else None, False, name)
     return out
 
 
-def sound_mismatches(pattern: Pattern) -> List[dict]:
+def sound_mismatches(pattern: Pattern, kit: str = "ep133") -> List[dict]:
     """
     Pads whose rhythm reads as one kind of sound ([pad_roles]: the row's label, or the assumed kit's pad) while the
     sound line suggests another: a kick row playing slot 343, in the factory's percussion block, say. Worth a remark
     (the beat may not sound as its rows read) and maybe a sound swap.
     """
-    roles = pad_roles(pattern)
+    roles = pad_roles(pattern, kit)
     out = []
     for pad in sorted(pattern.sounds, key=KEYPAD_ORDER.index):
         if pad not in roles:
             continue
         row_role, assumed, name = roles[pad]
         sound = pattern.sounds[pad]
-        sound_role, how = _sound_role(sound)
+        sound_role, how = _sound_role(sound, kit)
         if row_role and sound_role and _FAMILY.get(row_role) != _FAMILY.get(sound_role):
-            block = factory_block(sound.slot)
+            block = factory_block(sound.slot, kit)
             out.append({
                 "pad": pad_label(pattern.group, pad),
                 "row": name,
@@ -1473,7 +1585,7 @@ def _slot_string(slots: Dict[int, int]) -> str:
 def pattern_report(pattern: Pattern, card: Card) -> dict:
     hits = [h for h in pattern.hits if h.semi is None]
     keys = [h for h in pattern.hits if h.semi is not None]
-    roles = pad_roles(pattern)
+    roles = pad_roles(pattern, card.kit)
     bars = pattern.bars
 
     def per_bar(items: List[Hit]) -> List[int]:
@@ -1550,7 +1662,7 @@ def pattern_report(pattern: Pattern, card: Card) -> dict:
         "pads": pads,
         "sounds": {pad_label(pattern.group, pad): _sound_data(pattern.sounds[pad]) for pad in KEYPAD_ORDER if pad in pattern.sounds},
         "pad_shaping": pad_shaping(pattern),
-        "sound_mismatches": sound_mismatches(pattern),
+        "sound_mismatches": sound_mismatches(pattern, card.kit),
         "keys": keys_report,
         "roles": by_role,
         "velocity": _velocity([h.vel for h in hits]),
@@ -1715,7 +1827,7 @@ def fingerprint(card: Card) -> Dict[str, set]:
     out: Dict[str, List[int]] = {"kick": [], "backbeat": [], "hat": []}
     bars_total = 0
     for pattern in _fingerprint_patterns(card):
-        roles = pad_roles(pattern)
+        roles = pad_roles(pattern, card.kit)
         hits = [h for h in pattern.hits if h.semi is None]
         if not hits:
             continue  # a group of KEYS notes only (bass, chords) has no drums: its bars mustn't dilute theirs
@@ -2506,7 +2618,9 @@ def cmd_check(args: argparse.Namespace) -> int:
         available = None
         if args.sounds:
             with open(args.sounds, encoding="utf-8", errors="replace") as f:
-                available = parse_sound_list(f.read())
+                text = f.read()
+            available = parse_sound_list(text)
+            card.kit = detect_kit(text) or card.kit
     except OSError as e:
         print("beatcard: %s" % e, file=sys.stderr)
         return 2
@@ -2515,7 +2629,10 @@ def cmd_check(args: argparse.Namespace) -> int:
             print("beatcard: no sounds found in %s: expected lines like '12 Kick 808'" % args.sounds, file=sys.stderr)
             return 2
         card.problems.extend(check_sounds(card, available))
-        card.problems.sort(key=lambda p: p.line)
+    if args.kit:
+        card.kit = args.kit
+    card.problems.extend(check_loops(card, available))
+    card.problems.sort(key=lambda p: p.line)
     if args.json:
         print(json.dumps({"ok": card.ok, "problems": [p.to_dict() for p in card.problems]}, indent=2))
         return 0 if card.ok else 1
@@ -2533,6 +2650,8 @@ def cmd_analyse(args: argparse.Namespace) -> int:
     card = _load(args)
     if card is None:
         return 1
+    if args.kit:
+        card.kit = args.kit
     report = analyse_card(card, load_recipes(args.recipes or _default_recipes()))
     print(json.dumps(report, indent=2) if args.json else render_analysis(report))
     return 0
@@ -2580,9 +2699,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = add("check", cmd_check, "read a card and print its problems with line numbers")
     p.add_argument("--json", action="store_true", help="print the problems as JSON")
     p.add_argument("--sounds", metavar="FILE", help="the user's sound list (Arc's share text, or lines of '<slot> <name>'): warn about sound lines whose slot or name isn't in it")
+    p.add_argument("--kit", choices=KITS, help="the factory kit the slots are read by (default: what the sound list or the card's sound lines say, else ep133)")
     p = add("analyse", cmd_analyse, "describe a card's groove, density, velocity, swing and gaps", ("analyze",))
     p.add_argument("--json", action="store_true", help="print the report as JSON")
     p.add_argument("--recipes", help="genres.md to compare with (default: the skill's own)")
+    p.add_argument("--kit", choices=KITS, help="the factory kit the slots are read by (default: what the card's sound lines say, else ep133)")
     add("grid", cmd_grid, "print the card as a step grid")
     p = add("midi", cmd_midi, "write the card as a type-1 .mid file (a card of scenes: the chain in order, each scene for its passes)")
     p.add_argument("-o", "--output", help="output file (default: the card's name .mid); '-' for standard output")

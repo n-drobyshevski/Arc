@@ -72,7 +72,8 @@ internal fun soundSetOf(m: MirrorUi?, factory: Map<Int, String>? = null): SoundS
  * With a [list], the sounds Arc knows follow the card's closing fence
  * ([BeatCards.soundList]), for Claude to choose from. When the pads are [padsKnown], the pads the notes use that have no
  * sound ([held] gives a pad's slot, null for none; [BeatCards.silentPads]) are named in a comment after the header
- * ([ClaudeText.noSoundOn]). Null when there is nothing to share: no notes in it.
+ * ([ClaudeText.noSoundOn]). A [kit] other than the EP-133's is named before the card ([ClaudeText.kitLine]). Null when
+ * there is nothing to share: no notes in it.
  */
 internal fun beatShare(
     seq: ProjectSeq,
@@ -86,6 +87,7 @@ internal fun beatShare(
     pads: (PhysicalPad) -> PadSettings? = { null },
     held: (PhysicalPad) -> Int? = { null },
     padsKnown: Boolean = false,
+    kit: dev.arc.ep133.features.FactoryKit = dev.arc.ep133.features.FactoryKit.EP133,
 ): BeatShare? {
     val groups = if (group == null) 0..3 else group..group
     val sections = groups.map { g -> CardSection(g, seq.selected(g), seq.pattern(g, seq.selected(g))) }
@@ -93,7 +95,7 @@ internal fun beatShare(
     val name = if (group == null) ClaudeText.sceneCardName(seq.scene) else ClaudeText.patternCardName(seq.selected(group), seq.scene)
     val card = BeatCards.fromPatterns(name, tempo, swing, sections, sounds, fx, pads)
     val silent = BeatCards.silentPads(card, held, padsKnown)
-    val text = ClaudeText.shareText(ClaudeText.SHARE_PROMPT, BeatCards.write(card, names, tidy = true, silent = silent))
+    val text = ClaudeText.shareText(ClaudeText.SHARE_PROMPT, BeatCards.write(card, names, tidy = true, silent = silent), kit)
     // The list follows the closing fence after a blank line (the card's text ends in a newline); readers stop at the fence.
     return BeatShare(ClaudeText.shareSubject(name), if (list == null) text else text + "\n" + BeatCards.soundList(list.source, list.names))
 }
@@ -133,11 +135,12 @@ internal fun beatShareChain(
     pads: (PhysicalPad) -> PadSettings? = { null },
     held: (PhysicalPad) -> Int? = { null },
     padsKnown: Boolean = false,
+    kit: dev.arc.ep133.features.FactoryKit = dev.arc.ep133.features.FactoryKit.EP133,
 ): BeatShare? {
     val name = ClaudeText.CHAIN_CARD_NAME
     val card = BeatCards.fromScenes(name, tempo, swing, seq, chainForCard(seq.chain.steps), sounds, fx, pads) ?: return null
     val silent = BeatCards.silentPads(card, held, padsKnown)
-    val text = ClaudeText.shareText(ClaudeText.SHARE_CHAIN_PROMPT, BeatCards.write(card, names, tidy = true, silent = silent))
+    val text = ClaudeText.shareText(ClaudeText.SHARE_CHAIN_PROMPT, BeatCards.write(card, names, tidy = true, silent = silent), kit)
     return BeatShare(ClaudeText.shareSubject(name), if (list == null) text else text + "\n" + BeatCards.soundList(list.source, list.names))
 }
 

@@ -2809,7 +2809,7 @@ export class ArcController {
    * clipboard with a toast saying so. Nothing when there are no notes.
    */
   async shareBeat(group: number | null): Promise<void> {
-    const share = this.pattern.beatShare(group)
+    const share = this.pattern.beatShare(group, this.live.factoryKit())
     if (share === null) return
     await this.sendText(share.subject, share.text)
   }

@@ -1299,6 +1299,92 @@ def cards_in(name):
     return bc.split_cards(read(os.path.join(REFS, name)))
 
 
+#: A few lines of the EP-40 Riddim pack as Arc lists it.
+EP40_LIST = "55 ep 40 kick\n48 jammy kick\n147 jammy rim a\n229 jammy hh\n230 jammy oh\n619 pianchrd cmaj\n742 syren\n" \
+            "824 jammy drms a 85\n827 jammy fill a 85\n830 jammy bass a 85\n833 jammy mel a 85\n"
+
+
+class Ep40Kit(unittest.TestCase):
+    def test_the_kit_is_told_by_arcs_sentence_the_packs_names_or_nothing(self):
+        self.assertEqual(bc.detect_kit("Improve this.\nMy EP-133 plays the EP-40 Riddim factory kit.\n```\nARC BEAT 1\n```\n"), "ep40")
+        self.assertEqual(bc.detect_kit("My EP-133's sounds (slot name), from the factory pack:\n" + EP40_LIST), "ep40")
+        self.assertEqual(bc.detect_kit("824 jammy drms a 85\n830 jammy bass a 85\n833 jammy mel a 85\n"), "ep40")
+        self.assertIsNone(bc.detect_kit("824 jammy drms a 85\n12 Kick 808\n"))  # one loop alone says nothing
+        self.assertIsNone(bc.detect_kit("My EP-133's sounds (slot name), from the EP-133:\n12 Kick 808\n14 Snare\n"))
+        # The sentence isn't a sound line.
+        self.assertEqual(bc.parse_sound_list("My EP-133 plays the EP-40 Riddim factory kit.\n12 Kick\n"), {12: "Kick"})
+
+    def test_a_card_naming_an_ep40_loop_is_read_by_the_ep40_kit(self):
+        self.assertEqual(bc.parse_card("ARC BEAT 1\ntempo 85\n[A]\nsound A7 824 jammy drms a 85\nA7 | X... .... .... .... |\n").kit, "ep40")
+        self.assertEqual(bc.parse_card("ARC BEAT 1\n[A]\nsound A7 55 ep 40 kick\nA7 | X... .... .... .... |\n").kit, "ep40")
+        self.assertEqual(bc.parse_card("ARC BEAT 1\n[A]\nsound A7 12 Kick 808\nA7 | X... .... .... .... |\n").kit, "ep133")
+
+    def test_ep40_blocks_and_words(self):
+        self.assertEqual(bc.factory_block(619, "ep40"), ("chord", "chords"))
+        self.assertEqual(bc.factory_block(742, "ep40"), ("fx", "vocals and FX"))
+        self.assertEqual(bc.factory_block(830, "ep40"), (None, "loops"))
+        self.assertIsNone(bc.factory_block(619))  # the EP-133's blocks end at 599
+        for name, role in (("rimmy sn", "snare"), ("jammy oh", "hat"), ("kik oh", "hat"), ("sub kik", "kick"), ("jammy drms a 85", "drums"),
+                           ("jammy fill b 85", "fill"), ("jammy bass a 85", "bass"), ("mpc melo a 82", "melodic"), ("clavinet", "melodic"),
+                           ("ep 40 clave", "rim"), ("syren", None)):
+            self.assertEqual(bc.role_of(name, "ep40"), role, name)
+        self.assertEqual(bc.role_of("rimmy sn"), None)  # the EP-133's words are as they were
+        self.assertEqual(bc.role_of("clavinet"), "perc")
+
+    def test_ep40_roles_in_the_report(self):
+        card = bc.parse_card("ARC BEAT 1\ntempo 85\n[A]\nsound A7 824 jammy drms a 85\nsound A2 147 jammy rim a\nsound A6 742 syren\n"
+                             "A7 | X... .... .... .... |\nA2 rim | .... .... X... .... |\nA6 siren fx | .... .... .... ..X. |\n"
+                             "[C]\nsound C1 619 pianchrd cmaj\nC1 chords | ..X. ..X. ..X. ..X. |\n")
+        self.assertEqual(card.kit, "ep40")
+        r = bc.analyse_card(card)
+        a, c = r["patterns"]
+        self.assertEqual(a["pads"]["A7"]["role"], "drums")
+        self.assertEqual(a["sound_mismatches"], [])
+        self.assertEqual(c["sound_mismatches"], [])  # a chord stab on a chords row is no mismatch
+        self.assertEqual(bc._sound_role(bc.Sound(742, "syren", 1), "ep40"), ("fx", "slot"))
+        self.assertEqual(bc._sound_role(bc.Sound(619, "pianchrd cmaj", 1), "ep40"), ("chord", "slot"))
+        # A kick row on a chord stab known only by its slot is worth a remark.
+        kick = bc.parse_card("ARC BEAT 1\n[A]\nsound A7 824 jammy drms a 85\nsound A1 619 619.pcm\nA1 kick | X... X... X... X... |\n")
+        self.assertEqual([(m["pad"], m["sound_role"]) for m in bc.analyse_card(kick)["patterns"][0]["sound_mismatches"]], [("A1", "chord")])
+
+    def test_unlabelled_group_a_pads_are_read_by_the_ep40_assumed_kit(self):
+        card = bc.parse_card("ARC BEAT 1\ntempo 85\n[A]\nsound A9 826 jammy drms c 85\nA1 | X... .... X... .... |\nA2 | .... .... X... .... |\nA4 | x.x. x.x. x.x. x.x. |\nA9 | X... .... .... .... |\n")
+        pads = bc.analyse_card(card)["patterns"][0]["pads"]
+        self.assertEqual({k: (v["role"], v["name_assumed"]) for k, v in pads.items() if k in ("A1", "A2", "A4")},
+                         {"A1": ("kick", True), "A2": ("snare", True), "A4": ("hat", True)})
+
+    def test_a_loop_off_the_cards_tempo_is_a_warning(self):
+        card = bc.parse_card("ARC BEAT 1\ntempo 90\n[A]\nsound A7 824 jammy drms a 85\nA7 | X... .... .... .... |\n"
+                             "[B]\nsound B7 830\nB7 | X... .... .... .... |\n")
+        problems = bc.check_loops(card, bc.parse_sound_list(EP40_LIST))
+        self.assertEqual([str(p) for p in problems], [
+            "line 4: warning: A7 plays loop 'jammy drms a 85' (85 BPM) but the card's tempo is 90: it will drift; set tempo 85",
+            "line 7: warning: B7 plays loop 'jammy bass a 85' (85 BPM) but the card's tempo is 90: it will drift; set tempo 85",
+        ])
+        self.assertEqual(bc.check_loops(bc.parse_card("ARC BEAT 1\ntempo 85.4\n[A]\nsound A7 824 jammy drms a 85\nA7 | X... .... .... .... |\n")), [])
+        # A name ending in a number outside the loops block is no loop.
+        self.assertEqual(bc.check_loops(bc.parse_card("ARC BEAT 1\ntempo 90\n[A]\nsound A7 12 kick bass a 85\nA7 | X... .... .... .... |\n")), [])
+
+    def run_cli(self, *args, stdin=None):
+        return subprocess.run([sys.executable, os.path.join(HERE, "beatcard.py")] + list(args), input=stdin, capture_output=True, text=True)
+
+    def test_the_cli_warns_about_a_loop_and_takes_kit(self):
+        r = self.run_cli("check", stdin="ARC BEAT 1\ntempo 92\n[A]\nsound A7 824 jammy drms a 85\nA7 | X... .... .... .... |\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("line 4: warning: A7 plays loop 'jammy drms a 85' (85 BPM) but the card's tempo is 92: it will drift; set tempo 85", r.stdout)
+        # Unnamed sounds' slots by the EP-40's blocks: a chords row on 619 is fine with --kit ep40, a mismatch by the EP-133's (no block, so none).
+        chords = "ARC BEAT 1\n[C]\nsound C1 619 619.pcm\nC1 chords | ..X. ..X. ..X. ..X. |\nC2 kick | X... X... X... X... |\nsound C2 742 742.pcm\n"
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as f:
+            f.write(chords)
+        self.addCleanup(os.unlink, f.name)
+        r40 = json.loads(self.run_cli("analyse", f.name, "--json", "--kit", "ep40").stdout)
+        self.assertEqual([(m["pad"], m["sound_role"]) for m in r40["patterns"][0]["sound_mismatches"]], [("C2", "fx")])
+        r133 = json.loads(self.run_cli("analyse", f.name, "--json").stdout)
+        self.assertEqual(r133["patterns"][0]["sound_mismatches"], [])
+        bad = self.run_cli("check", "--kit", "ep41", stdin="ARC BEAT 1\n")
+        self.assertEqual(bad.returncode, 2)
+
+
 class Effects(unittest.TestCase):
     """The effect lines of the header, read the way BeatCards.read does (same errors and warnings, same line numbers)."""
 
@@ -1970,6 +2056,12 @@ class SkillFiles(unittest.TestCase):
         pairs = re.findall(r"\|\s*(A(?:[0-9.]|ENTER))\s*\|\s*([a-z0-9 ]+?)\s*(?=\|)", text)
         found = {p: s for p, s in pairs if p in bc.ASSUMED_KIT}
         self.assertEqual(found, bc.ASSUMED_KIT)
+
+    def test_the_ep40_kit_table_matches_the_script(self):
+        text = read(os.path.join(REFS, "ep40-kit.md"))
+        pairs = re.findall(r"\|\s*(A(?:[0-9.]|ENTER))\s*\|\s*([a-z0-9 ]+?)\s*(?=\|)", text)
+        found = {p: s for p, s in pairs if p in bc.ASSUMED_KIT_EP40}
+        self.assertEqual(found, bc.ASSUMED_KIT_EP40)
 
     def test_lessons(self):
         text = read(os.path.join(REFS, "lessons.md"))

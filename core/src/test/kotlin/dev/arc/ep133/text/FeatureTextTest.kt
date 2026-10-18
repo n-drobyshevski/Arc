@@ -549,6 +549,18 @@ class FeatureTextTest {
         assertEquals(listOf("P01 S02", "P99 S10", "S02"), listOf(ClaudeText.patternCardName(1, 1), ClaudeText.patternCardName(99, 9), ClaudeText.sceneCardName(1)))
         assertEquals("Arc beat P01 S02", ClaudeText.shareSubject("P01 S02"))
         assertEquals("Analyse this beat:\n\n```\nARC BEAT 1\nswing 50\n```\n", ClaudeText.shareText("Analyse this beat:", "ARC BEAT 1\nswing 50\n"))
+        // A kit other than the EP-133's is named between the prompt and the card; the EP-133's own kit adds nothing.
+        assertEquals(null, ClaudeText.kitLine(dev.arc.ep133.features.FactoryKit.EP133))
+        assertEquals("My EP-133 plays the EP-40 Riddim factory kit.", ClaudeText.kitLine(dev.arc.ep133.features.FactoryKit.EP40))
+        assertEquals("My EP-133 plays the EP-1320 Medieval factory kit.", ClaudeText.kitLine(dev.arc.ep133.features.FactoryKit.EP1320))
+        assertEquals(
+            "Analyse this beat:\n\nMy EP-133 plays the EP-40 Riddim factory kit.\n\n```\nARC BEAT 1\n```\n",
+            ClaudeText.shareText("Analyse this beat:", "ARC BEAT 1\n", dev.arc.ep133.features.FactoryKit.EP40),
+        )
+        assertEquals(
+            ClaudeText.shareText("Analyse this beat:", "ARC BEAT 1\n"),
+            ClaudeText.shareText("Analyse this beat:", "ARC BEAT 1\n", dev.arc.ep133.features.FactoryKit.EP133),
+        )
         assertEquals("No beat card in that text.", ClaudeText.NO_CARD)
         // The prompt asks for the sound lines kept, or sounds chosen from the list that follows the card.
         assertTrue(ClaudeText.SHARE_PROMPT.contains("sound list") && ClaudeText.SHARE_PROMPT.contains("FX and pad lines") && ClaudeText.SHARE_PROMPT.endsWith(":"))

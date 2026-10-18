@@ -506,6 +506,14 @@ describe('FeatureTextTest', () => {
     expect([ClaudeText.patternCardName(1, 1), ClaudeText.patternCardName(99, 9), ClaudeText.sceneCardName(1)]).toEqual(['P01 S02', 'P99 S10', 'S02'])
     expect(ClaudeText.shareSubject('P01 S02')).toBe('Arc beat P01 S02')
     expect(ClaudeText.shareText('Analyse this beat:', 'ARC BEAT 1\nswing 50\n')).toBe('Analyse this beat:\n\n```\nARC BEAT 1\nswing 50\n```\n')
+    // A kit other than the EP-133's is named between the prompt and the card; the EP-133's own kit adds nothing.
+    expect(ClaudeText.kitLine(FactoryKit.EP133)).toBeNull()
+    expect(ClaudeText.kitLine(FactoryKit.EP40)).toBe('My EP-133 plays the EP-40 Riddim factory kit.')
+    expect(ClaudeText.kitLine(FactoryKit.EP1320)).toBe('My EP-133 plays the EP-1320 Medieval factory kit.')
+    expect(ClaudeText.shareText('Analyse this beat:', 'ARC BEAT 1\n', FactoryKit.EP40)).toBe(
+      'Analyse this beat:\n\nMy EP-133 plays the EP-40 Riddim factory kit.\n\n```\nARC BEAT 1\n```\n',
+    )
+    expect(ClaudeText.shareText('Analyse this beat:', 'ARC BEAT 1\n', FactoryKit.EP133)).toBe(ClaudeText.shareText('Analyse this beat:', 'ARC BEAT 1\n'))
     expect(ClaudeText.NO_CARD).toBe('No beat card in that text.')
     // The prompt asks for the sound lines kept, or sounds chosen from the list that follows the card.
     expect(ClaudeText.SHARE_PROMPT.includes('sound list') && ClaudeText.SHARE_PROMPT.includes('FX and pad lines') && ClaudeText.SHARE_PROMPT.endsWith(':')).toBe(true)

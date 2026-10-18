@@ -1352,7 +1352,7 @@ class BeatCardTest {
             assertEquals(r.card!!.fx, BeatCards.read(BeatCards.write(r.card!!)).card!!.fx)
         }
         val withFx = cards.map { BeatCards.read(it).card!! }.filter { it.fx != null }
-        assertEquals(setOf("House groove", "Dub chord echo", "Industrial pressure", "Hard techno pound", "Schranz pressure", "Hard groove workout", "Dusty lo-fi", "Amen shred", "Breakcore track"), withFx.map { it.name }.toSet())
+        assertEquals(setOf("House groove", "Dub chord echo", "Industrial pressure", "Hard techno pound", "Schranz pressure", "Hard groove workout", "Dusty lo-fi", "Amen shred", "Breakcore track", "Dub plate", "UK dub"), withFx.map { it.name }.toSet())
         val house = withFx.first { it.name == "House groove" }.fx!!
         assertEquals(Sidechain(true, 0, 9, 0b0010, 0.3f, 0.55f), house.sidechain)
         assertEquals(FxType.FILTER, withFx.first { it.name == "Dusty lo-fi" }.fx!!.type)

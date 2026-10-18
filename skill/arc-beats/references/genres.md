@@ -1,6 +1,8 @@
 # Genre recipes
 
-Twenty-nine starting points, including a techno family of twelve (Techno, Detroit, minimal, dub, acid, hypnotic, peak-time, melodic, industrial, hard techno, schranz and hard groove), each a complete ARC BEAT card (see [beat-card.md](beat-card.md) for the format). One of them, Breakcore arrangement, is a whole track idea: a card of five scenes with a chain. Use them as a base: change the tempo and a few steps and say what you changed. The cards are checked by the skill's test, so they are valid as written.
+Thirty-six starting points, including a techno family of twelve (Techno, Detroit, minimal, dub, acid, hypnotic, peak-time, melodic, industrial, hard techno, schranz and hard groove), each a complete ARC BEAT card (see [beat-card.md](beat-card.md) for the format). One of them, Breakcore arrangement, is a whole track idea: a card of five scenes with a chain. Use them as a base: change the tempo and a few steps and say what you changed. The cards are checked by the skill's test, so they are valid as written.
+
+The last seven, marked **(EP-40)**, are reggae, dub and dancehall for the EP-40 Riddim kit: one drop, rockers, steppers, dub, digital riddim, dancehall and UK dub. Their pads are that kit's (kick A1, rimshot A2, closed hat A4, siren D1; see [ep40-kit.md](ep40-kit.md)), not the assumed kit below. Use them when the share says the EP-133 plays the EP-40 kit, or when the user asks for these styles and confirms that kit. For the EP-40's loops, follow the loop rules in ep40-kit.md.
 
 `scripts/beatcard.py analyse` compares a user's beat with these recipes, reading the `BPM:` and `Swing:` lines and the card of each section below. Keep that shape if you add a recipe: a `##` heading, the two lines, then one fenced card.
 
@@ -909,3 +911,140 @@ A7 kick        | X... .... X... .... |
 A9 snare       | .... X... .... X... |
 A4 closed hat  | x.x. x.x. x.x. x.x. |
 ```
+
+## One drop (EP-40)
+- BPM: 70-80
+- Swing: 50-60
+- Feel: roots reggae. Beat 1 is left empty, and the kick and the rimshot land together on beat 3. Hats play every eighth and swing a little. The pads are the EP-40 kit's (P01; see [ep40-kit.md](ep40-kit.md)), so use this one when the share says the EP-133 plays that kit.
+
+```
+ARC BEAT 1
+name One drop
+tempo 76
+swing 56
+
+[A] bars 1 step 1/16
+A1 kick        | .... .... X... .... |
+A2 rimshot     | .... .... X... .... |
+A4 closed hat  | x.o. x.o. x.o. x.o. |
+A5 open hat    | .... .... .... ..o. |
+```
+
+## Rockers (EP-40)
+- BPM: 75-85
+- Swing: 50-58
+- Feel: the one drop with a kick on 1 as well, so it drives. The rimshot stays on beat 3, hats sit on the offbeats, and a second rim answers in between.
+
+```
+ARC BEAT 1
+name Rockers
+tempo 80
+swing 54
+
+[A] bars 1 step 1/16
+A1 kick        | X... .... X... .... |
+A2 rimshot     | .... .... X... .... |
+A3 rim         | ..o. .... ..o. ...o |
+A4 closed hat  | ..x. ..x. ..x. ..x. |
+```
+
+## Steppers (EP-40)
+- BPM: 72-84
+- Swing: 50-54
+- Feel: a kick on every beat under a reggae tempo. The rimshot still lands on beat 3, and the hats sit on the offbeats with an open hat at the end of the bar. It marches.
+
+```
+ARC BEAT 1
+name Steppers
+tempo 78
+swing 50
+
+[A] bars 1 step 1/16
+A1 kick        | X... X... X... X... |
+A2 rimshot     | .... .... X... .... |
+A4 closed hat  | ..x. ..x. ..x. .... |
+A5 open hat    | .... .... .... ..x. |
+```
+
+## Dub (EP-40)
+- BPM: 65-78
+- Swing: 50-56
+- Feel: the riddim stripped back to bones. The kick is on 1, the rimshot on 3 and a few hats. The space is for the delay, and a siren at the end of the second bar runs off into it.
+
+```
+ARC BEAT 1
+name Dub plate
+tempo 72
+swing 52
+fx delay 70 65
+send A 30 D 70
+
+[A] bars 2 step 1/16
+A1 kick        | X... .... .... ..o. | X... .... .... .... |
+A2 rimshot     | .... .... X... .... | .... .... X... .... |
+A4 closed hat  | .... x... .... x... | .... x... .... x.o. |
+
+[D] bars 2 step 1/16
+D1 siren       | .... .... .... .... | .... .... .... X... |
+```
+
+The delay is long with high feedback, so the rimshot and the siren echo away; send more of A for a heavier dub.
+
+## Digital riddim (EP-40)
+- BPM: 90-100
+- Swing: 50
+- Feel: mid-80s digital dancehall in the spirit of Sleng Teng. A busy, machine-straight kick in threes, rimshots on 2 and 4 and steady eighth hats. Put a bass one-shot from the user's list on B and repeat a two-note figure.
+
+```
+ARC BEAT 1
+name Digital riddim
+tempo 96
+swing 50
+
+[A] bars 1 step 1/16
+A1 kick        | X..X ..X. X..X ..X. |
+A2 rimshot     | .... X... .... X... |
+A4 closed hat  | x.x. x.x. x.x. x.x. |
+```
+
+## Dancehall (EP-40)
+- BPM: 96-110
+- Swing: 50-54
+- Feel: modern dancehall. The kick is on 1 with a push before beat 3 and before the next bar, rimshots on 2 and 4, and hats on the offbeats with a double at the end. Shouts from D (D3, D4) go on bar ends.
+
+```
+ARC BEAT 1
+name Dancehall
+tempo 104
+swing 50
+
+[A] bars 1 step 1/16
+A1 kick        | X... ..X. X... ..X. |
+A2 rimshot     | .... X... .... X... |
+A4 closed hat  | ..x. ..x. ..x. ..xx |
+```
+
+## UK dub (EP-40)
+- BPM: 135-145
+- Swing: 50
+- Feel: UK steppers dub at sound-system pace. A four-on-the-floor kick, the rimshot on beat 3 so it feels half-time, hats on every sixteenth and an open hat on the offbeats. A long delay on D for sirens.
+
+```
+ARC BEAT 1
+name UK dub
+tempo 140
+swing 50
+fx delay 60 55
+send D 60
+
+[A] bars 1 step 1/16
+A1 kick        | X... X... X... X... |
+A2 rimshot     | .... .... X... .... |
+A4 closed hat  | xoxo xoxo xoxo xoxo |
+A5 open hat    | ..x. ..x. ..x. ..x. |
+
+[D] bars 1 step 1/16
+D1 siren       | .... .... .... ..X. |
+```
+
+The delay carries the siren over the bar line; take the send down if it clouds the kick.

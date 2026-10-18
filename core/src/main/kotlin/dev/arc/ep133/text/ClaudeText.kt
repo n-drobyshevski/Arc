@@ -140,8 +140,22 @@ object ClaudeText {
     /** The share's subject: "Arc beat P01 S02". */
     fun shareSubject(cardName: String) = "Arc beat $cardName"
 
-    /** The shared text: [prompt], a blank line and [card] (which ends in a newline) in a fenced block. */
-    fun shareText(prompt: String, card: String) = prompt + "\n\n```\n" + card + "```\n"
+    /**
+     * The kit the EP-133 plays, when it isn't its own: "My EP-133 plays the EP-40 Riddim factory kit." (the skill
+     * reads its slots and pads by it). Null for the EP-133's own kit.
+     */
+    fun kitLine(kit: dev.arc.ep133.features.FactoryKit): String? = when (kit) {
+        dev.arc.ep133.features.FactoryKit.EP133 -> null
+        dev.arc.ep133.features.FactoryKit.EP40 -> "My EP-133 plays the ${FeatureText.FACTORY_40} factory kit."
+        dev.arc.ep133.features.FactoryKit.EP1320 -> "My EP-133 plays the ${FeatureText.FACTORY_1320} factory kit."
+    }
+
+    /**
+     * The shared text: [prompt], a blank line and [card] (which ends in a newline) in a fenced block; with a [kit]
+     * other than the EP-133's, its [kitLine] as a paragraph between them.
+     */
+    fun shareText(prompt: String, card: String, kit: dev.arc.ep133.features.FactoryKit = dev.arc.ep133.features.FactoryKit.EP133) =
+        prompt + (kitLine(kit)?.let { "\n\n$it" } ?: "") + "\n\n```\n" + card + "```\n"
 
     // ---------- The sound list ----------
     /** Where the sound list Arc adds after a shared card came from: the EP-133 itself, its last read, or the factory pack. */

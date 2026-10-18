@@ -5,6 +5,7 @@
 // its map keyed by padKey; the test's `with` helper is withP (`with` is reserved in JS); the sequencer is compared
 // with toEqual (plain data, as Kotlin's data class equals) and assertSame is toBe.
 import { describe, expect, it } from 'vitest'
+import { FactoryKit } from '../../src/core/features/factorySounds'
 import { BeatCards, beatCard, cardSection, type BeatCard, type CardSection } from '../../src/core/features/beatCard'
 import { padKey, physicalPad, type PhysicalPad } from '../../src/core/features/padNotes'
 import { Pattern, ProjectSeq, Seq, Timing, pattern, patternNote, type PatternNote } from '../../src/core/features/pattern'
@@ -46,6 +47,10 @@ describe('BeatPlanTest', () => {
     expect(scene.subject).toBe('Arc beat S01')
     expect(scene.text.startsWith(ClaudeText.SHARE_PROMPT + '\n\n```\nARC BEAT 1\nname S01\ntempo 92\nswing 50\n# tidied')).toBe(true)
     expect(scene.text.endsWith('\n```\n')).toBe(true)
+    // The EP-40 kit is named before the card; the EP-133's adds nothing.
+    const riddim = beatShare(seq, null, 92.0, 50, nameOf, FactoryKit.EP40)!
+    expect(riddim.text.startsWith(ClaudeText.SHARE_PROMPT + '\n\nMy EP-133 plays the EP-40 Riddim factory kit.\n\n```\nARC BEAT 1\n')).toBe(true)
+    expect(beatShare(seq, null, 92.0, 50, nameOf, FactoryKit.EP133)!.text).toBe(scene.text)
     // The blank groups (B, D) are left out; the pad's name is on its row.
     const c = BeatCards.read(scene.text).card!
     expect(c.sections.map((s) => s.group)).toEqual([0, 2])
