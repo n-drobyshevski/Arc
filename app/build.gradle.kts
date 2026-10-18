@@ -32,8 +32,9 @@ android {
         // Phones and the 64-bit emulator. 32-bit x86 (old emulators) would add 1.6 MB; it plays Live through AudioTrack.
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
         externalNativeBuild {
-            // Oboe's prefab package is built against the shared C++ runtime.
-            cmake { arguments += "-DANDROID_STL=c++_shared" }
+            // Oboe is built from source and linked into libarc_live.so with the static C++ runtime
+            // (src/main/cpp/CMakeLists.txt): no libc++_shared.so or liboboe.so in the app.
+            cmake { arguments += "-DANDROID_STL=c++_static" }
         }
     }
 
@@ -55,6 +56,18 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        // The upload key for Google Play and GitHub releases, only where the environment gives all of it
+        // (release.yml, from the repository's secrets). It is never committed.
+        val upload = listOf("ARC_UPLOAD_KEYSTORE", "ARC_UPLOAD_KEYSTORE_PASSWORD", "ARC_UPLOAD_KEY_ALIAS", "ARC_UPLOAD_KEY_PASSWORD")
+            .map { providers.environmentVariable(it).orNull }
+        if (upload.all { !it.isNullOrEmpty() }) {
+            create("release") {
+                storeFile = file(upload[0]!!)
+                storePassword = upload[1]
+                keyAlias = upload[2]
+                keyPassword = upload[3]
+            }
+        }
     }
 
     buildTypes {
@@ -62,9 +75,24 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
         release {
+            // The release key, where the build is given it (release.yml); else the release build is unsigned.
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // The native engine's symbol table goes in the bundle, so Play Console can read its crashes.
+            ndk { debugSymbolLevel = "SYMBOL_TABLE" }
+        }
+    }
+
+    // arc is in English only: the libraries' translations of their own strings stay out.
+    androidResources { localeFilters += "en" }
+
+    packaging {
+        resources {
+            // Kotlin metadata only reflection reads (arc uses none) and the coroutines debug agent's file.
+            // The libraries' META-INF LICENSE files stay: their licences ask for a copy with the app.
+            excludes += setOf("META-INF/*.version", "META-INF/*.kotlin_module", "kotlin/**", "DebugProbesKt.bin")
         }
     }
 
@@ -75,8 +103,6 @@ android {
 
     buildFeatures {
         compose = true
-        // Native packages from AARs (Oboe) for the CMake build.
-        prefab = true
     }
 
     // Screenshots of @Preview screens (src/screenshotTest), rendered on the JVM; nothing ships in the app.
@@ -118,7 +144,6 @@ dependencies {
     debugImplementation(libs.compose.ui.tooling)
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
-    implementation(libs.oboe)
     ksp(libs.room.compiler)
 
     screenshotTestImplementation(libs.screenshot.validation.api)
