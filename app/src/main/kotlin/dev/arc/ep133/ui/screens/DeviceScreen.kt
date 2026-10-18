@@ -93,8 +93,6 @@ import dev.arc.ep133.ui.components.ArcField
 import dev.arc.ep133.ui.components.ArcIcon
 import dev.arc.ep133.ui.components.ArcKey
 import dev.arc.ep133.ui.components.Caption
-import dev.arc.ep133.ui.components.CoachYellow
-import dev.arc.ep133.ui.components.CoachYellowInk
 import dev.arc.ep133.ui.components.DashedBox
 import dev.arc.ep133.ui.components.DisplayPanel
 import dev.arc.ep133.ui.components.EdgeTabWidth
@@ -249,7 +247,7 @@ fun DeviceScreen(
                     onSelect = { section = it },
                     modifier = Modifier
                         .padding(top = 14.dp)
-                        .coachMark("device.switch", CoachText.SOUNDS_PROJECTS, CoachYellow, CoachYellowInk),
+                        .coachMark("device.switch", CoachText.SOUNDS_PROJECTS, c.coach, c.onCoach),
                 )
             }
             if (section == 0) {
@@ -748,7 +746,7 @@ private fun SoundRow(
                 enabled = enabled,
                 description = if (playing) FeatureText.stop(e.name) else FeatureText.play(e.name),
                 onClick = { if (playing) onStop() else onPlay() },
-                modifier = if (mark) Modifier.coachMark("device.play", CoachText.PLAY, CoachYellow, CoachYellowInk) else Modifier,
+                modifier = if (mark) Modifier.coachMark("device.play", CoachText.PLAY, c.coach, c.onCoach) else Modifier,
             )
         }
         val note = when {

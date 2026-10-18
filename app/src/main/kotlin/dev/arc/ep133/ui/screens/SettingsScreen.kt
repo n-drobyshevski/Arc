@@ -68,6 +68,7 @@ import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.Format
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.text.SettingsText
+import dev.arc.ep133.text.SkinChoice
 import dev.arc.ep133.text.Strings
 import dev.arc.ep133.text.ThemeChoice
 import dev.arc.ep133.ui.components.ArcKey
@@ -104,6 +105,8 @@ fun SettingsScreen(
     padOrder: PadOrder,
     version: String,
     onTheme: (ThemeChoice) -> Unit,
+    /** The EP the app is dressed as (an addition). */
+    onSkin: (SkinChoice) -> Unit = {},
     onAutoConnect: (Boolean) -> Unit,
     onKeepScreenOn: (Boolean) -> Unit,
     /** How many backups a new Keep value would delete now. */
@@ -156,6 +159,15 @@ fun SettingsScreen(
                         ThemeChoice.entries.map(SettingsText::theme),
                         selected = settings.theme.ordinal,
                         onSelect = { onTheme(ThemeChoice.entries[it]) },
+                        compact = true,
+                    )
+                }
+                PlateLine()
+                SettingRow(SettingsText.SKIN) {
+                    Segmented(
+                        SkinChoice.entries.map(SettingsText::skin),
+                        selected = settings.skin.ordinal,
+                        onSelect = { onSkin(SkinChoice.entries[it]) },
                         compact = true,
                     )
                 }

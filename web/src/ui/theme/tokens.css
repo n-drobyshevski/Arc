@@ -47,6 +47,11 @@
   --piano-line: #1E1F21;
   --piano-signal: #FF4C00;
   --piano-digit: #55545C;
+  /* Section tag and coach marks (ArcColors tagFace / tagInk, coach / onCoach). */
+  --tag-face: #C9A227;
+  --tag-ink: #1E1F21;
+  --coach: #D4A300;
+  --on-coach: #1E1F21;
   /* Hatching (Components.kt Modifier.hatch): "/" lines in keyEdge, 1px wide.
    * An SVG tile, so the step is exactly 9px horizontally (and 7px for the side
    * strip, SideZone.kt); a CSS gradient's period would be off by sqrt(2).
@@ -153,12 +158,9 @@
   --row-tip: color-mix(in srgb, var(--navy) 10%, transparent);
 
   /* ---- Fixed colours (do not change with the theme) ---- */
-  /* Section tag (Chrome.kt TagFace / TagInk). */
-  --tag-face: #C9A227;
-  --tag-ink: #1E1F21;
-  /* Coach marks (Coach.kt CoachYellow / CoachYellowInk). */
-  --coach-yellow: #D4A300;
-  --coach-yellow-ink: #1E1F21;
+  /* Coach marks: ArcColors.coach / onCoach, under the names the web uses. */
+  --coach-yellow: var(--coach);
+  --coach-yellow-ink: var(--on-coach);
   /* Guide key caps (GuideKeys.kt). */
   --guide-light-face: #DAD9D5;
   --guide-light-edge: #A9A8A2;

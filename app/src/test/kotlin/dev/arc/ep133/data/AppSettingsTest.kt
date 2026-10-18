@@ -6,6 +6,7 @@ import dev.arc.ep133.features.SwitchTime
 import dev.arc.ep133.features.Timing
 import dev.arc.ep133.features.TimingSettings
 import dev.arc.ep133.text.LiveEngine
+import dev.arc.ep133.text.SkinChoice
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -225,6 +226,16 @@ class AppSettingsTest {
         assertEquals(chosen, AppSettings().withIndex(chosen.values().mapKeys { "app." + it.key }))
         // A kit arc doesn't know, from another version: left as it is.
         assertEquals(chosen, chosen.withIndex(mapOf("app.factoryKit" to "ep9")))
+    }
+
+    @Test
+    fun `the skin starts on the EP-133's, and round-trips by its name`() {
+        assertEquals(SkinChoice.EP133, AppSettings().skin)
+        val chosen = AppSettings(skin = SkinChoice.EP1320)
+        assertEquals("EP1320", chosen.values()["skin"])
+        assertEquals(chosen, AppSettings().withIndex(chosen.values().mapKeys { "app." + it.key }))
+        // A skin arc doesn't know, from another version: left as it is.
+        assertEquals(chosen, chosen.withIndex(mapOf("app.skin" to "OP1")))
     }
 
     @Test

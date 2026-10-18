@@ -113,9 +113,8 @@ val LocalDelayMadeUp = staticCompositionLocalOf<StateFlow<Int?>> { MutableStateF
 /** How wide the left-edge guide tab is (screens keep this much gutter on the left). */
 val EdgeTabWidth: Dp = 22.dp
 
-/** The pocket operator app's mustard EDIT tag. */
-private val TagFace = Color(0xFFC9A227)
-private val TagInk = Color(0xFF1E1F21)
+/** The ink on the Bluetooth key's amber face (ArcColors.warn), in every skin. */
+private val WarnInk = Color(0xFF1E1F21)
 
 /**
  * The page under a top bar. The content's own safe-drawing padding then only
@@ -333,9 +332,9 @@ private fun LateBlock(late: LateKey) {
     val madeUp by LocalDelayMadeUp.current.collectAsStateWithLifecycle()
     val words = madeUp?.let(MirrorText::wirelessMadeUp) ?: MirrorText.WIRELESS_DELAY
     IconBlock(
-        ArcIcon.BLUETOOTH, CoachText.BLUETOOTH, c.warn, TagInk,
+        ArcIcon.BLUETOOTH, CoachText.BLUETOOTH, c.warn, WarnInk,
         { late.onTap(words) },
-        Modifier.coachMark("top.bluetooth", CoachText.BLUETOOTH, c.warn, TagInk),
+        Modifier.coachMark("top.bluetooth", CoachText.BLUETOOTH, c.warn, WarnInk),
         iconSize = 20.dp,
         beside = ArcIcon.CLOCK,
         description = words,
@@ -357,11 +356,12 @@ private val TagShape = GenericShape { size, _ ->
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SectionTag(section: Tab, onClick: () -> Unit, onLongPress: () -> Unit, modifier: Modifier) {
+    val c = LocalArcColors.current
     Box(
         modifier
             .heightIn(min = 44.dp)
             .clip(TagShape)
-            .background(TagFace)
+            .background(c.tagFace)
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -373,7 +373,7 @@ private fun SectionTag(section: Tab, onClick: () -> Unit, onLongPress: () -> Uni
             .padding(start = 14.dp, end = 26.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
-        Text(section.label.uppercase(), style = ArcType.tab.copy(fontSize = androidx.compose.ui.unit.TextUnit(17f, androidx.compose.ui.unit.TextUnitType.Sp)), color = TagInk, maxLines = 1)
+        Text(section.label.uppercase(), style = ArcType.tab.copy(fontSize = androidx.compose.ui.unit.TextUnit(17f, androidx.compose.ui.unit.TextUnitType.Sp)), color = c.tagInk, maxLines = 1)
     }
 }
 

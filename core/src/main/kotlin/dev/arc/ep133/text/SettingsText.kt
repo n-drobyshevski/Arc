@@ -6,6 +6,14 @@ import dev.arc.ep133.text.Format.plural
 /** The theme the app uses (an addition to the web version). */
 enum class ThemeChoice { SYSTEM, LIGHT, DARK }
 
+/**
+ * The skin the app wears, after one of the EP family (an addition to the web
+ * version): the K.O. II's grey and orange, the EP-40 Riddim's cream and dub
+ * green, or the EP-1320 Medieval's olive gold, parchment and oxblood. Each
+ * comes light or dark, as [ThemeChoice] says.
+ */
+enum class SkinChoice { EP133, EP40, EP1320 }
+
 /** The settings page (an addition to the web version). */
 object SettingsText {
     const val TITLE = "Settings"
@@ -19,6 +27,12 @@ object SettingsText {
         ThemeChoice.SYSTEM -> "System"
         ThemeChoice.LIGHT -> "Light"
         ThemeChoice.DARK -> "Dark"
+    }
+    const val SKIN = "Skin"
+    fun skin(s: SkinChoice) = when (s) {
+        SkinChoice.EP133 -> "EP-133"
+        SkinChoice.EP40 -> "EP-40"
+        SkinChoice.EP1320 -> "EP-1320"
     }
 
     const val DEVICE = "Device"

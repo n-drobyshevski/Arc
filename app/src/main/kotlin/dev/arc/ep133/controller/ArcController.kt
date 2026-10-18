@@ -7028,6 +7028,7 @@ class ArcController(
     }
 
     fun setTheme(t: dev.arc.ep133.text.ThemeChoice) = changeSettings { it.copy(theme = t) }
+    fun setSkin(s: dev.arc.ep133.text.SkinChoice) = changeSettings { it.copy(skin = s) }
 
     fun setAutoConnect(on: Boolean) = changeSettings { it.copy(autoConnect = on) }
 

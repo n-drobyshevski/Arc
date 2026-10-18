@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.arc.ep133.features.KeyMotion
+import dev.arc.ep133.text.SkinChoice
 
 /*
  * Key caps, drawn as the EP-133 Sample Tool draws the K.O. II: a flat face over
@@ -88,6 +89,137 @@ val DarkHwColors = LightHwColors.copy(
     ledOff = Color(0xFF55565A),
     ko = KoColors(edge = Color(0xFF0E0F10)),
 )
+
+/**
+ * The EP-40 Riddim, drawn as the K.O. II is: a cream body, cream number pads
+ * with dub green figures, a green PLAY, the orange X knob and the green Y.
+ * As with the K.O. II the keys stay in the dark theme; the body darkens.
+ */
+val Ep40KoColors = KoColors(
+    body = Color(0xFFC9BEA9),
+    edge = Color(0xFFA99D84),
+    panel = Color(0xFFECEBE6),
+    label = Color(0xFF0B4A36),
+    grille = Color(0xFFBEB39C),
+    grilleHole = Color(0xFF121312),
+    screen = Color(0xFF0E3326),
+    screenInk = Color(0xFF6FD9AE),
+    screenTag = Color(0xFFEAF6EF),
+    screenTagInk = Color(0xFF0E2B20),
+    darkFace = Color(0xFFEEEBE2),
+    // A pale key's side is darker than its face.
+    darkEdge = Color(0xFFB3A891),
+    darkInk = Color(0xFF03382A),
+    lightFace = Color(0xFFDCD3C0),
+    lightEdge = Color(0xFFA99D84),
+    lightInk = Color(0xFF0B4A36),
+    tierInk = Color(0xFF0B4A36),
+    tierLine = Color(0xFFCFC4AE),
+    greyFace = Color(0xFF00503A),
+    greyEdge = Color(0xFF00301F),
+    greyInk = Color(0xFFF4F1E8),
+    loopFace = Color(0xFF147C4B),
+    ledOff = Color(0xFFA39880),
+    ledOn = Color(0xFFF05A24),
+    portLight = Color(0xFFECEBE6),
+    portLightInk = Color(0xFF0B4A36),
+    portDark = Color(0xFF00503A),
+    portDarkInk = Color(0xFFF4F1E8),
+    portInk = Color(0xFF0B4A36),
+    yTag = Color(0xFF003A28),
+    faderTrack = Color(0xFF121312),
+    faderEdge = Color(0xFF5A5444),
+    knobOrange = listOf(Color(0xFFF44E0F), Color(0xFFA8340A), Color(0xFFF86A30), Color(0xFFD2460D)),
+    knobBlack = listOf(Color(0xFF003A28), Color(0xFF00180F), Color(0xFF0B4A36), Color(0xFF002A1C)),
+)
+
+val Ep40LightHwColors = LightHwColors.copy(
+    body = Color(0xFFB3A78B),
+    darkFace = Ep40KoColors.darkFace,
+    darkEdge = Ep40KoColors.darkEdge,
+    darkInk = Ep40KoColors.darkInk,
+    darkDim = Color(0xFF4F6B5C),
+    lightFace = Ep40KoColors.lightFace,
+    lightEdge = Ep40KoColors.lightEdge,
+    lightInk = Ep40KoColors.lightInk,
+    ledOff = Ep40KoColors.ledOff,
+    ko = Ep40KoColors,
+)
+
+val Ep40DarkHwColors = Ep40LightHwColors.copy(
+    body = Color(0xFF22332A),
+    ledOff = Color(0xFF4A5C51),
+    ko = Ep40KoColors.copy(edge = Color(0xFF06100C)),
+)
+
+/**
+ * The EP-1320 Medieval, drawn as the K.O. II is: an olive gold body, oxblood
+ * number pads with parchment figures, parchment lower keys, a bottle green
+ * PLAY, the red X knob and the brown Y.
+ */
+val Ep1320KoColors = KoColors(
+    body = Color(0xFFA8945A),
+    edge = Color(0xFF7E6C3A),
+    panel = Color(0xFFE4D6C4),
+    label = Color(0xFF3A2418),
+    grille = Color(0xFF7A4A2E),
+    grilleHole = Color(0xFF362017),
+    screen = Color(0xFF0E0B0A),
+    screenInk = Color(0xFFF2553A),
+    screenTag = Color(0xFFE8DCC8),
+    screenTagInk = Color(0xFF1A0E0B),
+    darkFace = Color(0xFF3E1E18),
+    darkEdge = Color(0xFF1E0E0B),
+    darkInk = Color(0xFFE8DCC8),
+    lightFace = Color(0xFFE4D6C4),
+    lightEdge = Color(0xFFB09C78),
+    lightInk = Color(0xFF3A2418),
+    tierInk = Color(0xFF3A2418),
+    tierLine = Color(0xFFCBBFA9),
+    greyFace = Color(0xFF1A2A25),
+    greyEdge = Color(0xFF0B1411),
+    greyInk = Color(0xFFE8DCC8),
+    loopFace = Color(0xFF25312D),
+    ledOff = Color(0xFF7A6A48),
+    ledOn = Color(0xFFE8331F),
+    portLight = Color(0xFFD8D6D2),
+    portLightInk = Color(0xFF3A2418),
+    portDark = Color(0xFF2F3F3A),
+    portDarkInk = Color(0xFFE8DCC8),
+    portInk = Color(0xFF3A2418),
+    yTag = Color(0xFF3A211C),
+    faderTrack = Color(0xFF1D2925),
+    faderEdge = Color(0xFF5A4632),
+    knobWhite = listOf(Color(0xFFE5DCCF), Color(0xFFB8AC98), Color(0xFFF0E8DC), Color(0xFFCFC3B0)),
+    knobOrange = listOf(Color(0xFFB80D05), Color(0xFF7A0803), Color(0xFFC8281E), Color(0xFF9A0F07)),
+    knobBlack = listOf(Color(0xFF3A211C), Color(0xFF1A0E0B), Color(0xFF4A2B24), Color(0xFF2A1712)),
+)
+
+val Ep1320LightHwColors = LightHwColors.copy(
+    body = Color(0xFF8A7848),
+    darkFace = Ep1320KoColors.darkFace,
+    darkEdge = Color(0xFF5A3329),
+    darkInk = Ep1320KoColors.darkInk,
+    darkDim = Color(0xFFB9A58A),
+    lightFace = Ep1320KoColors.lightFace,
+    lightEdge = Ep1320KoColors.lightEdge,
+    lightInk = Ep1320KoColors.lightInk,
+    ledOff = Ep1320KoColors.ledOff,
+    ko = Ep1320KoColors,
+)
+
+val Ep1320DarkHwColors = Ep1320LightHwColors.copy(
+    body = Color(0xFF544C2A),
+    ledOff = Color(0xFF5C5036),
+    ko = Ep1320KoColors.copy(edge = Color(0xFF0E0F10)),
+)
+
+/** The keys and the drawn device for [skin], light or [dark]. */
+fun hwColors(skin: SkinChoice, dark: Boolean): HwColors = when (skin) {
+    SkinChoice.EP133 -> if (dark) DarkHwColors else LightHwColors
+    SkinChoice.EP40 -> if (dark) Ep40DarkHwColors else Ep40LightHwColors
+    SkinChoice.EP1320 -> if (dark) Ep1320DarkHwColors else Ep1320LightHwColors
+}
 
 /**
  * The Guide's K.O. II illustration: the device's own colours, the same in
