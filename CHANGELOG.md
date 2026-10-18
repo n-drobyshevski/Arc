@@ -6,6 +6,8 @@ version fixes bugs. The version itself is set in `version.properties`.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-18
+
 ### Added
 - Live on Android: **a new Live tools sheet**, a front page and four pages. The front page opens on a dark **now display**: while a take records, its time large in orange with a **STOP** key (armed, **Waiting for the first sound** and a **● TAKE** key that calls it off); after a share to Claude, **Shared to Claude** with what went (**Scene S02**, **A · 01**, **Chain**), **Paste Claude's reply when it's ready**, **PASTE BEAT** and a **×** to stop waiting (a card arriving or its import ends it too); otherwise the group or key (**Group A · Follow**, **Keys · DO major**), the project and the last thing the EP-133 played, a KEYS note on two octaves of piano or the pad hit. Under it one plate of rows, each with a live line, opens a page: **Play** (the view switch, **Follow**, **Mode**, note repeat; in KEYS the key and the colours), **Claude** (the beat cards, with the notes folded under **About beat cards**), **Takes** (the takes, with their hints under **About takes**) and **Help** (how Live reads the EP-133, or how Keys works, in the open). A page slides in with **‹ Play** as its head, Back and the **‹** return to the front page, and the sheet opens on the front page each time. The factory sounds and **Reset pads** became tinted notices above the display, and Settings a gear key before the close key. The web's panel is unchanged.
 - Live on Android: **scene chains.** The SCENE panel gets a **CHAIN** row under the group columns: an **ON** chip, the steps as chips (**S03 ×2 → S04 → …**, a tap cycles the passes ×1 ×2 ×4 ×8, a long press removes the step, a dashed **＋ S03** adds the scene shown, **↻** at the end) and, while it plays, **S03 · PASS 1/2** in orange with the step lit and a thin progress bar. With the chain on, each scene plays its passes and the next step's scene takes over sample-accurately at the end of its longest pattern, looping at the end; PLAY starts at the first step with the scene showing, STOP keeps the chain and resets its passes, and choosing a scene or pattern by hand (or COMMIT) turns it off (**Chain off: you picked a scene.**). Edits are one UNDO step each and are saved with the project (`patterns.json` version 3, which still reads versions 1 and 2). A chain has a guide tag.
@@ -210,7 +212,8 @@ version fixes bugs. The version itself is set in `version.properties`.
 - Share or save `.pak` files, import them from other apps, and a SysEx debug log.
 - `.pak` files interchangeable with the web version.
 
-[Unreleased]: https://github.com/n-drobyshevski/arc/compare/v0.3.5...HEAD
+[Unreleased]: https://github.com/n-drobyshevski/arc/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/n-drobyshevski/arc/compare/v0.3.5...v0.4.0
 [0.3.5]: https://github.com/n-drobyshevski/arc/compare/v0.3.0...v0.3.5
 [0.3.0]: https://github.com/n-drobyshevski/arc/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/n-drobyshevski/arc/releases/tag/v0.2.0
