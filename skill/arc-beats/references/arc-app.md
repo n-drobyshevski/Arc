@@ -78,7 +78,7 @@ In Live, open **Live tools** (the strip on the right edge) and tap the **Claude*
 - **A · 01** picks one pattern: the playing pattern of the group shown (the key's label follows the group and the pattern number).
 - **CHAIN** picks the project's chain, as one card of several scenes (see "Scenes and chains" in [beat-card.md](beat-card.md)): ask for it when you are to comment on an arrangement or continue a track. It works only when the project has a chain.
 - **SOUNDS** is **With my sound list**: when its light is orange, the share adds the user's sounds after the card, so you can choose from the sounds they really have (see "Sound list" in [beat-card.md](beat-card.md)). Ask for it when you build a beat or suggest sound swaps; without it you do not know their sounds.
-- **SHARE** sends what is picked, and **PASTE** reads the card on the clipboard (PASTE BEAT).
+- **SHARE** sends what is picked, and **PASTE** reads the card on the clipboard (PASTE BEAT). **Holding PASTE** opens a card file instead (.txt or .md); a card file can also be shared to Arc from the Claude app or Files, or opened with Arc, and on the web picked with **Open a card file** under PASTE BEAT or dropped on the page.
 
 After a share the glass reads **Waiting for Claude** until a card is pasted, with **STOP** to stop waiting. Older versions of Arc, and the web app, show the same choices as keys (**SHARE SCENE S02**, **SHARE A · 01**, **SHARE CHAIN**, **PASTE BEAT**) with a **With my sound list** tick box; the steps below name them that way.
 

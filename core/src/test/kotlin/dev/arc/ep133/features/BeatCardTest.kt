@@ -1380,6 +1380,15 @@ class BeatCardTest {
     )
 
     @Test
+    fun `card files are txt and md files`() {
+        assertTrue(BeatCards.isCardFile("Night bus.arcbeat.txt"))
+        assertTrue(BeatCards.isCardFile("beat.MD"))
+        assertTrue(BeatCards.isCardFile("beat.markdown"))
+        assertFalse(BeatCards.isCardFile("backup.pak"))
+        assertFalse(BeatCards.isCardFile("txt"))
+    }
+
+    @Test
     fun `a card keeps each pad's row name`() {
         assertEquals(mapOf(PhysicalPad(0, 5) to "shaker", PhysicalPad(0, 7) to "open hat", PhysicalPad(2, 9) to "chords"), silentCard.names)
     }

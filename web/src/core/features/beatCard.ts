@@ -1971,4 +1971,12 @@ function suggestSound(
   return first((_, name) => k.sound.test(name)) ?? open.map(([slot]) => slot).find(inBlock) ?? null
 }
 
-export const BeatCards = { VERSION, MAX_NAME, MAX_SCENES, TIDY_COMMENT, read, hasCard, write, fromPatterns, fromScenes, fxOf, padOf, applyFx, applyPad, resolveSounds, soundNames, soundList, silentPads, notesByPad, suggestSound, plan, planScenes } as const
+/** Whether a file named [name] may hold a beat card as text, picked or dropped on the page: .txt, .md or .markdown. */
+function isCardFile(name: string): boolean {
+  return /\.(txt|md|markdown)$/i.test(name)
+}
+
+/** The most of a card file Arc reads: a longer one is no card. */
+const MAX_CARD_FILE = 1 << 20
+
+export const BeatCards = { VERSION, MAX_NAME, MAX_SCENES, TIDY_COMMENT, read, hasCard, write, fromPatterns, fromScenes, fxOf, padOf, applyFx, applyPad, resolveSounds, soundNames, soundList, silentPads, notesByPad, suggestSound, isCardFile, MAX_CARD_FILE, plan, planScenes } as const

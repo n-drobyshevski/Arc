@@ -120,6 +120,8 @@ class ClaudeUi(
     val onShareChain: () -> Unit = {},
     val onSharePattern: (group: Int) -> Unit = {},
     val onPaste: () -> Unit = {},
+    /** PASTE held: a .txt or .md file with a beat card in it, from the system's file picker. */
+    val onOpenFile: () -> Unit = {},
     val onGetSkill: () -> Unit = {},
     val onLearn: () -> Unit = {},
     /** What was shared to Claude and not yet answered ("Scene S02", "A \u00B7 01", "Chain"); null when no reply is awaited. */

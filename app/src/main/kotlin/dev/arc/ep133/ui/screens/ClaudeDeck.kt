@@ -53,7 +53,7 @@ private enum class Pick { SCENE, PATTERN, CHAIN }
  * SCENE, the pattern (A · 01) and CHAIN pick what goes (lit navy; one with
  * nothing to share is faded, CHAIN only with a chain), SOUNDS switches the
  * sound list on (its light orange), SHARE sends the pick and PASTE brings a
- * card in. The two links follow.
+ * card in (held, it opens a .txt or .md card file). The two links follow.
  */
 @Composable
 internal fun ClaudeDeck(claude: ClaudeUi, group: Int) {
@@ -117,7 +117,13 @@ internal fun ClaudeDeck(claude: ClaudeUi, group: Int) {
                 enabled = !empty,
             )
         }
-        add { DeckKey(DeckGlyph.PASTE, ClaudeText.KEY_PASTE, ClaudeText.PASTE_BEAT_NAME, claude.onPaste, style = DeckStyle.SIGNAL) }
+        // Held, PASTE opens a card file instead (a .txt or .md Claude gave as a file).
+        add {
+            DeckKey(
+                DeckGlyph.PASTE, ClaudeText.KEY_PASTE, ClaudeText.PASTE_BEAT_NAME, claude.onPaste, style = DeckStyle.SIGNAL,
+                onLongClick = claude.onOpenFile, longClickLabel = ClaudeText.OPEN_CARD_FILE,
+            )
+        }
     }
     DeckStrip(keys)
     GridPlate { LinkRow(ClaudeText.GET_SKILL, claude.onGetSkill) }

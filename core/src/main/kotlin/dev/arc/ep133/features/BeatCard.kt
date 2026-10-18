@@ -272,6 +272,14 @@ object BeatCards {
      */
     fun read(text: String): CardRead = Reader(text.removePrefix("\uFEFF").lines()).run()
 
+    /** Whether a file named [name] may hold a beat card as text, shared to Arc, opened with it or picked under PASTE: .txt, .md or .markdown. */
+    fun isCardFile(name: String): Boolean = CARD_FILE.containsMatchIn(name)
+
+    /** The most of a card file Arc reads: a longer one is no card (the text is checked by [hasCard] all the same). */
+    const val MAX_CARD_FILE = 1 shl 20
+
+    private val CARD_FILE = Regex("\\.(txt|md|markdown)$", RegexOption.IGNORE_CASE)
+
     /** Whether [text] has an ARC BEAT line: what [read] starts from, so a text without one is no card at all (not a card with a mistake). */
     fun hasCard(text: String): Boolean = text.removePrefix("\uFEFF").lines().any { CARD_START.containsMatchIn(trim(it)) }
 

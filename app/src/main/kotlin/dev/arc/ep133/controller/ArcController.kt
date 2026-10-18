@@ -5344,6 +5344,19 @@ class ArcController(
      * toast says so. Nothing changes until [importBeat]. Works offline and while stopped or playing: the plan reads
      * the patterns once they are loaded, so a card never lands on a project's notes before they are read.
      */
+    /**
+     * A .txt or .md file with a beat card in it (shared to arc, opened with it, or picked with PASTE held): its text, as
+     * [receiveBeat] takes it. A file that can't be read, or is longer than a card ([BeatCards.MAX_CARD_FILE]), has none.
+     */
+    fun receiveBeatFile(uri: android.net.Uri): Job = scope.launch {
+        val text = withContext(Dispatchers.IO) {
+            runCatching { dev.arc.ep133.files.Files.read(context, uri) }.getOrNull()
+                ?.takeIf { it.size <= dev.arc.ep133.features.BeatCards.MAX_CARD_FILE }
+                ?.toString(Charsets.UTF_8)
+        }
+        receiveBeat(text)
+    }
+
     fun receiveBeat(text: String?) {
         if (text == null || !dev.arc.ep133.features.BeatCards.hasCard(text)) {
             toast(dev.arc.ep133.text.ClaudeText.NO_CARD)
@@ -7108,6 +7121,8 @@ class ArcController(
     /** Import a document by URI. Runs in the app scope, so activity recreation cannot cut it short. */
     fun importUri(uri: android.net.Uri): Job = scope.launch {
         val (name, modified) = withContext(Dispatchers.IO) { dev.arc.ep133.files.Files.describe(context, uri) }
+        // A beat card file opened with arc, whatever type its provider reported.
+        if (dev.arc.ep133.features.BeatCards.isCardFile(name)) return@launch receiveBeatFile(uri).join()
         import(name, modified) { dev.arc.ep133.files.Files.read(context, uri) }.join()
     }
 

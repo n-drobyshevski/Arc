@@ -182,9 +182,14 @@ export function App(props: AppProps): JSX.Element {
     const offDrop = typeof document === 'undefined'
       ? () => undefined
       : attachDrop(document.body, { onFiles: (f) => void c.importFiles(f), filter: (f) => isPakName(f.name) })
+    // A beat card file (.txt or .md, as Claude may give one) dropped anywhere opens on the card's sheet.
+    const offCardDrop = typeof document === 'undefined'
+      ? () => undefined
+      : attachDrop(document.body, { onFiles: (f) => void c.receiveBeatFile(f[0]!), filter: (f) => BeatCards.isCardFile(f.name) })
     return () => {
       off()
       offDrop()
+      offCardDrop()
       nav.setBackGuard(() => false)
       if (!props.nav) nav.dispose()
     }
@@ -1420,6 +1425,7 @@ function claudeUi(c: ArcController): ClaudeActions | null {
     onShareScene: () => void c.shareBeat(null),
     onSharePattern: (g) => void c.shareBeat(g),
     onPaste: () => void c.pasteBeat(),
+    onOpenFile: () => void c.openBeatFile(),
     learnUrl: learnUrl(),
   }
 }

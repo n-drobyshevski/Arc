@@ -87,7 +87,9 @@ object ClaudeText {
     const val COPY_THEN_PASTE = "Copy Claude's reply, then press PASTE"
     /** The glass's dismiss word, beside the head. */
     const val STOP = "Stop"
-    const val PICK_HINT = "Pick what to share, then press SHARE."
+    const val PICK_HINT = "Pick what to share, then press SHARE. Hold PASTE to open a card file."
+    /** PASTE held (Android), or the web's link under PASTE BEAT: a .txt or .md file with Claude's card in it. */
+    const val OPEN_CARD_FILE = "Open a card file"
     /** The keys' words (upper-cased where shown); the pattern's key says its place, "A · 01". */
     const val KEY_SCENE = "Scene"
     const val KEY_CHAIN = "Chain"

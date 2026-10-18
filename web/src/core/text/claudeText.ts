@@ -111,6 +111,8 @@ export const ClaudeText = {
     return `Share ${place(group, n)} with Claude` + (empty ? NOTHING_TO_SHARE : '')
   },
   PASTE_BEAT_NAME: 'Paste a beat card from the clipboard',
+  /** The link under PASTE BEAT (Android: PASTE held): a .txt or .md file with Claude's card in it. */
+  OPEN_CARD_FILE: 'Open a card file',
   NOTHING_TO_SHARE,
 
   /** SHARE CHAIN: the project's chain as a card of scenes, and the same key for screen readers ("Share the chain with Claude, 4 steps"). */

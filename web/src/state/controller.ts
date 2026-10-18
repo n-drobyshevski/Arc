@@ -98,6 +98,7 @@ import { WebText } from '../core/text/webText'
 import { ktTrim } from '../core/util/kotlinText'
 import { APP_BUILD } from '../version'
 import { describeFile, PAK_ACCEPT, WAV_ACCEPT, type ReadableFile } from '../platform/files/pick'
+import { BeatCards } from '../core/features/beatCard'
 import { logFileName } from '../platform/files/save'
 import type { FileData } from '../platform/files/save'
 import { FileListTarget, type ExternalTarget } from '../platform/storage/external'
@@ -2857,6 +2858,19 @@ export class ArcController {
   async receiveBeat(text: string | null): Promise<void> {
     this._beatPasting.value = false
     await this.pattern.receiveBeat(text)
+  }
+
+  /** Open a card file (the link under PASTE BEAT): a .txt or .md with Claude's card in it, from the file picker. */
+  async openBeatFile(): Promise<void> {
+    const files = await this.deps.files.pick({ accept: '.txt,.md,.markdown,text/plain,text/markdown' })
+    const file = files[0]
+    if (file) await this.receiveBeatFile(file)
+  }
+
+  /** A card file picked or dropped on the page: its text, as receiveBeat takes it; one longer than a card has none. */
+  async receiveBeatFile(file: { readonly size: number; text(): Promise<string> }): Promise<void> {
+    const text = file.size <= BeatCards.MAX_CARD_FILE ? await file.text().catch(() => null) : null
+    await this.receiveBeat(text)
   }
 
   /** PASTE BEAT's box closed without a paste. */

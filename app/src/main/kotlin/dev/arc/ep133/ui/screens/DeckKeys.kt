@@ -1,7 +1,7 @@
 package dev.arc.ep133.ui.screens
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -71,7 +71,8 @@ internal enum class DeckGlyph { DOT, PLAY, STOP, SHARE, SAVE, SEND, DELETE, SCEN
 /**
  * A key of the strip: a cap with [glyph] over its [label], read as
  * [description]. With [selected] it is one of a set of choices (read as
- * selected or not), with [checked] a switch (read as on or off).
+ * selected or not), with [checked] a switch (read as on or off); [onLongClick]
+ * adds a hold (PASTE's: open a card file).
  */
 @Composable
 internal fun RowScope.DeckKey(
@@ -84,6 +85,9 @@ internal fun RowScope.DeckKey(
     glyphColor: Color? = null,
     selected: Boolean? = null,
     checked: Boolean? = null,
+    /** A long press, and its name for screen readers (an action of the key's). */
+    onLongClick: (() -> Unit)? = null,
+    longClickLabel: String? = null,
 ) {
     val c = LocalArcColors.current
     val source = remember { MutableInteractionSource() }
@@ -99,7 +103,14 @@ internal fun RowScope.DeckKey(
             .padding(bottom = 3.dp)
             .heightIn(min = 56.dp)
             .cap(face, edge, RoundedCornerShape(8.dp), capPress(pressed && enabled), alpha = if (enabled) 1f else 0.45f)
-            .clickable(source, indication = null, enabled = enabled, onClick = onClick)
+            .combinedClickable(
+                interactionSource = source,
+                indication = null,
+                enabled = enabled,
+                onLongClickLabel = longClickLabel,
+                onLongClick = onLongClick,
+                onClick = onClick,
+            )
             .semantics(mergeDescendants = true) {
                 contentDescription = description
                 role = when {
