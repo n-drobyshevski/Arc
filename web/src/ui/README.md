@@ -166,7 +166,11 @@ it matches Android at 360px and gives way only on a narrower screen.
   kebab-case (`--shell`, `--key`, `--key-edge`, `--ink`, `--graphite`,
   `--signal`, `--navy`, `--on-navy`, `--plate`, `--line`, `--ok`, `--danger`,
   `--display*`, `--tab-off`); derived ones (`--scrim`, `--row-pressed`,
-  `--field-rule`, ...); fixed (`--tag-face`, `--coach-yellow`, `--guide-*`).
+  `--field-rule`, ...); `--tag-face` / `--tag-ink` and `--coach` / `--on-coach`
+  (`--coach-yellow` is an alias); fixed (`--guide-*`). The skins (`html[data-skin]`,
+  EP40 and EP1320; theme.ts sets it) redefine every colour, light and dark, after
+  the EP-133's blocks, here, in cap.css and desk.css; test/ui/theme.test.ts checks
+  them against Kotlin's palettes.
   Sizes `--size-*` (ArcType), tracking `--track-*`, weights `--weight-*`,
   radii `--radius-*`, spacing `--space-N` (N = dp), layout (`--column-max`
   560, `--wide-max` 720, `--gutter-start`, `--gutter-end`, `--tap-min`),
@@ -176,7 +180,7 @@ it matches Android at 360px and gives way only on a narrower screen.
   Sample Tool draws it), pressed on `:active`, `[data-down]`, `.is-down` and
   `[aria-pressed=true]`. Each element sets `--cap-face` (and `--cap-ink`,
   `--cap-edge`, `--cap-glow`); `--hw-*` are the hardware colours, `--ko-*`
-  the Guide's K.O. II illustration (KoColors; only `--ko-edge` changes in the dark). Key,
+  the Guide's K.O. II illustration (KoColors; only `--ko-edge` changes in the dark), both per skin. Key,
   IconBlock, Segmented, SectionMenu, PlayKey and the Live pads, keys and
   group keys use it.
   Never hard-code a theme colour: both themes switch by redefining tokens.

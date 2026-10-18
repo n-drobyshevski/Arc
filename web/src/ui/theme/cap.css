@@ -59,6 +59,8 @@
   --ko-light-face: #EEEDE9;
   --ko-light-edge: #A9A8A2;
   --ko-light-ink: #6A6B6E;
+  /* A selected pale key's letter (the group key picked), in the pads' dark. */
+  --ko-picked-ink: #232425;
   /* A two-tier key's pale lower half: its ink, and the rule under ERASE. */
   --ko-tier-ink: #5A5B5D;
   --ko-tier-line: #D0CFCA;
@@ -104,6 +106,146 @@
     --hw-dark-edge: #606165; /* stands out from the dark body */
     --ko-edge: #0E0F10;
   }
+}
+
+/* The skins (Cap.kt Ep40*HwColors / Ep40KoColors, Ep1320*): the keys and the
+ * drawn device in each skin's colours, after the EP-133 blocks as in tokens.css.
+ * In the dark theme only the body, the unlit LED and the drawing's edge change. */
+:root[data-skin=EP40] {
+  --hw-dark-face: #EEEBE2;
+  --hw-dark-edge: #B3A891;
+  --hw-dark-ink: #03382A;
+  --hw-dark-dim: #4F6B5C;
+  --hw-light-face: #DCD3C0;
+  --hw-light-edge: #A99D84;
+  --hw-light-ink: #0B4A36;
+  --hw-body: #B3A78B;
+  --hw-led-off: #A39880;
+  --ko-body: #C9BEA9;
+  --ko-edge: #A99D84;
+  --ko-panel: #ECEBE6;
+  --ko-label: #0B4A36;
+  --ko-grille: #BEB39C;
+  --ko-grille-hole: #121312;
+  --ko-screen: #0E3326;
+  --ko-screen-ink: #6FD9AE;
+  --ko-screen-tag: #EAF6EF;
+  --ko-screen-tag-ink: #0E2B20;
+  --ko-dark-face: #EEEBE2;
+  --ko-dark-edge: #B3A891;
+  --ko-dark-ink: #03382A;
+  --ko-light-face: #DCD3C0;
+  --ko-light-edge: #A99D84;
+  --ko-light-ink: #0B4A36;
+  --ko-picked-ink: #03382A;
+  --ko-tier-ink: #0B4A36;
+  --ko-tier-line: #CFC4AE;
+  --ko-grey-face: #00503A;
+  --ko-grey-edge: #00301F;
+  --ko-grey-ink: #F4F1E8;
+  --ko-loop-face: #147C4B;
+  --ko-led-off: #A39880;
+  --ko-led-on: #F05A24;
+  --ko-port-light: #ECEBE6;
+  --ko-port-light-ink: #0B4A36;
+  --ko-port-dark: #00503A;
+  --ko-port-dark-ink: #F4F1E8;
+  --ko-port-ink: #0B4A36;
+  --ko-y-tag: #003A28;
+  --ko-fader-track: #121312;
+  --ko-fader-edge: #5A5444;
+  --ko-knob-white: #EAE9E5;
+  --ko-knob-white-edge: #BDBCB7;
+  --ko-knob-white-cap: #F7F6F3;
+  --ko-knob-white-cap-edge: #D3D2CD;
+  --ko-knob-orange: #F44E0F;
+  --ko-knob-orange-edge: #A8340A;
+  --ko-knob-orange-cap: #F86A30;
+  --ko-knob-orange-cap-edge: #D2460D;
+  --ko-knob-black: #003A28;
+  --ko-knob-black-edge: #00180F;
+  --ko-knob-black-cap: #0B4A36;
+  --ko-knob-black-cap-edge: #002A1C;
+}
+:root[data-skin=EP40][data-theme=dark] {
+  --hw-dark-face: #EEEBE2;
+  --hw-dark-edge: #B3A891;
+  --hw-dark-ink: #03382A;
+  --hw-dark-dim: #4F6B5C;
+  --hw-light-face: #DCD3C0;
+  --hw-light-edge: #A99D84;
+  --hw-light-ink: #0B4A36;
+  --hw-body: #22332A;
+  --hw-led-off: #4A5C51;
+  --ko-edge: #06100C;
+}
+:root[data-skin=EP1320] {
+  --hw-dark-face: #3E1E18;
+  --hw-dark-edge: #5A3329;
+  --hw-dark-ink: #E8DCC8;
+  --hw-dark-dim: #B9A58A;
+  --hw-light-face: #E4D6C4;
+  --hw-light-edge: #B09C78;
+  --hw-light-ink: #3A2418;
+  --hw-body: #8A7848;
+  --hw-led-off: #7A6A48;
+  --ko-body: #A8945A;
+  --ko-edge: #7E6C3A;
+  --ko-panel: #E4D6C4;
+  --ko-label: #3A2418;
+  --ko-grille: #7A4A2E;
+  --ko-grille-hole: #362017;
+  --ko-screen: #0E0B0A;
+  --ko-screen-ink: #F2553A;
+  --ko-screen-tag: #E8DCC8;
+  --ko-screen-tag-ink: #1A0E0B;
+  --ko-dark-face: #3E1E18;
+  --ko-dark-edge: #1E0E0B;
+  --ko-dark-ink: #E8DCC8;
+  --ko-light-face: #E4D6C4;
+  --ko-light-edge: #B09C78;
+  --ko-light-ink: #3A2418;
+  --ko-picked-ink: #3E1E18;
+  --ko-tier-ink: #3A2418;
+  --ko-tier-line: #CBBFA9;
+  --ko-grey-face: #1A2A25;
+  --ko-grey-edge: #0B1411;
+  --ko-grey-ink: #E8DCC8;
+  --ko-loop-face: #25312D;
+  --ko-led-off: #7A6A48;
+  --ko-led-on: #E8331F;
+  --ko-port-light: #D8D6D2;
+  --ko-port-light-ink: #3A2418;
+  --ko-port-dark: #2F3F3A;
+  --ko-port-dark-ink: #E8DCC8;
+  --ko-port-ink: #3A2418;
+  --ko-y-tag: #3A211C;
+  --ko-fader-track: #1D2925;
+  --ko-fader-edge: #5A4632;
+  --ko-knob-white: #E5DCCF;
+  --ko-knob-white-edge: #B8AC98;
+  --ko-knob-white-cap: #F0E8DC;
+  --ko-knob-white-cap-edge: #CFC3B0;
+  --ko-knob-orange: #B80D05;
+  --ko-knob-orange-edge: #7A0803;
+  --ko-knob-orange-cap: #C8281E;
+  --ko-knob-orange-cap-edge: #9A0F07;
+  --ko-knob-black: #3A211C;
+  --ko-knob-black-edge: #1A0E0B;
+  --ko-knob-black-cap: #4A2B24;
+  --ko-knob-black-cap-edge: #2A1712;
+}
+:root[data-skin=EP1320][data-theme=dark] {
+  --hw-dark-face: #3E1E18;
+  --hw-dark-edge: #5A3329;
+  --hw-dark-ink: #E8DCC8;
+  --hw-dark-dim: #B9A58A;
+  --hw-light-face: #E4D6C4;
+  --hw-light-edge: #B09C78;
+  --hw-light-ink: #3A2418;
+  --hw-body: #544C2A;
+  --hw-led-off: #5C5036;
+  --ko-edge: #0E0F10;
 }
 
 /* A cap's travel, animatable (a registered number; inherits: false, so a cap inside a cap keeps its own). */

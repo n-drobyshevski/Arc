@@ -53,7 +53,7 @@ import { choiceOf as pianoChoiceOf, fits as pianoFits, switchShown } from '../..
 import { FeatureText } from '../../core/text/featureText'
 import { Format } from '../../core/text/format'
 import { MirrorText } from '../../core/text/mirrorText'
-import { SettingsText, THEME_CHOICES, type ThemeChoice } from '../../core/text/settingsText'
+import { SettingsText, SKIN_CHOICES, THEME_CHOICES, type SkinChoice, type ThemeChoice } from '../../core/text/settingsText'
 import { WebText } from '../../core/text/webText'
 import type { AppSettings } from '../../platform/storage/settings'
 import type { UiState } from '../../state/types'
@@ -77,6 +77,8 @@ export interface SettingsScreenProps {
   padOrder: PadOrder
   version: string
   onTheme: (t: ThemeChoice) => void
+  /** The EP the app is dressed as (an addition). */
+  onSkin?: (s: SkinChoice) => void
   onAutoConnect: (on: boolean) => void
   onKeepScreenOn: (on: boolean) => void
   /** How many backups a new Keep value would delete now. */
@@ -410,6 +412,21 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
                       onSelect={(i) => {
                         const c = THEME_CHOICES[i]
                         if (c !== undefined) props.onTheme(c)
+                      }}
+                      labelledBy={t}
+                    />
+                  )}
+                />
+                <SettingRow
+                  title={SettingsText.SKIN}
+                  control={({ titleId: t }) => (
+                    <Segmented
+                      compact
+                      options={SKIN_CHOICES.map((s) => SettingsText.skin(s))}
+                      selected={Math.max(0, SKIN_CHOICES.indexOf(settings.skin))}
+                      onSelect={(i) => {
+                        const s = SKIN_CHOICES[i]
+                        if (s !== undefined) props.onSkin?.(s)
                       }}
                       labelledBy={t}
                     />

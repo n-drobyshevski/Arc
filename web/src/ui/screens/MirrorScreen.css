@@ -491,7 +491,7 @@
   stroke-opacity: 0.8;
 }
 .live-keys__key.is-on {
-  --cap-ink: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--ko-dark-face));
+  --cap-ink: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--ko-picked-ink));
 }
 /* The group's pattern in the glyph's place (Kotlin GroupKey's number): "03", or "03→05" blinking
  * while a pick waits, the key ringed in signal orange. */

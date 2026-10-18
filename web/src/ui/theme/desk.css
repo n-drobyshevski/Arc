@@ -47,6 +47,12 @@
   }
 }
 
+/* The skins' desks: a shade under each skin's page. */
+:root[data-skin=EP40] { --desk-page: #A99F88; }
+:root[data-skin=EP40][data-theme=dark] { --desk-page: #08100C; }
+:root[data-skin=EP1320] { --desk-page: #9C8A55; }
+:root[data-skin=EP1320][data-theme=dark] { --desk-page: #0B0F0D; }
+
 @media (min-width: 1024px) {
   :root { --top-bar-max: 1200px; }
 }

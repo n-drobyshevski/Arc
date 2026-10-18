@@ -113,6 +113,8 @@ val Ep40KoColors = KoColors(
     lightFace = Color(0xFFDCD3C0),
     lightEdge = Color(0xFFA99D84),
     lightInk = Color(0xFF0B4A36),
+    // The pads are cream here: the picked letter takes their figures' green.
+    pickedInk = Color(0xFF03382A),
     tierInk = Color(0xFF0B4A36),
     tierLine = Color(0xFFCFC4AE),
     greyFace = Color(0xFF00503A),
@@ -174,6 +176,7 @@ val Ep1320KoColors = KoColors(
     lightFace = Color(0xFFE4D6C4),
     lightEdge = Color(0xFFB09C78),
     lightInk = Color(0xFF3A2418),
+    pickedInk = Color(0xFF3E1E18),
     tierInk = Color(0xFF3A2418),
     tierLine = Color(0xFFCBBFA9),
     greyFace = Color(0xFF1A2A25),
@@ -246,6 +249,8 @@ data class KoColors(
     val lightFace: Color = Color(0xFFEEEDE9),
     val lightEdge: Color = Color(0xFFA9A8A2),
     val lightInk: Color = Color(0xFF6A6B6E),
+    /** A selected pale key's letter (the group key picked): the K.O. II prints it in its pads' dark. */
+    val pickedInk: Color = Color(0xFF232425),
     /** A two-tier key's pale lower half: its ink, and the rule under ERASE. */
     val tierInk: Color = Color(0xFF5A5B5D),
     val tierLine: Color = Color(0xFFD0CFCA),

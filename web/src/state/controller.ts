@@ -92,7 +92,7 @@ import type { WebLatencyHint } from '../core/text/latencyText'
 import { MirrorText } from '../core/text/mirrorText'
 import { DATE_TIME_PATTERN, DAY_PATTERN, MONTH_DAY_PATTERN, date as formatDate } from '../core/text/format'
 import { BackupDevice, fileNameFor, importTitle, toPrune, type BackupRecord, type RestoreSelection } from '../core/text/libraryRules'
-import { SettingsText, type ThemeChoice } from '../core/text/settingsText'
+import { SettingsText, type SkinChoice, type ThemeChoice } from '../core/text/settingsText'
 import { Strings } from '../core/text/strings'
 import { WebText } from '../core/text/webText'
 import { ktTrim } from '../core/util/kotlinText'
@@ -2454,6 +2454,10 @@ export class ArcController {
 
   setTheme(t: ThemeChoice): void {
     this.changeSettings((s) => ({ ...s, theme: t }))
+  }
+
+  setSkin(s: SkinChoice): void {
+    this.changeSettings((cur) => ({ ...cur, skin: s }))
   }
 
   setAutoConnect(on: boolean): void {

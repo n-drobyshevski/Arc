@@ -20,6 +20,22 @@ export type ThemeChoice = (typeof ThemeChoice)[keyof typeof ThemeChoice]
 /** ThemeChoice.entries, in declaration order. */
 export const THEME_CHOICES: readonly ThemeChoice[] = [ThemeChoice.SYSTEM, ThemeChoice.LIGHT, ThemeChoice.DARK]
 
+/**
+ * The skin the app wears, after one of the EP family (an addition to the web
+ * version): the K.O. II's grey and orange, the EP-40 Riddim's cream and dub
+ * green, or the EP-1320 Medieval's olive gold, parchment and oxblood. Each
+ * comes light or dark, as [ThemeChoice] says.
+ */
+export const SkinChoice = {
+  EP133: 'EP133',
+  EP40: 'EP40',
+  EP1320: 'EP1320',
+} as const
+export type SkinChoice = (typeof SkinChoice)[keyof typeof SkinChoice]
+
+/** SkinChoice.entries, in declaration order. */
+export const SKIN_CHOICES: readonly SkinChoice[] = [SkinChoice.EP133, SkinChoice.EP40, SkinChoice.EP1320]
+
 /** null keeps every backup. */
 const KEEP_CHOICES: readonly (number | null)[] = Object.freeze([null, 5, 10, 20])
 
@@ -39,6 +55,17 @@ export const SettingsText = {
         return 'Light'
       case ThemeChoice.DARK:
         return 'Dark'
+    }
+  },
+  SKIN: 'Skin',
+  skin(s: SkinChoice): string {
+    switch (s) {
+      case SkinChoice.EP133:
+        return 'EP-133'
+      case SkinChoice.EP40:
+        return 'EP-40'
+      case SkinChoice.EP1320:
+        return 'EP-1320'
     }
   },
 

@@ -130,6 +130,164 @@
   }
 }
 
+/* ---- Colours: the skins (ArcTheme.kt Ep40*ArcColors, Ep1320*ArcColors) ----
+ * theme.ts sets html[data-skin] with data-theme. A skin's light block sets every
+ * colour, so it wins over the EP-133 dark blocks above by coming after them; its
+ * dark block wins over both by its extra attribute. The EP-133 has no blocks:
+ * it is the :root ones. test/ui/theme.test.ts checks every value against Kotlin. */
+:root[data-skin=EP40] {
+  --shell: #D3C9B5;
+  --key: #ECE8DE;
+  --key-edge: #B3A891;
+  --ink: #0B4A36;
+  --graphite: #4A5548;
+  --signal: #F05A24;
+  --signal-edge: #B8400F;
+  --on-signal: #FFFFFF;
+  --display: #0E3326;
+  --display-ink: #6FD9AE;
+  --display-dim: #3E9273;
+  --segment-off: #1C5240;
+  --danger: #7F1616;
+  --warn: #F2C230;
+  --navy: #00503A;
+  --on-navy: #F4F1E8;
+  --tab-off: #E2DCCB;
+  --on-tab-off: #3F5547;
+  --plate: #CFC4AE;
+  --line: #10261D;
+  --ok: #79B84A;
+  --on-ok: #0E2B20;
+  --piano-white: #F2EFE6;
+  --piano-black: #0B2A20;
+  --on-piano-black: #9FD8BA;
+  --key-out: #CDC6B5;
+  --key-out-black: #2E4238;
+  --piano-line: #0B2A20;
+  --piano-signal: #C2410F;
+  --piano-digit: #4A5548;
+  --tag-face: #3EB0D1;
+  --tag-ink: #0E2B20;
+  --coach: #F2C230;
+  --on-coach: #0B4A36;
+  --hatch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='9'%3E%3Cpath d='M-1 1L1 -1M0 9L9 0M8 10L10 8' stroke='%23B3A891' stroke-width='1'/%3E%3C/svg%3E");
+  --hatch-7: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='7'%3E%3Cpath d='M-1 1L1 -1M0 7L7 0M6 8L8 6' stroke='%23B3A891' stroke-width='1'/%3E%3C/svg%3E");
+}
+:root[data-skin=EP40][data-theme=dark] {
+  --shell: #0E1813;
+  --key: #1A2A22;
+  --key-edge: #2C4136;
+  --ink: #E8DFCC;
+  --graphite: #9DA993;
+  --signal: #F05A24;
+  --signal-edge: #B8400F;
+  --on-signal: #FFFFFF;
+  --display: #0E3326;
+  --display-ink: #6FD9AE;
+  --display-dim: #3E9273;
+  --segment-off: #1C5240;
+  --danger: #FF9C8F;
+  --warn: #F2C230;
+  --navy: #9FD8BA;
+  --on-navy: #0B2A1E;
+  --tab-off: #24352C;
+  --on-tab-off: #A8B9A9;
+  --plate: #1F2E26;
+  --line: #06100C;
+  --ok: #1F6B47;
+  --on-ok: #E8DFCC;
+  --piano-white: #4A5C51;
+  --piano-black: #08110D;
+  --on-piano-black: #9FD8BA;
+  --key-out: #3A4A41;
+  --key-out-black: #22302A;
+  --piano-line: #A8B9A9;
+  --piano-signal: #FF9A6E;
+  --piano-digit: #B5C2B4;
+  --tag-face: #3EB0D1;
+  --tag-ink: #0E2B20;
+  --coach: #F2C230;
+  --on-coach: #0B2A20;
+  --hatch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='9'%3E%3Cpath d='M-1 1L1 -1M0 9L9 0M8 10L10 8' stroke='%232C4136' stroke-width='1'/%3E%3C/svg%3E");
+  --hatch-7: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='7'%3E%3Cpath d='M-1 1L1 -1M0 7L7 0M6 8L8 6' stroke='%232C4136' stroke-width='1'/%3E%3C/svg%3E");
+}
+:root[data-skin=EP1320] {
+  --shell: #D0B97E;
+  --key: #E4D6C4;
+  --key-edge: #A08A50;
+  --ink: #3A2418;
+  --graphite: #524228;
+  --signal: #B8301E;
+  --signal-edge: #7E1B12;
+  --on-signal: #FFFFFF;
+  --display: #0E0B0A;
+  --display-ink: #F2553A;
+  --display-dim: #9A6A3A;
+  --segment-off: #33251F;
+  --danger: #7A1418;
+  --warn: #E8A13A;
+  --navy: #2E4B3E;
+  --on-navy: #E8DCC8;
+  --tab-off: #DCD8CF;
+  --on-tab-off: #5A4632;
+  --plate: #A8945A;
+  --line: #3A2418;
+  --ok: #7FAE8A;
+  --on-ok: #0E1A12;
+  --piano-white: #EFE5D3;
+  --piano-black: #2A1410;
+  --on-piano-black: #E8A13A;
+  --key-out: #CBBFA9;
+  --key-out-black: #4A352C;
+  --piano-line: #2A1410;
+  --piano-signal: #B8301E;
+  --piano-digit: #5A4632;
+  --tag-face: #9A8550;
+  --tag-ink: #1A0E0B;
+  --coach: #E8A13A;
+  --on-coach: #2A1410;
+  --hatch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='9'%3E%3Cpath d='M-1 1L1 -1M0 9L9 0M8 10L10 8' stroke='%23A08A50' stroke-width='1'/%3E%3C/svg%3E");
+  --hatch-7: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='7'%3E%3Cpath d='M-1 1L1 -1M0 7L7 0M6 8L8 6' stroke='%23A08A50' stroke-width='1'/%3E%3C/svg%3E");
+}
+:root[data-skin=EP1320][data-theme=dark] {
+  --shell: #121714;
+  --key: #25312D;
+  --key-edge: #34433C;
+  --ink: #E8DCC8;
+  --graphite: #A89C84;
+  --signal: #E8442C;
+  --signal-edge: #A83020;
+  --on-signal: #FFFFFF;
+  --display: #0E0B0A;
+  --display-ink: #F2553A;
+  --display-dim: #9A6A3A;
+  --segment-off: #33251F;
+  --danger: #FF948A;
+  --warn: #E8A13A;
+  --navy: #A9C4B0;
+  --on-navy: #13201A;
+  --tab-off: #26332D;
+  --on-tab-off: #A9B3A0;
+  --plate: #544C2A;
+  --line: #0A0E0C;
+  --ok: #245A38;
+  --on-ok: #F2E8D6;
+  --piano-white: #5A5246;
+  --piano-black: #0E0A08;
+  --on-piano-black: #E8A13A;
+  --key-out: #48413A;
+  --key-out-black: #2E2620;
+  --piano-line: #BDB29E;
+  --piano-signal: #FF8F70;
+  --piano-digit: #C4B8A2;
+  --tag-face: #9A8550;
+  --tag-ink: #1A0E0B;
+  --coach: #E8A13A;
+  --on-coach: #2A1410;
+  --hatch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='9'%3E%3Cpath d='M-1 1L1 -1M0 9L9 0M8 10L10 8' stroke='%2334433C' stroke-width='1'/%3E%3C/svg%3E");
+  --hatch-7: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='7'%3E%3Cpath d='M-1 1L1 -1M0 7L7 0M6 8L8 6' stroke='%2334433C' stroke-width='1'/%3E%3C/svg%3E");
+}
+
 :root {
   /* ---- Derived colours (theme-independent definitions over the tokens above) ---- */
   /* "page" is the Kotlin shell: page and sheet background. */

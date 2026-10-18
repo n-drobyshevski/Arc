@@ -49,6 +49,7 @@ describe('SettingsStore', () => {
     const s = new SettingsStore(memoryStorage())
     expect(s.settings).toEqual({
       theme: 'SYSTEM',
+      skin: 'EP133',
       autoConnect: true,
       keepScreenOn: true,
       keepLast: null,
@@ -141,6 +142,7 @@ describe('SettingsStore', () => {
     const all = new SettingsStore(memoryStorage({ [SETTINGS_KEY]: writeSettings(DEFAULT_SETTINGS) }))
     expect(Object.keys(all.toIndex())).toEqual([
       'app.theme',
+      'app.skin',
       'app.autoConnect',
       'app.keepScreenOn',
       'app.keepLast',
@@ -200,6 +202,21 @@ describe('SettingsStore', () => {
     expect(settingsFromIndex({ 'app.factoryKit': 'ep133' }, s.settings).factoryKit).toBe('ep133')
     expect(settingsFromIndex({ 'app.factoryKit': 'ep40' }, s.settings).factoryKit).toBe('ep40')
     expect(settingsFromIndex({ 'app.factoryKit': 'nope' }, s.settings).factoryKit).toBe('ep1320')
+  })
+
+  it('keeps the skin by its name, an unknown one read as the EP-133\'s', () => {
+    const storage = memoryStorage()
+    const s = new SettingsStore(storage)
+    expect(s.settings.skin).toBe('EP133')
+    s.update((c) => ({ ...c, skin: 'EP40' }))
+    expect(JSON.parse(storage.getItem(SETTINGS_KEY)!)).toEqual({ skin: 'EP40' })
+    expect(s.toIndex()).toEqual({ 'app.skin': 'EP40' })
+    expect(new SettingsStore(storage).settings.skin).toBe('EP40')
+    expect(readSettings(JSON.stringify({ skin: 'EP1320' })).skin).toBe('EP1320')
+    expect(readSettings(JSON.stringify({ skin: 'OP1' })).skin).toBe('EP133')
+    expect(settingsFromIndex({ 'app.skin': 'EP1320' }, s.settings).skin).toBe('EP1320')
+    // A skin arc doesn't know, from another version: left as it is.
+    expect(settingsFromIndex({ 'app.skin': 'OP1' }, s.settings).skin).toBe('EP40')
   })
 
   it('keeps the Keys view per window shape and the piano size, Auto stored as 0', () => {

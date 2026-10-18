@@ -35,11 +35,13 @@ import { SampleSource } from '../../core/features/sampleSource'
 import { Timing, TimingSettings } from '../../core/features/pattern'
 import { SwitchTime } from '../../core/features/scenes'
 import { Tempo } from '../../core/features/tempo'
-import { ThemeChoice } from '../../core/text/settingsText'
+import { SkinChoice, ThemeChoice } from '../../core/text/settingsText'
 
 /** The settings page's choices (an addition to the web version). */
 export interface AppSettings {
   readonly theme: ThemeChoice
+  /** The EP the app is dressed as, light or dark as [theme] says. */
+  readonly skin: SkinChoice
   readonly autoConnect: boolean
   readonly keepScreenOn: boolean
   /** How many backups to keep; null keeps all. */
@@ -141,6 +143,7 @@ function ktFloat(v: number): string {
 
 export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   theme: ThemeChoice.SYSTEM,
+  skin: SkinChoice.EP133,
   autoConnect: true,
   keepScreenOn: true,
   keepLast: null,
@@ -176,6 +179,7 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
 /** Every setting's key, in Android's order (SettingsStore.values()). */
 export const SETTING_KEYS = Object.freeze([
   'theme',
+  'skin',
   'autoConnect',
   'keepScreenOn',
   'keepLast',
@@ -324,6 +328,11 @@ export function ktToBooleanStrictOrNull(s: string): boolean | null {
   return s === 'true' ? true : s === 'false' ? false : null
 }
 
+/** SkinChoice.valueOf, or null. */
+function skinOf(v: unknown): SkinChoice | null {
+  return v === SkinChoice.EP133 || v === SkinChoice.EP40 || v === SkinChoice.EP1320 ? v : null
+}
+
 /** ThemeChoice.valueOf, or null. */
 function themeOf(v: unknown): ThemeChoice | null {
   return v === ThemeChoice.SYSTEM || v === ThemeChoice.LIGHT || v === ThemeChoice.DARK ? v : null
@@ -352,6 +361,7 @@ export function readSettings(raw: string | null): AppSettings {
   const keep = o.keepLast
   return {
     theme: themeOf(o.theme) ?? ThemeChoice.SYSTEM,
+    skin: skinOf(o.skin) ?? SkinChoice.EP133,
     autoConnect: bool('autoConnect', true),
     keepScreenOn: bool('keepScreenOn', true),
     // getInt("keepLast", 0).takeIf { it > 0 }
@@ -411,6 +421,7 @@ export function writeSettings(s: AppSettings, keys: Iterable<SettingKey> = SETTI
 export function settingValues(s: AppSettings): Record<SettingKey, string> {
   return {
     theme: s.theme,
+    skin: s.skin,
     autoConnect: String(s.autoConnect),
     keepScreenOn: String(s.keepScreenOn),
     keepLast: String(s.keepLast ?? 0),
@@ -485,6 +496,7 @@ export function settingsFromIndex(map: Readonly<Record<string, string>>, cur: Ap
   }
   return {
     theme: themeOf(get(map, 'app.theme')) ?? cur.theme,
+    skin: skinOf(get(map, 'app.skin')) ?? cur.skin,
     autoConnect: b('app.autoConnect') ?? cur.autoConnect,
     keepScreenOn: b('app.keepScreenOn') ?? cur.keepScreenOn,
     keepLast: keep ?? (has(map, 'app.keepLast') ? null : cur.keepLast),
