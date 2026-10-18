@@ -1851,11 +1851,14 @@ def fingerprint(card: Card) -> Dict[str, set]:
     for pattern in _fingerprint_patterns(card):
         roles = pad_roles(pattern, card.kit)
         hits = [h for h in pattern.hits if h.semi is None]
-        if not hits:
-            continue  # a group of KEYS notes only (bass, chords) has no drums: its bars mustn't dilute theirs
+        found = {key: [slots for slots in _role_slots(hits, roles, wanted, pattern.bars)]
+                 for key, wanted in (("kick", ("kick",)), ("backbeat", BACKBEAT_ROLES[:2]), ("hat", ("hat",)))}
+        # A group with no kick, backbeat or hat (KEYS notes, a skank, shouts and FX) has no drums: its bars mustn't dilute theirs.
+        if not any(slots for runs in found.values() for slots in runs):
+            continue
         bars_total += pattern.bars
-        for key, wanted in (("kick", ("kick",)), ("backbeat", BACKBEAT_ROLES[:2]), ("hat", ("hat",))):
-            for slots in _role_slots(hits, roles, wanted, pattern.bars):
+        for key, runs in found.items():
+            for slots in runs:
                 out[key].extend(slots)
     result: Dict[str, set] = {}
     for key, slots in out.items():
