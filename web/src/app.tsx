@@ -130,7 +130,7 @@ import { SampleContext, type SampleActions } from './ui/live/SamplePanel'
 import { SampleReviewSheet } from './ui/sheets/SampleReviewSheet'
 import { BeatCards } from './core/features/beatCard'
 import { stepWord } from './state/stepPlan'
-import { projectChoicesOf, projectKeyOf, projectKeyState } from './ui/live/projectKey'
+import { projectChoicesOf, projectKeySignal, projectKeyState, type ProjectKeyUi } from './ui/live/projectKey'
 import { ProjectSheet } from './ui/sheets/ProjectSheet'
 import { TempoSheet } from './ui/sheets/TempoSheet'
 import { FxSheet } from './ui/sheets/FxSheet'
@@ -228,9 +228,9 @@ function Root(): JSX.Element {
   const c = useController()
   const nav = useNav()
   const v = nav.view.value
-  const state = c.state.value
+  // Not the mirror or KEYS's pad: those re-render only what shows them.
+  const state = c.stateShell.value
   const settings = c.settings.value
-  const playing = c.playing.value
   const desk = useDesk()
   const fine = useFinePointer()
   // The computer keyboard (web, desktop): ? the keys sheet, Esc, Ctrl/Cmd+Z, and the screen's own (Live's).
@@ -251,6 +251,8 @@ function Root(): JSX.Element {
   const arp = useMemo(() => arpUi(c), [c])
   const claude = useMemo(() => claudeUi(c), [c])
   const sample = useMemo(() => sampleUi(c), [c])
+  // PROJECT's key: only what it shows re-renders the shell, not each publish.
+  const projectKey = useMemo(() => projectKeySignal(() => liveMirror(c), () => c.state.value.busy), [c])
   // The top bar's mic key: its light read there alone.
   const micKey = useMemo(() => (sample === null ? null : { on: computed(() => c.sample.ui.value.on), onTap: () => c.toggleSample() }), [c, sample])
   // PROJECT held: the pads printed 1 to 9 pick a project instead of sounding.
@@ -316,12 +318,12 @@ function Root(): JSX.Element {
         }
       },
       onHold: () => {
-        const pad = state.keysPad
+        const pad = c.state.peek().keysPad
         if (pad === null) c.toast(MirrorText.PLAY_A_PAD)
         else if (c.editTarget(pad) !== null) nav.open(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
       },
     },
-    project: v.tab === 'live' ? projectUi(c, state.busy, () => nav.open(sheetLayer(PROJECT_SHEET))) : null,
+    project: v.tab === 'live' ? projectUi(c, projectKey.value, () => nav.open(sheetLayer(PROJECT_SHEET))) : null,
     fx:
       v.tab === 'live'
         ? {
@@ -394,7 +396,7 @@ function Root(): JSX.Element {
     page = (
       <SettingsScreen
         settings={settings}
-        state={state}
+        state={c.state.value}
         padOrder={c.padOrder()}
         version={APP_BUILD}
         onTheme={(t) => c.setTheme(t)}
@@ -464,7 +466,7 @@ function Root(): JSX.Element {
       <ContentsScreen
         b={b}
         contents={state.contents?.backupId === b.id ? state.contents : null}
-        playing={playing}
+        playing={c.playing.value}
         onPlay={(slot) => void c.playBackupSound(slot)}
         onStop={() => c.stopPlayback()}
         onShareWav={(snd) => void c.shareWav(b, snd)}
@@ -627,7 +629,8 @@ function tempoUi(c: ArcController, openSheet: () => void): TempoUi | null {
       return p.metronome.value.bpm
     },
     get deviceBpm() {
-      return c.state.value.mirror?.state.bpm ?? null
+      // The device's tempo alone, so the TEMPO key doesn't follow every publish.
+      return c.deviceBpm.value
     },
     get beat() {
       return p.beats.value
@@ -652,7 +655,7 @@ function deviceControlsUi(c: ArcController): DeviceControlsUi {
       return c.fx.desk.fx.value
     },
     get bpm() {
-      return patternBpm(c.state.value.mirror?.state.bpm, c.pattern.metronome.value.bpm)
+      return patternBpm(c.deviceBpm.value, c.pattern.metronome.value.bpm)
     },
     setFxXY: (x, y) => c.fx.desk.setXY(x, y),
     setGroupLevel: (g, v) => c.fx.desk.setGroupLevel(g, v),
@@ -1197,8 +1200,7 @@ function DevicePages(props: { dk: DeviceKeysUi; view: NavView }): null {
 }
 
 /** PROJECT as its key shows it (Kotlin projectKeyOf), and what it does. */
-function projectUi(c: ArcController, busy: boolean, openSheet: () => void): ProjectUi {
-  const k = projectKeyOf(liveMirror(c), busy)
+function projectUi(c: ArcController, k: ProjectKeyUi, openSheet: () => void): ProjectUi {
   return {
     shown: k.shown,
     state: projectKeyState(k),
@@ -1214,10 +1216,12 @@ function projectUi(c: ArcController, busy: boolean, openSheet: () => void): Proj
 function LiveProjectSheet(props: { view: NavView }): JSX.Element {
   const c = useController()
   const nav = useNav()
+  const open = props.view.sheets.includes(PROJECT_SHEET)
   return (
     <ProjectSheet
-      open={props.view.sheets.includes(PROJECT_SHEET)}
-      choices={projectChoicesOf(liveMirror(c), c.state.value.busy)}
+      open={open}
+      // Closed, it reads no mirror, so a publish doesn't re-render it (the sheet keeps what it showed as it closes).
+      choices={open ? projectChoicesOf(liveMirror(c), c.state.value.busy) : []}
       onPick={(n) => c.selectProject(n)}
       onDismiss={() => nav.close(sheetLayer(PROJECT_SHEET))}
     />
@@ -1229,22 +1233,27 @@ function LiveTempoSheet(props: { view: NavView }): JSX.Element | null {
   const c = useController()
   const nav = useNav()
   const p = c.pattern
+  // The settings alone, not the arp's and the pattern's whole state (the arp's is new each time the tempo moves).
+  const timing = useComputed(() => p.ui.value.timingSettings)
+  const arp = useComputed(() => p.arp.value.settings)
   if (!p.canClick) return null
   const m = p.metronome.value
+  const open = props.view.sheets.includes(TEMPO_SHEET)
   return (
     <TempoSheet
-      open={props.view.sheets.includes(TEMPO_SHEET)}
+      open={open}
       bpm={m.bpm}
-      deviceBpm={c.state.value.mirror?.state.bpm ?? null}
+      // The device's tempo only while open, so its clock doesn't re-render it closed.
+      deviceBpm={open ? c.deviceBpm.value : null}
       clickOn={m.on}
-      timing={p.ui.value.timingSettings}
+      timing={timing.value}
       onClick={(on) => p.setClick(on)}
       onBpm={(bpm) => p.setTempo(bpm)}
       onTap={(at) => p.tapTempo(at)}
       onInterval={(t) => p.setTimingInterval(t)}
       onSwing={(v) => p.setTimingSwing(v)}
       onQuantize={(on) => p.setTimingQuantize(on)}
-      arp={p.arp.value.settings}
+      arp={arp.value}
       onArpOrder={(o) => p.setArpOrder(o)}
       onArpOctaves={(n) => p.setArpOctaves(n)}
       onArpGate={(v) => p.setArpGate(v)}
@@ -1260,13 +1269,16 @@ function LiveFxSheet(props: { view: NavView }): JSX.Element {
   const nav = useNav()
   const d = c.fx.desk
   const fx = d.fx.value
-  const state = c.state.value
-  const selected = state.keysPad
+  const open = props.view.sheets.includes(FX_SHEET)
+  // The whole state only while open (the pad names are read through nameOf, and a new mirror says they changed):
+  // closed, a pad played or the clock doesn't re-render it.
+  const state = open ? c.state.value : null
+  const selected = state?.keysPad ?? null
   return (
     <FxSheet
-      open={props.view.sheets.includes(FX_SHEET)}
+      open={open}
       settings={fx}
-      bpm={patternBpm(state.mirror?.state.bpm, c.pattern.metronome.value.bpm)}
+      bpm={patternBpm(state?.mirror?.state.bpm, c.pattern.metronome.value.bpm)}
       selected={selected}
       nameOf={(pad) => c.mirrorName(pad)}
       // An effect put on with no send anywhere: the group of the pad played last sends to it.

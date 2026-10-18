@@ -46,9 +46,10 @@ export function editPadOf(sheets: readonly string[]): PhysicalPad | null {
 export function PadEditSheet(props: { view: NavView }): JSX.Element {
   const c = useController()
   const nav = useNav()
-  const state = c.state.value
-  const playing = c.playing.value
   const pad = editPadOf(props.view.sheets)
+  // The mirror and the sound playing only while a pad is open: closed, a publish, a pad played or a preview doesn't re-render it.
+  const state = pad !== null ? c.state.value : c.stateShell.value
+  const playing = pad !== null ? c.playing.value : null
   const id = pad !== null ? `${EDIT_PREFIX}${pad.group}:${pad.offset}` : null
   const target = pad !== null ? c.editTarget(pad, true) : null
   const close = (): void => {

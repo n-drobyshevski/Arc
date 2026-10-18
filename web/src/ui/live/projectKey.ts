@@ -2,6 +2,7 @@
 //
 // What Live's PROJECT key shows, and the project sheet's keys.
 
+import { computed, type ReadonlySignal } from '@preact/signals'
 import { PROJECT_COUNT } from '../../core/protocol/device'
 import { ProjectSource, ProjectStep } from '../../core/features/projectStep'
 import { MirrorText } from '../../core/text/mirrorText'
@@ -49,6 +50,24 @@ export function projectKeyOf(mirror: MirrorUi | null, busy: boolean): ProjectKey
     enabled: !mirror.loading && (!busy || target !== null),
     switching: target !== null,
   }
+}
+
+/**
+ * [projectKeyOf] as a signal (web addition): the same object while what the
+ * key shows is the same, so a publish that leaves it alone re-renders nothing
+ * (the computed itself still runs on each publish, which is cheap).
+ */
+export function projectKeySignal(mirror: () => MirrorUi | null, busy: () => boolean): ReadonlySignal<ProjectKeyUi> {
+  let last: ProjectKeyUi | null = null
+  return computed(() => {
+    const k = projectKeyOf(mirror(), busy())
+    if (last === null || !sameKey(last, k)) last = k
+    return last
+  })
+}
+
+function sameKey(a: ProjectKeyUi, b: ProjectKeyUi): boolean {
+  return a.shown === b.shown && a.source === b.source && a.enabled === b.enabled && a.switching === b.switching
 }
 
 /** The key's screen reader state: the project and where it comes from, with why it is greyed out. */

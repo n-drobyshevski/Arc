@@ -155,6 +155,18 @@ function toInt(s: string): number {
   return n
 }
 
+/**
+ * Whether [a] and [b] differ in nothing but the mirror and KEYS's pad (ArcController.stateShell).
+ * Every UiState field is required, so [b]'s keys are all of them.
+ */
+function sameShell(a: UiState, b: UiState): boolean {
+  for (const k in b) {
+    if (k === 'mirror' || k === 'keysPad') continue
+    if (a[k as keyof UiState] !== b[k as keyof UiState]) return false
+  }
+  return true
+}
+
 export function createController(deps: Deps): ArcController {
   return new ArcController(deps)
 }
@@ -163,6 +175,14 @@ export class ArcController {
   readonly store: Store<UiState>
   /** The app state, for components. */
   readonly state: ReadonlySignal<UiState>
+  /**
+   * The state for the app's shell (web addition): the same object while only
+   * the mirror or KEYS's pad changes, so a publish or a pad played re-renders
+   * none of it. Its mirror and keysPad may be old: read those from [state].
+   */
+  readonly stateShell: ReadonlySignal<UiState>
+  /** The device's tempo alone, from the mirror (web addition): null without a clock. */
+  readonly deviceBpm: ReadonlySignal<number | null>
   /** The settings page's choices (ArcController.settings). */
   readonly settings: ReadonlySignal<AppSettings>
   /** The key of the sound playing (player.playing). */
@@ -258,6 +278,13 @@ export class ArcController {
   constructor(private readonly deps: Deps) {
     this.store = createStore<UiState>(initialState(deps.midi.supported(), deps.files.canPickFolder()))
     this.state = this.store.state
+    let shell: UiState | null = null
+    this.stateShell = computed(() => {
+      const s = this.state.value
+      if (shell === null || !sameShell(shell, s)) shell = s
+      return shell
+    })
+    this.deviceBpm = computed(() => this.state.value.mirror?.state.bpm ?? null)
     this.settingsSignal = signal<AppSettings>(deps.settings.settings)
     this.settings = this.settingsSignal
     this.playing = deps.player.playing
