@@ -15,10 +15,10 @@ data class PadTarget(val project: Int, val group: Int, val pad: Int, val slot: I
 /**
  * The sound to play for a pad (an addition): its [slot] and [name], and
  * whether it is a factory sound put on the pad offline ([factory]), which
- * plays from the factory pack first. A sample recorded in arc and not on the
- * device yet has slot 0 and plays from its [file] in arc's samples folder.
+ * plays from [kit]'s factory pack first. A sample recorded in arc and not on
+ * the device yet has slot 0 and plays from its [file] in arc's samples folder.
  */
-data class PadSample(val slot: Int, val name: String, val factory: Boolean, val file: String? = null)
+data class PadSample(val slot: Int, val name: String, val factory: Boolean, val file: String? = null, val kit: FactoryKit = FactoryKit.EP133)
 
 /** A pad that is sounding (or fading out): its velocity, when it started, and when it was released. */
 data class PadLight(val velocity: Int, val channel: Int, val onAt: Long, val offAt: Long? = null)
@@ -329,7 +329,7 @@ class LiveMirror(
     }
 
     /** What an offline change plays: a recorded sample brings its [OfflinePad.file] along. */
-    private fun sampleIn(p: OfflinePad) = PadSample(p.slot, p.name, p.source == SoundSource.FACTORY, p.file)
+    private fun sampleIn(p: OfflinePad) = PadSample(p.slot, p.name, p.source == SoundSource.FACTORY, p.file, p.kit)
 
     /** An offline change's slot on the device; a recorded sample's slot 0 is a placeholder, not a slot. */
     private fun slotIn(p: OfflinePad): Int? = p.slot.takeUnless { p.source == SoundSource.RECORDED }

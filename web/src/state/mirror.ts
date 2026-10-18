@@ -325,7 +325,9 @@ export class MirrorController {
     this.stop()
     const gen = this.openGen
     const lastRead = await host.live.loadLastRead()
-    const factory = await host.live.factorySnapshots()
+    // The active kit's projects (FactoryKit), and the pack they came from.
+    const pack = await host.live.factoryProjects()
+    const factory = pack.snaps
     if (gen !== this.openGen) return
     const views = ProjectStep.offlineViews(lastRead?.activeProject ?? null, factory.keys())
     // The view PROJECT stepped to; else the last read; never read, the factory sounds' first project.
@@ -355,14 +357,30 @@ export class MirrorController {
     host.padsOffline?.()
     this.mirror = m
     this.mirrorSession = null
+    // A factory project's pads play from its pack.
+    host.live.showPack(fromRead ? null : pack.id)
     void host.live.preloadPads(m)
     // Every factory project's line is FACTORY (refreshOffline goes by it).
     const offline = fromRead && lastRead !== null ? MirrorText.lastSeen(host.fmtDateTime(lastRead.savedAt)) : MirrorText.FACTORY
     const offlineShort = fromRead && lastRead !== null ? MirrorText.seen(host.fmtMonthDay(lastRead.savedAt)) : null
+    const kit = host.live.factoryKit().id
     host.store.update((st) => ({
       ...st,
-      mirror: { state: m.snapshot(host.perfNow()), loading: false, error: null, offline, offlineShort, offlineSounds, offlineProjects: views },
+      mirror: { state: m.snapshot(host.perfNow()), loading: false, error: null, offline, offlineShort, offlineSounds, offlineProjects: views, kit },
     }))
+  }
+
+  /**
+   * The factory kit changed (FactoryKit): offline, Live opens again with the
+   * other pack's names and sounds, a factory project shown back at the
+   * kit's first ([FactorySounds.PROJECT]).
+   */
+  kitChanged(): void {
+    const st = this.host.store.get()
+    const mi = st.mirror
+    if (mi === null || (this.host.session() !== null && st.device !== null)) return
+    if (mi.offline === MirrorText.FACTORY) this.offlineProject = FactorySounds.PROJECT
+    void this.openOffline()
   }
 
   // ---------- PROJECT: the next project (an addition) ----------
@@ -631,6 +649,7 @@ export class MirrorController {
     this.pushOff = null
     this.mirror = null
     this.mirrorSession = null
+    this.host.live.showPack(null)
   }
 
   /** Forgets which pad is which in Live (names are learned again as pads are pressed). */

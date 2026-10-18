@@ -1,5 +1,7 @@
 package dev.arc.ep133.controller
 
+import dev.arc.ep133.features.FactoryKit
+import dev.arc.ep133.features.FactorySounds
 import dev.arc.ep133.features.LiveSnapshot
 import dev.arc.ep133.features.OfflinePad
 import dev.arc.ep133.features.OfflinePads
@@ -7,11 +9,16 @@ import dev.arc.ep133.features.PadGroup
 import dev.arc.ep133.features.PadTarget
 import dev.arc.ep133.features.SoundSource
 import dev.arc.ep133.protocol.SoundEntry
+import dev.arc.ep133.text.BackupDevice
+import dev.arc.ep133.text.BackupRecord
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
-/** The controller's offline EDIT rules: the lists offered, what a pick keeps, and what reconnecting writes. */
+/** The controller's offline EDIT rules: the lists offered, what a pick keeps, what reconnecting writes, and which factory kit plays. */
 class OfflineEditTest {
     private val read = LiveSnapshot(1L, 1, listOf(PadGroup("a", mapOf(1 to 5))), mapOf(5 to "kick", 1 to "snare", 343 to "343.pcm"))
     private val pack = LiveSnapshot(2L, 1, listOf(PadGroup("a", mapOf(1 to 1))), mapOf(343 to "bass", 1 to "kick"))
@@ -120,4 +127,72 @@ class OfflineEditTest {
         assertEquals(listOf(up), connectedLocal(pads, setOf("smp-a.wav")).list)
         assertEquals(OfflinePads.EMPTY, connectedLocal(pads, emptySet()))
     }
+
+    // ---------- the factory kits (the EP-133's and the EP-1320's) ----------
+
+    private fun rec(id: String, createdAt: Long, source: String) = BackupRecord(
+        id, id, "", createdAt, source, null, BackupDevice(), 0, 0, emptyList(), emptyList(), emptyMap(), 0,
+    )
+
+    private val ep133Pack = rec("f", 1L, FactorySounds.SOURCE)
+    private val medievalPack = rec("m", 2L, FactoryKit.EP1320.source)
+    private val medievalBackup = rec("b", 3L, "device")
+
+    @Test
+    fun `Live plays the kit chosen while its pack is saved, else the EP-133's`() {
+        val both = listOf(ep133Pack, medievalPack, medievalBackup)
+        assertEquals(FactoryKit.EP1320, activeKitOf(FactoryKit.EP1320, both))
+        assertEquals(FactoryKit.EP133, activeKitOf(FactoryKit.EP133, both))
+        // The Medieval's copy deleted: back to the EP-133's, not to nothing.
+        assertEquals(FactoryKit.EP133, activeKitOf(FactoryKit.EP1320, listOf(ep133Pack, medievalBackup)))
+        // The EP-133's alone saved never hides behind the chosen one.
+        assertEquals(FactoryKit.EP1320, activeKitOf(FactoryKit.EP1320, listOf(medievalPack)))
+        assertTrue(kitsSaved(both))
+        assertFalse(kitsSaved(listOf(ep133Pack, medievalBackup)))
+    }
+
+    @Test
+    fun `connecting a Medieval picks its kit when its pack is saved`() {
+        val both = listOf(ep133Pack, medievalPack)
+        assertEquals(FactoryKit.EP1320, kitOnConnect("TE032AS005", FactoryKit.EP133, both))
+        assertEquals(FactoryKit.EP133, kitOnConnect("TE032AS001", FactoryKit.EP1320, both))
+        // Already the kit, no pack for it, or a device with no kit: nothing changes.
+        assertNull(kitOnConnect("TE032AS005", FactoryKit.EP1320, both))
+        assertNull(kitOnConnect("TE032AS005", FactoryKit.EP133, listOf(ep133Pack)))
+        assertNull(kitOnConnect("TE032AS003", FactoryKit.EP133, both))
+    }
+
+    @Test
+    fun `a sound the device lists unnamed plays from the connected device's kit, offline the active one`() {
+        assertEquals(FactoryKit.EP1320, unnamedKit("TE032AS005", FactoryKit.EP133))
+        assertEquals(FactoryKit.EP133, unnamedKit("TE032AS001", FactoryKit.EP1320))
+        assertEquals(FactoryKit.EP1320, unnamedKit(null, FactoryKit.EP1320))
+        assertEquals(FactoryKit.EP133, unnamedKit("TE032AS003", FactoryKit.EP133))
+    }
+
+    @Test
+    fun `the two packs' sounds of one slot and name are kept apart in memory`() {
+        assertEquals("5:kick", padMemoryKey(5, " Kick "))
+        assertEquals("pack:f:5:kick", padMemoryKey(5, "kick", ep133Pack.id))
+        assertNotEquals(padMemoryKey(5, "kick", ep133Pack.id), padMemoryKey(5, "kick", medievalPack.id))
+        assertNotEquals(padMemoryKey(5, "kick"), padMemoryKey(5, "kick", medievalPack.id))
+    }
+
+    @Test
+    fun `a factory sound picked offline keeps the kit shown, any other sound the EP-133's`() {
+        val t = PadTarget(1, 0, 1, 343)
+        val put = offlineAssign(OfflinePads.EMPTY, t, 343, "lute", SoundSource.FACTORY, readSlot = 5, kit = FactoryKit.EP1320)
+        assertEquals(listOf(OfflinePad(1, 0, 1, 343, "lute", SoundSource.FACTORY, kit = FactoryKit.EP1320)), put.list)
+        val device = offlineAssign(OfflinePads.EMPTY, t, 1, "snare", SoundSource.DEVICE, readSlot = 5, kit = FactoryKit.EP1320)
+        assertEquals(FactoryKit.EP133, device.list.single().kit)
+    }
+
+    @Test
+    fun `a new copy of a kit replaces that kit's earlier ones, never the other kit's or the backup`() {
+        val newer = rec("m2", 9L, FactoryKit.EP1320.source)
+        val all = listOf(ep133Pack, medievalPack, medievalBackup, newer)
+        assertEquals(listOf(medievalPack), olderKitCopies(all, FactoryKit.EP1320, newer.id))
+        assertEquals(emptyList<BackupRecord>(), olderKitCopies(all, FactoryKit.EP133, ep133Pack.id))
+    }
 }
+

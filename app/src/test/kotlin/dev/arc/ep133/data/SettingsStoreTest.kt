@@ -147,6 +147,18 @@ class SettingsStoreTest {
         assertEquals(SwitchTime.IMMEDIATE, SettingsStore(prefs).settings.value.sceneSwitch)
     }
 
+    @Test
+    fun `the factory kit is kept once chosen, and goes into library json`() {
+        val prefs = MemoryPrefs()
+        val store = SettingsStore(prefs)
+        assertEquals(dev.arc.ep133.features.FactoryKit.EP133, store.settings.value.factoryKit)
+        assertFalse(prefs.contains("factoryKit"))
+        store.update { it.copy(factoryKit = dev.arc.ep133.features.FactoryKit.EP1320) }
+        assertEquals("ep1320", prefs.getString("factoryKit", null))
+        assertEquals(dev.arc.ep133.features.FactoryKit.EP1320, SettingsStore(prefs).settings.value.factoryKit)
+        assertEquals(mapOf("app.factoryKit" to "ep1320"), store.toIndex())
+    }
+
     /** SharedPreferences in a map: enough for [SettingsStore]. */
     private class MemoryPrefs : SharedPreferences {
         val map = HashMap<String, Any?>()

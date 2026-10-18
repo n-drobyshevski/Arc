@@ -10,7 +10,7 @@ import { toJson as indexToJson } from '../../src/core/backup/libraryIndex'
 import { encodeWav } from '../../src/core/formats/wav'
 import { writeZip } from '../../src/core/formats/zip'
 import { FeatureText } from '../../src/core/text/featureText'
-import { BackupDevice, type BackupRecord } from '../../src/core/text/libraryRules'
+import { BackupDevice, toPrune, type BackupRecord } from '../../src/core/text/libraryRules'
 import { MirrorText } from '../../src/core/text/mirrorText'
 import { Strings } from '../../src/core/text/strings'
 import { WebText } from '../../src/core/text/webText'
@@ -18,7 +18,7 @@ import { NullPlayer } from '../../src/platform/audio/player'
 import { MemoryTarget } from '../../src/platform/storage/external'
 import { LIVE_KEY, memoryStorage, SETTINGS_KEY } from '../../src/platform/storage/settings'
 import { LIVE_AUDIO_KEEP_MS } from '../../src/state/controller'
-import { LATE_LOAD_MS, latencyRows, PRESS_STAMP_MAX_MS, pressTime } from '../../src/state/live'
+import { LATE_LOAD_MS, latencyRows, packKey, PRESS_STAMP_MAX_MS, pressTime } from '../../src/state/live'
 import { WebLatencyHint } from '../../src/core/text/latencyText'
 import { createStore } from '../../src/state/store'
 import { Tasks } from '../../src/state/tasks'
@@ -26,7 +26,7 @@ import { HOME_TAB, initialState } from '../../src/state/types'
 import type { Session } from '../../src/core/protocol/session'
 import { tone } from '../helpers/demoData'
 import { pad, tarFile } from '../helpers/bytes'
-import { FactorySounds } from '../../src/core/features/factorySounds'
+import { FactoryKit, FactorySounds } from '../../src/core/features/factorySounds'
 import type { FactoryDeps } from '../../src/state/deps'
 import { disposeAll, freshLibrary, liveHarness, sleep, until, type LiveHarness } from './liveHarness'
 
@@ -976,9 +976,10 @@ describe('Factory sounds', () => {
     expect(h.c.state.value.mirror!.state.activeProject).toBe(1)
     expect(h.c.mirrorName(A1)).toBe('micro kick')
     expect(h.c.mirrorName(A5)).toBe('nt clap')
-    await vi.waitFor(() => expect(h.liveAudio.loaded.has('5:nt clap')).toBe(true))
+    // Kept under the pack's own keys.
+    await vi.waitFor(() => expect(h.liveAudio.loaded.has(packKey(b.id, 5, 'nt clap'))).toBe(true))
     await h.c.playPad(A5)
-    expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'live:0:4', key: '5:nt clap' })
+    expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'live:0:4', key: packKey(b.id, 5, 'nt clap') })
     // Not downloaded twice.
     await h.c.getFactorySounds()
     expect(asked).toHaveLength(3)
@@ -1126,7 +1127,9 @@ describe('Factory sounds', () => {
     // Still the last read, now playing from the pack.
     expect(h.c.state.value.mirror!.offline).not.toBe(MirrorText.FACTORY)
     await h.c.playPad(A1)
-    expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'live:0:0', key: '1:001.pcm' })
+    // Kept under the pack's key: another kit's pack would be another sound.
+    const pack = FactorySounds.inLibrary(h.c.state.value.backups)!
+    expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'live:0:0', key: packKey(pack.id, 1, '001.pcm') })
   })
 
   it('offline with pads counted from the top and none learned, a last read still names and plays its pads', async () => {
@@ -1141,7 +1144,7 @@ describe('Factory sounds', () => {
     const seven = physicalPad(0, 9)
     expect(h.c.mirrorName(seven)).toBe('001.pcm')
     await h.c.playPad(seven)
-    expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'live:0:9', key: '1:001.pcm' })
+    expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'live:0:9', key: packKey(FactorySounds.inLibrary(h.c.state.value.backups)!.id, 1, '001.pcm') })
     // The guess isn't kept as learned.
     expect(h.storage.getItem('arc.mirror.learned')).toBeNull()
   })
@@ -1158,6 +1161,267 @@ describe('Factory sounds', () => {
     await until(h, (s) => s.mirror?.offline != null)
     expect(h.c.state.value.mirror!.offline).not.toBe(MirrorText.FACTORY)
     expect(h.c.mirrorName(A5)).toBe('clap')
+  })
+})
+
+describe('Factory sounds: the EP-1320 kit beside the EP-133', () => {
+  const PAGE_HTML = '<script type="module" crossorigin src="/apps/ep-sample-tool/assets/index-C1wBjhTa.js"></script>'
+  const SCRIPT = 'x="/apps/ep-sample-tool/assets/ep-133-factory-content-T3st.pak"'
+  const MEDIEVAL = { device_name: 'EP-1320', device_sku: 'TE032AS005', device_version: '1.0.0' }
+  const MEDIEVAL_GREET = 'chip_id:0;mode:normal;os_version:1.0.0;product:EP-1320;serial:MOCK1320;sku:TE032AS005;sw_version:1.0.0'
+  const EP133_GREET = 'chip_id:0;mode:normal;os_version:2.0.5;product:EP-133;serial:MOCK0001;sku:TE032AS001;sw_version:2.0.5'
+
+  /**
+   * A small pack: [names] in slots 1 and 5 on a/p01 and a/p05 of project 1
+   * (and of project 2 when [two]), each a tone [len] samples long, so which
+   * pack a sound came from can be told by its length.
+   */
+  async function pack(meta: Record<string, string>, names: [string, string], len: number, two = false): Promise<Uint8Array> {
+    const wav = encodeWav(tone(len, 220), 1, 46875)
+    const p = tarFile([['pads/a/p01', pad(1)], ['pads/a/p05', pad(5)]])
+    return writeZip(
+      [
+        { path: 'meta.json', data: new TextEncoder().encode(JSON.stringify({ ...meta, generated_at: '2024-02-03T00:00:00.000Z' })), compress: false },
+        { path: `sounds/001 ${names[0]}.wav`, data: wav, compress: false },
+        { path: `sounds/005 ${names[1]}.wav`, data: wav, compress: false },
+        { path: 'projects/P01.tar', data: p, compress: false },
+        ...(two ? [{ path: 'projects/P02.tar', data: tarFile([['pads/b/p01', pad(5)]]), compress: false }] : []),
+      ],
+      { date: 0, offsetMin: 0 },
+    )
+  }
+
+  /** The EP-133's pack, as downloaded: micro kick and nt clap, 2000 samples. */
+  const ep133Pak = (names: [string, string] = ['micro kick', 'nt clap']): Promise<Uint8Array> =>
+    pack({ pak_type: 'factory', device_name: 'EP-133', device_sku: 'TE032AS001' }, names, 2000)
+  /** A backup of an EP-1320 (a user pack): med kick and med clap, 3000 samples. */
+  const medievalPak = (type = 'user', names: [string, string] = ['med kick', 'med clap'], two = false): Promise<Uint8Array> =>
+    pack({ pak_type: type, ...MEDIEVAL }, names, 3000, two)
+
+  function site(pak: Uint8Array): FactoryDeps {
+    return {
+      text: async (path) => (path === FactorySounds.PAGE ? PAGE_HTML : SCRIPT),
+      bytes: async (_path, _signal, onProgress) => {
+        onProgress(pak.length, pak.length)
+        return pak
+      },
+    }
+  }
+
+  const kitPack = (h: LiveHarness, kit: FactoryKit): BackupRecord | null => FactorySounds.inLibrary(h.c.state.value.backups, kit)
+
+  /** Both kits saved: the EP-133's downloaded, the EP-1320's imported as its factory pack (Live then plays it). */
+  async function bothKits(h: LiveHarness, medieval?: Uint8Array): Promise<void> {
+    await until(h, (s) => s.libraryLoaded)
+    await h.c.getFactorySounds()
+    await until(h, (s) => kitPack(h, FactoryKit.EP133) !== null)
+    await h.c.import('medieval.pak', null, async () => medieval ?? (await medievalPak('factory')))
+    await until(h, (s) => kitPack(h, FactoryKit.EP1320) !== null)
+  }
+
+  it('Use as factory sounds saves a copy as the EP-1320 kit, and the backup stays as it was', async () => {
+    const bytes = await medievalPak()
+    const h = await liveHarness({ storage: memoryStorage(ORDER), unplugged: true })
+    await until(h, (s) => s.libraryLoaded)
+    // An EP-1320 user pack imports as an ordinary backup.
+    await h.c.import('my medieval.pak', null, async () => bytes)
+    await until(h, (s) => s.backups.length === 1)
+    const own = h.c.state.value.backups[0]!
+    expect(own).toMatchObject({ source: 'import', title: 'my medieval', device: { product: 'EP-1320', sku: 'TE032AS005' } })
+    expect(FactorySounds.canUseAsFactory(own)).toBe(true)
+    h.c.setLive(true)
+    await until(h, (s) => s.mirror?.error === MirrorText.NOT_CONNECTED)
+
+    await h.c.useAsFactory(own)
+    await until(h, (s) => s.backups.length === 2)
+    const copy = kitPack(h, FactoryKit.EP1320)!
+    expect(copy).toMatchObject({
+      title: FeatureText.FACTORY_TITLE_1320,
+      source: FactoryKit.EP1320.source,
+      fileName: FactorySounds.FILE_NAME_1320,
+      soundCount: 2,
+      device: { product: 'EP-1320', sku: 'TE032AS005', serial: '', osVersion: '1.0.0' },
+    })
+    expect(copy.id).not.toBe(own.id)
+    expect(h.c.state.value.backups.find((b) => b.id === own.id)).toEqual(own)
+    expect(await h.library.bytes(copy.id)).toEqual(bytes)
+    expect(h.c.state.value.freshId).toBe(copy.id)
+    expect(h.toasts.at(-1)?.text).toBe(FeatureText.factory1320Saved(2))
+    // Live plays the EP-1320's kit from now on: its project 1, its note naming it.
+    expect(h.deps.settings.settings.factoryKit).toBe(FactoryKit.EP1320.id)
+    expect(h.c.factoryKit).toBe(FactoryKit.EP1320)
+    await until(h, (s) => s.mirror?.offline === MirrorText.FACTORY)
+    expect(h.c.state.value.mirror!.kit).toBe(FactoryKit.EP1320.id)
+    expect(h.c.mirrorName(A1)).toBe('med kick')
+    expect(h.c.mirrorName(A5)).toBe('med clap')
+    // Never pruned, and the copy isn't offered again.
+    expect(toPrune(h.c.state.value.backups, 0).map((b) => b.id)).toEqual([own.id])
+    expect(FactorySounds.canUseAsFactory(copy)).toBe(false)
+
+    // Again: the newer copy replaces the older.
+    await h.c.useAsFactory(own)
+    await until(h, (s) => s.backups.some((b) => b.source === FactoryKit.EP1320.source && b.id !== copy.id) && !s.backups.some((b) => b.id === copy.id))
+    expect(h.c.state.value.backups.filter((b) => b.source === FactoryKit.EP1320.source)).toHaveLength(1)
+    expect(h.c.state.value.backups.some((b) => b.id === own.id)).toBe(true)
+  })
+
+  it("refuses a backup that isn't an EP-1320's, and keeps nothing", async () => {
+    const h = await liveHarness({ unplugged: true })
+    await until(h, (s) => s.libraryLoaded)
+    await backupWith(h, 'b1', 1, 'kick')
+    const b = h.c.state.value.backups[0]!
+    expect(FactorySounds.canUseAsFactory(b)).toBe(false)
+    await h.c.useAsFactory(b)
+    expect(h.toasts.at(-1)).toMatchObject({ text: FeatureText.NOT_MEDIEVAL, error: true })
+    expect(h.c.state.value.backups).toHaveLength(1)
+    expect(h.c.state.value.task).toBeNull()
+    expect(h.deps.settings.settings.factoryKit).toBe(FactoryKit.EP133.id)
+  })
+
+  it("an imported EP-1320 factory pack is saved as the kit straight away, replacing an older one", async () => {
+    const h = await liveHarness({ unplugged: true })
+    await until(h, (s) => s.libraryLoaded)
+    await h.c.import('medieval.pak', null, async () => medievalPak('factory'))
+    await until(h, (s) => kitPack(h, FactoryKit.EP1320) !== null)
+    const first = kitPack(h, FactoryKit.EP1320)!
+    expect(first).toMatchObject({ title: FeatureText.FACTORY_TITLE_1320, fileName: FactorySounds.FILE_NAME_1320 })
+    expect(h.toasts.at(-1)?.text).toBe(FeatureText.factory1320Saved(2))
+    expect(h.deps.settings.settings.factoryKit).toBe(FactoryKit.EP1320.id)
+    await h.c.import('medieval 2.pak', null, async () => medievalPak('factory', ['new kick', 'new clap']))
+    await until(h, (s) => s.backups.length === 1 && s.backups[0]!.id !== first.id)
+    expect(h.c.state.value.backups[0]!.source).toBe(FactoryKit.EP1320.source)
+  })
+
+  it("switching the kit opens Live offline again on the other pack's first project and names", async () => {
+    const h = await liveHarness({ storage: memoryStorage(ORDER), unplugged: true, factory: site(await ep133Pak()) })
+    await bothKits(h, await medievalPak('factory', ['med kick', 'med clap'], true))
+    h.c.setLive(true)
+    await until(h, (s) => s.mirror?.offline === MirrorText.FACTORY)
+    expect(h.c.mirrorName(A1)).toBe('med kick')
+    expect(h.c.state.value.mirror!.offlineSounds!.factory!.map((e) => e.name)).toEqual(['med kick', 'med clap'])
+    expect(h.c.state.value.mirror!.offlineProjects).toEqual([1, 2])
+    // PROJECT on to the Medieval's project 2.
+    h.c.selectProject(2)
+    await until(h, (s) => s.mirror?.state.activeProject === 2)
+
+    h.c.setFactoryKit(FactoryKit.EP133)
+    expect(h.deps.settings.settings.factoryKit).toBe(FactoryKit.EP133.id)
+    await until(h, (s) => s.mirror?.kit === FactoryKit.EP133.id)
+    const mi = h.c.state.value.mirror!
+    expect(mi.offline).toBe(MirrorText.FACTORY)
+    expect(mi.state.activeProject).toBe(FactorySounds.PROJECT)
+    expect(mi.offlineProjects).toEqual([1])
+    expect(h.c.mirrorName(A1)).toBe('micro kick')
+    expect(h.c.mirrorName(A5)).toBe('nt clap')
+    expect(mi.offlineSounds!.factory!.map((e) => e.name)).toEqual(['micro kick', 'nt clap'])
+    expect(h.c.liveSounds().map((e) => e.name)).toEqual(['micro kick', 'nt clap'])
+
+    // And back: project 1 again, not the 2 stepped to before.
+    h.c.setFactoryKit(FactoryKit.EP1320)
+    await until(h, (s) => s.mirror?.kit === FactoryKit.EP1320.id)
+    expect(h.c.state.value.mirror!.state.activeProject).toBe(1)
+    expect(h.c.mirrorName(A1)).toBe('med kick')
+
+    // The EP-1320's copy deleted: Live falls back on the EP-133's kit.
+    expect(await h.c.delete(kitPack(h, FactoryKit.EP1320)!)).toBe(true)
+    await until(h, (s) => s.mirror?.kit === FactoryKit.EP133.id)
+    expect(h.c.factoryKit).toBe(FactoryKit.EP133)
+    expect(h.c.mirrorName(A1)).toBe('micro kick')
+  })
+
+  it('connecting a TE032AS005 device makes the EP-1320 the kit, once its pack is saved', async () => {
+    const h = await liveHarness({ factory: site(await ep133Pak()) })
+    await until(h, (s) => s.libraryLoaded)
+    await h.c.getFactorySounds()
+    await until(h, (s) => kitPack(h, FactoryKit.EP133) !== null)
+    h.mock.greet = MEDIEVAL_GREET
+    await h.c.connect()
+    await until(h, (s) => s.device !== null && !s.busy)
+    expect(h.c.state.value.device!.info.sku).toBe('TE032AS005')
+    // No EP-1320 pack: the kit stays.
+    expect(h.deps.settings.settings.factoryKit).toBe(FactoryKit.EP133.id)
+
+    await h.c.import('medieval.pak', null, async () => medievalPak('factory'))
+    await until(h, (s) => kitPack(h, FactoryKit.EP1320) !== null)
+    h.c.setFactoryKit(FactoryKit.EP133)
+    expect(h.deps.settings.settings.factoryKit).toBe(FactoryKit.EP133.id)
+    h.ep.access.unplug(h.ep.input, h.ep.output)
+    await until(h, (s) => s.device === null)
+    h.ep.access.plug(h.ep.input, h.ep.output)
+    await until(h, (s) => s.device !== null && !s.busy)
+    expect(h.deps.settings.settings.factoryKit).toBe(FactoryKit.EP1320.id)
+    // Copied to library.json with the other settings.
+    expect(h.deps.settings.toIndex()['app.factoryKit']).toBe('ep1320')
+
+    // An EP-133 next: its kit again.
+    h.ep.access.unplug(h.ep.input, h.ep.output)
+    await until(h, (s) => s.device === null)
+    h.mock.greet = EP133_GREET
+    h.ep.access.plug(h.ep.input, h.ep.output)
+    await until(h, (s) => s.device !== null && !s.busy)
+    expect(h.deps.settings.settings.factoryKit).toBe(FactoryKit.EP133.id)
+  })
+
+  it("a sound the device lists unnamed plays from the connected device's kit, and offline from the active one", async () => {
+    const h = await liveHarness({ storage: memoryStorage(ORDER), factory: site(await ep133Pak()) })
+    await bothKits(h)
+    // An EP-1320 still holding its factory sound in slot 1: listed by its file.
+    h.mock.greet = MEDIEVAL_GREET
+    h.mock.addSound({ slot: 1, name: '001.pcm', pcm: h.mock.sounds.get(1)!.pcm })
+    await h.c.connect()
+    h.c.setLive(true)
+    await until(h, (s) => s.mirror !== null && !s.mirror.loading && !s.busy && s.mirror.offline == null)
+    await copied(h)
+    // The kit chosen is the EP-133's, but this is an EP-1320.
+    h.c.setFactoryKit(FactoryKit.EP133)
+    expect(h.c.mirrorName(A1)).toBe('001.pcm')
+    // Without arc's copy, the pad plays from the EP-1320's pack (3000 samples, not the EP-133's 2000).
+    await h.c.clearPadSounds()
+    const medieval = packKey(kitPack(h, FactoryKit.EP1320)!.id, 1, '001.pcm')
+    await vi.waitFor(() => expect(h.liveAudio.loaded.get(medieval)?.pcm.length).toBe(3000))
+    await h.c.playPad(A1)
+    expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'live:0:0', key: medieval })
+
+    // Unplugged, the last read's unnamed sound plays from the active kit's pack.
+    h.ep.access.unplug(h.ep.input, h.ep.output)
+    await until(h, (s) => s.mirror?.offline != null && s.mirror.offline !== MirrorText.FACTORY)
+    const ep133 = packKey(kitPack(h, FactoryKit.EP133)!.id, 1, '001.pcm')
+    await vi.waitFor(() => expect(h.liveAudio.loaded.get(ep133)?.pcm.length).toBe(2000))
+    await h.c.playPad(A1)
+    expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'live:0:0', key: ep133 })
+  })
+
+  it('keeps each pack\'s sounds under its own keys, though slot and name are the same, and a pad keeps its kit', async () => {
+    // Both packs have "kick" in slot 1 and "clap" in slot 5.
+    const h = await liveHarness({ storage: memoryStorage(ORDER), unplugged: true, factory: site(await ep133Pak(['kick', 'clap'])) })
+    await bothKits(h, await medievalPak('factory', ['kick', 'clap']))
+    const ep133 = kitPack(h, FactoryKit.EP133)!.id
+    const medieval = kitPack(h, FactoryKit.EP1320)!.id
+    h.c.setLive(true)
+    await until(h, (s) => s.mirror?.kit === FactoryKit.EP1320.id)
+    await vi.waitFor(() => expect(h.liveAudio.loaded.get(packKey(medieval, 1, 'kick'))?.pcm.length).toBe(3000))
+    await h.c.playPad(A1)
+    expect(h.liveAudio.presses.at(-1)?.key).toBe(packKey(medieval, 1, 'kick'))
+    // The EP-1320's clap on D1, in arc only: it keeps its kit.
+    const D1 = physicalPad(3, 0)
+    expect(await h.c.assignPad(D1, 5, 'factory')).toBe(true)
+    expect(JSON.parse(h.storage.getItem('arc.live.pads')!).pads[0]).toMatchObject({ slot: 5, name: 'clap', source: 'factory', kit: 'ep1320' })
+
+    h.c.setFactoryKit(FactoryKit.EP133)
+    await until(h, (s) => s.mirror?.kit === FactoryKit.EP133.id)
+    await vi.waitFor(() => expect(h.liveAudio.loaded.get(packKey(ep133, 1, 'kick'))?.pcm.length).toBe(2000))
+    await h.c.playPad(A1)
+    expect(h.liveAudio.presses.at(-1)?.key).toBe(packKey(ep133, 1, 'kick'))
+    // The other kit's kick stays apart; D1 still plays the EP-1320's clap.
+    expect(h.liveAudio.loaded.get(packKey(medieval, 1, 'kick'))?.pcm.length).toBe(3000)
+    expect(packKey(ep133, 1, 'kick')).not.toBe(packKey(medieval, 1, 'kick'))
+    await h.c.playPad(D1)
+    expect(h.liveAudio.presses.at(-1)?.key).toBe(packKey(medieval, 5, 'clap'))
+    expect(h.liveAudio.loaded.get(packKey(medieval, 5, 'clap'))?.pcm.length).toBe(3000)
+    // The previews of the factory list follow the kit too.
+    const player = h.deps.player as NullPlayer
+    await h.c.playLiveSound(5, 'factory')
+    expect(player.plays.at(-1)?.key).toBe('factory:5')
   })
 })
 
@@ -1267,7 +1531,8 @@ describe('Live offline: pads changed in arc only', () => {
     expect(h.c.padSource(A5)).toBe('factory')
     expect(h.c.state.value.offlinePads).toBe(1)
     await h.c.playPad(A5)
-    expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'live:0:4', key: '1:micro kick' })
+    const pack = FactorySounds.inLibrary(h.c.state.value.backups)!
+    expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'live:0:4', key: packKey(pack.id, 1, 'micro kick') })
     // The pad holding the device's slot 1 still plays the device's sound.
     expect(h.c.mirrorName(A1)).toBe('kick')
     await h.c.playPad(A1)

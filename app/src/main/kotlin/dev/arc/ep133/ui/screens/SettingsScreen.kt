@@ -55,7 +55,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.arc.ep133.audio.OutputDelay
 import dev.arc.ep133.controller.UiState
+import dev.arc.ep133.controller.activeKitOf
+import dev.arc.ep133.controller.kitsSaved
 import dev.arc.ep133.data.AppSettings
+import dev.arc.ep133.features.FactoryKit
 import dev.arc.ep133.features.FactorySounds
 import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.PadOrder
@@ -123,6 +126,8 @@ fun SettingsScreen(
     onReviewSamples: (Boolean) -> Unit = {},
     /** Downloads the factory sounds (FactorySounds); null hides the row. */
     onGetFactory: (() -> Unit)? = null,
+    /** The factory kit Live plays offline, offered once both kits are saved. */
+    onFactoryKit: (FactoryKit) -> Unit = {},
     onSource: () -> Unit,
     onFontLicence: () -> Unit,
     onDebug: () -> Unit,
@@ -239,6 +244,27 @@ fun SettingsScreen(
                             style = KeyStyle.Quiet,
                             enabled = !saved && !state.busy,
                         )
+                    }
+                    // The EP-1320's: no download, a copy of the user's own Medieval backup (from Backups' detail sheet).
+                    val saved1320 = FactorySounds.inLibrary(state.backups, FactoryKit.EP1320) != null
+                    PlateLine()
+                    // Not saved there is no key to press, so how to get them shows under the name.
+                    SettingRow(
+                        FeatureText.FACTORY_1320,
+                        note = if (saved1320) FeatureText.FACTORY_1320_SAVED else FeatureText.FACTORY_1320_NOTE,
+                        noteShown = !saved1320,
+                        control = if (saved1320) ({ ArcKey(FeatureText.SAVED, {}, size = KeySize.Small, style = KeyStyle.Quiet, enabled = false) }) else null,
+                    )
+                    if (kitsSaved(state.backups)) {
+                        PlateLine()
+                        SettingRow(FeatureText.FACTORY_KIT) {
+                            Segmented(
+                                FactoryKit.entries.map(MirrorText::kit),
+                                selected = activeKitOf(settings.factoryKit, state.backups).ordinal,
+                                onSelect = { onFactoryKit(FactoryKit.entries[it]) },
+                                compact = true,
+                            )
+                        }
                     }
                 }
             }

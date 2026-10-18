@@ -119,4 +119,81 @@ class FactorySoundsTest {
         assertEquals(emptyList<BackupRecord>(), LibraryRules.toPrune(backups, 3))
         assertEquals(LibraryRules.FACTORY_FROM, LibraryRules.facts(factory, "").toMap()["From"])
     }
+
+    private fun rec(id: String, createdAt: Long, source: String, device: BackupDevice) = rec(id, createdAt, source).copy(device = device)
+
+    private val medievalMeta = mapOf("pak_type" to "user", "device_name" to "EP-1320", "device_sku" to "TE032AS005")
+
+    @Test
+    fun `a kit is found by its id, its library source and its device's sku`() {
+        assertEquals(FactoryKit.EP133, FactoryKit.ofSku("TE032AS001"))
+        assertEquals(FactoryKit.EP1320, FactoryKit.ofSku("TE032AS005"))
+        assertNull(FactoryKit.ofSku("TE032AS003"))
+        assertNull(FactoryKit.ofSku(null))
+        assertEquals(FactoryKit.EP1320, FactoryKit.ofId("ep1320"))
+        assertNull(FactoryKit.ofId("ep40"))
+        assertEquals(FactoryKit.EP133, FactoryKit.ofSource(FactorySounds.SOURCE))
+        assertEquals(FactoryKit.EP1320, FactoryKit.ofSource("factory-ep1320"))
+        assertNull(FactoryKit.ofSource("device"))
+        assertTrue(FactorySounds.isFactorySource("factory-ep1320"))
+        assertFalse(FactorySounds.isFactorySource("import"))
+    }
+
+    @Test
+    fun `each kit finds its own pack, never the other's`() {
+        val ep133 = rec("f", 1L, FactorySounds.SOURCE)
+        val medieval = rec("m", 2L, FactoryKit.EP1320.source)
+        val newer = rec("m2", 3L, FactoryKit.EP1320.source)
+        val backups = listOf(rec("a", 10L, "device"), ep133, medieval, newer)
+        assertEquals(ep133, FactorySounds.inLibrary(backups))
+        assertEquals(ep133, FactorySounds.inLibrary(backups, FactoryKit.EP133))
+        assertEquals(newer, FactorySounds.inLibrary(backups, FactoryKit.EP1320))
+        assertNull(FactorySounds.inLibrary(listOf(ep133), FactoryKit.EP1320))
+        assertNull(FactorySounds.inLibrary(listOf(medieval), FactoryKit.EP133))
+    }
+
+    @Test
+    fun `a Medieval's pack fits its kit, a factory or a user pack alike`() {
+        assertTrue(FactorySounds.fitsKit(pak(medievalMeta, emptyMap()), FactoryKit.EP1320))
+        assertTrue(FactorySounds.fitsKit(pak(medievalMeta + ("pak_type" to "factory"), emptyMap()), FactoryKit.EP1320))
+        // Named so without its sku, or its sku alone.
+        assertTrue(FactorySounds.fitsKit(pak(mapOf("device_name" to "EP-1320 Medieval"), emptyMap()), FactoryKit.EP1320))
+        assertTrue(FactorySounds.fitsKit(pak(mapOf("device_sku" to "TE032AS005"), emptyMap()), FactoryKit.EP1320))
+        // The EP-133's pack isn't the Medieval's, nor the other way round; and a pack needs sounds.
+        assertFalse(FactorySounds.fitsKit(pak(factoryMeta + ("device_sku" to "TE032AS001"), emptyMap()), FactoryKit.EP1320))
+        assertFalse(FactorySounds.fitsKit(pak(medievalMeta + ("pak_type" to "factory"), emptyMap()), FactoryKit.EP133))
+        assertTrue(FactorySounds.fitsKit(pak(factoryMeta, emptyMap()), FactoryKit.EP133))
+        val silent = Pak(JsonObject(medievalMeta.mapValues { JsonPrimitive(it.value) }), JsonObject(emptyMap()), LinkedHashMap(), LinkedHashMap())
+        assertFalse(FactorySounds.fitsKit(silent, FactoryKit.EP1320))
+    }
+
+    @Test
+    fun `an imported EP-1320 factory pack goes in as its kit, anything else as an import`() {
+        assertEquals(FactoryKit.EP1320, FactorySounds.importKit(pak(medievalMeta + ("pak_type" to "factory"), emptyMap())))
+        // A Medieval's own backup is an import: Use as factory sounds copies it.
+        assertNull(FactorySounds.importKit(pak(medievalMeta, emptyMap())))
+        // The EP-133's pack imported by hand stays an import, as before.
+        assertNull(FactorySounds.importKit(pak(factoryMeta, emptyMap())))
+    }
+
+    @Test
+    fun `only a Medieval's backup can be used as factory sounds`() {
+        val medieval = BackupDevice("EP-1320", "TE032AS005", "", "1.0.0")
+        assertTrue(FactorySounds.canUseAsFactory(rec("a", 1L, "device", medieval)))
+        assertTrue(FactorySounds.canUseAsFactory(rec("b", 1L, "import", BackupDevice(product = "EP-1320 Medieval"))))
+        assertFalse(FactorySounds.canUseAsFactory(rec("c", 1L, "device", BackupDevice("EP-133", "TE032AS001"))))
+        // The copy itself isn't offered again.
+        assertFalse(FactorySounds.canUseAsFactory(rec("d", 1L, FactoryKit.EP1320.source, medieval)))
+    }
+
+    @Test
+    fun `neither kit is pruned, and each says where it came from`() {
+        val ep133 = rec("f", 1L, FactorySounds.SOURCE)
+        val medieval = rec("m", 2L, FactoryKit.EP1320.source, BackupDevice("EP-1320", "TE032AS005"))
+        val backups = listOf(rec("a", 10L, "device"), ep133, medieval, rec("b", 20L, "import"))
+        assertEquals(listOf("a"), LibraryRules.toPrune(backups, 1).map { it.id })
+        assertEquals(emptyList<BackupRecord>(), LibraryRules.toPrune(backups, 2))
+        assertEquals("Your backup, used as EP-1320 factory sounds", LibraryRules.facts(medieval, "").toMap()["From"])
+        assertEquals(LibraryRules.FACTORY_FROM, LibraryRules.facts(ep133, "").toMap()["From"])
+    }
 }

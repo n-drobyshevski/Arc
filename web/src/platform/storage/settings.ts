@@ -30,6 +30,7 @@ import { physicalPad, type PhysicalPad } from '../../core/features/padNotes'
 import { PadOrder } from '../../core/features/padPush'
 import { KeysView, choiceOf as pianoChoiceOf, keysViewOf } from '../../core/features/piano'
 import { ArpOrder, ArpSettings } from '../../core/features/arp'
+import { FactoryKit, type FactoryKitId } from '../../core/features/factorySounds'
 import { SampleSource } from '../../core/features/sampleSource'
 import { Timing, TimingSettings } from '../../core/features/pattern'
 import { SwitchTime } from '../../core/features/scenes'
@@ -86,6 +87,8 @@ export interface AppSettings {
   readonly sampleTrimSilence: boolean
   /** BARS on PTN: a hands-free take lasts the pattern's length, from its next loop start. */
   readonly samplePattern: boolean
+  /** The factory kit Live plays offline (FactoryKit.id): the EP-133's, or the EP-1320's once saved. */
+  readonly factoryKit: FactoryKitId
 }
 
 /** SAMPLE's LEVEL for the mic until one is chosen, in dB. */
@@ -167,6 +170,7 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   sampleNormalize: false,
   sampleTrimSilence: false,
   samplePattern: false,
+  factoryKit: FactoryKit.EP133.id,
 })
 
 /** Every setting's key, in Android's order (SettingsStore.values()). */
@@ -200,6 +204,7 @@ export const SETTING_KEYS = Object.freeze([
   'sampleNormalize',
   'sampleTrimSilence',
   'samplePattern',
+  'factoryKit',
 ] as const)
 export type SettingKey = (typeof SETTING_KEYS)[number]
 
@@ -377,6 +382,7 @@ export function readSettings(raw: string | null): AppSettings {
     sampleNormalize: bool('sampleNormalize', false),
     sampleTrimSilence: bool('sampleTrimSilence', false),
     samplePattern: bool('samplePattern', false),
+    factoryKit: FactoryKit.ofId(typeof o.factoryKit === 'string' ? o.factoryKit : null)?.id ?? FactoryKit.EP133.id,
   }
 }
 
@@ -434,6 +440,7 @@ export function settingValues(s: AppSettings): Record<SettingKey, string> {
     sampleNormalize: String(s.sampleNormalize),
     sampleTrimSilence: String(s.sampleTrimSilence),
     samplePattern: String(s.samplePattern),
+    factoryKit: s.factoryKit,
   }
 }
 
@@ -506,6 +513,7 @@ export function settingsFromIndex(map: Readonly<Record<string, string>>, cur: Ap
     sampleNormalize: b('app.sampleNormalize') ?? cur.sampleNormalize,
     sampleTrimSilence: b('app.sampleTrimSilence') ?? cur.sampleTrimSilence,
     samplePattern: b('app.samplePattern') ?? cur.samplePattern,
+    factoryKit: FactoryKit.ofId(get(map, 'app.factoryKit'))?.id ?? cur.factoryKit,
   }
 }
 

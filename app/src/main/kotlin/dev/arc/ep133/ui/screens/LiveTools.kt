@@ -68,6 +68,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.arc.ep133.controller.MirrorUi
+import dev.arc.ep133.features.FactoryKit
 import dev.arc.ep133.features.FactorySounds
 import dev.arc.ep133.features.MirrorState
 import dev.arc.ep133.features.NoteNames
@@ -144,6 +145,9 @@ internal class ToolsUi(
     val onGetFactory: (() -> Unit)?,
     val offlinePads: Int,
     val onResetPads: () -> Unit,
+    /** Both factory kits saved: the one Live plays, and the switch's pick of the other. */
+    val factoryKit: FactoryKit?,
+    val onFactoryKit: (FactoryKit) -> Unit,
     val tapToPlay: Boolean,
     val sideways: Boolean,
     /** No blinking, and the page changes at once. */
@@ -244,6 +248,7 @@ private fun FrontPage(ui: ToolsUi, onPage: (ToolsPage) -> Unit) {
     val c = LocalArcColors.current
     val st = ui.mirror?.state ?: MirrorState()
     FactoryNotice(ui.mirror, ui.onGetFactory)
+    FactoryKitRow(ui.mirror, ui.factoryKit, ui.onFactoryKit)
     OfflinePadsNotice(ui.offlinePads, ui.onResetPads)
     NowDisplay(ui, st)
     // On its side the display is one line (in the top bar), so what clock out is for is told here.
@@ -385,6 +390,15 @@ private fun SparkGlyph(color: Color) {
 private fun FactoryNotice(mirror: MirrorUi?, onGetFactory: (() -> Unit)?) {
     if (onGetFactory == null || mirror?.error != MirrorText.NOT_CONNECTED && mirror?.offline == null) return
     Notice(FeatureText.FACTORY_SOUNDS, FeatureText.FACTORY_NOTE, FeatureText.GET, onGetFactory)
+}
+
+/** Showing factory sounds with both kits saved: the switch between them, as on the display's factory line. */
+@Composable
+private fun FactoryKitRow(mirror: MirrorUi?, kit: FactoryKit?, onKit: (FactoryKit) -> Unit) {
+    if (kit == null || mirror?.offline != MirrorText.FACTORY) return
+    GridPlate {
+        SettingRow(FeatureText.FACTORY_KIT) { KitSwitch(kit, onKit) }
+    }
 }
 
 /** Pads changed offline, in arc only: how many, and the key that puts the device's sounds back on them. */
@@ -720,7 +734,7 @@ private fun liveNotes(st: MirrorState, mirror: MirrorUi?, tapToPlay: Boolean, si
         // Pads that play on the phone mean keys that do too, and sideways they are a piano.
         if (tapToPlay && !sideways) add(MirrorText.PIANO_HINT)
         // Offline the display line says so too, with this note under a tap.
-        if (mirror?.offline != null) add(MirrorText.offlineNote(mirror.offline, st.activeProject ?: FactorySounds.PROJECT))
+        if (mirror?.offline != null) add(MirrorText.offlineNote(mirror.offline, st.activeProject ?: FactorySounds.PROJECT, mirror.kit))
         if (learning) add(MirrorText.LEARN_NOTE)
         if (learning && !st.pushesSeen && st.learned.isEmpty() && st.lastHit?.pad != null && mirror?.loading == false) add(MirrorText.NO_PUSHES)
         add(MirrorText.COMMUNITY_NOTE)

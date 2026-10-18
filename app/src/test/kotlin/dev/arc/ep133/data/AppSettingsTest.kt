@@ -218,6 +218,16 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `the factory kit starts on the EP-133's, and round-trips by its id`() {
+        assertEquals(dev.arc.ep133.features.FactoryKit.EP133, AppSettings().factoryKit)
+        val chosen = AppSettings(factoryKit = dev.arc.ep133.features.FactoryKit.EP1320)
+        assertEquals("ep1320", chosen.values()["factoryKit"])
+        assertEquals(chosen, AppSettings().withIndex(chosen.values().mapKeys { "app." + it.key }))
+        // A kit arc doesn't know, from another version: left as it is.
+        assertEquals(chosen, chosen.withIndex(mapOf("app.factoryKit" to "ep40")))
+    }
+
+    @Test
     fun `an earlier library json's single TIMING choice gives the interval and quantize`() {
         val eighth = AppSettings().withIndex(mapOf("app.patternTiming" to "1/8"))
         assertEquals(TimingSettings(Timing.EIGHTH, 50, true), eighth.timing)

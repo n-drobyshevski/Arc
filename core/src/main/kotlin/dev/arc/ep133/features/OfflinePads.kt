@@ -35,7 +35,9 @@ enum class SoundSource(val id: String) {
  * [project]'s pad file for [group] (0..3, A..D) and [pad] (its number in the
  * project file, pNN, as in [PadTarget]), and the [slot] and [name] picked from
  * [source]'s list. A [SoundSource.RECORDED] sample has no slot yet ([slot] 0)
- * and plays from [file], its file name in arc's samples folder.
+ * and plays from [file], its file name in arc's samples folder. A
+ * [SoundSource.FACTORY] sound plays from [kit]'s pack (the EP-133's for
+ * everything else).
  */
 data class OfflinePad(
     val project: Int,
@@ -45,6 +47,7 @@ data class OfflinePad(
     val name: String,
     val source: SoundSource,
     val file: String? = null,
+    val kit: FactoryKit = FactoryKit.EP133,
 )
 
 /**
@@ -78,6 +81,8 @@ data class OfflinePads(val list: List<OfflinePad> = emptyList()) {
                 put("source", p.source.id)
                 // Only recorded samples have one: the other entries stay as they always were.
                 p.file?.let { put("file", it) }
+                // The EP-1320's factory sounds only: the EP-133's entries stay as they always were.
+                if (p.kit != FactoryKit.EP133) put("kit", p.kit.id)
             })
         }
     }.toString()
@@ -106,7 +111,9 @@ data class OfflinePads(val list: List<OfflinePad> = emptyList()) {
                 val recorded = source == SoundSource.RECORDED
                 val slot = int(f, "slot")?.takeIf { if (recorded) it == 0 else it >= 1 } ?: continue
                 val file = if (recorded) string(f, "file") ?: continue else null
-                out = out.put(OfflinePad(project, group, pad, slot, name, source, file))
+                // A factory sound's only; none (or one this version doesn't know) is the EP-133's.
+                val kit = FactoryKit.ofId(string(f, "kit"))?.takeIf { source == SoundSource.FACTORY } ?: FactoryKit.EP133
+                out = out.put(OfflinePad(project, group, pad, slot, name, source, file, kit))
             }
             out
         }.getOrNull()

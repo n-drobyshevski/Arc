@@ -226,10 +226,11 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f, claude: ClaudeUi? = null, toolsPage: ToolsPage? = null) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f, claude: ClaudeUi? = null, toolsPage: ToolsPage? = null, factoryKit: dev.arc.ep133.features.FactoryKit? = null) {
     // As the controller has it: the last read's day alone for a short line ("Seen Oct 5").
     val offlineShort = offline?.takeIf { it.startsWith("Last seen ") }?.let { MirrorText.seen(it.removePrefix("Last seen ").substringBefore(",")) }
-    val mirror = MirrorUi(state, loading = loading, error = error, offline = offline, offlineShort = offlineShort, offlineProjects = offlineProjects)
+    // [factoryKit]: both kits saved, that one shown (its switch on the factory line).
+    val mirror = MirrorUi(state, loading = loading, error = error, offline = offline, offlineShort = offlineShort, offlineProjects = offlineProjects, kit = factoryKit ?: dev.arc.ep133.features.FactoryKit.EP133)
     // PROJECT as MainActivity works it out; TEMPO's light caught on a beat while the click is on; FX named on its light,
     // held while [punch] gives the punch-ins.
     val functions = FunctionKeysUi(project = projectKeyOf(mirror, busy = false), clickOn = clickOn, beatLit = clickOn, fx = fx, fxHeld = punch != null)
@@ -267,6 +268,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             initialToolsPage = toolsPage,
             initialNoteOpen = noteOpen,
             onGetFactory = if (getFactory) ({}) else null,
+            factoryKit = factoryKit,
             onPad = if (playingPads.isNotEmpty()) ({ _, _, _, _ -> }) else null,
             playingPads = playingPads,
             keys = keys,
@@ -358,6 +360,20 @@ fun LiveGetFactoryToolsPreview() = Live(MirrorState(), oneGroup = true, tools = 
 @Preview(name = "Live factory sounds", widthDp = 393, heightDp = 1180, showBackground = true)
 @Composable
 fun LiveFactoryPreview() = Live(lastRead.copy(activeProject = 1), offline = dev.arc.ep133.text.MirrorText.FACTORY, noteOpen = true)
+
+// Both factory kits saved: the EP-133 / EP-1320 switch on the factory line, the EP-1320's shown.
+@PreviewTest
+@Preview(name = "Live factory kit switch", widthDp = 393, heightDp = 1180, showBackground = true)
+@Composable
+fun LiveFactoryKitPreview() =
+    Live(lastRead.copy(activeProject = 1), offline = dev.arc.ep133.text.MirrorText.FACTORY, noteOpen = true, factoryKit = dev.arc.ep133.features.FactoryKit.EP1320)
+
+// The same switch in Live tools, for the one-group view.
+@PreviewTest
+@Preview(name = "Live factory kit tools", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveFactoryKitToolsPreview() =
+    Live(lastRead.copy(activeProject = 1), oneGroup = true, tools = true, offline = dev.arc.ep133.text.MirrorText.FACTORY, factoryKit = dev.arc.ep133.features.FactoryKit.EP133)
 
 @PreviewTest
 @Preview(name = "Live offline pad playing", widthDp = 412, heightDp = 843, showBackground = true)
@@ -2027,11 +2043,11 @@ fun TrimSidewaysPreview() {
 }
 
 @Composable
-private fun Settings(dark: Boolean) {
+private fun Settings(dark: Boolean, state: UiState = connectedState, settings: AppSettings = AppSettings(keepLast = 10)) {
     ArcTheme(dark = dark) {
         SettingsScreen(
-            settings = AppSettings(keepLast = 10),
-            state = connectedState,
+            settings = settings,
+            state = state,
             padOrder = PadOrder.FROM_TOP,
             version = "1.0",
             onTheme = {}, onAutoConnect = {}, onKeepScreenOn = {}, pruneCount = { 0 }, onKeepLast = {},
@@ -2055,6 +2071,19 @@ fun SettingsDarkPreview() = Settings(dark = true)
 @Preview(name = "Settings sideways", widthDp = 867, heightDp = 388, showBackground = true)
 @Composable
 fun SettingsSidewaysPreview() = Settings(dark = false)
+
+// Both factory kits saved: the EP-1320's row says Saved, and the kit row switches Live between them.
+private val bothKitsState = connectedState.copy(
+    backups = connectedState.backups + listOf(
+        backup("f", dev.arc.ep133.text.FeatureText.FACTORY_TITLE, 1_700_000_000_000L, 343, 9).copy(source = dev.arc.ep133.features.FactorySounds.SOURCE),
+        backup("m", dev.arc.ep133.text.FeatureText.FACTORY_TITLE_1320, 1_791_100_000_000L, 343, 9).copy(source = dev.arc.ep133.features.FactoryKit.EP1320.source),
+    ),
+)
+
+@PreviewTest
+@Preview(name = "Settings factory kits", widthDp = 393, heightDp = 1500, showBackground = true)
+@Composable
+fun SettingsFactoryKitsPreview() = Settings(dark = false, state = bothKitsState, settings = AppSettings(keepLast = 10, factoryKit = dev.arc.ep133.features.FactoryKit.EP1320))
 
 // A tablet: the sections listed on the left, the plates beside them.
 @PreviewTest

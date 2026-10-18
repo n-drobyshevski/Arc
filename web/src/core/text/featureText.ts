@@ -458,4 +458,23 @@ export const FeatureText = {
   factoryFailed(message: string): string {
     return `Couldn't get the factory sounds: ${message}`
   },
+
+  // ---------- the EP-1320 Medieval's factory sounds (FactoryKit.EP1320), from your own backup ----------
+  /** The copy's title in the library. */
+  FACTORY_TITLE_1320: 'EP-1320 Medieval factory sounds',
+  /** Settings › Live › Factory sounds: the EP-1320's row. */
+  FACTORY_1320: 'EP-1320 Medieval',
+  FACTORY_1320_NOTE:
+    'teenage engineering offers no download for the EP-1320. Open a backup of your Medieval (best made right after a factory reset) in Backups and choose Use as factory sounds.',
+  FACTORY_1320_SAVED: 'In your backups, copied from your own Medieval backup.',
+  /** The detail sheet's key on an EP-1320 backup. */
+  USE_AS_FACTORY: 'Use as factory sounds',
+  SAVING_FACTORY: 'Saving factory sounds',
+  NOT_MEDIEVAL: "This backup isn't from an EP-1320 Medieval, or it has no sounds.",
+  /** Which kit Live plays offline, when both are saved (Settings, and the switch on Live's factory line). */
+  FACTORY_KIT: 'Factory kit',
+
+  factory1320Saved(sounds: number): string {
+    return `EP-1320 factory sounds saved: ${plural(sounds, 'sound')}. Live plays them until it has read your EP-1320.`
+  },
 } as const

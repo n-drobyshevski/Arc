@@ -18,11 +18,13 @@
 // @Synchronized is dropped (single-threaded JS); pads are keyed by
 // padKey() = group * 12 + offset; padSamples keys a pad by group * 100 +
 // its number where Kotlin uses a Pair, and distinct() compares the fields;
-// PadSample's `file` is optional, absent being Kotlin's default null.
+// PadSample's `file` and `kit` are optional, absent being Kotlin's default
+// null.
 
 import type { MidiEvent } from '../protocol/midiInput'
 import { pad as padOfNote, padKey, type PhysicalPad } from './padNotes'
 import type { LiveSnapshot } from './liveSnapshot'
+import type { FactoryKitId } from './factorySounds'
 import { OfflinePads, SoundSource, type OfflinePad } from './offlinePads'
 import { PadOrder, topNumber } from './padPush'
 import { groupOrder, type PadGroup } from './projectPads'
@@ -42,14 +44,16 @@ export interface PadTarget {
 /**
  * The sound to play for a pad (an addition): its [slot] and [name], and
  * whether it is a factory sound put on the pad offline ([factory]), which
- * plays from the factory pack first. A sample recorded in arc and not on the
- * device yet has slot 0 and plays from its [file] in arc's samples folder.
+ * plays from its [kit]'s factory pack first (null: the EP-133's). A sample
+ * recorded in arc and not on the device yet has slot 0 and plays from its
+ * [file] in arc's samples folder.
  */
 export interface PadSample {
   readonly slot: number
   readonly name: string
   readonly factory: boolean
   readonly file?: string | null
+  readonly kit?: FactoryKitId | null
 }
 
 /** A pad file id from a pad push: project 1..99, group 0..3 (A..D) and the pad's number in the project file (pNN). */
@@ -417,7 +421,7 @@ export class LiveMirror {
     const seen = new Set<string>()
     const out: PadSample[] = []
     for (const s of byPad.values()) {
-      const k = JSON.stringify([s.slot, s.factory, s.file ?? null, s.name])
+      const k = JSON.stringify([s.slot, s.factory, s.file ?? null, s.name, s.kit ?? null])
       if (seen.has(k)) continue
       seen.add(k)
       out.push(s)
@@ -513,10 +517,11 @@ export class LiveMirror {
   }
 }
 
-/** What an offline change plays: a recorded sample brings its file along. */
+/** What an offline change plays: a recorded sample brings its file along, a factory sound its kit. */
 function sampleIn(p: OfflinePad): PadSample {
-  const s = { slot: p.slot, name: p.name, factory: p.source === SoundSource.FACTORY }
-  return p.file != null ? { ...s, file: p.file } : s
+  const s: PadSample = { slot: p.slot, name: p.name, factory: p.source === SoundSource.FACTORY }
+  if (p.file != null) return { ...s, file: p.file }
+  return s.factory && p.kit != null ? { ...s, kit: p.kit } : s
 }
 
 /** An offline change's slot on the device; a recorded sample's slot 0 is a placeholder, not a slot. */

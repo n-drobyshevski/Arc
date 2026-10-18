@@ -184,6 +184,17 @@ class FeatureTextTest {
         // Project 1 unless PROJECT stepped on; a last read keeps its own note.
         assertEquals(MirrorText.factoryNote(1), MirrorText.offlineNote(MirrorText.FACTORY))
         assertEquals(MirrorText.OFFLINE_NOTE, MirrorText.offlineNote(MirrorText.lastSeen("5 Oct, 14:02"), 3))
+        // The EP-1320's kit names its own sounds; the switch's keys name the kits.
+        assertEquals(
+            "Not connected: these are the EP-1320's factory sounds, project 2 as it ships. Connect your EP-133 to see it live.",
+            MirrorText.offlineNote(MirrorText.FACTORY, 2, dev.arc.ep133.features.FactoryKit.EP1320),
+        )
+        assertEquals(MirrorText.OFFLINE_NOTE, MirrorText.offlineNote(MirrorText.lastSeen("5 Oct, 14:02"), 3, dev.arc.ep133.features.FactoryKit.EP1320))
+        assertEquals(listOf("EP-133", "EP-1320"), dev.arc.ep133.features.FactoryKit.entries.map(MirrorText::kit))
+        assertEquals(
+            "EP-1320 factory sounds saved: 1 sound. Live plays them until it has read your EP-1320.",
+            FeatureText.factory1320Saved(1),
+        )
         assertEquals("Seen 5 Oct", MirrorText.seen("5 Oct"))
         assertTrue(MirrorText.LISTEN_ONLY.endsWith("in EDIT, switch projects with PROJECT, or keep a sample in SAMPLE."))
         assertEquals("Next project: tap; hold + pad 1–9 to pick", CoachText.PROJECT)

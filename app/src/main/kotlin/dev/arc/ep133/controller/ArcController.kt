@@ -16,6 +16,7 @@ import dev.arc.ep133.features.BackupDiff
 import dev.arc.ep133.features.DeviceBrowser
 import dev.arc.ep133.features.DeviceContents
 import dev.arc.ep133.features.DiffResult
+import dev.arc.ep133.features.FactoryKit
 import dev.arc.ep133.features.FactorySounds
 import dev.arc.ep133.features.OfflinePad
 import dev.arc.ep133.features.OfflinePads
@@ -160,6 +161,8 @@ data class MirrorUi(
      * the last read's and the factory pack's. Fewer than two grey it out.
      */
     val offlineProjects: List<Int> = emptyList(),
+    /** Offline: the factory kit whose pack Live shows (with [offline] FACTORY) and lists. */
+    val kit: FactoryKit = FactoryKit.EP133,
 )
 
 /** Live's click (TEMPO): whether it sounds, and the phone's tempo (the EP-133's leads while it sends MIDI clock). */
@@ -421,6 +424,42 @@ internal fun offlineSoundsOf(
 }
 
 /**
+ * The factory kit Live plays offline (an addition): [chosen] while its pack
+ * is saved, else the EP-133's, so a deleted EP-1320 copy doesn't leave Live
+ * with nothing.
+ */
+internal fun activeKitOf(chosen: FactoryKit, backups: List<BackupRecord>): FactoryKit =
+    chosen.takeIf { FactorySounds.inLibrary(backups, it) != null } ?: FactoryKit.EP133
+
+/** Both kits' packs saved: Settings and Live's factory line offer the kit switch. */
+internal fun kitsSaved(backups: List<BackupRecord>): Boolean = FactoryKit.entries.all { FactorySounds.inLibrary(backups, it) != null }
+
+/**
+ * The kit to switch to as a device with [sku] connects: its own, when that
+ * kit's pack is saved and it isn't [chosen] already; else null.
+ */
+internal fun kitOnConnect(sku: String?, chosen: FactoryKit, backups: List<BackupRecord>): FactoryKit? =
+    FactoryKit.ofSku(sku)?.takeIf { it != chosen && FactorySounds.inLibrary(backups, it) != null }
+
+/**
+ * The kit whose pack plays a sound the device lists unnamed ("343.pcm",
+ * FactorySounds.unnamed): the connected device's ([sku]), else [active].
+ */
+internal fun unnamedKit(sku: String?, active: FactoryKit): FactoryKit = FactoryKit.ofSku(sku) ?: active
+
+/**
+ * A pad sound's key in Live's memory: its slot and name, and for a sound
+ * from a factory pack that pack's library entry ([pack]) too, so the two
+ * kits' sounds of the same slot and name never stand in for each other.
+ */
+internal fun padMemoryKey(slot: Int, name: String, pack: String? = null): String =
+    (pack?.let { "pack:$it:" } ?: "") + "$slot:${name.trim().lowercase()}"
+
+/** The packs of [kit] other than [keepId], the one just saved: it replaces them. */
+internal fun olderKitCopies(backups: List<BackupRecord>, kit: FactoryKit, keepId: String): List<BackupRecord> =
+    backups.filter { it.source == kit.source && it.id != keepId }
+
+/**
  * [slot]'s row in [source]'s list when it is listed and arc can play it;
  * null: it needs the EP-133. The pad's own sound in the read ([readSlot])
  * is always taken, unplayable or not: picking it drops the pad's change.
@@ -433,7 +472,8 @@ internal fun OfflineSounds.pick(slot: Int, source: SoundSource, readSlot: Int? =
 /**
  * [pads] after [slot] ([name], from [source]) was picked offline for [t]'s
  * pad: picking the device's own sound, the one the read has there
- * ([readSlot]), drops the pad's change; anything else is put on it.
+ * ([readSlot]), drops the pad's change; anything else is put on it. A
+ * factory sound is [kit]'s, the kit Live shows.
  */
 internal fun offlineAssign(
     pads: OfflinePads,
@@ -442,9 +482,10 @@ internal fun offlineAssign(
     name: String,
     source: SoundSource,
     readSlot: Int?,
+    kit: FactoryKit = FactoryKit.EP133,
 ): OfflinePads =
     if (source == SoundSource.DEVICE && slot == readSlot) pads.drop(t.project, t.group, t.pad)
-    else pads.put(OfflinePad(t.project, t.group, t.pad, slot, name, source))
+    else pads.put(OfflinePad(t.project, t.group, t.pad, slot, name, source, kit = if (source == SoundSource.FACTORY) kit else FactoryKit.EP133))
 
 /** What reconnecting does with one offline pad change. */
 internal sealed interface OfflineStep {
@@ -852,6 +893,8 @@ class ArcController(
     private var openPak: Pair<String, dev.arc.ep133.backup.Pak>? = null
     /** The factory sounds' projects with pads as Live shows them, by number, by the library entry they came from. */
     private var factorySnaps: Pair<String, Map<Int, dev.arc.ep133.features.LiveSnapshot>>? = null
+    /** The factory pack a factory project shown offline comes from (its library entry); null showing the last read. */
+    private var offlinePack: String? = null
     // PROJECT, connected: the project the newest tap asked for, until the device's read of it lands,
     // and the one worker writing it (taps meanwhile only move the target). Main thread only.
     private var projectTarget: Int? = null
@@ -1108,6 +1151,7 @@ class ArcController(
             liveEvents = open.transport.events
             _state.update { it.copy(connected = true) }
             s.handshake()
+            s.info?.let { followKit(it.sku) }
             refreshDevice()
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) throw e
@@ -1415,10 +1459,12 @@ class ArcController(
             val key = "${source.id}:$slot"
             val sounds = _state.value.mirror?.offlineSounds
             val name = (if (source == SoundSource.FACTORY) sounds?.factory else sounds?.device)?.firstOrNull { it.slot == slot }?.name ?: return@launch
-            val previewKey = "$PAD_PREVIEW$key:${name.trim().lowercase()}"
-            val sound = previews[previewKey] ?: padMemory[memoryKey(slot, name)]
+            // A factory sound is the active kit's, the one the list shows: kept by its pack too.
+            val pack = if (source == SoundSource.FACTORY) FactorySounds.inLibrary(_state.value.backups, activeKit()) else null
+            val previewKey = "$PAD_PREVIEW$key:" + padMemoryKey(slot, name, pack?.id)
+            val sound = previews[previewKey] ?: padMemory[padMemoryKey(slot, name, pack?.id)]
                 ?: try {
-                    loadPadAudio(slot, name, source == SoundSource.FACTORY)?.also { previews.put(previewKey, it) }
+                    loadPadAudio(slot, name, pack)?.also { previews.put(previewKey, it) }
                 } catch (e: Throwable) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     toast(e.message ?: e.toString(), error = true)
@@ -1669,7 +1715,10 @@ class ArcController(
         stopMirror()
         val gen = mirrorGen
         val lastRead = loadLastRead()
-        val factory = factorySnapshots()
+        // The kit chosen (or the EP-133's while the chosen one's pack isn't saved): one kit at a time.
+        val kit = activeKit()
+        val pack = FactorySounds.inLibrary(_state.value.backups, kit)
+        val factory = factorySnapshots(kit)
         if (gen != mirrorGen) return
         val views = dev.arc.ep133.features.ProjectStep.offlineViews(lastRead?.activeProject, factory.keys)
         // The view PROJECT stepped to; else the last read; never read, the factory sounds' first project.
@@ -1695,28 +1744,30 @@ class ArcController(
         // And with the settings turned offline.
         padSettings = loadOfflinePadSettings().byPad()
         padSaved.clear()
-        val sounds = offlineSounds(lastRead, if (fromRead) SoundSource.DEVICE else SoundSource.FACTORY)
+        val sounds = offlineSounds(lastRead, if (fromRead) SoundSource.DEVICE else SoundSource.FACTORY, kit)
         if (gen != mirrorGen || session != null && _state.value.device != null) return
         mirror = m
+        // Set before the preload asks which pack the pads play from ([packOf]).
+        offlinePack = if (fromRead) null else pack?.id
         preloadPads(m)
         // Every factory project's line is FACTORY (refreshOffline goes by it); offlineNote names the project.
         val offline = lastRead?.takeIf { fromRead }?.let { dev.arc.ep133.text.MirrorText.lastSeen(fmtDateTime(it.savedAt)) } ?: dev.arc.ep133.text.MirrorText.FACTORY
         val offlineShort = lastRead?.takeIf { fromRead }?.let { dev.arc.ep133.text.MirrorText.seen(fmtMonthDay(it.savedAt)) }
         _state.update {
-            it.copy(mirror = MirrorUi(m.snapshot(System.nanoTime()), loading = false, offline = offline, offlineShort = offlineShort, offlineSounds = sounds, offlineProjects = views))
+            it.copy(mirror = MirrorUi(m.snapshot(System.nanoTime()), loading = false, offline = offline, offlineShort = offlineShort, offlineSounds = sounds, offlineProjects = views, kit = kit))
         }
     }
 
     /**
      * The lists Live offers offline ([OfflineSounds]): the device's sounds
      * from [lastRead], dimmed where arc has neither a copy, a backup nor the
-     * factory pack's sound, and the factory pack's; [base] the view's own.
+     * factory pack's sound, and the factory pack's ([kit]'s); [base] the view's own.
      */
-    private suspend fun offlineSounds(lastRead: dev.arc.ep133.features.LiveSnapshot?, base: SoundSource): OfflineSounds {
-        val factory = factorySnapshots().values.firstOrNull()
+    private suspend fun offlineSounds(lastRead: dev.arc.ep133.features.LiveSnapshot?, base: SoundSource, kit: FactoryKit = activeKit()): OfflineSounds {
+        val factory = factorySnapshots(kit).values.firstOrNull()
         val unavailable = lastRead?.let { r ->
             val copies = withContext(Dispatchers.IO) { runCatching { padSounds.copies() }.getOrDefault(emptyMap()) }
-            val packSaved = FactorySounds.inLibrary(_state.value.backups) != null
+            val packSaved = FactorySounds.inLibrary(_state.value.backups, kit) != null
             withContext(Dispatchers.Default) { dev.arc.ep133.features.PadSounds.unavailable(r.names, copies, backupNames, packSaved) }
         }
         return offlineSoundsOf(lastRead, factory, unavailable.orEmpty(), base)
@@ -1725,10 +1776,12 @@ class ArcController(
     /**
      * What Live can show from the factory sounds while no EP-133 is
      * connected: each of their projects with pads, by number, in order;
-     * none when the library doesn't have them (FactorySounds).
+     * none when the library doesn't have them (FactorySounds). [kit]'s pack,
+     * the active kit's unless asked; kept by its library entry, so a switch
+     * of kits reads the other pack once.
      */
-    private suspend fun factorySnapshots(): Map<Int, dev.arc.ep133.features.LiveSnapshot> {
-        val b = FactorySounds.inLibrary(_state.value.backups) ?: return emptyMap()
+    private suspend fun factorySnapshots(kit: FactoryKit = activeKit()): Map<Int, dev.arc.ep133.features.LiveSnapshot> {
+        val b = FactorySounds.inLibrary(_state.value.backups, kit) ?: return emptyMap()
         factorySnaps?.takeIf { it.first == b.id }?.let { return it.second }
         val snaps = try {
             val pak = pakOf(b.id)
@@ -1756,16 +1809,18 @@ class ArcController(
 
     /**
      * Live without a device follows the library: it shows the factory sounds
-     * once they are in it, and stops when they are deleted (it opens offline
-     * again); otherwise the offline lists are made again, as which sounds
-     * arc can play changes with the backups, the pack and the copies.
+     * once they are in it, and stops when they are deleted or another kit's
+     * pack takes over (it opens offline again); otherwise the offline lists
+     * are made again, as which sounds arc can play changes with the backups,
+     * the pack and the copies.
      */
     private fun refreshOffline() {
         val st = _state.value
         val mi = st.mirror ?: return
         if (session != null && st.device != null) return
-        val has = FactorySounds.inLibrary(st.backups) != null
-        if (has && mi.error == dev.arc.ep133.text.MirrorText.NOT_CONNECTED || !has && mi.offline == dev.arc.ep133.text.MirrorText.FACTORY) {
+        val pack = FactorySounds.inLibrary(st.backups, activeKit())
+        // A factory project shown from a pack that is gone, or no longer the active kit's (deleted, replaced, or the kit switched).
+        if (pack != null && mi.error == dev.arc.ep133.text.MirrorText.NOT_CONNECTED || mi.offline == dev.arc.ep133.text.MirrorText.FACTORY && pack?.id != offlinePack) {
             scope.launch { openOfflineMirror() }
             return
         }
@@ -2357,13 +2412,34 @@ class ArcController(
         _state.update { it.copy(browser = it.browser.copy(draft = listOf(item))) }
     }
 
-    private fun memoryKey(slot: Int, name: String) = "$slot:${name.trim().lowercase()}"
+    /** A device sound's key in [padMemory] ([padMemoryKey] with no pack). */
+    private fun memoryKey(slot: Int, name: String) = padMemoryKey(slot, name)
 
-    /** A pad sample's key in [padMemory]: a recording's by its file (it has no slot yet), else by slot and name. */
-    private fun sampleKey(sample: PadSample) = sample.file?.let(::recordedKey) ?: memoryKey(sample.slot, sample.name)
+    /**
+     * A pad sample's key in [padMemory]: a recording's by its file (it has no slot yet), else by slot and name, and
+     * by the factory pack it plays from first ([packOf]), if any.
+     */
+    private fun sampleKey(sample: PadSample) = sample.file?.let(::recordedKey) ?: padMemoryKey(sample.slot, sample.name, packOf(sample)?.id)
 
-    private fun keepInMemory(slot: Int, name: String, a: PcmSound) {
-        padMemory.put(memoryKey(slot, name), a)
+    /**
+     * The factory pack [sample] plays from first, if any: a factory sound put on a pad offline plays from its own
+     * kit's pack (the active kit's when that one is gone), a factory project's pads from the pack shown
+     * ([offlinePack]), and a sound the device lists unnamed from its kit's ([unnamedKit]).
+     */
+    private fun packOf(sample: PadSample): BackupRecord? {
+        if (sample.file != null) return null
+        val backups = _state.value.backups
+        return when {
+            sample.factory -> FactorySounds.inLibrary(backups, sample.kit) ?: FactorySounds.inLibrary(backups, activeKit())
+            FactorySounds.unnamed(sample.slot, sample.name) -> FactorySounds.inLibrary(backups, unnamedKit(session?.info?.sku, activeKit()))
+            else -> offlinePack?.let { id -> backups.firstOrNull { it.id == id } }
+        }
+    }
+
+    private fun keepInMemory(slot: Int, name: String, a: PcmSound) = keepInMemory(memoryKey(slot, name), a)
+
+    private fun keepInMemory(key: String, a: PcmSound) {
+        padMemory.put(key, a)
         prepareLive(listOf(a))
         refreshPatternPlan()
     }
@@ -2404,16 +2480,17 @@ class ArcController(
     /** [sample]'s sound: a recording's from its file, else as [loadPadAudio] finds it. */
     private suspend fun loadSampleAudio(sample: PadSample): PcmSound? {
         val file = sample.file
-        return if (file != null) loadRecorded(file) else loadPadAudio(sample.slot, sample.name, sample.factory)
+        return if (file != null) loadRecorded(file) else loadPadAudio(sample.slot, sample.name, packOf(sample))
     }
 
     /**
      * A sample from arc's copy or a backup, decoded; null when neither has it.
-     * A factory sound put on a pad offline ([factory]) comes from the factory
-     * pack first: the device's copy in that slot may be another sound.
+     * A factory sound ([pack], the factory pack it is from: one put on a pad
+     * offline, or a factory project's) comes from that pack first: the
+     * device's copy in that slot may be another sound.
      */
-    private suspend fun loadPadAudio(slot: Int, name: String, factory: Boolean = false): PcmSound? {
-        val wav = (if (factory) fromPack(slot, name) else null)
+    private suspend fun loadPadAudio(slot: Int, name: String, pack: BackupRecord? = null): PcmSound? {
+        val wav = pack?.let { fromPack(it, slot, name) }
             ?: withContext(Dispatchers.IO) { padSounds.get(slot, name) }
             ?: fromBackup(slot, name)
             ?: return null
@@ -2471,7 +2548,8 @@ class ArcController(
         val (slot, name) = sample
         return try {
             // The background copy reading this very sound: wait for it rather than read it twice.
-            val copied = loadPadAudio(slot, name, sample.factory) ?: copying?.takeIf { it.first == slot }?.second?.await()
+            val pack = packOf(sample)
+            val copied = loadPadAudio(slot, name, pack) ?: copying?.takeIf { it.first == slot }?.second?.await()
             val audio = copied ?: padMemory[memoryKey(slot, name)] ?: if (session != null && _state.value.device != null) {
                 val (d, pcm) = exclusive("play:$slot") { s -> DeviceBrowser.soundDetails(s, slot) to dev.arc.ep133.protocol.Fs.download(s, slot) }
                     // SAMPLE's upload holds the device while Live plays on: say why the pad is silent.
@@ -2480,11 +2558,11 @@ class ArcController(
                 deviceSounds[slot]?.let { keepPadSound(slot, it.name, it.size, pcm, d.channels, d.sampleRate) }
                     ?: withContext(Dispatchers.Default) { PcmSound.of(pcm, d.channels.toInt(), d.sampleRate.toInt()) }
             } else {
-                val factory = (sample.factory || FactorySounds.unnamed(slot, name)) && FactorySounds.inLibrary(_state.value.backups) == null
+                val factory = (sample.factory || FactorySounds.unnamed(slot, name)) && FactorySounds.inLibrary(_state.value.backups, activeKit()) == null
                 toastOnce(if (factory) dev.arc.ep133.text.MirrorText.NO_COPY_FACTORY else dev.arc.ep133.text.MirrorText.NO_COPY)
                 return null
             }
-            if (mirror != null) keepInMemory(slot, name, audio)
+            if (mirror != null) keepInMemory(padMemoryKey(slot, name, pack?.id), audio)
             audio
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) throw e
@@ -2551,18 +2629,19 @@ class ArcController(
 
     /**
      * The WAV of a sound from the newest backup that has it, if any; a sound
-     * the device lists unnamed ("343.pcm") from the factory pack.
+     * the device lists unnamed ("343.pcm") from the factory pack: the
+     * connected device's kit's, else the active kit's ([unnamedKit]).
      */
     private suspend fun fromBackup(slot: Int, name: String): ByteArray? {
-        val b = dev.arc.ep133.features.PadSounds.newestBackupWith(slot, name, backupNames, _state.value.backups)
-            ?: FactorySounds.inLibrary(_state.value.backups)?.takeIf { FactorySounds.unnamed(slot, name) }
+        val backups = _state.value.backups
+        val b = dev.arc.ep133.features.PadSounds.newestBackupWith(slot, name, backupNames, backups)
+            ?: FactorySounds.inLibrary(backups, unnamedKit(session?.info?.sku, activeKit()))?.takeIf { FactorySounds.unnamed(slot, name) }
             ?: return null
         return pakOf(b.id).sounds[slot]?.wav
     }
 
-    /** The factory pack's sound in [slot], when the library has the pack and the sound there is still [name]. */
-    private suspend fun fromPack(slot: Int, name: String): ByteArray? {
-        val b = FactorySounds.inLibrary(_state.value.backups) ?: return null
+    /** [b]'s sound in [slot] (a factory pack's), when the sound there is still [name]. */
+    private suspend fun fromPack(b: BackupRecord, slot: Int, name: String): ByteArray? {
         val snd = pakOf(b.id).sounds[slot] ?: return null
         return snd.wav.takeIf { dev.arc.ep133.features.PadSoundCache.sameName(snd.name, name) }
     }
@@ -5636,7 +5715,7 @@ class ArcController(
                 skipped++
                 continue
             }
-            pads = offlineAssign(pads, t, slot, entryAt.name, sounds.base, m.slotAt(t.group, t.pad))
+            pads = offlineAssign(pads, t, slot, entryAt.name, sounds.base, m.slotAt(t.group, t.pad), _state.value.mirror?.kit ?: activeKit())
             // The new sound comes with its own settings, as on the device.
             settings = settings.drop(t.project, t.group, t.pad)
             done += PadBack(p.pad, t)
@@ -5967,7 +6046,8 @@ class ArcController(
         val readSlot = m.slotAt(t.group, t.pad)
         val entry = _state.value.mirror?.offlineSounds?.pick(slot, source, readSlot) ?: return toast(dev.arc.ep133.text.MirrorText.NEEDS_DEVICE)
         val before = loadOfflinePads()
-        val pads = offlineAssign(before, t, slot, entry.name, source, readSlot)
+        // A factory sound is the kit's the list shows.
+        val pads = offlineAssign(before, t, slot, entry.name, source, readSlot, _state.value.mirror?.kit ?: activeKit())
         if (mirror !== m) return
         saveOfflinePads(pads)
         // A recording on the pad not on the device yet: into Takes, never left unseen in arc's folder.
@@ -6622,6 +6702,7 @@ class ArcController(
         mirrorPushOff = null
         mirror = null
         mirrorSession = null
+        offlinePack = null
         clockFollow = null
         // A switch still writing finishes its pass, then sees the mirror gone (switchProjects).
         projectTarget = null
@@ -6765,20 +6846,28 @@ class ArcController(
     fun import(name: String, lastModified: Long?, read: suspend () -> ByteArray): Job = scope.launch {
         try {
             val bytes = withContext(Dispatchers.IO) { read() }
-            val d = withContext(Dispatchers.Default) { Paks.describe(Paks.open(bytes)) }
+            val pak = withContext(Dispatchers.Default) { Paks.open(bytes) }
+            val d = withContext(Dispatchers.Default) { Paks.describe(pak) }
+            // An EP-1320 factory pack goes in as that kit's (replacing an earlier one), not as an import.
+            val kit = FactorySounds.importKit(pak)
             val saved = library.save(
                 record(
-                    title = dev.arc.ep133.text.LibraryRules.importTitle(name),
+                    title = if (kit != null) FeatureText.FACTORY_TITLE_1320 else dev.arc.ep133.text.LibraryRules.importTitle(name),
                     // generatedAt || file.lastModified || Date.now()
                     createdAt = d.generatedAt ?: lastModified?.takeIf { it != 0L } ?: System.currentTimeMillis(),
-                    source = "import",
-                    fileName = name,
+                    source = kit?.source ?: "import",
+                    fileName = if (kit != null) FactorySounds.FILE_NAME_1320 else name,
                     device = BackupDevice(d.device.product, d.device.sku, "", d.device.osVersion),
                     d = d,
                 ),
                 bytes,
                 d.soundNames,
             )
+            if (kit != null) {
+                keptKit(kit, saved)
+                toastSaved(FeatureText.factory1320Saved(saved.record.soundCount), saved.copyError)
+                return@launch
+            }
             _state.update { it.copy(freshId = saved.record.id) }
             toastSaved(Strings.imported(saved.record.soundCount, saved.record.projectCount) + pruneOld(saved.record.id), saved.copyError)
         } catch (e: Throwable) {
@@ -6793,10 +6882,10 @@ class ArcController(
      * the progress sheet shows how much has come, and Cancel stops it.
      */
     fun getFactorySounds(): Job = scope.launch {
-        if (FactorySounds.inLibrary(_state.value.backups) != null) return@launch
+        if (FactorySounds.inLibrary(_state.value.backups, FactoryKit.EP133) != null) return@launch
         // Tapped while something else runs (a read, a transfer): it goes next, not never.
         _state.first { !it.busy }
-        if (FactorySounds.inLibrary(_state.value.backups) != null) return@launch
+        if (FactorySounds.inLibrary(_state.value.backups, FactoryKit.EP133) != null) return@launch
         val saved = runTask(FeatureText.GETTING_FACTORY, device = false) { onProgress, signal ->
             try {
                 withContext(Dispatchers.IO) {
@@ -6830,6 +6919,70 @@ class ArcController(
         } ?: return@launch
         _state.update { it.copy(freshId = saved.record.id) }
         toastSaved(FeatureText.factorySaved(saved.record.soundCount), saved.copyError)
+    }
+
+    /**
+     * Copies [b], a Medieval's backup (FactorySounds.canUseAsFactory), into
+     * the library as the EP-1320's factory sounds ([FactoryKit.EP1320]),
+     * which teenage engineering doesn't offer, as a task like
+     * [getFactorySounds]. The backup stays as it was; an earlier copy goes,
+     * and Live plays the new kit from now on.
+     */
+    fun useAsFactory(b: BackupRecord): Job = scope.launch {
+        _state.first { !it.busy }
+        val kit = FactoryKit.EP1320
+        val saved = runTask(FeatureText.SAVING_FACTORY, device = false) { _, _ ->
+            val bytes = library.bytes(b.id)
+            val pak = withContext(Dispatchers.Default) { Paks.open(bytes) }
+            if (!FactorySounds.fitsKit(pak, kit)) throw java.io.IOException(FeatureText.NOT_MEDIEVAL)
+            val d = Paks.describe(pak)
+            library.save(
+                record(
+                    title = FeatureText.FACTORY_TITLE_1320,
+                    createdAt = System.currentTimeMillis(),
+                    source = kit.source,
+                    fileName = FactorySounds.FILE_NAME_1320,
+                    device = BackupDevice(d.device.product, d.device.sku, "", d.device.osVersion),
+                    d = d,
+                ),
+                bytes,
+                d.soundNames,
+            )
+        } ?: return@launch
+        keptKit(kit, saved)
+        toastSaved(FeatureText.factory1320Saved(saved.record.soundCount), saved.copyError)
+    }
+
+    /** [saved], a new pack of [kit]: it replaces the kit's earlier ones, is shown as fresh, and Live plays it. */
+    private suspend fun keptKit(kit: FactoryKit, saved: dev.arc.ep133.data.Saved) {
+        for (old in olderKitCopies(library.backups.first(), kit, saved.record.id)) {
+            runCatching { library.delete(old.id) }.onFailure { e -> if (e is kotlinx.coroutines.CancellationException) throw e }
+        }
+        _state.update { it.copy(freshId = saved.record.id) }
+        setFactoryKit(kit)
+    }
+
+    /** The factory kit Live plays offline: the one chosen while its pack is saved, else the EP-133's ([activeKitOf]). */
+    private fun activeKit(): FactoryKit = activeKitOf(settings.value.factoryKit, _state.value.backups)
+
+    /**
+     * Picks the factory kit Live plays offline (Settings, or Live's factory
+     * line, with both saved; a pack just saved; the device connected). Kept,
+     * and Live offline opens on it again, at the kit's first project.
+     */
+    fun setFactoryKit(kit: FactoryKit) {
+        if (kit == settings.value.factoryKit) return
+        changeSettings { it.copy(factoryKit = kit) }
+        refreshFactoryNames()
+        val mi = _state.value.mirror ?: return
+        if (session != null) return
+        if (mi.offline == dev.arc.ep133.text.MirrorText.FACTORY) offlineProject = FactorySounds.PROJECT
+        scope.launch { openOfflineMirror() }
+    }
+
+    /** A device with [sku] connected: Live's kit becomes its own when that kit's pack is saved ([kitOnConnect]). */
+    private fun followKit(sku: String) {
+        kitOnConnect(sku, settings.value.factoryKit, _state.value.backups)?.let(::setFactoryKit)
     }
 
     /** Saves edits made in the detail sheet (`saveDetailEdits`). */

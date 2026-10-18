@@ -94,8 +94,9 @@ export async function openSettings(page: Page): Promise<void> {
  * Imports a .pak through the Import key. The app makes a hidden <input type=file>
  * per pick and clicks it; Playwright intercepts that picker (FileChooser) and
  * sets the input's files, which fires its change event like a real choice.
+ * [file] is a path, or a file made in the test.
  */
-export async function importPak(page: Page, file: string): Promise<void> {
+export async function importPak(page: Page, file: string | { name: string; mimeType: string; buffer: Buffer }): Promise<void> {
   const chooser = page.waitForEvent('filechooser')
   await page.getByRole('button', { name: 'Import a .pak' }).click()
   const fc = await chooser

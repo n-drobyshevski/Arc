@@ -106,6 +106,7 @@ import dev.arc.ep133.controller.stepOffered
 import dev.arc.ep133.controller.stepView
 import dev.arc.ep133.controller.punchSlotForPad
 import dev.arc.ep133.features.FxType
+import dev.arc.ep133.features.FactoryKit
 import dev.arc.ep133.features.FactorySounds
 import dev.arc.ep133.features.Beat
 import dev.arc.ep133.features.Tempo
@@ -128,7 +129,9 @@ import dev.arc.ep133.features.TransportPhase
 import dev.arc.ep133.features.TransportState
 import dev.arc.ep133.data.TakeInfo
 import dev.arc.ep133.text.GuideText
+import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.MirrorText
+import dev.arc.ep133.ui.components.Segmented
 import dev.arc.ep133.ui.components.Caption
 import dev.arc.ep133.ui.components.CapDx
 import dev.arc.ep133.ui.components.CapDy
@@ -389,6 +392,12 @@ fun MirrorScreen(
     initialNoteOpen: Boolean = false,
     /** Not connected: download the factory sounds (FactorySounds); null when they are in the library. */
     onGetFactory: (() -> Unit)? = null,
+    /**
+     * The factory kit Live plays offline, when both kits are saved (null otherwise): the factory line's switch
+     * picks the other with [onFactoryKit].
+     */
+    factoryKit: FactoryKit? = null,
+    onFactoryKit: (FactoryKit) -> Unit = {},
     /** Pad changes made offline, in arc only: how many, for Live tools' row with [onResetPads]. */
     offlinePads: Int = 0,
     onResetPads: () -> Unit = {},
@@ -961,6 +970,7 @@ fun MirrorScreen(
                             group = stepGroup ?: group,
                             claude = claude, take = take, takes = takes,
                             onGetFactory = onGetFactory, offlinePads = offlinePads, onResetPads = onResetPads,
+                            factoryKit = factoryKit, onFactoryKit = onFactoryKit,
                             tapToPlay = onPad != null, sideways = sideways,
                             still = fixedNow != null || reduceMotion,
                         ),
@@ -1443,7 +1453,7 @@ fun MirrorScreen(
                                 if (editing && arpLine == null) {
                                     EditLine()
                                 } else {
-                                    Display(st, mirror, transport, take, still = fixedNow != null, compact = sideways, noteOpen = noteOpen, onNote = { noteOpen = it }, onGetFactory = onGetFactory, arp = arpLine, step = stepLine)
+                                    Display(st, mirror, transport, take, still = fixedNow != null, compact = sideways, noteOpen = noteOpen, onNote = { noteOpen = it }, onGetFactory = onGetFactory, arp = arpLine, step = stepLine, factoryKit = factoryKit, onFactoryKit = onFactoryKit)
                                 }
                             }
                             val fnRow: @Composable () -> Unit = { FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
@@ -1809,6 +1819,21 @@ private fun RowScope.SpokenLine(said: String, content: @Composable RowScope.() -
     )
 }
 
+/** The kit switch's widest on the display: its two keys, the line's room past them left free. */
+private val KitSwitchWidth = 220.dp
+
+/** The factory kit switch (EP-133 / EP-1320), when both kits are saved: on the display's factory line and in Live tools. */
+@Composable
+internal fun KitSwitch(kit: FactoryKit, onKit: (FactoryKit) -> Unit, modifier: Modifier = Modifier) {
+    Segmented(
+        FactoryKit.entries.map(MirrorText::kit),
+        selected = kit.ordinal,
+        onSelect = { onKit(FactoryKit.entries[it]) },
+        modifier = modifier.semantics { contentDescription = FeatureText.FACTORY_KIT },
+        compact = true,
+    )
+}
+
 /**
  * The all-groups page's display. Offline, why it is stays folded under the
  * word until asked for, so the pads keep the room: [noteOpen] whether it is
@@ -1831,9 +1856,13 @@ private fun Display(
     arp: String? = null,
     /** CORRECT on the pattern's row while it plays with timing correct on ([StepLine]). */
     step: StepLine? = null,
+    /** Both factory kits saved: the one Live plays, switched on the factory line. */
+    factoryKit: FactoryKit? = null,
+    onFactoryKit: (FactoryKit) -> Unit = {},
 ) {
     val c = LocalArcColors.current
     val offline = mirror?.offline != null && st.playing == null
+    val kitSwitch = factoryKit.takeIf { offline && mirror?.offline == MirrorText.FACTORY && !compact && arp == null }
     val getFactory = onGetFactory.takeIf { mirror?.error == MirrorText.NOT_CONNECTED }
     val track = patternTrack(transport, still, corner = DisplayCorner, inset = 18.dp)
     DisplayPanel(track.frame) {
@@ -1875,6 +1904,8 @@ private fun Display(
                 modifier = Modifier.weight(1f),
             )
         }
+        // Under the factory line, as wide as its two keys need.
+        if (kitSwitch != null) KitSwitch(kitSwitch, onFactoryKit, Modifier.padding(top = 4.dp).widthIn(max = KitSwitchWidth))
         if (transport != null) PatternRow(transport, track.beat, still, step)
         // The one-group view keeps to one screen; the all-groups view explains clock out.
         when {
@@ -1884,7 +1915,7 @@ private fun Display(
                 enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn(),
                 exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut(),
             ) {
-                Text(MirrorText.offlineNote(mirror.offline, st.activeProject ?: FactorySounds.PROJECT), style = ArcType.displayHint, color = c.displayDim)
+                Text(MirrorText.offlineNote(mirror.offline, st.activeProject ?: FactorySounds.PROJECT, mirror.kit), style = ArcType.displayHint, color = c.displayDim)
             }
             // Never read: the factory sounds to get.
             getFactory != null -> Text(

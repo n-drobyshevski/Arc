@@ -114,6 +114,8 @@ export class MockEP133 {
   /** Pad file node to the metadata written to it; a pad not here reads {"sym":0}. */
   private readonly padsMeta = new Map<number, Json>()
   deviceId = 0x33
+  /** The GREET reply (product, sku, os…): another model by its sku. */
+  greet = GREET_TEXT
   needsInit = false
   dropped = 0
   /** Every FILE sub-command that was handled, in order. */
@@ -226,7 +228,7 @@ export class MockEP133 {
     if (!f || !f.isRequest) return
     const p = f.payload
     if (f.command === 1) {
-      this.reply(f, 0, utf8(GREET_TEXT))
+      this.reply(f, 0, utf8(this.greet))
       return
     }
     if (f.command !== 5) return this.reply(f, 2)

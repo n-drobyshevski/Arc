@@ -23,7 +23,11 @@
 //   kept until the EP-133 connects, and the sounds it offers without the
 //   device (offlineSounds): the last read's list, dimmed where arc has no
 //   audio, and the factory pack's. A factory sound put on a pad plays from
-//   the pack first (loadPadAudio).
+//   the pack first (loadPadAudio);
+// - the factory kit (an addition): the EP-133's pack or the EP-1320's, one
+//   at a time ([factoryKit]); a pack's sounds are kept in memory under keys
+//   with the pack's record id in them ([packKey]), so two packs with the
+//   same slot and name never share one.
 //
 // Web deltas:
 // - Coroutines become promises; a generation counter ends a loop (cacheGen,
@@ -50,7 +54,7 @@
 import { signal, type ReadonlySignal } from '@preact/signals'
 import { openPak, type Pak } from '../core/backup/pak'
 import { soundDetails, type SoundDetails } from '../core/features/deviceBrowser'
-import { FactorySounds } from '../core/features/factorySounds'
+import { FactoryKit, FactorySounds } from '../core/features/factorySounds'
 import { Keys } from '../core/features/keys'
 import { LatencyStats } from '../core/features/latencyStats'
 import type { NameEntry } from '../core/features/librarySearch'
@@ -67,6 +71,7 @@ import type { SoundEntry } from '../core/protocol/device'
 import { download } from '../core/protocol/fs'
 import type { Session } from '../core/protocol/session'
 import { FeatureText } from '../core/text/featureText'
+import type { BackupRecord } from '../core/text/libraryRules'
 import { MirrorText } from '../core/text/mirrorText'
 import { WebText } from '../core/text/webText'
 import { ktTrim } from '../core/util/kotlinText'
@@ -114,14 +119,19 @@ export function memoryKey(slot: number, name: string): string {
   return `${slot}:${ktTrim(name).toLowerCase()}`
 }
 
+/** The key a factory pack's sound is kept under: its library entry's [pack] id, the slot and the name. */
+export function packKey(pack: string, slot: number, name: string): string {
+  return `pack:${pack}:${memoryKey(slot, name)}`
+}
+
 /** The key a SAMPLE recording kept on a pad is kept under (ArcController.recordedKey): "rec:<file>". */
 export function recordedKey(file: string): string {
   return `rec:${file}`
 }
 
-/** The key [s] is kept under: its recording's, or its slot and name. */
-export function sampleKey(s: PadSample): string {
-  return s.file != null ? recordedKey(s.file) : memoryKey(s.slot, s.name)
+/** The key [s] is kept under: its recording's, its [pack]'s (a factory pack's sound), or its slot and name. */
+export function sampleKey(s: PadSample, pack: string | null = null): string {
+  return s.file != null ? recordedKey(s.file) : pack !== null ? packKey(pack, s.slot, s.name) : memoryKey(s.slot, s.name)
 }
 
 /**
@@ -207,6 +217,8 @@ export class LiveSounds {
   private factorySnap: { id: string; snap: LiveSnapshot | null } | null = null
   // Every factory project with pads, by the library entry they came from (PROJECT offline).
   private factorySnaps: { id: string; snaps: Map<number, LiveSnapshot> } | null = null
+  // The factory pack whose project the offline mirror shows (its record id); null while it shows a read.
+  private shownPack: string | null = null
   // Live's pad samples decoded and ready ("slot:name"), least recently played first.
   private readonly padMemory = new Map<string, PadAudio>()
   private padMemoryBytes = 0
@@ -342,8 +354,7 @@ export class LiveSounds {
    * pack's; [base] is the list the pads shown come from.
    */
   async offlineSounds(base: SoundSource, lastRead: LiveSnapshot | null): Promise<OfflineSounds> {
-    const backups = this.host.store.get().backups
-    const pack = FactorySounds.inLibrary(backups) !== null ? await this.factorySnapshot() : null
+    const pack = this.factoryPack() !== null ? await this.factorySnapshot() : null
     // Read each time (rarely: Live opening offline, the library changing), so a copy dropped for room counts as gone.
     let copies: ReadonlyMap<number, string>
     try {
@@ -357,6 +368,68 @@ export class LiveSounds {
       factory: pack === null ? null : entriesOf(pack.names),
       unavailable: lastRead === null ? new Set() : unavailable(lastRead.names, copies, this.host.names(), pack !== null),
     }
+  }
+
+  // ---------- the factory kit ----------
+
+  /** The kit Live's factory sounds come from: the one chosen (the factoryKit setting) while its pack is saved, else the EP-133's. */
+  factoryKit(): FactoryKit {
+    const kit = FactoryKit.ofId(this.host.deps.settings.settings.factoryKit) ?? FactoryKit.EP133
+    return kit !== FactoryKit.EP133 && FactorySounds.inLibrary(this.host.store.get().backups, kit) === null ? FactoryKit.EP133 : kit
+  }
+
+  /** The [factoryKit]'s pack in the library, if saved. */
+  factoryPack(): BackupRecord | null {
+    return FactorySounds.inLibrary(this.host.store.get().backups, this.factoryKit())
+  }
+
+  /** The offline mirror shows a project of the factory pack [id] (null: a read, or nothing offline). */
+  showPack(id: string | null): void {
+    this.shownPack = id
+  }
+
+  /** The factory pack whose project the offline mirror shows (its record id), else null. */
+  get shownPackId(): string | null {
+    return this.shownPack
+  }
+
+  /** The pack the offline view shows, while it is still in the library. */
+  private shownPackRecord(): BackupRecord | null {
+    const id = this.shownPack
+    return id === null ? null : (this.host.store.get().backups.find((b) => b.id === id) ?? null)
+  }
+
+  /**
+   * The pack [s] plays from first: a factory sound put on a pad, its kit's
+   * (else the active kit's, its own gone); a pad of the factory project
+   * shown, that pack; null for the device's sounds and recordings.
+   */
+  private packOf(s: PadSample): BackupRecord | null {
+    if (s.file != null) return null
+    if (!s.factory) return this.shownPackRecord()
+    const backups = this.host.store.get().backups
+    const kit = FactoryKit.ofId(s.kit ?? null) ?? FactoryKit.EP133
+    return FactorySounds.inLibrary(backups, kit) ?? this.factoryPack()
+  }
+
+  /**
+   * The key [s] is kept under, in memory and in Live's output: a pack's
+   * sound under its pack's, as is a sound the device lists unnamed (it
+   * plays from the pack of the kit it falls back on, [unnamedPack]).
+   */
+  private keyOf(s: PadSample): string {
+    const pack = this.packOf(s) ?? (s.file == null && FactorySounds.unnamed(s.slot, s.name) ? this.unnamedPack() : null)
+    return sampleKey(s, pack?.id ?? null)
+  }
+
+  /**
+   * The pack a sound the device lists unnamed ("343.pcm") plays from: the
+   * connected device's kit's (its sku), else the active kit's.
+   */
+  private unnamedPack(): BackupRecord | null {
+    const { host } = this
+    const sku = host.session() !== null ? (host.store.get().device?.info.sku ?? null) : null
+    return FactorySounds.inLibrary(host.store.get().backups, FactoryKit.ofSku(sku) ?? this.factoryKit())
   }
 
   // ---------- copies of the device's pad sounds ----------
@@ -531,11 +604,12 @@ export class LiveSounds {
   }
 
   /**
-   * [slot]'s sample with this name from memory, as s16le bytes for a preview
-   * (SoundPlayer.play), or null. The same bytes come back for the same sample.
+   * [slot]'s sample with this name from memory (a factory [pack]'s, by its
+   * record id), as s16le bytes for a preview (SoundPlayer.play), or null.
+   * The same bytes come back for the same sample.
    */
-  memorySound(slot: number, name: string): { pcm: Uint8Array; channels: number; sampleRate: number } | null {
-    const a = this.padMemory.get(memoryKey(slot, name))
+  memorySound(slot: number, name: string, pack: string | null = null): { pcm: Uint8Array; channels: number; sampleRate: number } | null {
+    const a = this.padMemory.get(pack !== null ? packKey(pack, slot, name) : memoryKey(slot, name))
     if (a === undefined) return null
     let pcm = this.previewBytes.get(a)
     if (pcm === undefined) {
@@ -572,7 +646,7 @@ export class LiveSounds {
       // The pads' sounds with the offline changes over them, each once.
       for (const sample of m.padSamples()) {
         if (gen !== this.preloadGen || this.host.mirror() !== m) return
-        const key = sampleKey(sample)
+        const key = this.keyOf(sample)
         if (this.padMemory.has(key) || this.padLoads.has(key)) continue
         let a: PadAudio | null
         try {
@@ -588,7 +662,7 @@ export class LiveSounds {
 
   /**
    * A sample from arc's copy or a backup, decoded; null when neither has it.
-   * A factory sound put on a pad offline ([factory]) comes from the pack first.
+   * A factory pack's sound ([packOf]) comes from the pack first.
    */
   private async loadSample(s: PadSample): Promise<PadAudio | null> {
     if (s.file != null) {
@@ -598,39 +672,38 @@ export class LiveSounds {
       const w = decodeWav(wav)
       return padAudioOf(w.pcm, w.channels, Math.trunc(w.sampleRate))
     }
-    return this.loadPadAudio(s.slot, s.name, s.factory)
+    return this.loadPadAudio(s.slot, s.name, this.packOf(s))
   }
 
-  private async loadPadAudio(slot: number, name: string, factory = false): Promise<PadAudio | null> {
-    const wav = await this.padWav(slot, name, factory)
+  private async loadPadAudio(slot: number, name: string, pack: BackupRecord | null = null): Promise<PadAudio | null> {
+    const wav = await this.padWav(slot, name, pack)
     if (wav === null) return null
     const w = decodeWav(wav)
     return padAudioOf(w.pcm, w.channels, Math.trunc(w.sampleRate))
   }
 
-  /** [loadPadAudio]'s WAV: the factory pack (for [factory]), arc's copy, or a backup. */
-  private async padWav(slot: number, name: string, factory: boolean): Promise<Uint8Array | null> {
+  /** [loadPadAudio]'s WAV: the factory [pack], arc's copy, or a backup. */
+  private async padWav(slot: number, name: string, pack: BackupRecord | null): Promise<Uint8Array | null> {
     return (
-      (factory ? await this.fromPack(slot, name) : null) ?? (await this.cache.get(slot, name)) ?? (await this.fromBackup(slot, name))
+      (pack !== null ? await this.fromPack(pack, slot, name) : null) ?? (await this.cache.get(slot, name)) ?? (await this.fromBackup(slot, name))
     )
   }
 
-  /** The WAV of the saved factory pack's sound in [slot], while it has this [name]. */
-  private async fromPack(slot: number, name: string): Promise<Uint8Array | null> {
-    const b = FactorySounds.inLibrary(this.host.store.get().backups)
-    if (b === null) return null
-    const snd = (await this.pakOf(b.id)).sounds.get(slot)
+  /** The WAV of the factory [pack]'s sound in [slot], while it has this [name]. */
+  private async fromPack(pack: BackupRecord, slot: number, name: string): Promise<Uint8Array | null> {
+    const snd = (await this.pakOf(pack.id)).sounds.get(slot)
     return snd !== undefined && PadSoundCache.sameName(snd.name, name) ? snd.wav : null
   }
 
   /**
    * A sound of the offline lists for a preview: from memory, else as a pad
-   * would load it ([factory]: a factory pack sound); null when arc has no audio for it.
+   * would load it ([factory]: the active kit's pack sound); null when arc has no audio for it.
    */
   async offlineSound(slot: number, name: string, factory: boolean): Promise<{ pcm: Uint8Array; channels: number; sampleRate: number } | null> {
-    const mem = this.memorySound(slot, name)
+    const pack = factory ? this.factoryPack() : null
+    const mem = this.memorySound(slot, name, pack?.id ?? null)
     if (mem !== null) return mem
-    const wav = await this.padWav(slot, name, factory)
+    const wav = await this.padWav(slot, name, pack)
     if (wav === null) return null
     const w = decodeWav(wav)
     return { pcm: w.pcm, channels: w.channels, sampleRate: Math.trunc(w.sampleRate) }
@@ -638,13 +711,11 @@ export class LiveSounds {
 
   /**
    * The WAV of a sound from the newest backup that has it, if any; a sound
-   * the device lists unnamed ("343.pcm") from the factory pack.
+   * the device lists unnamed ("343.pcm") from the factory pack ([unnamedPack]).
    */
   private async fromBackup(slot: number, name: string): Promise<Uint8Array | null> {
     const backups = this.host.store.get().backups
-    const b =
-      newestBackupWith(slot, name, this.host.names(), backups) ??
-      (FactorySounds.unnamed(slot, name) ? FactorySounds.inLibrary(backups) : null)
+    const b = newestBackupWith(slot, name, this.host.names(), backups) ?? (FactorySounds.unnamed(slot, name) ? this.unnamedPack() : null)
     if (b === null) return null
     return (await this.pakOf(b.id)).sounds.get(slot)?.wav ?? null
   }
@@ -659,10 +730,10 @@ export class LiveSounds {
 
   /**
    * What Live shows while no EP-133 has been read: the factory sounds' first
-   * project, when the library has them (FactorySounds); else null.
+   * project (the active kit's), when the library has them (FactorySounds); else null.
    */
   async factorySnapshot(): Promise<LiveSnapshot | null> {
-    const b = FactorySounds.inLibrary(this.host.store.get().backups)
+    const b = this.factoryPack()
     if (b === null) return null
     if (this.factorySnap?.id === b.id) return this.factorySnap.snap
     let snap: LiveSnapshot | null
@@ -677,12 +748,18 @@ export class LiveSounds {
 
   /**
    * Every factory project with pads as Live shows it, by number, when the
-   * library has the pack (PROJECT steps through them offline); empty without it.
+   * library has the active kit's pack (PROJECT steps through them offline);
+   * empty without it.
    */
   async factorySnapshots(): Promise<Map<number, LiveSnapshot>> {
-    const b = FactorySounds.inLibrary(this.host.store.get().backups)
-    if (b === null) return new Map()
-    if (this.factorySnaps?.id === b.id) return this.factorySnaps.snaps
+    return (await this.factoryProjects()).snaps
+  }
+
+  /** [factorySnapshots] with the pack they came from (its record id; null without one). */
+  async factoryProjects(): Promise<{ id: string | null; snaps: Map<number, LiveSnapshot> }> {
+    const b = this.factoryPack()
+    if (b === null) return { id: null, snaps: new Map() }
+    if (this.factorySnaps?.id === b.id) return this.factorySnaps
     const snaps = new Map<number, LiveSnapshot>()
     try {
       const pak = await this.pakOf(b.id)
@@ -694,7 +771,7 @@ export class LiveSounds {
       snaps.clear()
     }
     this.factorySnaps = { id: b.id, snaps }
-    return snaps
+    return this.factorySnaps
   }
 
   /** The sound on [pad] (its offline change first), when the mirror knows it. */
@@ -718,7 +795,7 @@ export class LiveSounds {
     if (this.held.has(key) || this.auditions.has(key)) return
     const sample = this.padSample(pad)
     if (sample === null) return
-    const mk = sampleKey(sample)
+    const mk = this.keyOf(sample)
     const a = this.padMemory.get(mk)
     if (a === undefined) {
       void this.loadForPattern(pad.group * 12 + pad.offset)
@@ -763,7 +840,7 @@ export class LiveSounds {
   patternVoice(pad: number): string | 'missing' | null {
     const sample = this.padSample(physicalPad(Math.floor(pad / 12), pad % 12))
     if (sample === null) return null
-    const key = sampleKey(sample)
+    const key = this.keyOf(sample)
     const a = this.padMemory.get(key)
     if (a === undefined || a.silent) return a === undefined ? 'missing' : null
     const out = this.host.deps.liveAudio
@@ -778,7 +855,7 @@ export class LiveSounds {
   async loadForPattern(pad: number): Promise<boolean> {
     const sample = this.padSample(physicalPad(Math.floor(pad / 12), pad % 12))
     if (sample === null) return false
-    const key = sampleKey(sample)
+    const key = this.keyOf(sample)
     if (this.padMemory.has(key)) return true
     let a: PadAudio | null
     try {
@@ -799,8 +876,7 @@ export class LiveSounds {
       if (!quiet) host.toastOnce(MirrorText.NO_SAMPLE)
       return null
     }
-    const { slot, name, factory } = sample
-    const key = sampleKey(sample)
+    const key = this.keyOf(sample)
     const mem = this.fromMemory(key)
     if (mem) return { key, audio: mem }
     if (sample.file != null) {
@@ -816,17 +892,18 @@ export class LiveSounds {
     // One load for every press waiting on this sound.
     let load = this.padLoads.get(key)
     if (load === undefined) {
-      load = this.loadForPress(slot, name, key, factory).finally(() => this.padLoads.delete(key))
+      load = this.loadForPress(sample, key).finally(() => this.padLoads.delete(key))
       this.padLoads.set(key, load)
     }
     return load
   }
 
   /** What [padAudio] waits for: arc's copy or a backup, else the device; null after a toast says why. */
-  private async loadForPress(slot: number, name: string, key: string, factory: boolean): Promise<{ key: string; audio: PadAudio } | null> {
+  private async loadForPress(sample: PadSample, key: string): Promise<{ key: string; audio: PadAudio } | null> {
     const { host } = this
+    const { slot, name, factory } = sample
     try {
-      let audio = await this.loadPadAudio(slot, name, factory)
+      let audio = await this.loadPadAudio(slot, name, this.packOf(sample))
       if (audio === null) {
         if (host.session() !== null && host.store.get().device !== null) {
           const r = await host.tasks.exclusive(`play:${slot}`, false, async (s) => {
@@ -838,12 +915,12 @@ export class LiveSounds {
           if (e) await this.keepPadSound(slot, e.name, e.size, r.pcm, r.d.channels, r.d.sampleRate)
           audio = this.padMemory.get(key) ?? padAudioOf(r.pcm, Math.trunc(r.d.channels), Math.trunc(r.d.sampleRate))
         } else {
-          const needsPack = (factory || FactorySounds.unnamed(slot, name)) && FactorySounds.inLibrary(host.store.get().backups) === null
+          const needsPack = factory ? this.packOf(sample) === null : FactorySounds.unnamed(slot, name) && this.unnamedPack() === null
           host.toastOnce(needsPack ? WebText.LIVE_NO_COPY_FACTORY : WebText.LIVE_NO_COPY)
           return null
         }
       }
-      if (host.mirror() !== null) this.keepInMemory(slot, name, audio)
+      if (host.mirror() !== null) this.keepUnder(key, audio)
       return { key, audio }
     } catch (e) {
       host.toast(errorText(e), true)
@@ -951,8 +1028,8 @@ export class LiveSounds {
     const token = host.playToken()
     // In memory: plays now, without waiting a turn.
     const sample = this.padSample(pad)
-    const mem = sample ? this.fromMemory(sampleKey(sample)) : null
-    if (sample && mem) this.startHeld(id, pad, hold, sampleKey(sample), mem, 0, pressedAt, true)
+    const mem = sample ? this.fromMemory(this.keyOf(sample)) : null
+    if (sample && mem) this.startHeld(id, pad, hold, this.keyOf(sample), mem, 0, pressedAt, true)
     if (unsure && hold) {
       // Not yet the latest press either: a scroll mustn't drop another press's late load.
       this.unsure.set(id, { started: mem !== null, pressedAt, token })
@@ -1024,9 +1101,9 @@ export class LiveSounds {
     }
     const pitch = note - Keys.ROOT_NOTE
     const sample = this.padSample(pad)
-    const mem = sample ? this.fromMemory(sampleKey(sample)) : null
+    const mem = sample ? this.fromMemory(this.keyOf(sample)) : null
     if (sample && mem) {
-      this.startHeld(id, pad, hold, sampleKey(sample), mem, pitch, pressedAt, true, true)
+      this.startHeld(id, pad, hold, this.keyOf(sample), mem, pitch, pressedAt, true, true)
       return Promise.resolve()
     }
     return (async () => {
