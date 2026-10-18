@@ -8,6 +8,7 @@ import { PadSettings, PlayMode } from '../../../src/core/features/padSettings'
 import { padKey, physicalPad, type PhysicalPad } from '../../../src/core/features/padNotes'
 import { Pattern, ProjectSeq, Seq, Timing, pattern, patternNote, projectSeq, scene, type PatternNote } from '../../../src/core/features/pattern'
 import { Steps } from '../../../src/core/features/steps'
+import { FactoryKit } from '../../../src/core/features/factorySounds'
 import { ClaudeText } from '../../../src/core/text/claudeText'
 
 /** The spec's own text: its first fenced block is the example card. */
@@ -1369,5 +1370,42 @@ describe('BeatCardTest', () => {
     const plan = BeatCards.plan(ProjectSeq.DEFAULT, track)
     expect(plan.scenes).toEqual([1, 2, 3, 4, 5])
     expect(plan.seq.chain).toEqual(chain([chainStep(1, 2), chainStep(2, 2), chainStep(3, 1), chainStep(4, 1), chainStep(5, 2)], true))
+  })
+
+  // ---- a sound to suggest for a silent pad ----
+
+  const suggestLibrary = new Map<number, string>([
+    [9, 'KICK 909'], [12, 'Kick 808'], [101, 'SNARE TIGHT'], [202, 'HH CLOSED'], [203, 'HH OPEN'], [312, 'SHAKER'], [340, 'COWBELL'],
+    [401, 'BASS SUB'], [512, 'PIANO'], [513, 'LEAD SAW'], [600, '601.pcm'], [615, 'horn skank amin'], [830, 'jammy bass a 85'],
+  ])
+  const silentCard = BeatCards.read(
+    'ARC BEAT 1\n[A]\nA3 shaker | .o.o .o.o .o.o .o.o |\nA5 open hat | .... .... .... ..x. |\nA6 | x... .... .... .... |\n' +
+      '[B]\nnotes\nB7 at 1.1.1 note F1\n[C]\nC7 chords | x... .... .... .... |\n[D]\nnotes\nD7 at 1.1.1 note C5\n',
+  )
+
+  it("a card keeps each pad's row name", () => {
+    expect(silentCard.names).toEqual(new Map([[padKey(physicalPad(0, 5)), 'shaker'], [padKey(physicalPad(0, 7)), 'open hat'], [padKey(physicalPad(2, 9)), 'chords']]))
+  })
+
+  it("a silent pad's sound is suggested by its row name, its kind, or its notes", () => {
+    const card = silentCard.card!
+    const suggest = (pad: PhysicalPad, taken: ReadonlySet<number> = new Set(), kit: FactoryKit = FactoryKit.EP133): number | null =>
+      BeatCards.suggestSound(card, pad, silentCard.names?.get(padKey(pad)) ?? null, suggestLibrary, taken, kit)
+    // The row's word in a sound's name, then its kind ("open hat" is a hat that is open).
+    expect(suggest(physicalPad(0, 5))).toBe(312)
+    expect(suggest(physicalPad(0, 7))).toBe(203)
+    // No name and pad hits: nothing to go by.
+    expect(suggest(physicalPad(0, 8))).toBeNull()
+    // KEYS notes only: low ones a bass (never an EP-40 loop), high ones melodic; a slot taken goes to the next.
+    expect(suggest(physicalPad(1, 9))).toBe(401)
+    expect(suggest(physicalPad(3, 9))).toBe(512)
+    expect(suggest(physicalPad(3, 9), new Set([512]))).toBe(513)
+    // Chords: a chord stab by name, wherever it sits; with none named, the EP-133's melodic block.
+    expect(suggest(physicalPad(2, 9))).toBe(615)
+    expect(BeatCards.suggestSound(card, physicalPad(2, 9), 'chords', new Map([...suggestLibrary].filter(([slot]) => slot !== 615)))).toBe(512)
+    expect(suggest(physicalPad(2, 9), new Set(), FactoryKit.EP40)).toBe(615)
+    // A kind with no name to match falls back to its factory block: an unnamed sound counts there.
+    expect(BeatCards.suggestSound(card, physicalPad(0, 8), 'kick', suggestLibrary)).toBe(9)
+    expect(BeatCards.suggestSound(card, physicalPad(2, 9), 'stab', new Map([[600, '601.pcm']]), new Set(), FactoryKit.EP40)).toBe(600)
   })
 })

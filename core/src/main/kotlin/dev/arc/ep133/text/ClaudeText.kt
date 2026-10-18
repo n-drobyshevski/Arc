@@ -310,11 +310,15 @@ object ClaudeText {
 
     /** Under the block: what a sound picked here does. */
     const val SILENT_NOTE = "A pad with no sound plays nothing. Pick a sound for it: it goes on the pad with IMPORT, with the card's other sounds."
+    /** A pick Arc made by the card's row name ([dev.arc.ep133.features.BeatCards.suggestSound]), until the user changes it. */
+    const val SUGGESTED = "Suggested"
+    const val SUGGESTED_NOTE =
+        "Arc suggested a sound for these pads from your library, by the card's names for them. IMPORT puts them on the pads with the card's other sounds; CHANGE picks another, or untick one under SOUNDS."
 
     /** A silent row for screen readers: "D7: 12 notes, no sound, they will be silent", and once picked "D7: will get 512 PIANO". */
     fun silentRowName(pad: PhysicalPad, notes: Int) =
         "${padLabel(pad)}: ${Format.plural(notes, "note")}, no sound, ${if (notes == 1) "it" else "they"} will be silent"
-    fun pickedRowName(pad: PhysicalPad, sound: String) = "${padLabel(pad)}: will get $sound"
+    fun pickedRowName(pad: PhysicalPad, sound: String, suggested: Boolean = false) = "${padLabel(pad)}: will get $sound" + if (suggested) ", suggested" else ""
     fun pickSoundName(pad: PhysicalPad) = "Pick a sound for ${padLabel(pad)}"
     fun changePickName(pad: PhysicalPad, sound: String) = "Pick another sound for ${padLabel(pad)}, now $sound"
 

@@ -193,7 +193,9 @@ fun ColumnScope.BeatImportSheetContent(
     var putOnPads by rememberSaveable { mutableStateOf(true) }
     var unticked by rememberSaveable { mutableStateOf(emptyList<Int>()) }
     // The sounds picked for silent pads (a pad's key and a slot, [pickedCode]) and the pad whose picker is open (-1: none).
-    var picked by rememberSaveable { mutableStateOf(initialPicked.map { (pad, slot) -> pickedCode(pad, slot) }) }
+    // At first, the sounds Arc suggests for them (BeatCards.suggestSound), unless a screenshot gives its own.
+    val suggested = ui.silent?.suggested.orEmpty()
+    var picked by rememberSaveable { mutableStateOf(initialPicked.ifEmpty { suggested.toList() }.map { (pad, slot) -> pickedCode(pad, slot) }) }
     var picking by rememberSaveable { mutableStateOf(initialPicking?.let(::padKey) ?: -1) }
     // The FX: applied unless switched off. The pad shaping rows: all ticked, bar the ones unticked.
     var applyFx by rememberSaveable { mutableStateOf(true) }
@@ -319,6 +321,8 @@ fun ColumnScope.BeatImportSheetContent(
                 else ClaudeText.soundName(pickedSlot(code), silent.choices?.names?.get(pickedSlot(code)))
             },
             onPick = { picking = padKey(it) },
+            // A pick still the one Arc suggested says so.
+            suggestedOf = { pad -> picked.any { pickedPad(it) == padKey(pad) && suggested[pad] == pickedSlot(it) } },
         )
     }
     sounds?.let { all ->
@@ -392,7 +396,7 @@ class PickPlayerUi(
  * them what a pick does. [soundOf] gives the sound picked for a pad ("512 PIANO") while its SOUNDS row is ticked, else null.
  */
 @Composable
-private fun SilentBlock(silent: SilentUi, soundOf: (PhysicalPad) -> String?, onPick: (PhysicalPad) -> Unit) {
+private fun SilentBlock(silent: SilentUi, soundOf: (PhysicalPad) -> String?, onPick: (PhysicalPad) -> Unit, suggestedOf: (PhysicalPad) -> Boolean = { false }) {
     val c = LocalArcColors.current
     GridPlate {
         Row(
@@ -405,10 +409,11 @@ private fun SilentBlock(silent: SilentUi, soundOf: (PhysicalPad) -> String?, onP
         }
         for (row in silent.rows) {
             PlateLine()
-            SilentRow(row, soundOf(row.pad), silent.choices != null) { onPick(row.pad) }
+            val sound = soundOf(row.pad)
+            SilentRow(row, sound, silent.choices != null, sound != null && suggestedOf(row.pad)) { onPick(row.pad) }
         }
     }
-    Text(ClaudeText.SILENT_NOTE, style = ArcType.small, color = c.graphite)
+    Text(if (silent.rows.any { suggestedOf(it.pad) }) ClaudeText.SUGGESTED_NOTE else ClaudeText.SILENT_NOTE, style = ArcType.small, color = c.graphite)
 }
 
 /**
@@ -417,7 +422,7 @@ private fun SilentBlock(silent: SilentUi, soundOf: (PhysicalPad) -> String?, onP
  * the key is CHANGE.
  */
 @Composable
-private fun SilentRow(row: SilentRowUi, sound: String?, canPick: Boolean, onPick: () -> Unit) {
+private fun SilentRow(row: SilentRowUi, sound: String?, canPick: Boolean, suggested: Boolean, onPick: () -> Unit) {
     val c = LocalArcColors.current
     Row(
         Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp),
@@ -429,14 +434,17 @@ private fun SilentRow(row: SilentRowUi, sound: String?, canPick: Boolean, onPick
             Modifier
                 .weight(1f)
                 .semantics(mergeDescendants = true) {
-                    contentDescription = if (sound == null) ClaudeText.silentRowName(row.pad, row.notes) else ClaudeText.pickedRowName(row.pad, sound)
+                    contentDescription = if (sound == null) ClaudeText.silentRowName(row.pad, row.notes) else ClaudeText.pickedRowName(row.pad, sound, suggested)
                 },
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             if (sound == null) {
                 Text(ClaudeText.silentRow(row.pad, row.notes), style = ArcType.small, color = c.ink)
             } else {
-                Text(ClaudeText.padLabel(row.pad) + " \u00B7 " + Format.plural(row.notes, "note"), style = ArcType.small, color = c.graphite)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(ClaudeText.padLabel(row.pad) + " \u00B7 " + Format.plural(row.notes, "note"), style = ArcType.small, color = c.graphite)
+                    if (suggested) Text(ClaudeText.SUGGESTED.uppercase(), style = ArcType.caps.copy(fontSize = 10.sp), color = c.signal, maxLines = 1)
+                }
                 Text("\u2192 $sound", style = ArcType.small, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }

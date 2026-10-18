@@ -259,7 +259,31 @@ class SilentRowUi(val pad: PhysicalPad, val notes: Int)
  * the [choices] PICK SOUND lists (null when no sound is known: the rows then have no key), and whether the pads change in
  * Arc only until the EP-133 connects ([offline]) and the [project] they are written in, for the SOUNDS block a pick joins.
  */
-class SilentUi(val rows: List<SilentRowUi>, val choices: SoundChoices?, val offline: Boolean, val project: Int?)
+class SilentUi(
+    val rows: List<SilentRowUi>,
+    val choices: SoundChoices?,
+    val offline: Boolean,
+    val project: Int?,
+    /** A sound Arc suggests for each pad it could find one for ([suggestedSounds]): the sheet starts with them picked. */
+    val suggested: Map<PhysicalPad, Int> = emptyMap(),
+)
+
+/**
+ * A sound for each of [silent]'s pads from the sounds PICK SOUND lists ([BeatCards.suggestSound]: by the pad's row name in
+ * [names], its kind, or its notes), each a different one, in the rows' order; the ones not available to play are passed over.
+ */
+internal fun suggestedSounds(silent: SilentUi, card: BeatCard, names: Map<PhysicalPad, String>, kit: dev.arc.ep133.features.FactoryKit): Map<PhysicalPad, Int> {
+    val choices = silent.choices ?: return emptyMap()
+    val list = choices.names.filterKeys { it !in choices.unavailable }
+    val taken = HashSet<Int>()
+    val out = LinkedHashMap<PhysicalPad, Int>()
+    for (row in silent.rows) {
+        val slot = BeatCards.suggestSound(card, row.pad, names[row.pad], list, taken, kit) ?: continue
+        out[row.pad] = slot
+        taken += slot
+    }
+    return out
+}
 
 /**
  * [card]'s silent pads ([BeatCards.silentPads]: [held] gives a pad's slot, null for none, and [known] says the pads were
@@ -444,6 +468,8 @@ internal fun beatImportUi(
     seq: ProjectSeq,
     now: Double,
     names: (PhysicalPad) -> String?,
+    /** The factory kit Arc plays: the EP-40's chord stabs are where its suggestions look for chords. */
+    kit: dev.arc.ep133.features.FactoryKit = dev.arc.ep133.features.FactoryKit.EP133,
     fx: (BeatCard) -> BeatFxUi? = { null },
     shaping: (BeatCard) -> PadShapingUi? = { null },
     silent: (BeatCard) -> SilentUi? = { null },
@@ -475,7 +501,7 @@ internal fun beatImportUi(
         sounds = sounds(card),
         fx = fx(card),
         shaping = shaping(card),
-        silent = silent(card),
+        silent = silent(card)?.let { s -> SilentUi(s.rows, s.choices, s.offline, s.project, suggestedSounds(s, card, read.names, kit)) },
         scenes = scenes,
         chain = plan.chain?.takeIf { plan.newScene }?.let(::BeatChainUi),
         noRoom = card.multiScene && plan.fullGroup == null && !plan.newScene,

@@ -1367,4 +1367,43 @@ class BeatCardTest {
         assertEquals(listOf(1, 2, 3, 4, 5), plan.scenes)
         assertEquals(Chain(listOf(ChainStep(1, 2), ChainStep(2, 2), ChainStep(3, 1), ChainStep(4, 1), ChainStep(5, 2)), true), plan.seq.chain)
     }
+
+    // ---- a sound to suggest for a silent pad ----
+
+    private val suggestLibrary = mapOf(
+        9 to "KICK 909", 12 to "Kick 808", 101 to "SNARE TIGHT", 202 to "HH CLOSED", 203 to "HH OPEN", 312 to "SHAKER", 340 to "COWBELL",
+        401 to "BASS SUB", 512 to "PIANO", 513 to "LEAD SAW", 600 to "601.pcm", 615 to "horn skank amin", 830 to "jammy bass a 85",
+    )
+    private val silentCard = BeatCards.read(
+        "ARC BEAT 1\n[A]\nA3 shaker | .o.o .o.o .o.o .o.o |\nA5 open hat | .... .... .... ..x. |\nA6 | x... .... .... .... |\n" +
+            "[B]\nnotes\nB7 at 1.1.1 note F1\n[C]\nC7 chords | x... .... .... .... |\n[D]\nnotes\nD7 at 1.1.1 note C5\n",
+    )
+
+    @Test
+    fun `a card keeps each pad's row name`() {
+        assertEquals(mapOf(PhysicalPad(0, 5) to "shaker", PhysicalPad(0, 7) to "open hat", PhysicalPad(2, 9) to "chords"), silentCard.names)
+    }
+
+    @Test
+    fun `a silent pad's sound is suggested by its row name, its kind, or its notes`() {
+        val card = silentCard.card!!
+        fun suggest(pad: PhysicalPad, taken: Set<Int> = emptySet(), kit: FactoryKit = FactoryKit.EP133) =
+            BeatCards.suggestSound(card, pad, silentCard.names[pad], suggestLibrary, taken, kit)
+        // The row's word in a sound's name, then its kind ("open hat" is a hat that is open).
+        assertEquals(312, suggest(PhysicalPad(0, 5)))
+        assertEquals(203, suggest(PhysicalPad(0, 7)))
+        // No name and pad hits: nothing to go by.
+        assertNull(suggest(PhysicalPad(0, 8)))
+        // KEYS notes only: low ones a bass (never an EP-40 loop), high ones melodic; a slot taken goes to the next.
+        assertEquals(401, suggest(PhysicalPad(1, 9)))
+        assertEquals(512, suggest(PhysicalPad(3, 9)))
+        assertEquals(513, suggest(PhysicalPad(3, 9), taken = setOf(512)))
+        // Chords: a chord stab by name, wherever it sits; with none named, the EP-133's melodic block.
+        assertEquals(615, suggest(PhysicalPad(2, 9)))
+        assertEquals(512, BeatCards.suggestSound(card, PhysicalPad(2, 9), "chords", suggestLibrary - 615))
+        assertEquals(615, suggest(PhysicalPad(2, 9), kit = FactoryKit.EP40))
+        // A kind with no name to match falls back to its factory block: an unnamed sound counts there.
+        assertEquals(9, BeatCards.suggestSound(card, PhysicalPad(0, 8), "kick", suggestLibrary))
+        assertEquals(600, BeatCards.suggestSound(card, PhysicalPad(2, 9), "stab", mapOf(600 to "601.pcm"), kit = FactoryKit.EP40))
+    }
 }

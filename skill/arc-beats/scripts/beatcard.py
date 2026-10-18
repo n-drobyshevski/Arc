@@ -5,7 +5,7 @@ Reads the text card format of references/beat-card.md the way Arc does (the
 reading rules there are the spec) and works on it. Python 3.9+, standard
 library only.
 
-    beatcard.py check   [CARD|-] [--json] [--sounds SOUNDS.txt] [--kit ep133|ep40]
+    beatcard.py check   [CARD|-] [--json] [--sounds SOUNDS.txt|factory|factory-ep40] [--kit ep133|ep40]
     beatcard.py analyse [CARD|-] [--json] [--recipes genres.md] [--kit ep133|ep40]
     beatcard.py midi    [CARD|-] [-o OUT.mid] [--loops N] [--channel 1-16]
     beatcard.py grid    [CARD|-]
@@ -1255,6 +1255,28 @@ def _ep40_names(names: Dict[int, str]) -> bool:
     if any(re.match(r"\s*ep[ -]?40\b", n, re.IGNORECASE) for n in names.values()):
         return True
     return sum(1 for slot, n in names.items() if loop_tempo(slot, n) is not None) >= 3
+
+
+#: The built-in sound lists `check --sounds` takes by name: the factory packs in references/factory-sounds.md, by its headings.
+FACTORY_LISTS = {"factory": ("EP-133 factory sounds", "ep133"), "factory-ep40": ("EP-40 Riddim factory sounds", "ep40")}
+
+
+def factory_sounds_path() -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "references", "factory-sounds.md")
+
+
+def factory_list(name: str, path: Optional[str] = None) -> Tuple[str, str]:
+    """The text of a factory pack's sound list ("factory" or "factory-ep40") from factory-sounds.md, and the kit it is."""
+    heading, kit = FACTORY_LISTS[name]
+    with open(path or factory_sounds_path(), encoding="utf-8") as f:
+        text = f.read()
+    out, inside = [], False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            inside = line[3:].strip() == heading
+        elif inside:
+            out.append(line)
+    return "\n".join(out), kit
 
 
 def detect_kit(text: str) -> Optional[str]:
@@ -2616,7 +2638,11 @@ def cmd_check(args: argparse.Namespace) -> int:
     try:
         card = parse_card(_read(args.card))
         available = None
-        if args.sounds:
+        if args.sounds in FACTORY_LISTS:
+            # The factory pack as shipped, when the user shared no list: its kit is the list's.
+            text, card.kit = factory_list(args.sounds)
+            available = parse_sound_list(text)
+        elif args.sounds:
             with open(args.sounds, encoding="utf-8", errors="replace") as f:
                 text = f.read()
             available = parse_sound_list(text)
@@ -2698,7 +2724,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = add("check", cmd_check, "read a card and print its problems with line numbers")
     p.add_argument("--json", action="store_true", help="print the problems as JSON")
-    p.add_argument("--sounds", metavar="FILE", help="the user's sound list (Arc's share text, or lines of '<slot> <name>'): warn about sound lines whose slot or name isn't in it")
+    p.add_argument("--sounds", metavar="FILE", help="the user's sound list (Arc's share text, or lines of '<slot> <name>'), or 'factory' / 'factory-ep40' for a factory pack as shipped (references/factory-sounds.md): warn about sound lines whose slot or name isn't in it")
     p.add_argument("--kit", choices=KITS, help="the factory kit the slots are read by (default: what the sound list or the card's sound lines say, else ep133)")
     p = add("analyse", cmd_analyse, "describe a card's groove, density, velocity, swing and gaps", ("analyze",))
     p.add_argument("--json", action="store_true", help="print the report as JSON")

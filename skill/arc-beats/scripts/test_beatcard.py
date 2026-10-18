@@ -1212,6 +1212,43 @@ class SoundReports(unittest.TestCase):
         self.assertNotIn("sound", bc.render_grid(one("[A]\n" + BAR + "\n")))
 
 
+class FactoryLists(unittest.TestCase):
+    """The factory packs as shipped (references/factory-sounds.md), for check --sounds factory / factory-ep40."""
+
+    def run_cli(self, *args, stdin=None):
+        return subprocess.run([sys.executable, os.path.join(HERE, "beatcard.py")] + list(args), input=stdin, capture_output=True, text=True)
+
+    def test_the_lists_hold_each_pack_and_only_its_own(self):
+        ep133, kit = bc.factory_list("factory")
+        self.assertEqual(kit, "ep133")
+        names = bc.parse_sound_list(ep133)
+        self.assertEqual(len(names), 309)
+        self.assertEqual((names[1], names[340], names[540]), ("micro kick", "shaker", "sky lead"))
+        self.assertTrue(all(s < 600 for s in names))
+        ep40, kit = bc.factory_list("factory-ep40")
+        self.assertEqual(kit, "ep40")
+        names = bc.parse_sound_list(ep40)
+        self.assertEqual(len(names), 471)
+        self.assertEqual((names[55], names[742], names[824]), ("ep 40 kick", "syren", "jammy drms a 85"))
+
+    def test_a_card_from_the_factory_list_checks_clean(self):
+        card = "ARC BEAT 1\n[A]\nsound A3 340 shaker\nA3 shaker | .o.o .o.o .o.o .o.o |\n[D]\nsound D7 540 sky lead\nnotes\nD7 at 1.1.1 note C5\n"
+        r = self.run_cli("check", "--sounds", "factory", stdin=card)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("warning", r.stdout)
+        # A name the pack doesn't have is warned about, with the slot's own.
+        r = self.run_cli("check", "--sounds", "factory", stdin="ARC BEAT 1\n[A]\nsound A3 340 shakerz\nA3 shaker | .o.o .o.o .o.o .o.o |\n")
+        self.assertIn("slot 340 holds 'shaker'", r.stdout)
+
+    def test_the_ep40_list_reads_by_the_ep40_kit(self):
+        # A loop off its tempo warns, as the EP-40 kit's loops do.
+        r = self.run_cli("check", "--sounds", "factory-ep40", stdin="ARC BEAT 1\ntempo 90\n[B] bars 2\nsound B7 830 jammy bass a 85\nB7 bass loop | X... .... .... .... | .... .... .... .... |\n")
+        self.assertIn("(85 BPM) but the card's tempo is 90", r.stdout)
+        # An EP-40 slot isn't in the EP-133's list.
+        r = self.run_cli("check", "--sounds", "factory", stdin="ARC BEAT 1\n[A]\nsound A3 742 syren\nA3 x | x... .... .... .... |\n")
+        self.assertIn("warning", r.stdout)
+
+
 class SoundsCli(unittest.TestCase):
     def run_cli(self, *args, stdin=None):
         return subprocess.run([sys.executable, os.path.join(HERE, "beatcard.py")] + list(args), input=stdin, capture_output=True, text=True)

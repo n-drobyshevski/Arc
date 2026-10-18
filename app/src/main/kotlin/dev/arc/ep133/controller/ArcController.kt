@@ -5380,6 +5380,7 @@ class ArcController(
             silent = { card ->
                 silentUi(card, { pad -> m?.soundSlot(pad) }, m?.padsKnown() == true, soundChoicesOf(_state.value.mirror, _state.value.factoryNames), offline, project)
             },
+            kit = activeKit(),
         )
     }
 

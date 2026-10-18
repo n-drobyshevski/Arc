@@ -38,7 +38,7 @@ import { LABELS, ROWS, noteName, padKey, physicalPad, type PhysicalPad } from '.
 import { Pattern, ProjectSeq, Seq, Timing, TimingSettings, pattern, patternNote, scene, timingTicks, type PatternNote, type Scene } from './pattern'
 import { PadSettings, PlayMode } from './padSettings'
 import { PadSoundCache } from './padSoundCache'
-import { unnamed } from './factorySounds'
+import { FactoryKit, unnamed } from './factorySounds'
 import { SceneOps } from './scenes'
 import { Steps } from './steps'
 import { BEATS_PER_BAR } from './tempo'
@@ -266,6 +266,8 @@ export interface CardProblem {
 export interface CardRead {
   readonly card: BeatCard | null
   readonly problems: readonly CardProblem[]
+  /** Each pad's row name as the card writes it ("A7 kick" gives kick), by padKey, the first row's for a pad with several: for suggestSound. */
+  readonly names?: ReadonlyMap<number, string>
 }
 
 /**
@@ -516,6 +518,8 @@ function read(text: string): CardRead {
   let chain: [number, number][] | null = null
   let chainAt = 0
 
+  // Each pad's first row name, for CardRead.names.
+  const names = new Map<number, string>()
   const error = (line: number, message: string): void => {
     problems.push({ line, message, error: true })
   }
@@ -526,7 +530,7 @@ function read(text: string): CardRead {
     // Array.prototype.sort is stable, as Kotlin's sortedBy.
     const sorted = [...problems].sort((a, b) => a.line - b.line)
     const card = sorted.some((p) => p.error) ? null : beatCardOfScenes(name, tempo, swing, [...scenes], readFx(), chain, sceneLines > 0)
-    return { card, problems: sorted }
+    return { card, problems: sorted, names }
   }
   // The chain names scenes the card has, and the card has scenes at all.
   const checkChain = (): void => {
@@ -747,6 +751,7 @@ function read(text: string): CardRead {
       error(no, `${label} is in group ${letter(pad.group)}, but the section is [${letter(d.group)}].`)
       return
     }
+    if (head.length > 1 && !names.has(padKey(pad))) names.set(padKey(pad), head.slice(1).join(' '))
     const ticks = timingTicks(d.step)
     const per = Seq.TICKS_PER_BAR / ticks
     const total = d.bars * per
@@ -1897,4 +1902,73 @@ function freePattern(seq: ProjectSeq, group: number, taken: ReadonlySet<number>)
 }
 
 /** The Kotlin `BeatCards` object. */
-export const BeatCards = { VERSION, MAX_NAME, MAX_SCENES, TIDY_COMMENT, read, hasCard, write, fromPatterns, fromScenes, fxOf, padOf, applyFx, applyPad, resolveSounds, soundNames, soundList, silentPads, notesByPad, plan, planScenes } as const
+// A kind of sound: what a row's name says (label), what a sound's name says (sound) and its factory block.
+interface SoundKind {
+  readonly name: string
+  readonly label: RegExp
+  readonly sound: RegExp
+  readonly block: readonly [number, number]
+}
+
+// In the order they are tried: "open hat" before "hat", "bass drum" (a kick) before "bass".
+const SOUND_KINDS: readonly SoundKind[] = [
+  { name: 'kick', label: /\b(kick|kik|bd|bass ?drum)\b/, sound: /\b(kick|kik|bd)/, block: [1, 99] },
+  { name: 'snare', label: /\b(snare|sd|rim ?shot)\b/, sound: /\b(snare|sn|sd)\b/, block: [100, 199] },
+  { name: 'clap', label: /\b(clap|snap)\b/, sound: /\b(clap|snap)/, block: [100, 199] },
+  { name: 'rim', label: /\b(rim|stick|clave)\b/, sound: /\b(rim|stick|clave)/, block: [100, 199] },
+  { name: 'open hat', label: /\b(open ?(hat|hh|hi.?hat)|oh)\b/, sound: /\b(oh|open)\b/, block: [200, 299] },
+  { name: 'hat', label: /\b(hi.?hats?|hh|hats?|ch)\b/, sound: /\b(hh|hats?|hihat|ch)\b/, block: [200, 299] },
+  { name: 'cymbal', label: /\b(crash|ride|cymbal|splash)\b/, sound: /\b(crash|ride|cym)/, block: [200, 299] },
+  { name: 'tom', label: /\btoms?\b/, sound: /\btom/, block: [300, 399] },
+  { name: 'perc', label: /\b(shaker|shak\w*|tamb\w*|conga|bongo|cowbell|cow|perc\w*|triangle)\b/, sound: /\b(shak|tamb|perc|conga|bongo|cow|tri)/, block: [300, 399] },
+  { name: 'bass', label: /\b(bass|sub|808|reese)\b/, sound: /\b(bass|sub|808|synbaz|baz)/, block: [400, 499] },
+  { name: 'chord', label: /\b(chords?|stabs?)\b/, sound: /\b(chrd|chord|stab|skank)/, block: [500, 599] },
+  { name: 'melodic', label: /\b(lead|keys?|piano|pads?|pluck|synth|organ|mel\w*|bell|strings?|arp)\b/, sound: /\b(lead|piano|pad|pluc?k|pluk|synth|organ|keys|bell|string|mel)/, block: [500, 599] },
+]
+
+// Words of a row's name too general to look for in a sound's name.
+const STOP_WORDS = new Set(['closed', 'open', 'loop', 'sound', 'the', 'and', 'new', 'drum', 'hit', 'low', 'high', 'main'])
+// An EP-40 loop's name ("jammy bass a 85"): tempo-locked, never a one-shot to suggest.
+const LOOP_NAME = /\b(drms|fill|bass|mel|melo)\s+[a-d]\s+[0-9]{2,3}\s*$/i
+
+/**
+ * A sound to suggest for a silent [pad] of [card]: one of [names] (slot to name, the sounds Arc knows) by the pad's row
+ * name in the card ([label], "shaker"). First a sound whose name has one of the label's words, then one whose name is of
+ * the label's kind (a hat for "closed hat", a bass for "sub"), then the first sound in the factory block of that kind
+ * (kicks 1-99 ... melodic 500-599; with the EP-40 kit, chords 600-699). A pad the card plays only in KEYS, with no
+ * telling name, takes a melodic sound, or a bass when its notes sit below C3. The EP-40's loops are never suggested, nor
+ * a slot in [taken]. Null when nothing fits. The Kotlin `BeatCards.suggestSound`.
+ */
+function suggestSound(
+  card: BeatCard,
+  pad: PhysicalPad,
+  label: string | null,
+  names: ReadonlyMap<number, string>,
+  taken: ReadonlySet<number> = new Set(),
+  kit: FactoryKit = FactoryKit.EP133,
+): number | null {
+  const low = (label ?? '').toLowerCase()
+  const keys = allSections(card).filter((s) => s.group === pad.group).flatMap((s) => s.pattern.notes.filter((n) => n.offset === pad.offset))
+  let kind = SOUND_KINDS.find((k) => k.label.test(low)) ?? null
+  if (kind === null && keys.length > 0 && keys.every((n) => n.semitones !== null)) {
+    const avg = keys.reduce((a, n) => a + n.semitones!, 0) / keys.length
+    kind = SOUND_KINDS.find((k) => k.name === (avg < -12 ? 'bass' : 'melodic'))!
+  }
+  const open = [...names].filter(([slot, name]) => slot >= SLOT_MIN && slot <= SLOT_MAX && !taken.has(slot) && !LOOP_NAME.test(name)).sort((a, b) => a[0] - b[0])
+  const block: readonly [number, number] | null = kind === null ? null : kind.name === 'chord' && kit === FactoryKit.EP40 ? [600, 699] : kind.block
+  const inBlock = (slot: number): boolean => block !== null && slot >= block[0] && slot <= block[1]
+  const first = (ok: (slot: number, name: string) => boolean): number | null => {
+    const all = open.filter(([slot, name]) => ok(slot, name.toLowerCase())).map(([slot]) => slot)
+    return all.find((slot) => block === null || inBlock(slot)) ?? all[0] ?? null
+  }
+  const words = (low.match(/[a-z0-9]+/g) ?? []).filter((w) => w.length >= 3 && !STOP_WORDS.has(w))
+  if (words.length > 0) {
+    const hit = first((_, name) => words.some((w) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).test(name)))
+    if (hit !== null) return hit
+  }
+  if (kind === null) return null
+  const k = kind
+  return first((_, name) => k.sound.test(name)) ?? open.map(([slot]) => slot).find(inBlock) ?? null
+}
+
+export const BeatCards = { VERSION, MAX_NAME, MAX_SCENES, TIDY_COMMENT, read, hasCard, write, fromPatterns, fromScenes, fxOf, padOf, applyFx, applyPad, resolveSounds, soundNames, soundList, silentPads, notesByPad, suggestSound, plan, planScenes } as const

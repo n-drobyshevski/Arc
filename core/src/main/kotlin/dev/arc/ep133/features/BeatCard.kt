@@ -169,7 +169,12 @@ data class SoundPick(
 data class CardProblem(val line: Int, val message: String, val error: Boolean)
 
 /** A card as read: the [card], or null when any problem is an error, and all the [problems] by line. */
-data class CardRead(val card: BeatCard?, val problems: List<CardProblem>)
+data class CardRead(
+    val card: BeatCard?,
+    val problems: List<CardProblem>,
+    /** Each pad's row name as the card writes it ("A7 kick" gives kick), the first row's for a pad with several: for [BeatCards.suggestSound]. */
+    val names: Map<PhysicalPad, String> = emptyMap(),
+)
 
 /**
  * A card planned into a project's sequencer: the [seq] after it, the
@@ -293,6 +298,8 @@ object BeatCards {
     }
 
     private class Reader(private val lines: List<String>) {
+        // Each pad's first row name, for CardRead.names.
+        private val names = LinkedHashMap<PhysicalPad, String>()
         private val problems = ArrayList<CardProblem>()
         private var name: String? = null
         private var tempo: Double? = null
@@ -342,7 +349,7 @@ object BeatCards {
         private fun result(): CardRead {
             val sorted = problems.sortedBy { it.line }
             val card = if (sorted.any { it.error }) null else BeatCard(name, tempo, swing, scenes.toList(), cardFx(), chain, sceneLines > 0)
-            return CardRead(card, sorted)
+            return CardRead(card, sorted, names.toMap())
         }
 
         // The chain names scenes the card has, and the card has scenes at all.
@@ -619,6 +626,7 @@ object BeatCards {
                 error(no, "$label is in group ${'A' + pad.group}, but the section is [${'A' + d.group}].")
                 return
             }
+            if (head.size > 1) names.putIfAbsent(PhysicalPad(pad.group, pad.offset), head.drop(1).joinToString(" "))
             val per = Seq.TICKS_PER_BAR / d.step.ticks
             val total = d.bars * per
             val steps = line.substring(bar + 1).filter { !isSpace(it) && it != '|' }
@@ -1435,6 +1443,63 @@ object BeatCards {
     }
 
     // ---- Sounds ----
+
+    /**
+     * A sound to suggest for a silent [pad] of [card] (an addition): one of [names] (slot to name, the sounds Arc knows) by
+     * the pad's row name in the card ([label], "shaker"). First a sound whose name has one of the label's words ("shaker"),
+     * then one whose name is of the label's kind (a hat for "closed hat", a bass for "sub"), then the first sound in the
+     * factory block of that kind (kicks 1-99 ... melodic 500-599; with the EP-40 kit, chords 600-699). A pad the card plays
+     * only in KEYS, with no telling name, takes a melodic sound, or a bass when its notes sit below C3. The EP-40's loops
+     * ("jammy bass a 85") are never suggested, nor a slot in [taken] (picked for another pad). Null when nothing fits.
+     */
+    fun suggestSound(
+        card: BeatCard,
+        pad: PhysicalPad,
+        label: String?,
+        names: Map<Int, String>,
+        taken: Set<Int> = emptySet(),
+        kit: FactoryKit = FactoryKit.EP133,
+    ): Int? {
+        val low = label.orEmpty().lowercase(Locale.ROOT)
+        val keys = card.allSections.filter { it.group == pad.group }.flatMap { s -> s.pattern.notes.filter { it.offset == pad.offset } }
+        val kind = SOUND_KINDS.firstOrNull { it.label.containsMatchIn(low) }
+            ?: if (keys.isNotEmpty() && keys.all { it.semitones != null }) SOUND_KINDS.first { it.name == if (keys.map { it.semitones!! }.average() < -12) "bass" else "melodic" } else null
+        val open = names.filter { (slot, name) -> slot in SLOT_MIN..SLOT_MAX && slot !in taken && !LOOP_NAME.containsMatchIn(name) }.toSortedMap()
+        val block = kind?.let { if (it.name == "chord" && kit == FactoryKit.EP40) 600..699 else it.block }
+        fun first(ok: (Int, String) -> Boolean): Int? {
+            val all = open.filter { (slot, name) -> ok(slot, name.lowercase(Locale.ROOT)) }.keys
+            return all.firstOrNull { block == null || it in block } ?: all.firstOrNull()
+        }
+        val words = WORD.findAll(low).map { it.value }.filter { it.length >= 3 && it !in STOP_WORDS }.toList()
+        if (words.isNotEmpty()) first { _, name -> words.any { w -> Regex("\\b${Regex.escape(w)}").containsMatchIn(name) } }?.let { return it }
+        if (kind == null) return null
+        return first { _, name -> kind.sound.containsMatchIn(name) } ?: open.keys.firstOrNull { it in block!! }
+    }
+
+    // A kind of sound: what a row's name says ([label]), what a sound's name says ([sound]) and its factory [block].
+    private class SoundKind(val name: String, val label: Regex, val sound: Regex, val block: IntRange)
+
+    // In the order they are tried: "open hat" before "hat", "bass drum" (a kick) before "bass".
+    private val SOUND_KINDS = listOf(
+        SoundKind("kick", Regex("\\b(kick|kik|bd|bass ?drum)\\b"), Regex("\\b(kick|kik|bd)"), 1..99),
+        SoundKind("snare", Regex("\\b(snare|sd|rim ?shot)\\b"), Regex("\\b(snare|sn|sd)\\b"), 100..199),
+        SoundKind("clap", Regex("\\b(clap|snap)\\b"), Regex("\\b(clap|snap)"), 100..199),
+        SoundKind("rim", Regex("\\b(rim|stick|clave)\\b"), Regex("\\b(rim|stick|clave)"), 100..199),
+        SoundKind("open hat", Regex("\\b(open ?(hat|hh|hi.?hat)|oh)\\b"), Regex("\\b(oh|open)\\b"), 200..299),
+        SoundKind("hat", Regex("\\b(hi.?hats?|hh|hats?|ch)\\b"), Regex("\\b(hh|hats?|hihat|ch)\\b"), 200..299),
+        SoundKind("cymbal", Regex("\\b(crash|ride|cymbal|splash)\\b"), Regex("\\b(crash|ride|cym)"), 200..299),
+        SoundKind("tom", Regex("\\btoms?\\b"), Regex("\\btom"), 300..399),
+        SoundKind("perc", Regex("\\b(shaker|shak\\w*|tamb\\w*|conga|bongo|cowbell|cow|perc\\w*|triangle)\\b"), Regex("\\b(shak|tamb|perc|conga|bongo|cow|tri)"), 300..399),
+        SoundKind("bass", Regex("\\b(bass|sub|808|reese)\\b"), Regex("\\b(bass|sub|808|synbaz|baz)"), 400..499),
+        SoundKind("chord", Regex("\\b(chords?|stabs?)\\b"), Regex("\\b(chrd|chord|stab|skank)"), 500..599),
+        SoundKind("melodic", Regex("\\b(lead|keys?|piano|pads?|pluck|synth|organ|mel\\w*|bell|strings?|arp)\\b"), Regex("\\b(lead|piano|pad|pluc?k|pluk|synth|organ|keys|bell|string|mel)"), 500..599),
+    )
+
+    // Words of a row's name too general to look for in a sound's name.
+    private val STOP_WORDS = setOf("closed", "open", "loop", "sound", "the", "and", "new", "drum", "hit", "low", "high", "main")
+    private val WORD = Regex("[a-z0-9]+")
+    // An EP-40 loop's name ("jammy bass a 85"): tempo-locked, never a one-shot to suggest.
+    private val LOOP_NAME = Regex("\\b(drms|fill|bass|mel|melo)\\s+[a-d]\\s+[0-9]{2,3}\\s*$", RegexOption.IGNORE_CASE)
 
     /**
      * The pads [card]'s notes use (pad hits and KEYS notes alike; a note past its pattern's end doesn't play) that would
