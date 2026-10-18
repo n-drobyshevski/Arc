@@ -49,6 +49,8 @@ import dev.arc.ep133.features.ClaudePrompt
 import dev.arc.ep133.features.FactoryKit
 import dev.arc.ep133.features.GenreFamily
 import dev.arc.ep133.features.Genres
+import dev.arc.ep133.features.PlayLevel
+import dev.arc.ep133.features.PlayWay
 import dev.arc.ep133.features.PromptGoal
 import dev.arc.ep133.features.PromptPart
 import dev.arc.ep133.features.PromptSlot
@@ -64,7 +66,7 @@ import dev.arc.ep133.ui.theme.LocalArcColors
 
 /**
  * Live tools' Claude page as the device's display (an addition): a prompt builder. The glass's tabs pick what to ask
- * (NEW BEAT, IMPROVE, TRACK, LEARN) and it says the prompt as a sentence whose orange words are its choices (genre,
+ * (NEW BEAT, IMPROVE, TRACK, PLAY: teach me to play the card, LEARN) and it says the prompt as a sentence whose orange words are its choices (genre,
  * tempo, kit...): a tap on one turns the keys under the glass into its answers ([Answers]). EDIT opens the prompt's
  * own text to change by hand, and SAVED keeps prompts to come back to. A prompt that goes with a card (an IMPROVE, a
  * TRACK from this beat) shows it on the glass as before: SCENE, the pattern (A · 01) and CHAIN pick it (lit navy; one
@@ -302,6 +304,18 @@ private fun Answers(slot: PromptSlot, p: ClaudePrompt, kit: FactoryKit, claude: 
             },
             columns = 2,
         )
+        PromptSlot.WAY -> KeyGrid(
+            PlayWay.entries.map { w -> { WordKey(PromptText.wayKey(w), PromptText.way(w), { set(p.copy(way = w)) }, sub = PromptText.waySub(w), selected = p.way == w) } },
+            columns = 2,
+        )
+        PromptSlot.LEVEL -> KeyGrid(
+            PlayLevel.entries.map { l -> { WordKey(PromptText.levelKey(l), PromptText.level(l), { set(p.copy(level = l)) }, selected = p.level == l) } },
+            columns = 3,
+        )
+        PromptSlot.SPEED -> KeyGrid(
+            ClaudePrompt.SPEEDS.map { n -> { WordKey(PromptText.speedKey(n), PromptText.speed(n), { set(p.copy(speed = n)) }, sub = PromptText.speed(n), selected = p.speed == n) } },
+            columns = 3,
+        )
         PromptSlot.LESSON -> KeyGrid(
             (1..ClaudePrompt.LESSONS.size).map { n ->
                 { WordKey(PromptText.lessonKey(n), PromptText.lesson(n), { set(p.copy(lesson = n)) }, sub = PromptText.lessonSub(n), selected = p.lesson == n) }
@@ -479,8 +493,8 @@ private fun Tabs(task: PromptTask, onTask: (PromptTask) -> Unit) {
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    (if (on) "● " else "") + PromptText.task(t).uppercase(),
-                    style = GlassHead.copy(fontSize = 11.sp),
+                    (if (on) "● " else "") + PromptText.tab(t).uppercase(),
+                    style = GlassHead.copy(fontSize = 10.5.sp, letterSpacing = 0.04.em),
                     color = if (on) c.displayInk else c.displayDim,
                     maxLines = 1,
                 )

@@ -5,6 +5,8 @@ import dev.arc.ep133.features.FactoryKit
 import dev.arc.ep133.features.Genre
 import dev.arc.ep133.features.GenreFamily
 import dev.arc.ep133.features.Genres
+import dev.arc.ep133.features.PlayLevel
+import dev.arc.ep133.features.PlayWay
 import dev.arc.ep133.features.PromptGoal
 import dev.arc.ep133.features.PromptPart
 import dev.arc.ep133.features.PromptSlot
@@ -26,8 +28,12 @@ object PromptText {
         PromptTask.BEAT -> "New beat"
         PromptTask.IMPROVE -> "Improve"
         PromptTask.TRACK -> "Track"
+        PromptTask.PLAY -> "Play"
         PromptTask.LEARN -> "Learn"
     }
+
+    /** The glass's tab: as [task], but NEW BEAT is NEW, so five fit. */
+    fun tab(t: PromptTask) = if (t == PromptTask.BEAT) "New" else task(t)
 
     /** A slot's name: over its answers, and for screen readers. */
     fun slot(s: PromptSlot) = when (s) {
@@ -41,6 +47,9 @@ object PromptText {
         PromptSlot.LENGTH -> "Length"
         PromptSlot.START -> "Start"
         PromptSlot.LESSON -> "Lesson"
+        PromptSlot.WAY -> "How"
+        PromptSlot.LEVEL -> "Level"
+        PromptSlot.SPEED -> "Start at"
     }
 
     fun family(f: GenreFamily) = when (f) {
@@ -103,6 +112,45 @@ object PromptText {
         else -> "4-5 edits"
     }
 
+    fun way(w: PlayWay) = when (w) {
+        PlayWay.FINGERS -> "by finger drumming"
+        PlayWay.STEPS -> "by step entry"
+        PlayWay.PERFORM -> "as a live set"
+        PlayWay.KEYS -> "its KEYS parts"
+    }
+
+    /** The way's key, and the line under it. */
+    fun wayKey(w: PlayWay) = when (w) {
+        PlayWay.FINGERS -> "Fingers"
+        PlayWay.STEPS -> "Steps"
+        PlayWay.PERFORM -> "Perform"
+        PlayWay.KEYS -> "Keys"
+    }
+
+    fun waySub(w: PlayWay) = when (w) {
+        PlayWay.FINGERS -> "live, part by part"
+        PlayWay.STEPS -> "on the sequencer"
+        PlayWay.PERFORM -> "scenes, FX, punch-ins"
+        PlayWay.KEYS -> "bass and melody"
+    }
+
+    fun level(l: PlayLevel) = when (l) {
+        PlayLevel.NEW -> "a beginner"
+        PlayLevel.SOME -> "an improver"
+        PlayLevel.SURE -> "a sure hand"
+    }
+
+    /** The level's key: its words without the article. */
+    fun levelKey(l: PlayLevel) = level(l).substringAfter(' ')
+
+    fun speed(percent: Int) = when (percent) {
+        50 -> "half tempo"
+        75 -> "three-quarter tempo"
+        else -> "full tempo"
+    }
+
+    fun speedKey(percent: Int) = "$percent%"
+
     const val FROM_SCRATCH = "from scratch"
     const val FROM_PICK = "from this beat"
     fun lesson(n: Int) = "lesson $n: ${ClaudePrompt.LESSONS[n - 1].lowercase()}"
@@ -121,6 +169,9 @@ object PromptText {
             PromptSlot.LENGTH -> bars(p.length)
             PromptSlot.START -> if (p.fromPick) FROM_PICK else FROM_SCRATCH
             PromptSlot.LESSON -> lesson(p.lesson)
+            PromptSlot.WAY -> way(p.way)
+            PromptSlot.LEVEL -> level(p.level)
+            PromptSlot.SPEED -> speed(p.speed)
         }
     }
 
@@ -135,6 +186,7 @@ object PromptText {
             PromptTask.BEAT -> listOf(w("Write a"), s(PromptSlot.BARS), w("beat in"), s(PromptSlot.GENRE), w("at"), s(PromptSlot.TEMPO), w("for the"), s(PromptSlot.KIT), w("kit with"), s(PromptSlot.PARTS))
             PromptTask.IMPROVE -> listOf(w("Improve it:"), s(PromptSlot.GOAL), s(PromptSlot.GENRE), w("in"), s(PromptSlot.EDITS), w("on the"), s(PromptSlot.KIT), w("kit"))
             PromptTask.TRACK -> listOf(w("Write a"), s(PromptSlot.LENGTH), w("track in"), s(PromptSlot.GENRE), w("at"), s(PromptSlot.TEMPO), w("for the"), s(PromptSlot.KIT), w("kit"), s(PromptSlot.START))
+            PromptTask.PLAY -> listOf(w("Teach me to play it"), s(PromptSlot.WAY), w("as"), s(PromptSlot.LEVEL), w("starting at"), s(PromptSlot.SPEED))
             PromptTask.LEARN -> listOf(w("Teach me"), s(PromptSlot.LESSON), w("one step at a time"))
         }
     }
@@ -216,6 +268,25 @@ object PromptText {
                     )
                 }
             }
+            PromptTask.PLAY -> {
+                val what = if (chain) "arrangement" else "beat"
+                lines(
+                    "Use the arc-beats skill to teach me to play this EP-133 $what from Arc myself, on the device, not just import it.",
+                    "- Way: " + when (p.way) {
+                        PlayWay.FINGERS -> "finger drumming, one part at a time, saying which hand and finger plays each pad"
+                        PlayWay.STEPS -> "step entry on the EP-133's sequencer, with the key combos of the official guide"
+                        PlayWay.PERFORM -> "performing it live, bar by bar: when to switch scenes, play fills and punch in FX"
+                        PlayWay.KEYS -> "its bass and melody parts in KEYS, note by note"
+                    },
+                    "- Me: " + when (p.level) {
+                        PlayLevel.NEW -> "a beginner"
+                        PlayLevel.SOME -> "I've had some practice"
+                        PlayLevel.SURE -> "I'm sure on the pads"
+                    },
+                    "- Start: " + if (p.speed >= 100) "at its own tempo" else "at ${p.speed}% of its tempo, then work up to it",
+                    "Go one step at a time: explain the step, give me something to play, and wait for me before the next one. $THE_CARD",
+                )
+            }
             PromptTask.LEARN -> learn(p.lesson)
         }
     }
@@ -295,6 +366,7 @@ object PromptText {
             PromptTask.BEAT -> listOfNotNull(g?.name ?: task(p.task), p.tempo?.toString()).joinToString(" ")
             PromptTask.IMPROVE -> "${task(p.task)} · " + (g?.name ?: goalKey(p.goal))
             PromptTask.TRACK -> "${task(p.task)} · " + listOfNotNull(g?.name, p.tempo?.toString()).joinToString(" ").ifEmpty { barsKey(p.length) }
+            PromptTask.PLAY -> "${task(p.task)} \u00B7 ${wayKey(p.way)} ${p.speed}%"
             PromptTask.LEARN -> "Lesson ${p.lesson}"
         }
         return if (p.text != null) "$base ✎" else base

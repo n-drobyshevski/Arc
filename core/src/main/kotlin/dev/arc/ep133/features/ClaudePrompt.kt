@@ -66,10 +66,16 @@ object Genres {
 }
 
 /** What the prompt asks Claude for: the Claude page's tabs. */
-enum class PromptTask { BEAT, IMPROVE, TRACK, LEARN }
+enum class PromptTask { BEAT, IMPROVE, TRACK, PLAY, LEARN }
 
 /** A word of the prompt's sentence that can be changed (tapped on the glass). */
-enum class PromptSlot { BARS, GENRE, TEMPO, KIT, PARTS, GOAL, EDITS, LENGTH, START, LESSON }
+enum class PromptSlot { BARS, GENRE, TEMPO, KIT, PARTS, GOAL, EDITS, LENGTH, START, LESSON, WAY, LEVEL, SPEED }
+
+/** How a PLAY prompt wants the card taught: finger drumming, step entry, performing it, or its KEYS parts. */
+enum class PlayWay { FINGERS, STEPS, PERFORM, KEYS }
+
+/** Who a PLAY prompt teaches: a beginner, someone with some practice, someone sure on the pads. */
+enum class PlayLevel { NEW, SOME, SURE }
 
 /** What an IMPROVE prompt asks for besides the edits ([BETTER]: nothing more, as the plain share asks). */
 enum class PromptGoal { BETTER, DRIVE, LAID_BACK, BUSIER, SPARSER, SWING, FILL, BASS, MELODY }
@@ -97,10 +103,14 @@ data class ClaudePrompt(
     val length: Int = 32,
     val fromPick: Boolean = false,
     val lesson: Int = 1,
+    val way: PlayWay = PlayWay.FINGERS,
+    val level: PlayLevel = PlayLevel.NEW,
+    /** A PLAY's starting tempo, in percent of the card's ([SPEEDS]). */
+    val speed: Int = 50,
     val text: String? = null,
 ) {
-    /** The prompt goes with a card ([SharePick]): an IMPROVE, or a TRACK that continues one. */
-    val withCard: Boolean get() = task == PromptTask.IMPROVE || task == PromptTask.TRACK && fromPick
+    /** The prompt goes with a card ([SharePick]): an IMPROVE, a PLAY, or a TRACK that continues one. */
+    val withCard: Boolean get() = task == PromptTask.IMPROVE || task == PromptTask.PLAY || task == PromptTask.TRACK && fromPick
 
     /** The words its sentence shows, in order (the glass's). */
     val slots: List<PromptSlot>
@@ -108,6 +118,7 @@ data class ClaudePrompt(
             PromptTask.BEAT -> listOf(PromptSlot.BARS, PromptSlot.GENRE, PromptSlot.TEMPO, PromptSlot.KIT, PromptSlot.PARTS)
             PromptTask.IMPROVE -> listOf(PromptSlot.GOAL, PromptSlot.GENRE, PromptSlot.EDITS, PromptSlot.KIT)
             PromptTask.TRACK -> listOf(PromptSlot.LENGTH, PromptSlot.GENRE, PromptSlot.TEMPO, PromptSlot.KIT, PromptSlot.START)
+            PromptTask.PLAY -> listOf(PromptSlot.WAY, PromptSlot.LEVEL, PromptSlot.SPEED)
             PromptTask.LEARN -> listOf(PromptSlot.LESSON)
         }
 
@@ -130,6 +141,9 @@ data class ClaudePrompt(
         "length=$length",
         "pick=$fromPick",
         "lesson=$lesson",
+        "way=${way.name}",
+        "level=${level.name}",
+        "speed=$speed",
         text?.let { "text=${escape(it)}" },
     ).joinToString(";")
 
@@ -137,6 +151,7 @@ data class ClaudePrompt(
         val BARS = listOf(1, 2, 4, 8)
         val EDITS = listOf(1, 3, 5)
         val LENGTHS = listOf(16, 32, 64)
+        val SPEEDS = listOf(50, 75, 100)
 
         /** The lessons of the skill's lessons.md, in order: lesson n is [LESSONS] [n - 1]. */
         val LESSONS = listOf(
@@ -164,6 +179,9 @@ data class ClaudePrompt(
                 length = map["length"]?.toIntOrNull()?.takeIf { it in LENGTHS } ?: d.length,
                 fromPick = map["pick"]?.toBooleanStrictOrNull() ?: d.fromPick,
                 lesson = map["lesson"]?.toIntOrNull()?.takeIf { it in 1..LESSONS.size } ?: d.lesson,
+                way = PlayWay.entries.firstOrNull { it.name == map["way"] } ?: d.way,
+                level = PlayLevel.entries.firstOrNull { it.name == map["level"] } ?: d.level,
+                speed = map["speed"]?.toIntOrNull()?.takeIf { it in SPEEDS } ?: d.speed,
                 text = map["text"]?.let(::unescape)?.takeIf { it.isNotBlank() },
             )
         }

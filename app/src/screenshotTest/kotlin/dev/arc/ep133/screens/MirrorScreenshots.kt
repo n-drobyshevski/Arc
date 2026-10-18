@@ -2434,6 +2434,18 @@ fun LiveToolsClaudeEditedPreview() = Live(
     ),
 )
 
+// PLAY: teach me to play scene S02 by finger drumming, the way word tapped (its four ways as keys), the scene on the glass.
+@PreviewTest
+@Preview(name = "Live tools claude play", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudePlayPreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(
+        scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, lights = claudeLights,
+        prompt = dev.arc.ep133.features.ClaudePrompt(dev.arc.ep133.features.PromptTask.PLAY), picking = dev.arc.ep133.features.PromptSlot.WAY,
+    ),
+)
+
 // LEARN: the lesson word tapped, the twelve lessons as keys.
 @PreviewTest
 @Preview(name = "Live tools claude learn", widthDp = 412, heightDp = 960, showBackground = true)

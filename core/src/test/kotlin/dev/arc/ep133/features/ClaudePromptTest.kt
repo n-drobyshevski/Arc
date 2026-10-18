@@ -43,7 +43,8 @@ class ClaudePromptTest {
     fun `a prompt keeps through its text, its own words escaped`() {
         val p = ClaudePrompt(
             PromptTask.BEAT, bars = 8, genre = "dub-techno", tempo = 121, kit = FactoryKit.EP40, parts = setOf(PromptPart.FX, PromptPart.BASS),
-            goal = PromptGoal.SWING, edits = 5, length = 64, fromPick = true, lesson = 7, text = "Line one; a\\b\nline=two",
+            goal = PromptGoal.SWING, edits = 5, length = 64, fromPick = true, lesson = 7, way = PlayWay.PERFORM, level = PlayLevel.SURE, speed = 75,
+            text = "Line one; a\\b\nline=two",
         )
         assertEquals(p, ClaudePrompt.decode(p.encode()))
         assertEquals(ClaudePrompt(), ClaudePrompt.decode(ClaudePrompt().encode()))
@@ -127,6 +128,25 @@ class ClaudePromptTest {
         )
         // Words of one's own go as they are.
         assertEquals("Just vibes", PromptText.prompt(beat.copy(text = "Just vibes"), SharePick.CHAIN, true))
+    }
+
+    @Test
+    fun `a play asks to be taught the card, the way, the level and the start as a list`() {
+        val p = ClaudePrompt(PromptTask.PLAY, way = PlayWay.STEPS, level = PlayLevel.SOME, speed = 75)
+        assertTrue(p.withCard)
+        assertEquals(
+            "Use the arc-beats skill to teach me to play this EP-133 beat from Arc myself, on the device, not just import it.\n" +
+                "- Way: step entry on the EP-133's sequencer, with the key combos of the official guide\n" +
+                "- Me: I've had some practice\n" +
+                "- Start: at 75% of its tempo, then work up to it\n" +
+                "Go one step at a time: explain the step, give me something to play, and wait for me before the next one. The card:",
+            PromptText.prompt(p, SharePick.PATTERN, true),
+        )
+        assertTrue(PromptText.prompt(p.copy(speed = 100), SharePick.CHAIN, true).contains("this EP-133 arrangement") )
+        assertTrue(PromptText.prompt(p.copy(speed = 100), SharePick.CHAIN, true).contains("- Start: at its own tempo\n"))
+        assertEquals("Teach me to play it by step entry as an improver starting at three-quarter tempo".lowercase(), PromptText.sentence(p, FactoryKit.EP133).joinToString(" ") { it.text }.lowercase())
+        assertEquals("Play \u00B7 Steps 75%", PromptText.name(p))
+        assertEquals("New", PromptText.tab(PromptTask.BEAT))
     }
 
     @Test
