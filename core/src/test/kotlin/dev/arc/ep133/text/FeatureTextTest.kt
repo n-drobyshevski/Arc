@@ -830,6 +830,18 @@ class FeatureTextTest {
             listOf("Recording 0:12", "1 take \u00B7 last Oct 5, 2:23 PM", "3 takes \u00B7 last Oct 4", "No takes yet"),
             listOf(MirrorText.takesRecording(12.9), MirrorText.takesSummary(1, "Oct 5, 2:23 PM"), MirrorText.takesSummary(3, "Oct 4"), MirrorText.NO_TAKES),
         )
+        assertEquals(
+            listOf("T03", "T12", "Takes \u00B7 3", "T03, 0:12, Oct 5, 2:23 PM", "T01, 1:13, Oct 4, playing", "Share WAV, T03", "Delete T02? Press DEL again"),
+            listOf(
+                MirrorText.takeNumber(3),
+                MirrorText.takeNumber(12),
+                MirrorText.takesCount(3),
+                MirrorText.takeRow(3, 12.4, "Oct 5, 2:23 PM", false),
+                MirrorText.takeRow(1, 73.0, "Oct 4", true),
+                MirrorText.litTake(FeatureText.SHARE_WAV, 3),
+                MirrorText.deleteTakeAgain(2),
+            ),
+        )
         assertEquals("Play, One group \u00B7 Follow on", MirrorText.toolsRow(MirrorText.PLAY, MirrorText.playOneGroup(true)))
         assertEquals(
             listOf("Back to Live tools", "Help", "phone mix", "Waiting for the first sound", "Play the EP-133's pads or keys", "About takes"),

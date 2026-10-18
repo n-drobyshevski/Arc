@@ -614,6 +614,23 @@ fun LiveRecordingKeysPreview() = Live(keysPlaying, keys = keysUi, rec = dev.arc.
 fun LiveToolsTakesPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, offline = "Last seen Oct 5, 2:02 PM", takes = someTakes)
 
 @PreviewTest
+@Preview(name = "Live tools takes dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakesDarkPreview() = Live(lastRead, dark = true, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, takes = someTakes)
+
+// The glass while a take records: REC, its number and the time; the TAKE key orange with the time on it.
+@PreviewTest
+@Preview(name = "Live tools takes recording", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakesRecordingPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, takes = someTakes, rec = dev.arc.ep133.features.RecState.Recording(7))
+
+// No takes yet, armed: the glass says it waits for the first sound, the strip's keys for a take faded.
+@PreviewTest
+@Preview(name = "Live tools takes armed", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakesArmedPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, rec = dev.arc.ep133.features.RecState.Armed)
+
+@PreviewTest
 @Preview(name = "Live offline note open", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
 fun LiveOfflineNotePreview() = Live(lastRead, offline = "Last seen Oct 5, 2:02 PM", noteOpen = true)

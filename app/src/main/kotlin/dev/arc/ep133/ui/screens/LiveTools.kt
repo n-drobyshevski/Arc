@@ -62,7 +62,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -78,19 +77,16 @@ import dev.arc.ep133.text.ClaudeText
 import dev.arc.ep133.text.CoachText
 import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.MirrorText
-import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcIcon
 import dev.arc.ep133.ui.components.ArcKey
 import dev.arc.ep133.ui.components.Caption
 import dev.arc.ep133.ui.components.Chevron
 import dev.arc.ep133.ui.components.Disclosure
-import dev.arc.ep133.ui.components.CaptionInfo
 import dev.arc.ep133.ui.components.GridPlate
 import dev.arc.ep133.ui.components.Icon
 import dev.arc.ep133.ui.components.InfoButton
 import dev.arc.ep133.ui.components.KeySize
 import dev.arc.ep133.ui.components.KeyStyle
-import dev.arc.ep133.ui.components.OneLine
 import dev.arc.ep133.ui.components.PlateLine
 import dev.arc.ep133.ui.components.Segmented
 import dev.arc.ep133.ui.components.SettingRow
@@ -187,7 +183,7 @@ internal fun ColumnScope.LiveToolsPanel(ui: ToolsUi, page: ToolsPage?, onPage: (
                 null -> FrontPage(ui, onPage)
                 ToolsPage.PLAY -> PlayPage(ui)
                 ToolsPage.CLAUDE -> ui.claude?.let { ClaudePage(it, ui.group) }
-                ToolsPage.TAKES -> ui.take?.let { TakesPage(ui.takes, it) }
+                ToolsPage.TAKES -> ui.take?.let { TakesPage(ui.takes, it, ui.still) }
                 ToolsPage.HELP -> HelpPage(ui)
             }
         }
@@ -690,10 +686,10 @@ private fun ClaudePage(claude: ClaudeUi, group: Int) {
     }
 }
 
-/** Takes: the TAKE key and the takes, and how recording works folded at the foot. */
+/** Takes: the takes on the glass and the keys under it, and how recording works folded at the foot. */
 @Composable
-private fun TakesPage(t: TakesUi, take: TakeUi) {
-    TakesSection(t, take, header = false)
+private fun TakesPage(t: TakesUi, take: TakeUi, still: Boolean) {
+    TakesDeck(t, take, still)
     Disclosure(MirrorText.ABOUT_TAKES) {
         val c = LocalArcColors.current
         Text(MirrorText.TAKES_HINT, style = ArcType.small, color = c.graphite)
@@ -740,73 +736,5 @@ private fun liveNotes(st: MirrorState, mirror: MirrorUi?, tapToPlay: Boolean, si
         if (learning && !st.pushesSeen && st.learned.isEmpty() && st.lastHit?.pad != null && mirror?.loading == false) add(MirrorText.NO_PUSHES)
         add(MirrorText.COMMUNITY_NOTE)
         add(MirrorText.LISTEN_ONLY)
-    }
-}
-
-/**
- * The Takes page: the TAKE key, which starts a take (it records from the
- * first sound) and stops it, its time on it while it records; then the
- * takes, each of which plays, and unfolds to share, save, send to the EP-133
- * or delete. With [header] the section starts with a TAKES caption and an
- * info key for how to record and what a take holds; the page folds those at
- * its foot instead.
- */
-@Composable
-internal fun TakesSection(t: TakesUi, take: TakeUi, header: Boolean = true) {
-    val c = LocalArcColors.current
-    var open by rememberSaveable { mutableStateOf<String?>(null) }
-    var confirm by rememberSaveable { mutableStateOf<String?>(null) }
-    if (header) CaptionInfo(MirrorText.TAKES, listOf(MirrorText.TAKES_HINT, MirrorText.TAKES_NOTE))
-    val recording = take.state as? RecState.Recording
-    ArcKey(
-        "● " + (recording?.let { MirrorText.takeBadge(it.seconds.toDouble()) } ?: MirrorText.TAKE),
-        take.onTake,
-        Modifier
-            .fillMaxWidth()
-            .semantics(mergeDescendants = true) {
-                contentDescription = MirrorText.takeDescription(take.state)
-                stateDescription = MirrorText.onOff(take.state != RecState.Idle)
-            },
-        style = if (take.state != RecState.Idle) KeyStyle.Signal else KeyStyle.Normal,
-        size = KeySize.Small,
-    )
-    for (take in t.list) {
-        val playing = t.playing == t.keyOf(take)
-        val unfolded = open == take.name
-        Plate(onClick = { open = if (unfolded) null else take.name; confirm = null }, enabled = true) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Column(Modifier.weight(1f)) {
-                    OneLine(t.fmtWhen(take.createdAt), ArcType.bold, c.ink)
-                    Text(MirrorText.takeLength(take.seconds), style = ArcType.small, color = c.graphite)
-                }
-                ArcKey(
-                    if (playing) FeatureText.STOP else FeatureText.PLAY,
-                    { if (playing) t.onStop() else t.onPlay(take) },
-                    size = KeySize.Small,
-                )
-            }
-            if (unfolded) {
-                if (confirm == take.name) {
-                    Text(MirrorText.DELETE_TAKE, style = ArcType.small, color = c.graphite, modifier = Modifier.padding(top = 6.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        ArcKey(Strings.DELETE, {
-                            confirm = null
-                            open = null
-                            t.onDelete(take)
-                        }, Modifier.weight(1f), size = KeySize.Small, style = KeyStyle.Signal)
-                        ArcKey(Strings.CANCEL, { confirm = null }, Modifier.weight(1f), size = KeySize.Small)
-                    }
-                } else {
-                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        ArcKey(FeatureText.SHARE_WAV, { t.onShare(take) }, Modifier.weight(1f), size = KeySize.Small)
-                        ArcKey(FeatureText.SAVE_WAV, { t.onSave(take) }, Modifier.weight(1f), size = KeySize.Small)
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        if (t.connected) ArcKey(MirrorText.TO_DEVICE, { t.onToDevice(take) }, Modifier.weight(1f), size = KeySize.Small)
-                        ArcKey(Strings.DELETE, { confirm = take.name }, Modifier.weight(1f), size = KeySize.Small)
-                    }
-                }
-            }
-        }
     }
 }

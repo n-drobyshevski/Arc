@@ -513,6 +513,25 @@ object MirrorText {
     const val TAKES_NOTE = "A take holds the pads and keys played on the phone, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out."
     const val TO_DEVICE = "To EP-133"
     const val DELETE_TAKE = "Delete this take?"
+
+    // The Takes page as the device's display: numbered takes on the glass, and one strip of keys for the lit one.
+    /** "T03": a take's number on the glass, the oldest T01. */
+    fun takeNumber(n: Int) = "T" + n.toString().padStart(2, '0')
+    /** "Takes · 3" (upper-cased where shown), the glass's head. */
+    fun takesCount(count: Int) = "$TAKES · $count"
+    /** "T03, 0:12, Oct 5, 2:23 PM", and ", playing": a take on the glass, for screen readers. */
+    fun takeRow(n: Int, seconds: Double, made: String, playing: Boolean) =
+        "${takeNumber(n)}, ${takeLength(seconds)}, $made" + if (playing) ", playing" else ""
+    const val TAKES_LIT_HINT = "Tap a take to light it; the keys act on it."
+    /** The keys' words, upper-cased where shown. */
+    const val TAKE_SHARE = "Share"
+    const val TAKE_SAVE = "Save"
+    const val TAKE_SEND = "EP"
+    const val TAKE_DEL = "Del"
+    /** "Share WAV, T03": a key for the lit take, for screen readers. */
+    fun litTake(action: String, n: Int) = "$action, ${takeNumber(n)}"
+    /** "Delete T03? Press DEL again", on the glass after one press of DEL. */
+    fun deleteTakeAgain(n: Int) = "Delete ${takeNumber(n)}? Press DEL again"
     const val NO_OUTPUT = "There is no sound output to record from."
     const val SHARE_TAKE_FAILED = "Sharing failed. Use Save WAV instead."
 
