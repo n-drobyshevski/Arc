@@ -1,10 +1,11 @@
 // Tests for platform/audio/liveAudio.ts (port of LiveAudio.kt) and liveMixer.ts,
 // with a fake backend whose mixer runs in-process.
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   LATE_OUTPUT_MS,
   LATE_STEP_MS,
+  GLITCH_WINDOW_MS,
   LATENCY_GLITCHES,
   CHOICE_KEY,
   HINT_KEY,
@@ -1126,13 +1127,21 @@ describe('LiveAudio', () => {
     backend.link.render(0)
     expect(live.voices.value.has('k')).toBe(true)
     const old = backend.ctx
-    // The voice ends just after its press: too soon to be sure no press is on its way.
-    backend.link.render(128 / RATE, 1024)
-    expect(live.voices.value.size).toBe(0)
-    expect(old.closed).toBe(false)
-    // A while later, still quiet: the output makes way for one at 'interactive', woken at once.
-    backend.clock += REPLACE_QUIET_MS
-    await new Promise((r) => setTimeout(r, REPLACE_QUIET_MS + 20))
+    vi.useFakeTimers()
+    try {
+      // The voice ends just after its press: too soon to be sure no press is on its way.
+      backend.link.render(128 / RATE, 1024)
+      expect(live.voices.value.size).toBe(0)
+      expect(old.closed).toBe(false)
+      // A while later, still quiet: the output makes way for one at 'interactive', woken at once.
+      backend.clock += REPLACE_QUIET_MS - 1
+      vi.advanceTimersByTime(REPLACE_QUIET_MS - 1)
+      expect(old.closed).toBe(false)
+      backend.clock += 1
+      vi.advanceTimersByTime(1)
+    } finally {
+      vi.useRealTimers()
+    }
     expect(old.closed).toBe(true)
     expect(live.isOpen).toBe(true)
     expect(backend.hints).toEqual([0, 'interactive'])
@@ -1142,7 +1151,7 @@ describe('LiveAudio', () => {
     expect(live.press('k', 's', PAD)).toBe(true)
   })
 
-  it('a quiet report long after the last press replaces the output at once', async () => {
+  it('a quiet report long after the last press still waits for the tail', async () => {
     const { live, backend } = await opened()
     live.preload('s', tone(), 1, RATE)
     backend.ctx.playbackStats = { underrunEvents: 0 }
@@ -1151,11 +1160,62 @@ describe('LiveAudio', () => {
     live.press('k', 's', PAD)
     backend.link.render(0)
     const old = backend.ctx
-    backend.clock += 1000
-    live.release('k')
-    backend.link.render(128 / RATE, RATE)
+    backend.clock += 10 * REPLACE_QUIET_MS
+    vi.useFakeTimers()
+    try {
+      live.release('k')
+      backend.link.render(128 / RATE, RATE)
+      expect(old.closed).toBe(false)
+      // Something sounds again meanwhile: the wait starts over when it ends.
+      backend.clock += REPLACE_QUIET_MS / 2
+      live.press('k', 's', { pitch: 0, gate: false })
+      backend.link.render(1)
+      backend.clock += REPLACE_QUIET_MS / 2
+      vi.advanceTimersByTime(REPLACE_QUIET_MS / 2)
+      expect(old.closed).toBe(false)
+      backend.link.render(2, RATE)
+      expect(live.voices.value.size).toBe(0)
+      backend.clock += REPLACE_QUIET_MS
+      vi.advanceTimersByTime(REPLACE_QUIET_MS)
+    } finally {
+      vi.useRealTimers()
+    }
     expect(old.closed).toBe(true)
     expect(backend.hints).toEqual([0, 'interactive'])
+  })
+
+  it('glitches far apart do not step back; three within the window do', async () => {
+    const { live, backend } = await opened()
+    live.preload('s', tone(), 1, RATE)
+    backend.ctx.playbackStats = { underrunEvents: 0 }
+    backend.ctx.setState('running')
+    // One glitch every few minutes, with presses between: never three in a window.
+    for (let i = 1; i <= 2 * LATENCY_GLITCHES; i++) {
+      backend.clock += 3 * 60000
+      backend.ctx.playbackStats = { underrunEvents: i }
+      live.press('k', 's', PAD)
+      backend.link.render(i)
+      live.release('k')
+    }
+    live.suspend()
+    live.close()
+    live.open()
+    await flush()
+    expect(backend.hints).toEqual([0, 0])
+    // Three within the window: the next output steps back.
+    backend.ctx.playbackStats = { underrunEvents: 0 }
+    backend.ctx.setState('running')
+    for (let i = 1; i <= LATENCY_GLITCHES; i++) {
+      backend.clock += GLITCH_WINDOW_MS / (LATENCY_GLITCHES + 1)
+      backend.ctx.playbackStats = { underrunEvents: i }
+      live.press('k', 's', PAD)
+      backend.link.render(i)
+      live.release('k')
+    }
+    live.suspend()
+    live.open()
+    await flush()
+    expect(backend.hints).toEqual([0, 0, 'interactive'])
   })
 
   it('the step back is kept for the tab, and a new LiveAudio starts from it', async () => {
