@@ -1411,8 +1411,10 @@ class MainActivity : ComponentActivity() {
                                 onCancel = { closeBeatSheet() },
                                 onImport = { tempo, soundPads, fx, shapePads, picked, setChain ->
                                     if (playing?.startsWith("device:") == true || playing?.startsWith("factory:") == true) controller.stopPlayback()
-                                    controller.importBeat(tempo, soundPads, fx, shapePads, picked, setChain)
+                                    controller.importBeat(tempo, soundPads, fx, shapePads, picked, setChain, appSettings.replaceScenes && b.replace != null)
                                 },
+                                replaceScenes = appSettings.replaceScenes,
+                                onReplaceScenes = controller::setReplaceScenes,
                                 onCopyProblems = ::copyProblems,
                                 // PICK SOUND lists the sounds the card's sound lines choose from, played as the pad sheet plays them.
                                 player = dev.arc.ep133.ui.screens.PickPlayerUi(

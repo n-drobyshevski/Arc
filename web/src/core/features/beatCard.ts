@@ -1793,8 +1793,8 @@ function soundList(source: string, available: ReadonlyMap<number, string>): stri
  * A card of scenes (isMultiScene, from `scene` lines) is planned by planScenes
  * instead, which also takes [setChain].
  */
-function plan(seq: ProjectSeq, card: BeatCard, setChain = true): CardImport {
-  if (isMultiScene(card)) return planScenes(seq, card, setChain)
+function plan(seq: ProjectSeq, card: BeatCard, setChain = true, replace = false): CardImport {
+  if (isMultiScene(card)) return planScenes(seq, card, setChain, replace)
   let out = seq
   const placed: [number, number][] = []
   for (const s of card.sections) {
@@ -1806,9 +1806,13 @@ function plan(seq: ProjectSeq, card: BeatCard, setChain = true): CardImport {
     placed.push([s.group, n])
   }
   if (placed.length < 2) return { seq: out, placed, newScene: false, fullGroup: null, scenes: [], chain: null }
+  const numbers = [0, 1, 2, 3].map((g) => [...placed].reverse().find((x) => x[0] === g)?.[1] ?? ProjectSeq.selected(seq, g))
+  // Replacing, the new scene is the project's only one, and a chain of the old scenes goes with them.
+  if (replace) {
+    return { seq: ProjectSeq.withScenes(out, [scene(numbers)], 0, { steps: [], on: false }), placed, newScene: true, fullGroup: null, scenes: [0], chain: null }
+  }
   const withScene = SceneOps.newScene(out)
   if (withScene.scenes.length === out.scenes.length) return { seq: out, placed, newScene: false, fullGroup: null, scenes: [], chain: null }
-  const numbers = [0, 1, 2, 3].map((g) => [...placed].reverse().find((x) => x[0] === g)?.[1] ?? ProjectSeq.selected(seq, g))
   const scenes = [...withScene.scenes.slice(0, -1), scene(numbers)]
   return {
     seq: ProjectSeq.withScenes(withScene, scenes, withScene.scene),
@@ -1835,12 +1839,19 @@ function plan(seq: ProjectSeq, card: BeatCard, setChain = true): CardImport {
  * it as the project's chain, replacing the one there and turned on; with it off
  * the project's chain is left alone.
  *
+ * With [replace] the new scenes take the place of the project's: the card's
+ * scenes become S01 on, the first selected, and the project's chain is cleared
+ * unless the card's is set (its steps then name the new scenes from 0). The
+ * project's patterns are kept in the banks; only the scenes that named them go.
+ * plan does the same for a card of several groups and no scenes: its one new
+ * scene is the project's only one.
+ *
  * Limits, as for the card without scenes: when a group has no free pattern for
  * a section, nothing is placed (`fullGroup`, [seq] as it was). When the new
  * scenes don't all fit in 99, none is added (`newScene` false, no scenes, no
  * chain), and the patterns are still placed.
  */
-function planScenes(seq: ProjectSeq, card: BeatCard, setChain = true): CardImport {
+function planScenes(seq: ProjectSeq, card: BeatCard, setChain = true, replace = false): CardImport {
   let out = seq
   const placed: [number, number][] = []
   const taken = new Set<number>()
@@ -1861,16 +1872,18 @@ function planScenes(seq: ProjectSeq, card: BeatCard, setChain = true): CardImpor
     numbers = now
     made.push(scene(now))
   }
-  if (seq.scenes.length + made.length > Seq.MAX_SCENES) return { seq: out, placed, newScene: false, fullGroup: null, scenes: [], chain: null }
-  const first = seq.scenes.length
+  if (!replace && seq.scenes.length + made.length > Seq.MAX_SCENES) return { seq: out, placed, newScene: false, fullGroup: null, scenes: [], chain: null }
+  // Replacing, the card's scenes are the project's from S01 (its patterns stay in the banks), else they follow its scenes.
+  const first = replace ? 0 : seq.scenes.length
   const indices = made.map((_, i) => first + i)
   const mapped = (card.chain ?? [])
     .filter(([sc]) => sc >= 1 && sc <= card.scenes.length)
     .slice(0, Chain.MAX_STEPS)
     .map(([sc, passes]) => chainStep(first + sc - 1, Math.min(Math.max(passes, Chain.MIN_PASSES), Chain.MAX_PASSES)))
   const steps = mapped.length > 0 ? mapped : null
-  const chain = setChain && steps !== null ? { steps, on: true } : seq.chain
-  return { seq: ProjectSeq.withScenes(out, [...seq.scenes, ...made], first, chain), placed, newScene: true, fullGroup: null, scenes: indices, chain: steps }
+  // A chain of the old scenes would name the new ones: replacing, it goes unless the card's takes its place.
+  const chain = setChain && steps !== null ? { steps, on: true } : replace ? { steps: [], on: false } : seq.chain
+  return { seq: ProjectSeq.withScenes(out, replace ? made : [...seq.scenes, ...made], first, chain), placed, newScene: true, fullGroup: null, scenes: indices, chain: steps }
 }
 
 // The first pattern of [group] after the one selected that has no notes and isn't in [taken] (group * 100 + number), round 1..99; null when there is none.

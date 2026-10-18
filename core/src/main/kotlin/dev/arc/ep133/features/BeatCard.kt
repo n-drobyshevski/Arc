@@ -1570,8 +1570,8 @@ object BeatCards {
      * A card of scenes ([BeatCard.multiScene], from `scene` lines) is planned
      * by [planScenes] instead, which also takes [setChain].
      */
-    fun plan(seq: ProjectSeq, card: BeatCard, setChain: Boolean = true): CardImport {
-        if (card.multiScene) return planScenes(seq, card, setChain)
+    fun plan(seq: ProjectSeq, card: BeatCard, setChain: Boolean = true, replace: Boolean = false): CardImport {
+        if (card.multiScene) return planScenes(seq, card, setChain, replace)
         var out = seq
         val placed = ArrayList<Pair<Int, Int>>()
         for (s in card.sections) {
@@ -1583,9 +1583,11 @@ object BeatCards {
             placed += s.group to n
         }
         if (placed.size < 2) return CardImport(out, placed, false)
+        val numbers = List(4) { g -> placed.lastOrNull { it.first == g }?.second ?: seq.selected(g) }
+        // Replacing, the new scene is the project's only one, and a chain of the old scenes goes with them.
+        if (replace) return CardImport(out.withScenes(listOf(Scene(numbers)), 0, Chain()), placed, true, scenes = listOf(0))
         val withScene = SceneOps.newScene(out)
         if (withScene.scenes.size == out.scenes.size) return CardImport(out, placed, false)
-        val numbers = List(4) { g -> placed.lastOrNull { it.first == g }?.second ?: seq.selected(g) }
         val scenes = withScene.scenes.dropLast(1) + Scene(numbers)
         return CardImport(withScene.withScenes(scenes, withScene.scene), placed, true, scenes = listOf(withScene.scenes.lastIndex))
     }
@@ -1605,13 +1607,20 @@ object BeatCards {
      * [CardImport.seq] has it as the project's chain, replacing the one there
      * and turned on; with it off the project's chain is left alone.
      *
+     * With [replace] the new scenes take the place of the project's: the card's
+     * scenes become S01 on, the first selected, and the project's chain is
+     * cleared unless the card's is set (its steps then name the new scenes
+     * from 0). The project's patterns are kept in the banks; only the scenes
+     * that named them go. [plan] does the same for a card of several groups
+     * and no scenes: its one new scene is the project's only one.
+     *
      * Limits, as for the card without scenes: when a group has no free
      * pattern for a section, nothing is placed ([CardImport.fullGroup], [seq]
      * as it was). When the new scenes don't all fit in 99, none is added
      * ([CardImport.newScene] false, no scenes, no chain), and the patterns are
      * still placed.
      */
-    fun planScenes(seq: ProjectSeq, card: BeatCard, setChain: Boolean = true): CardImport {
+    fun planScenes(seq: ProjectSeq, card: BeatCard, setChain: Boolean = true, replace: Boolean = false): CardImport {
         var out = seq
         val placed = ArrayList<Pair<Int, Int>>()
         val taken = HashSet<Pair<Int, Int>>()
@@ -1631,13 +1640,15 @@ object BeatCards {
             numbers = now
             made += Scene(now)
         }
-        if (seq.scenes.size + made.size > Seq.MAX_SCENES) return CardImport(out, placed, false)
-        val first = seq.scenes.size
+        if (!replace && seq.scenes.size + made.size > Seq.MAX_SCENES) return CardImport(out, placed, false)
+        // Replacing, the card's scenes are the project's from S01 (its patterns stay in the banks), else they follow its scenes.
+        val first = if (replace) 0 else seq.scenes.size
         val indices = made.indices.map { first + it }
         val steps = card.chain?.filter { it.first in 1..card.scenes.size }?.take(Chain.MAX_STEPS)
             ?.map { (scene, passes) -> ChainStep(first + scene - 1, passes.coerceIn(Chain.MIN_PASSES, Chain.MAX_PASSES)) }?.ifEmpty { null }
-        val chain = if (setChain && steps != null) Chain(steps, true) else seq.chain
-        return CardImport(out.withScenes(seq.scenes + made, first, chain), placed, true, scenes = indices, chain = steps)
+        // A chain of the old scenes would name the new ones: replacing, it goes unless the card's takes its place.
+        val chain = if (setChain && steps != null) Chain(steps, true) else if (replace) Chain() else seq.chain
+        return CardImport(out.withScenes(if (replace) made else seq.scenes + made, first, chain), placed, true, scenes = indices, chain = steps)
     }
 
     // The first pattern of [group] after the one selected that has no notes and isn't in [taken], round 1..99; null when there is none.

@@ -408,11 +408,21 @@ class BeatImportUi(
     val scenes: List<BeatSceneUi> = emptyList(),
     val chain: BeatChainUi? = null,
     val noRoom: Boolean = false,
+    /** How many scenes the project has, for the REPLACE row ("Replace S01–S05"). */
+    val projectScenes: Int = 1,
+    /** Where the card goes with REPLACE on (its scenes from S01): null when the card adds no scene. */
+    val replace: BeatReplaceUi? = null,
 ) {
     val card: BeatCard? get() = read.card
 
     val problems: List<CardProblem> get() = read.problems
 }
+
+/**
+ * A card's scenes with REPLACE on: they become the project's from S01. [scene] is the one new scene of a card of
+ * several groups (0), [scenes] the rows of a card of scenes and [chain] its chain on them.
+ */
+class BeatReplaceUi(val scene: Int?, val scenes: List<BeatSceneUi>, val chain: BeatChainUi?)
 
 /** The bars drawn of a long pattern. */
 internal const val BEAT_BARS_SHOWN = 2
@@ -449,6 +459,8 @@ internal fun beatImportUi(
     val summary = ClaudeText.summary(grids.maxOfOrNull { it.bars } ?: 0, pads, grids.sumOf { g -> g.rows.sumOf { it.hits } })
     val tempo = card.tempo?.let { Tempo.round(it) }?.takeIf { it != nowBpm }
     val scenes = if (card.multiScene) sceneRows(card, grids, plan) else emptyList()
+    // The same card with REPLACE on: the patterns go where they go either way, the scenes from S01.
+    val replaced = BeatCards.plan(seq, card, replace = true).takeIf { it.newScene && it.fullGroup == null }
     return BeatImportUi(
         read = read,
         title = card.name ?: ClaudeText.CARD,
@@ -467,6 +479,14 @@ internal fun beatImportUi(
         scenes = scenes,
         chain = plan.chain?.takeIf { plan.newScene }?.let(::BeatChainUi),
         noRoom = card.multiScene && plan.fullGroup == null && !plan.newScene,
+        projectScenes = seq.scenes.size,
+        replace = replaced?.let { r ->
+            BeatReplaceUi(
+                scene = if (card.multiScene) null else r.seq.scene,
+                scenes = if (card.multiScene) sceneRows(card, grids, r) else emptyList(),
+                chain = r.chain?.let(::BeatChainUi),
+            )
+        },
     )
 }
 
@@ -542,11 +562,12 @@ internal class BeatApplied(
  * scenes and the picks as they were. [BeatApplied.seq] is [seq] itself when a group is full.
  *
  * A card of scenes adds one scene for each of its own after the project's, the first selected, and with [setChain] on (and a chain in
- * the card) the project's chain becomes the card's on the new scenes, turned on: all in the same one checkpoint. With no room for the
+ * the card) the project's chain becomes the card's on the new scenes, turned on: all in the same one checkpoint. With [replace] (the
+ * sheet's REPLACE) the new scenes take the place of the project's, from S01, the project's patterns kept in the banks; with no room for the
  * scenes (the project has too many) the patterns are placed, and the first scene's picked in the scene playing.
  */
-internal fun applyBeat(seq: ProjectSeq, card: BeatCard, recorder: PatternRecorder, setChain: Boolean = true): BeatApplied {
-    val plan = BeatCards.plan(seq, card, setChain)
+internal fun applyBeat(seq: ProjectSeq, card: BeatCard, recorder: PatternRecorder, setChain: Boolean = true, replace: Boolean = false): BeatApplied {
+    val plan = BeatCards.plan(seq, card, setChain, replace)
     if (plan.fullGroup != null) return BeatApplied(seq, emptyList(), null, plan.fullGroup)
     var after = plan.seq
     if (!plan.newScene) {

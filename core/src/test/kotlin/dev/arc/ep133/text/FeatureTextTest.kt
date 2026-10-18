@@ -591,6 +591,17 @@ class FeatureTextTest {
         assertEquals(listOf("Goes to", "New scene", "Tempo"), listOf(ClaudeText.GOES_TO, MirrorText.NEW_SCENE, ClaudeText.TEMPO))
         assertEquals("SET \u00B7 NOW 122", ClaudeText.tempoChip(122).uppercase())
         assertEquals(listOf("SET", "136 \u2192 85", "136 \u00B7 card 85"), listOf(ClaudeText.SET_TEMPO.uppercase(), ClaudeText.tempoChange(136, 85), ClaudeText.tempoKept(136, 85)))
+        assertEquals(
+            listOf("After S05", "Replace S01\u2013S05", "Replace S01", "S03 \u00B7 A 04 \u00B7 B (same)", "Add the card's scenes after the project's 5 scenes", "Replace the project's 1 scene with the card's"),
+            listOf(
+                ClaudeText.scenesAfter(5),
+                ClaudeText.scenesReplace(5),
+                ClaudeText.scenesReplace(1),
+                ClaudeText.cardSceneReplaced(2, listOf(0 to 4, 1 to null)),
+                ClaudeText.replaceScenesName(false, 5),
+                ClaudeText.replaceScenesName(true, 1),
+            ),
+        )
         assertEquals(listOf("Set the tempo to 92, now 122", "Keep the tempo at 122, the card says 92"), listOf(true, false).map { ClaudeText.tempoChipName("92", 122, it) })
         assertEquals("Swing 58 \u00B7 placed in the notes", ClaudeText.swingLine(58))
         // Problems: listed, announced and copied for Claude.

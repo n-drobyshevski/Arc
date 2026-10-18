@@ -182,6 +182,9 @@ fun ColumnScope.BeatImportSheetContent(
     /** For screenshots: start with these sounds picked for silent pads (pad, slot), or the picker of this pad open. */
     initialPicked: List<Pair<PhysicalPad, Int>> = emptyList(),
     initialPicking: PhysicalPad? = null,
+    /** The Scenes row's REPLACE (a setting, kept for the next card): the card's scenes take the place of the project's. */
+    replaceScenes: Boolean = false,
+    onReplaceScenes: (Boolean) -> Unit = {},
 ) {
     val c = LocalArcColors.current
     // Chosen on this sheet only: a card's tempo never replaces Arc's unasked.
@@ -241,8 +244,15 @@ fun ColumnScope.BeatImportSheetContent(
         }
     }
     val tempo = ui.tempo
-    val sceneRows = ui.scenes.count { it.index != null }
-    val rows = (if (ui.scenes.isEmpty()) ui.grids.count { it.goesTo != null } + (if (ui.scene != null) 1 else 0) else sceneRows + (if (ui.chain != null) 1 else 0)) + (if (tempo != null) 1 else 0)
+    // With REPLACE on, the scenes, the new scene and the chain are the ones that start at S01.
+    val replacing = ui.replace?.takeIf { replaceScenes }
+    val targets = replacing?.scenes?.ifEmpty { null } ?: ui.scenes
+    val newScene = if (replacing != null) replacing.scene else ui.scene
+    val chainUi = if (replacing != null) replacing.chain else ui.chain
+    val sceneRows = targets.count { it.index != null }
+    val rows = (if (ui.replace != null) 1 else 0) +
+        (if (ui.scenes.isEmpty()) ui.grids.count { it.goesTo != null } + (if (newScene != null) 1 else 0) else sceneRows + (if (chainUi != null) 1 else 0)) +
+        (if (tempo != null) 1 else 0)
     if (rows > 0) {
         GridPlate {
             var first = true
@@ -251,28 +261,35 @@ fun ColumnScope.BeatImportSheetContent(
                 if (!first) PlateLine()
                 first = false
             }
+            ui.replace?.let {
+                line()
+                // Where the card's scenes go: after the project's, or in their place (REPLACE).
+                ValueRow(ClaudeText.SCENES, if (replaceScenes) ClaudeText.scenesReplace(ui.projectScenes) else ClaudeText.scenesAfter(ui.projectScenes)) {
+                    SwitchChip(ClaudeText.REPLACE, ClaudeText.replaceScenesName(replaceScenes, ui.projectScenes), replaceScenes) { onReplaceScenes(!replaceScenes) }
+                }
+            }
             if (ui.scenes.isEmpty()) {
                 for (g in ui.grids) {
                     val n = g.goesTo ?: continue
                     line()
                     ValueRow(ClaudeText.GOES_TO, ClaudeText.goesTo(g.group, n))
                 }
-                ui.scene?.let {
+                newScene?.let {
                     line()
                     ValueRow(MirrorText.NEW_SCENE, MirrorText.sceneLabel(it))
                 }
             } else {
                 // One row for each scene: "Scene 1 · Drop" and where it goes, "new S03 · A 04 · B (same)".
-                for (sc in ui.scenes) {
+                for (sc in targets) {
                     val index = sc.index ?: continue
                     line()
                     StackedRow(
                         ClaudeText.cardScene(sc.number, sc.name),
-                        ClaudeText.cardSceneTarget(index, sc.parts),
+                        if (replacing != null) ClaudeText.cardSceneReplaced(index, sc.parts) else ClaudeText.cardSceneTarget(index, sc.parts),
                         description = sc.patterns?.let { ClaudeText.cardSceneName(sc.number, sc.name, index, it) },
                     )
                 }
-                ui.chain?.let { chain ->
+                chainUi?.let { chain ->
                     line()
                     StackedRow(MirrorText.CHAIN, ClaudeText.chainImport(chain.steps), description = ClaudeText.setChainName(setChain, chain.steps.size)) {
                         SwitchChip(ClaudeText.SET_CHAIN, ClaudeText.setChainName(setChain, chain.steps.size), setChain) { setChain = !setChain }
@@ -288,8 +305,9 @@ fun ColumnScope.BeatImportSheetContent(
             }
         }
     }
-    if (ui.chain != null && setChain) Text(ClaudeText.SET_CHAIN_NOTE, style = ArcType.small, color = c.graphite)
-    if (ui.noRoom) Text(ClaudeText.NO_ROOM_FOR_SCENES, style = ArcType.small, color = c.warn)
+    if (replacing != null) Text(ClaudeText.replaceScenesNote(ui.projectScenes), style = ArcType.small, color = c.graphite)
+    if (chainUi != null && setChain) Text(ClaudeText.SET_CHAIN_NOTE, style = ArcType.small, color = c.graphite)
+    if (ui.noRoom && replacing == null) Text(ClaudeText.NO_ROOM_FOR_SCENES, style = ArcType.small, color = c.warn)
     ui.fx?.let { FxBlock(it, applyFx) { applyFx = !applyFx } }
     if (silent != null) {
         SilentBlock(
@@ -343,7 +361,7 @@ fun ColumnScope.BeatImportSheetContent(
                 val shaped = ui.shaping?.rows.orEmpty().filter { it.changes(soundGoing(it.pad)) && padKey(it.pad) !in shapeOff }.mapTo(HashSet()) { it.pad }
                 // The picked sounds that are ticked: they are in [pads] too, being SOUNDS rows.
                 val chosen = pickedRows.filter { it.pad in pads }.associate { it.pad to it.pick.slot!! }
-                onImport(setTempo && tempo != null, pads, applyFx && ui.fx != null, shaped, chosen, setChain && ui.chain != null)
+                onImport(setTempo && tempo != null, pads, applyFx && ui.fx != null, shaped, chosen, setChain && chainUi != null)
             },
             Modifier.weight(1f),
             style = KeyStyle.Signal,

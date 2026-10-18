@@ -5335,6 +5335,9 @@ class ArcController(
     /** "With my sound list" on or off (kept like the other Live preferences). */
     fun setShareSounds(on: Boolean) = changeSettings { it.copy(shareSounds = on) }
 
+    /** The beat card sheet's REPLACE: a card's scenes take the place of the project's, or follow them; kept for the next card. */
+    fun setReplaceScenes(on: Boolean) = changeSettings { it.copy(replaceScenes = on) }
+
     /**
      * A text from PASTE BEAT (the clipboard) or shared to arc: with an ARC BEAT line in it, the card is read and planned
      * into the project's patterns as they stand ([BeatCards.plan]) and its sheet opens ([beatImport]); with none the
@@ -5405,6 +5408,7 @@ class ArcController(
      *
      * A card of scenes adds a scene for each of its own, and with [setChain] (the sheet's SET CHAIN) its chain replaces the project's,
      * on the new scenes, and is turned on: part of the same one UNDO step, the sequencer's (the transport playing, the chain joins at once).
+     * With [replaceScenes] (the sheet's REPLACE) the card's scenes take the place of the project's, from S01, in that same step.
      */
     fun importBeat(
         setTempo: Boolean,
@@ -5413,6 +5417,7 @@ class ArcController(
         shapePads: Set<dev.arc.ep133.features.PhysicalPad> = emptySet(),
         pickedSounds: Map<dev.arc.ep133.features.PhysicalPad, Int> = emptyMap(),
         setChain: Boolean = true,
+        replaceScenes: Boolean = false,
     ) {
         val ui = _beatImport.value ?: return
         val card = ui.card ?: return
@@ -5420,7 +5425,7 @@ class ArcController(
         // The sequencer as it was: UNDO is that one, once the sounds are back with it.
         val before = projectSeq
         sceneEdit {
-            val a = applyBeat(projectSeq, card, patternRecorder, setChain)
+            val a = applyBeat(projectSeq, card, patternRecorder, setChain, replaceScenes)
             applied = a
             if (a.seq !== projectSeq) sceneDesk.cancel()
             a.seq

@@ -2465,6 +2465,7 @@ private fun BeatSheet(
     silent: (BeatCard) -> SilentUi? = { null },
     initialPicked: List<Pair<PhysicalPad, Int>> = emptyList(),
     initialPicking: PhysicalPad? = null,
+    replaceScenes: Boolean = false,
 ) {
     val ui = beatImportUi(BeatCards.read(text), seq, 122.0, { names[it] }, fx = fx, shaping = shaping, sounds = sounds, silent = silent)
     Framed(Tab.LIVE, dark = dark) {
@@ -2473,6 +2474,7 @@ private fun BeatSheet(
             BeatImportSheetContent(
                 ui, onCancel = {}, onImport = { _, _, _, _, _, _ -> }, onCopyProblems = {},
                 initialSetTempo = initialSetTempo, initialPicked = initialPicked, initialPicking = initialPicking,
+                replaceScenes = replaceScenes,
             )
         }
     }
@@ -2496,6 +2498,12 @@ fun BeatSheetSceneDarkPreview() = BeatSheet(NIGHT_DRIVE, dark = true, initialSet
 @Preview(name = "Beat sheet scenes chain", widthDp = 360, heightDp = 1500, showBackground = true)
 @Composable
 fun BeatSheetScenesChainPreview() = BeatSheet(TRACK)
+
+// REPLACE on, in a project of three scenes: the card's scenes become S01-S03 and the chain names them, with the line that says so.
+@PreviewTest
+@Preview(name = "Beat sheet scenes replace", widthDp = 360, heightDp = 1560, showBackground = true)
+@Composable
+fun BeatSheetScenesReplacePreview() = BeatSheet(TRACK, seq = beatSeq.withScenes(List(3) { dev.arc.ep133.features.Scene() }, 0), replaceScenes = true)
 
 // A card that can't be read: its errors and warning by line, COPY PROBLEMS, and IMPORT off with the reason.
 @PreviewTest

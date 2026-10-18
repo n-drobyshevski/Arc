@@ -472,6 +472,20 @@ object ClaudeText {
     fun setChainName(on: Boolean, steps: Int) = (if (on) "Set the project's chain from the card" else "Leave the project's chain as it is") + ", ${Format.plural(steps, "step")}"
     const val SET_CHAIN_NOTE = "Replaces this project's chain with the card's, on the new scenes, and turns it on. UNDO takes it back."
 
+    /**
+     * REPLACE ([SCENES] row): the switch for where a card's scenes go. Its row: "After S05" (off: they follow the project's) or
+     * "Replace S01–S05" (on: they take their place), its name for screen readers, and the line under the plate while on.
+     */
+    const val REPLACE = "Replace"
+    fun scenesAfter(count: Int) = "After ${sceneCardName(count - 1)}"
+    fun scenesReplace(count: Int) = "Replace " + if (count <= 1) sceneCardName(0) else "${sceneCardName(0)}\u2013${sceneCardName(count - 1)}"
+    fun replaceScenesName(on: Boolean, count: Int) =
+        if (on) "Replace the project's ${Format.plural(count, "scene")} with the card's" else "Add the card's scenes after the project's ${Format.plural(count, "scene")}"
+    fun replaceScenesNote(count: Int) =
+        "The card's scenes take the place of this project's ${Format.plural(count, "scene")}, from S01. Their patterns stay in the banks; UNDO takes it back."
+    /** A card scene's row with REPLACE on: "S01 · A 04 · B (same)", the scene it becomes from S01. */
+    fun cardSceneReplaced(index: Int, parts: List<Pair<Int, Int?>>) = cardSceneTarget(index, parts).removePrefix("new ")
+
     /** The card's chain as the sheet shows it: "1×2 2 1×2 3" (card scene numbers; ×passes when more than one). */
     fun chainText(steps: List<Pair<Int, Int>>) = steps.joinToString(" ") { (scene, passes) -> if (passes == 1) "$scene" else "$scene\u00D7$passes" }
 
