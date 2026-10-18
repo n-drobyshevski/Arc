@@ -340,6 +340,46 @@ describe('BeatCardScenesTest', () => {
     expect(noChain.scenes).toEqual([1, 2])
   })
 
+  it("with replace the card's scenes take the place of the project's, from S01", () => {
+    const card = BeatCards.read(track).card!
+    const old = chain([chainStep(0, 3)], true)
+    const seq = ProjectSeq.withChain(project(), old)
+    const replaced = BeatCards.plan(seq, card, true, true)
+    expect(replaced.newScene).toBe(true)
+    // The patterns go where they go either way; the scenes are the card's alone, the first selected.
+    expect(replaced.placed).toEqual(BeatCards.plan(seq, card).placed)
+    expect(replaced.scenes).toEqual([0, 1, 2])
+    expect(replaced.seq.scenes).toEqual([scene([4, 6, 1, 7]), scene([5, 6, 1, 7]), scene([5, 7, 1, 7])])
+    expect(replaced.seq.scene).toBe(0)
+    // The card's chain names the new scenes from 0, and is on.
+    const mapped = [chainStep(0, 2), chainStep(1, 1), chainStep(2, 4), chainStep(1, 1)]
+    expect(replaced.chain).toEqual(mapped)
+    expect(replaced.seq.chain).toEqual(chain(mapped, true))
+    // SET CHAIN off: the old chain named the old scenes, so it goes.
+    expect(BeatCards.plan(seq, card, false, true).seq.chain).toEqual(chain())
+    // The project's patterns stay in the banks.
+    expect(ProjectSeq.pattern(replaced.seq, 0, 2)).toEqual(kick)
+    expect(ProjectSeq.pattern(replaced.seq, 3, 7)).toEqual(kick)
+    // No room to add 3 scenes after 97, but room to replace them.
+    const crowded = BeatCards.plan(projectSeq([], Array.from({ length: 97 }, () => scene())), card, true, true)
+    expect(crowded.newScene).toBe(true)
+    expect(crowded.seq.scenes).toHaveLength(3)
+  })
+
+  it("with replace a card of several groups and no scene line is the project's one scene", () => {
+    const card = read('ARC BEAT 1', '[A]', bar, '[B]', 'B7 | X... .... .... .... |').card!
+    const seq = ProjectSeq.withScenes(project(), [scene([1, 5, 1, 7]), scene([2, 5, 1, 7])], 1, chain([chainStep(1, 2)], true))
+    const replaced = BeatCards.plan(seq, card, true, true)
+    expect(replaced.newScene).toBe(true)
+    expect(replaced.scenes).toEqual([0])
+    expect(replaced.seq.scenes).toEqual([scene([4, 6, 1, 7])])
+    expect(replaced.seq.chain).toEqual(chain())
+    // A card of one group adds no scene, so there is nothing to replace.
+    const one = BeatCards.plan(seq, read('ARC BEAT 1', '[A]', bar).card!, true, true)
+    expect(one.newScene).toBe(false)
+    expect(one.seq.scenes).toEqual(seq.scenes)
+  })
+
   it("a group a scene leaves out takes the number of the scene before, the first scene the playing one's", () => {
     const card = read('ARC BEAT 1', 'scene', '[C]', 'C7 | X... .... .... .... |', 'scene', '[A]', bar, 'scene').card!
     const plan = BeatCards.plan(project(), card)

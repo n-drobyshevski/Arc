@@ -48,6 +48,10 @@ class AppSettingsTest {
         assertEquals("false", AppSettings(shareSounds = false).values()["shareSounds"])
         assertFalse(AppSettings().withIndex(mapOf("app.shareSounds" to "false")).shareSounds)
         assertTrue(AppSettings(shareSounds = false).withIndex(mapOf("app.shareSounds" to "true")).shareSounds)
+        // The beat card sheet's REPLACE: off at first (a card's scenes follow the project's), kept with the rest.
+        assertFalse(AppSettings().replaceScenes)
+        assertEquals("true", AppSettings(replaceScenes = true).values()["replaceScenes"])
+        assertTrue(AppSettings().withIndex(mapOf("app.replaceScenes" to "true")).replaceScenes)
         // Missing or unreadable: left as it is.
         assertFalse(AppSettings(shareSounds = false).withIndex(emptyMap()).shareSounds)
         assertTrue(AppSettings().withIndex(mapOf("app.shareSounds" to "maybe")).shareSounds)

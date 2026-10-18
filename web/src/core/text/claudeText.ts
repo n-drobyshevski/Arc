@@ -13,6 +13,7 @@
 
 import type { CardFx, CardProblem } from '../features/beatCard'
 import type { ChainStep } from '../features/chain'
+import type { FactoryKit } from '../features/factorySounds'
 import { FxSettings, FxType } from '../features/fxSettings'
 import type { PadSettings } from '../features/padSettings'
 import { physicalPad, type PhysicalPad } from '../features/padNotes'
@@ -110,6 +111,8 @@ export const ClaudeText = {
     return `Share ${place(group, n)} with Claude` + (empty ? NOTHING_TO_SHARE : '')
   },
   PASTE_BEAT_NAME: 'Paste a beat card from the clipboard',
+  /** The link under PASTE BEAT (Android: PASTE held): a .txt or .md file with Claude's card in it. */
+  OPEN_CARD_FILE: 'Open a card file',
   NOTHING_TO_SHARE,
 
   /** SHARE CHAIN: the project's chain as a card of scenes, and the same key for screen readers ("Share the chain with Claude, 4 steps"). */
@@ -172,9 +175,28 @@ export const ClaudeText = {
     return `Arc beat ${cardName}`
   },
 
-  /** The shared text: [prompt], a blank line and [card] (which ends in a newline) in a fenced block. */
-  shareText(prompt: string, card: string): string {
-    return prompt + '\n\n```\n' + card + '```\n'
+  /**
+   * The kit the EP-133 plays, when it isn't its own: "My EP-133 plays the EP-40 Riddim factory kit." (the skill
+   * reads its slots and pads by it). Null for the EP-133's own kit.
+   */
+  kitLine(kit: FactoryKit): string | null {
+    switch (kit.id) {
+      case 'ep133':
+        return null
+      case 'ep40':
+        return `My EP-133 plays the ${FeatureText.FACTORY_40} factory kit.`
+      case 'ep1320':
+        return `My EP-133 plays the ${FeatureText.FACTORY_1320} factory kit.`
+    }
+  },
+
+  /**
+   * The shared text: [prompt], a blank line and [card] (which ends in a newline) in a fenced block; with a [kit]
+   * other than the EP-133's, its [kitLine] as a paragraph between them.
+   */
+  shareText(prompt: string, card: string, kit?: FactoryKit): string {
+    const line = kit === undefined ? null : ClaudeText.kitLine(kit)
+    return prompt + (line === null ? '' : '\n\n' + line) + '\n\n```\n' + card + '```\n'
   },
 
   // ---------- The sound list ----------

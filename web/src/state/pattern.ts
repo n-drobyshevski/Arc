@@ -25,6 +25,7 @@
 //   the count-in is the sequencer's own (PatternScheduler).
 // - Times are performance.now() milliseconds where Kotlin's are System.nanoTime.
 
+import type { FactoryKit } from '../core/features/factorySounds'
 import { signal, type ReadonlySignal, type Signal } from '@preact/signals'
 import { physicalPad, type PhysicalPad } from '../core/features/padNotes'
 import { Pattern, Patterns, ProjectPatterns, ProjectSeq, Seq, TimingSettings, type Timing } from '../core/features/pattern'
@@ -1554,11 +1555,12 @@ export class PatternDesk {
    * What SHARE sends: [group]'s playing pattern, or (null) the scene playing,
    * as an ARC BEAT card at the tempo Live plays at and the TIMING swing, with
    * the pads' names; null when there are no notes in it. The patterns are the
-   * project's as they stand, a pattern still recording included.
+   * project's as they stand, a pattern still recording included. The [kit]
+   * Live plays is named before the card when it isn't the EP-133's.
    */
-  beatShare(group: number | null): BeatShare | null {
+  beatShare(group: number | null, kit?: FactoryKit): BeatShare | null {
     if (group !== null && (group < 0 || group > 3)) return null
-    return beatShare(this.seq, group, this.bpm(), this.settings.timing.swing, (pad) => this.padName(pad))
+    return beatShare(this.seq, group, this.bpm(), this.settings.timing.swing, (pad) => this.padName(pad), kit)
   }
 
   /**

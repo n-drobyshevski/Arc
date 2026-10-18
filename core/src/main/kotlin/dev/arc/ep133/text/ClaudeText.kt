@@ -70,6 +70,37 @@ object ClaudeText {
     /** The chain's share, for a project with no chain: nothing to share. */
     const val NO_CHAIN_TO_SHARE = "Add scenes to the chain to share it"
 
+    // The Claude page as the device's display: what will go on the glass, and the keys under it.
+    /** The glass's head (upper-cased where shown): ready, or a reply awaited. */
+    const val READY = "Claude · ready"
+    const val WAITING = "Waiting for Claude"
+    /** "Sent Scene S02": what went, large on the glass while the reply is awaited ([what] as [sharedScene] gives it). */
+    fun sent(what: String) = "Sent $what"
+    /** "Scene S02", "Chain": what SHARE sends, large on the glass. */
+    fun sceneTitle(scene: String) = "Scene $scene"
+    const val CHAIN = "Chain"
+    /** "3 scenes · 6 steps": the chain's line on the glass. */
+    fun chainLine(scenes: Int, steps: Int) = "${Format.plural(scenes, "scene")} · ${Format.plural(steps, "step")}"
+    const val SCENE_EMPTY = "No notes in this scene yet"
+    const val PATTERN_EMPTY = "No notes in this pattern yet"
+    /** On the glass while the reply is awaited. */
+    const val COPY_THEN_PASTE = "Copy Claude's reply, then press PASTE"
+    /** The glass's dismiss word, beside the head. */
+    const val STOP = "Stop"
+    const val PICK_HINT = "Pick what to share, then press SHARE. Hold PASTE to open a card file."
+    /** PASTE held (Android), or the web's link under PASTE BEAT: a .txt or .md file with Claude's card in it. */
+    const val OPEN_CARD_FILE = "Open a card file"
+    /** The keys' words (upper-cased where shown); the pattern's key says its place, "A · 01". */
+    const val KEY_SCENE = "Scene"
+    const val KEY_CHAIN = "Chain"
+    const val KEY_SOUNDS = "Sounds"
+    const val KEY_SHARE = "Share"
+    const val KEY_PASTE = "Paste"
+    /** The pick keys for screen readers: "Scene S02", "A · 01", "Chain, 3 scenes", and that there is nothing to share. */
+    fun pickScene(scene: String, empty: Boolean) = sceneTitle(scene) + if (empty) NOTHING_TO_SHARE else ""
+    fun pickPattern(group: Int, n: Int, empty: Boolean) = place(group, n) + if (empty) NOTHING_TO_SHARE else ""
+    fun pickChain(scenes: Int) = "$CHAIN, ${Format.plural(scenes, "scene")}"
+
     /** The two links under the card. */
     const val GET_SKILL = "Get the arc-beats skill"
     const val LEARN = "Learn with Claude"
@@ -111,8 +142,22 @@ object ClaudeText {
     /** The share's subject: "Arc beat P01 S02". */
     fun shareSubject(cardName: String) = "Arc beat $cardName"
 
-    /** The shared text: [prompt], a blank line and [card] (which ends in a newline) in a fenced block. */
-    fun shareText(prompt: String, card: String) = prompt + "\n\n```\n" + card + "```\n"
+    /**
+     * The kit the EP-133 plays, when it isn't its own: "My EP-133 plays the EP-40 Riddim factory kit." (the skill
+     * reads its slots and pads by it). Null for the EP-133's own kit.
+     */
+    fun kitLine(kit: dev.arc.ep133.features.FactoryKit): String? = when (kit) {
+        dev.arc.ep133.features.FactoryKit.EP133 -> null
+        dev.arc.ep133.features.FactoryKit.EP40 -> "My EP-133 plays the ${FeatureText.FACTORY_40} factory kit."
+        dev.arc.ep133.features.FactoryKit.EP1320 -> "My EP-133 plays the ${FeatureText.FACTORY_1320} factory kit."
+    }
+
+    /**
+     * The shared text: [prompt], a blank line and [card] (which ends in a newline) in a fenced block; with a [kit]
+     * other than the EP-133's, its [kitLine] as a paragraph between them.
+     */
+    fun shareText(prompt: String, card: String, kit: dev.arc.ep133.features.FactoryKit = dev.arc.ep133.features.FactoryKit.EP133) =
+        prompt + (kitLine(kit)?.let { "\n\n$it" } ?: "") + "\n\n```\n" + card + "```\n"
 
     // ---------- The sound list ----------
     /** Where the sound list Arc adds after a shared card came from: the EP-133 itself, its last read, or the factory pack. */
@@ -182,6 +227,10 @@ object ClaudeText {
     /** "Tempo  92": the card's tempo, whole BPM; and the chip that sets it, "SET · NOW 122" ([now] is Arc's). */
     const val TEMPO = "Tempo"
     fun tempoChip(now: Int) = "Set · now $now"
+    /** The tempo row's key (SET, with its light and ON or OFF), and the row's value: "136 \u2192 85" while it sets the card's, "136 \u00B7 card 85" while not. */
+    const val SET_TEMPO = "Set"
+    fun tempoChange(now: Int, card: Int) = "$now \u2192 $card"
+    fun tempoKept(now: Int, card: Int) = "$now \u00B7 card $card"
     fun tempoChipName(card: String, now: Int, on: Boolean) =
         if (on) "Set the tempo to $card, now $now" else "Keep the tempo at $now, the card says $card"
 
@@ -263,11 +312,15 @@ object ClaudeText {
 
     /** Under the block: what a sound picked here does. */
     const val SILENT_NOTE = "A pad with no sound plays nothing. Pick a sound for it: it goes on the pad with IMPORT, with the card's other sounds."
+    /** A pick Arc made by the card's row name ([dev.arc.ep133.features.BeatCards.suggestSound]), until the user changes it. */
+    const val SUGGESTED = "Suggested"
+    const val SUGGESTED_NOTE =
+        "Arc suggested a sound for these pads from your library, by the card's names for them. IMPORT puts them on the pads with the card's other sounds; CHANGE picks another, or untick one under SOUNDS."
 
     /** A silent row for screen readers: "D7: 12 notes, no sound, they will be silent", and once picked "D7: will get 512 PIANO". */
     fun silentRowName(pad: PhysicalPad, notes: Int) =
         "${padLabel(pad)}: ${Format.plural(notes, "note")}, no sound, ${if (notes == 1) "it" else "they"} will be silent"
-    fun pickedRowName(pad: PhysicalPad, sound: String) = "${padLabel(pad)}: will get $sound"
+    fun pickedRowName(pad: PhysicalPad, sound: String, suggested: Boolean = false) = "${padLabel(pad)}: will get $sound" + if (suggested) ", suggested" else ""
     fun pickSoundName(pad: PhysicalPad) = "Pick a sound for ${padLabel(pad)}"
     fun changePickName(pad: PhysicalPad, sound: String) = "Pick another sound for ${padLabel(pad)}, now $sound"
 
@@ -424,6 +477,20 @@ object ClaudeText {
     const val SET_CHAIN = "Set chain"
     fun setChainName(on: Boolean, steps: Int) = (if (on) "Set the project's chain from the card" else "Leave the project's chain as it is") + ", ${Format.plural(steps, "step")}"
     const val SET_CHAIN_NOTE = "Replaces this project's chain with the card's, on the new scenes, and turns it on. UNDO takes it back."
+
+    /**
+     * REPLACE ([SCENES] row): the switch for where a card's scenes go. Its row: "After S05" (off: they follow the project's) or
+     * "Replace S01–S05" (on: they take their place), its name for screen readers, and the line under the plate while on.
+     */
+    const val REPLACE = "Replace"
+    fun scenesAfter(count: Int) = "After ${sceneCardName(count - 1)}"
+    fun scenesReplace(count: Int) = "Replace " + if (count <= 1) sceneCardName(0) else "${sceneCardName(0)}\u2013${sceneCardName(count - 1)}"
+    fun replaceScenesName(on: Boolean, count: Int) =
+        if (on) "Replace the project's ${Format.plural(count, "scene")} with the card's" else "Add the card's scenes after the project's ${Format.plural(count, "scene")}"
+    fun replaceScenesNote(count: Int) =
+        "The card's scenes take the place of this project's ${Format.plural(count, "scene")}, from S01. Their patterns stay in the banks; UNDO takes it back."
+    /** A card scene's row with REPLACE on: "S01 · A 04 · B (same)", the scene it becomes from S01. */
+    fun cardSceneReplaced(index: Int, parts: List<Pair<Int, Int?>>) = cardSceneTarget(index, parts).removePrefix("new ")
 
     /** The card's chain as the sheet shows it: "1×2 2 1×2 3" (card scene numbers; ×passes when more than one). */
     fun chainText(steps: List<Pair<Int, Int>>) = steps.joinToString(" ") { (scene, passes) -> if (passes == 1) "$scene" else "$scene\u00D7$passes" }

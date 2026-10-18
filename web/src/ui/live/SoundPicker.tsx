@@ -27,6 +27,7 @@ import { FeatureText } from '../../core/text/featureText'
 import { Format } from '../../core/text/format'
 import { MirrorText } from '../../core/text/mirrorText'
 import { Search } from '../components/Icons'
+import { useFactoryKit } from '../FactoryKitContext'
 import { PlayKey } from '../components/PlayKey'
 import { Segmented } from '../components/Segmented'
 import './SoundPicker.css'
@@ -74,6 +75,7 @@ export interface SoundPickerProps {
 }
 
 export function SoundPicker(props: SoundPickerProps): JSX.Element {
+  const kit = useFactoryKit()
   const { current = null, playing, onPick, onDrag, scroll = false, offline = false } = props
   const factory = props.factory ?? null
   const id = useId()
@@ -140,7 +142,7 @@ export function SoundPicker(props: SoundPickerProps): JSX.Element {
           <p class="t-small snd__none">{sounds.length === 0 ? FeatureText.NO_SOUNDS : FeatureText.NO_FIND_MATCHES}</p>
         )}
         {blocks.map((b) => {
-          const kind = FeatureText.factoryCategory(b.from)
+          const kind = FeatureText.factoryCategory(b.from, kit)
           return (
             <section key={b.from} class="snd__block" data-block={b.from} id={`${id}-b${b.from}`} aria-labelledby={`${id}-h${b.from}`}>
               <h3 class="snd__bar" id={`${id}-h${b.from}`}>
@@ -219,7 +221,8 @@ export function RangeKey(props: {
   controls?: string
   onClick: () => void
 }): JSX.Element {
-  const kind = FeatureText.factoryCategory(props.range.from)
+  const kit = useFactoryKit()
+  const kind = FeatureText.factoryCategory(props.range.from, kit)
   return (
     <button
       type="button"

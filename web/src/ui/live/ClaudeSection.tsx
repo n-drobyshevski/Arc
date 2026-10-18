@@ -34,6 +34,8 @@ export interface ClaudeActions {
   onShareScene(): void
   onSharePattern(group: number): void
   onPaste(): void
+  /** The link under PASTE BEAT: a .txt or .md file with Claude's card in it. */
+  onOpenFile(): void
   /** Learn with Claude's link: claude.ai with the starter prompt. */
   readonly learnUrl: string
 }
@@ -93,6 +95,7 @@ export function ClaudeSection(props: { group: number }): JSX.Element | null {
           onClick={() => claude.onSharePattern(g)}
         />
         <Key text={ClaudeText.PASTE_BEAT} size="small" block variant="signal" aria-label={ClaudeText.PASTE_BEAT_NAME} onClick={claude.onPaste} />
+        <Key text={ClaudeText.OPEN_CARD_FILE} size="small" block variant="quiet" onClick={claude.onOpenFile} />
       </div>
       {/* Links, not LinkRow's buttons: the zip downloads and claude.ai opens in a tab. */}
       <RowCard>

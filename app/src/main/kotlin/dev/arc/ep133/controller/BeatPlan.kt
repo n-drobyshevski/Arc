@@ -72,7 +72,8 @@ internal fun soundSetOf(m: MirrorUi?, factory: Map<Int, String>? = null): SoundS
  * With a [list], the sounds Arc knows follow the card's closing fence
  * ([BeatCards.soundList]), for Claude to choose from. When the pads are [padsKnown], the pads the notes use that have no
  * sound ([held] gives a pad's slot, null for none; [BeatCards.silentPads]) are named in a comment after the header
- * ([ClaudeText.noSoundOn]). Null when there is nothing to share: no notes in it.
+ * ([ClaudeText.noSoundOn]). A [kit] other than the EP-133's is named before the card ([ClaudeText.kitLine]). Null when
+ * there is nothing to share: no notes in it.
  */
 internal fun beatShare(
     seq: ProjectSeq,
@@ -86,6 +87,7 @@ internal fun beatShare(
     pads: (PhysicalPad) -> PadSettings? = { null },
     held: (PhysicalPad) -> Int? = { null },
     padsKnown: Boolean = false,
+    kit: dev.arc.ep133.features.FactoryKit = dev.arc.ep133.features.FactoryKit.EP133,
 ): BeatShare? {
     val groups = if (group == null) 0..3 else group..group
     val sections = groups.map { g -> CardSection(g, seq.selected(g), seq.pattern(g, seq.selected(g))) }
@@ -93,7 +95,7 @@ internal fun beatShare(
     val name = if (group == null) ClaudeText.sceneCardName(seq.scene) else ClaudeText.patternCardName(seq.selected(group), seq.scene)
     val card = BeatCards.fromPatterns(name, tempo, swing, sections, sounds, fx, pads)
     val silent = BeatCards.silentPads(card, held, padsKnown)
-    val text = ClaudeText.shareText(ClaudeText.SHARE_PROMPT, BeatCards.write(card, names, tidy = true, silent = silent))
+    val text = ClaudeText.shareText(ClaudeText.SHARE_PROMPT, BeatCards.write(card, names, tidy = true, silent = silent), kit)
     // The list follows the closing fence after a blank line (the card's text ends in a newline); readers stop at the fence.
     return BeatShare(ClaudeText.shareSubject(name), if (list == null) text else text + "\n" + BeatCards.soundList(list.source, list.names))
 }
@@ -133,11 +135,12 @@ internal fun beatShareChain(
     pads: (PhysicalPad) -> PadSettings? = { null },
     held: (PhysicalPad) -> Int? = { null },
     padsKnown: Boolean = false,
+    kit: dev.arc.ep133.features.FactoryKit = dev.arc.ep133.features.FactoryKit.EP133,
 ): BeatShare? {
     val name = ClaudeText.CHAIN_CARD_NAME
     val card = BeatCards.fromScenes(name, tempo, swing, seq, chainForCard(seq.chain.steps), sounds, fx, pads) ?: return null
     val silent = BeatCards.silentPads(card, held, padsKnown)
-    val text = ClaudeText.shareText(ClaudeText.SHARE_CHAIN_PROMPT, BeatCards.write(card, names, tidy = true, silent = silent))
+    val text = ClaudeText.shareText(ClaudeText.SHARE_CHAIN_PROMPT, BeatCards.write(card, names, tidy = true, silent = silent), kit)
     return BeatShare(ClaudeText.shareSubject(name), if (list == null) text else text + "\n" + BeatCards.soundList(list.source, list.names))
 }
 
@@ -256,7 +259,31 @@ class SilentRowUi(val pad: PhysicalPad, val notes: Int)
  * the [choices] PICK SOUND lists (null when no sound is known: the rows then have no key), and whether the pads change in
  * Arc only until the EP-133 connects ([offline]) and the [project] they are written in, for the SOUNDS block a pick joins.
  */
-class SilentUi(val rows: List<SilentRowUi>, val choices: SoundChoices?, val offline: Boolean, val project: Int?)
+class SilentUi(
+    val rows: List<SilentRowUi>,
+    val choices: SoundChoices?,
+    val offline: Boolean,
+    val project: Int?,
+    /** A sound Arc suggests for each pad it could find one for ([suggestedSounds]): the sheet starts with them picked. */
+    val suggested: Map<PhysicalPad, Int> = emptyMap(),
+)
+
+/**
+ * A sound for each of [silent]'s pads from the sounds PICK SOUND lists ([BeatCards.suggestSound]: by the pad's row name in
+ * [names], its kind, or its notes), each a different one, in the rows' order; the ones not available to play are passed over.
+ */
+internal fun suggestedSounds(silent: SilentUi, card: BeatCard, names: Map<PhysicalPad, String>, kit: dev.arc.ep133.features.FactoryKit): Map<PhysicalPad, Int> {
+    val choices = silent.choices ?: return emptyMap()
+    val list = choices.names.filterKeys { it !in choices.unavailable }
+    val taken = HashSet<Int>()
+    val out = LinkedHashMap<PhysicalPad, Int>()
+    for (row in silent.rows) {
+        val slot = BeatCards.suggestSound(card, row.pad, names[row.pad], list, taken, kit) ?: continue
+        out[row.pad] = slot
+        taken += slot
+    }
+    return out
+}
 
 /**
  * [card]'s silent pads ([BeatCards.silentPads]: [held] gives a pad's slot, null for none, and [known] says the pads were
@@ -405,11 +432,21 @@ class BeatImportUi(
     val scenes: List<BeatSceneUi> = emptyList(),
     val chain: BeatChainUi? = null,
     val noRoom: Boolean = false,
+    /** How many scenes the project has, for the REPLACE row ("Replace S01–S05"). */
+    val projectScenes: Int = 1,
+    /** Where the card goes with REPLACE on (its scenes from S01): null when the card adds no scene. */
+    val replace: BeatReplaceUi? = null,
 ) {
     val card: BeatCard? get() = read.card
 
     val problems: List<CardProblem> get() = read.problems
 }
+
+/**
+ * A card's scenes with REPLACE on: they become the project's from S01. [scene] is the one new scene of a card of
+ * several groups (0), [scenes] the rows of a card of scenes and [chain] its chain on them.
+ */
+class BeatReplaceUi(val scene: Int?, val scenes: List<BeatSceneUi>, val chain: BeatChainUi?)
 
 /** The bars drawn of a long pattern. */
 internal const val BEAT_BARS_SHOWN = 2
@@ -431,6 +468,8 @@ internal fun beatImportUi(
     seq: ProjectSeq,
     now: Double,
     names: (PhysicalPad) -> String?,
+    /** The factory kit Arc plays: the EP-40's chord stabs are where its suggestions look for chords. */
+    kit: dev.arc.ep133.features.FactoryKit = dev.arc.ep133.features.FactoryKit.EP133,
     fx: (BeatCard) -> BeatFxUi? = { null },
     shaping: (BeatCard) -> PadShapingUi? = { null },
     silent: (BeatCard) -> SilentUi? = { null },
@@ -446,6 +485,8 @@ internal fun beatImportUi(
     val summary = ClaudeText.summary(grids.maxOfOrNull { it.bars } ?: 0, pads, grids.sumOf { g -> g.rows.sumOf { it.hits } })
     val tempo = card.tempo?.let { Tempo.round(it) }?.takeIf { it != nowBpm }
     val scenes = if (card.multiScene) sceneRows(card, grids, plan) else emptyList()
+    // The same card with REPLACE on: the patterns go where they go either way, the scenes from S01.
+    val replaced = BeatCards.plan(seq, card, replace = true).takeIf { it.newScene && it.fullGroup == null }
     return BeatImportUi(
         read = read,
         title = card.name ?: ClaudeText.CARD,
@@ -460,10 +501,18 @@ internal fun beatImportUi(
         sounds = sounds(card),
         fx = fx(card),
         shaping = shaping(card),
-        silent = silent(card),
+        silent = silent(card)?.let { s -> SilentUi(s.rows, s.choices, s.offline, s.project, suggestedSounds(s, card, read.names, kit)) },
         scenes = scenes,
         chain = plan.chain?.takeIf { plan.newScene }?.let(::BeatChainUi),
         noRoom = card.multiScene && plan.fullGroup == null && !plan.newScene,
+        projectScenes = seq.scenes.size,
+        replace = replaced?.let { r ->
+            BeatReplaceUi(
+                scene = if (card.multiScene) null else r.seq.scene,
+                scenes = if (card.multiScene) sceneRows(card, grids, r) else emptyList(),
+                chain = r.chain?.let(::BeatChainUi),
+            )
+        },
     )
 }
 
@@ -539,11 +588,12 @@ internal class BeatApplied(
  * scenes and the picks as they were. [BeatApplied.seq] is [seq] itself when a group is full.
  *
  * A card of scenes adds one scene for each of its own after the project's, the first selected, and with [setChain] on (and a chain in
- * the card) the project's chain becomes the card's on the new scenes, turned on: all in the same one checkpoint. With no room for the
+ * the card) the project's chain becomes the card's on the new scenes, turned on: all in the same one checkpoint. With [replace] (the
+ * sheet's REPLACE) the new scenes take the place of the project's, from S01, the project's patterns kept in the banks; with no room for the
  * scenes (the project has too many) the patterns are placed, and the first scene's picked in the scene playing.
  */
-internal fun applyBeat(seq: ProjectSeq, card: BeatCard, recorder: PatternRecorder, setChain: Boolean = true): BeatApplied {
-    val plan = BeatCards.plan(seq, card, setChain)
+internal fun applyBeat(seq: ProjectSeq, card: BeatCard, recorder: PatternRecorder, setChain: Boolean = true, replace: Boolean = false): BeatApplied {
+    val plan = BeatCards.plan(seq, card, setChain, replace)
     if (plan.fullGroup != null) return BeatApplied(seq, emptyList(), null, plan.fullGroup)
     var after = plan.seq
     if (!plan.newScene) {

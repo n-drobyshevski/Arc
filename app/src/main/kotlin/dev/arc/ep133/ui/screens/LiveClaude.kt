@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,7 +41,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -57,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.arc.ep133.controller.BeatFxUi
 import dev.arc.ep133.controller.BeatGridUi
 import dev.arc.ep133.controller.BeatImportUi
@@ -78,12 +79,12 @@ import dev.arc.ep133.text.Format
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.text.SettingsText
 import dev.arc.ep133.text.Strings
+import dev.arc.ep133.ui.components.capPress
+import dev.arc.ep133.ui.components.cap
 import dev.arc.ep133.ui.components.ArcKey
-import dev.arc.ep133.ui.components.CaptionInfo
 import dev.arc.ep133.ui.components.GridPlate
 import dev.arc.ep133.ui.components.KeySize
 import dev.arc.ep133.ui.components.KeyStyle
-import dev.arc.ep133.ui.components.LinkRow
 import dev.arc.ep133.ui.components.PlateLine
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
@@ -112,11 +113,15 @@ class ClaudeUi(
     val withSounds: Boolean = true,
     val chainSteps: Int = 0,
     val chainScenes: Int = 0,
+    /** Each group's pattern, its first bar as step lights ([dev.arc.ep133.controller.stepLights]), for the glass. */
+    val lights: List<List<dev.arc.ep133.controller.Weight?>> = List(4) { dev.arc.ep133.controller.NO_LIGHTS },
     val onWithSounds: (Boolean) -> Unit = {},
     val onShareScene: () -> Unit = {},
     val onShareChain: () -> Unit = {},
     val onSharePattern: (group: Int) -> Unit = {},
     val onPaste: () -> Unit = {},
+    /** PASTE held: a .txt or .md file with a beat card in it, from the system's file picker. */
+    val onOpenFile: () -> Unit = {},
     val onGetSkill: () -> Unit = {},
     val onLearn: () -> Unit = {},
     /** What was shared to Claude and not yet answered ("Scene S02", "A \u00B7 01", "Chain"); null when no reply is awaited. */
@@ -130,91 +135,7 @@ class ClaudeUi(
     val hasChain: Boolean get() = chainSteps > 0
 }
 
-/**
- * Live tools' Claude page: a card with SHARE SCENE, SHARE for
- * the [group] shown (the shares are dimmed, and still announced, when there is
- * nothing to share), SHARE CHAIN · N SCENES when the project's chain has steps
- * (the chain as a card of scenes), the tick box "With my sound list" under them (when Arc
- * knows sounds) and PASTE BEAT, and under it two links: the skill's zip, and a
- * starter prompt to learn the EP-133 with Claude. With [header] the section
- * starts with a CLAUDE caption and the info key (what a beat card is, and how
- * to give Claude the arc-beats skill); the page has the Claude row's name for
- * a title instead and folds those notes at its foot.
- */
-@Composable
-internal fun ClaudeSection(claude: ClaudeUi, group: Int, header: Boolean = true) {
-    val c = LocalArcColors.current
-    val g = group.coerceIn(0, 3)
-    val number = claude.numbers.getOrElse(g) { 1 }
-    val patternEmpty = !claude.hasNotes.getOrElse(g) { false }
-    val sceneEmpty = !claude.sceneHasNotes
-    if (header) CaptionInfo(ClaudeText.CLAUDE, listOf(ClaudeText.INFO_CARDS, ClaudeText.INFO_SKILL))
-    GridPlate {
-        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(ClaudeText.BEAT_CARDS, style = ArcType.semi, color = c.ink)
-            Text(ClaudeText.BEAT_HINT, style = ArcType.small, color = c.graphite)
-            ArcKey(
-                ClaudeText.shareScene(claude.scene),
-                claude.onShareScene,
-                Modifier
-                    .fillMaxWidth()
-                    .semantics(mergeDescendants = true) { contentDescription = ClaudeText.shareSceneName(claude.scene, sceneEmpty) },
-                size = KeySize.Small,
-                enabled = !sceneEmpty,
-            )
-            ArcKey(
-                ClaudeText.sharePattern(g, number),
-                { claude.onSharePattern(g) },
-                Modifier
-                    .fillMaxWidth()
-                    .semantics(mergeDescendants = true) { contentDescription = ClaudeText.sharePatternName(g, number, patternEmpty) },
-                size = KeySize.Small,
-                enabled = !patternEmpty,
-            )
-            if (claude.hasChain) {
-                ArcKey(
-                    ClaudeText.shareChainKey(claude.chainScenes),
-                    claude.onShareChain,
-                    Modifier
-                        .fillMaxWidth()
-                        .semantics(mergeDescendants = true) { contentDescription = ClaudeText.shareChainName(claude.chainSteps) },
-                    size = KeySize.Small,
-                )
-            }
-            if (claude.sounds > 0) SoundListTick(claude.sounds, claude.withSounds, claude.onWithSounds)
-            ArcKey(
-                ClaudeText.PASTE_BEAT,
-                claude.onPaste,
-                Modifier
-                    .fillMaxWidth()
-                    .semantics(mergeDescendants = true) { contentDescription = ClaudeText.PASTE_BEAT_NAME },
-                style = KeyStyle.Signal,
-                size = KeySize.Small,
-            )
-        }
-    }
-    GridPlate { LinkRow(ClaudeText.GET_SKILL, claude.onGetSkill) }
-    GridPlate { LinkRow(ClaudeText.LEARN, claude.onLearn) }
-}
-
-/** A tick box row: [text] after a box, a tap anywhere on the row switches it. */
-@Composable
-private fun TickRow(text: String, on: Boolean, onChange: (Boolean) -> Unit) {
-    val c = LocalArcColors.current
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 44.dp)
-            .toggleable(value = on, interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Checkbox, onValueChange = onChange),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        TickBox(on)
-        Text(text, style = ArcType.small, color = c.ink, modifier = Modifier.weight(1f))
-    }
-}
-
-/** The box of a [TickRow] or a sound row: the row it sits in is what is tapped. */
+/** The box of a sound row: the row it sits in is what is tapped. */
 @Composable
 private fun TickBox(on: Boolean, enabled: Boolean = true) {
     val c = LocalArcColors.current
@@ -225,11 +146,6 @@ private fun TickBox(on: Boolean, enabled: Boolean = true) {
         )
     }
 }
-
-/** "With my sound list · 212 sounds": the shared card is followed by the sounds Arc knows. */
-@Composable
-private fun SoundListTick(count: Int, on: Boolean, onChange: (Boolean) -> Unit) =
-    TickRow(ClaudeText.withSoundList(count), on, onChange)
 
 /**
  * A beat card's sheet (a pasted card, or Claude's reply shared to arc): the
@@ -268,6 +184,9 @@ fun ColumnScope.BeatImportSheetContent(
     /** For screenshots: start with these sounds picked for silent pads (pad, slot), or the picker of this pad open. */
     initialPicked: List<Pair<PhysicalPad, Int>> = emptyList(),
     initialPicking: PhysicalPad? = null,
+    /** The Scenes row's REPLACE (a setting, kept for the next card): the card's scenes take the place of the project's. */
+    replaceScenes: Boolean = false,
+    onReplaceScenes: (Boolean) -> Unit = {},
 ) {
     val c = LocalArcColors.current
     // Chosen on this sheet only: a card's tempo never replaces Arc's unasked.
@@ -276,7 +195,9 @@ fun ColumnScope.BeatImportSheetContent(
     var putOnPads by rememberSaveable { mutableStateOf(true) }
     var unticked by rememberSaveable { mutableStateOf(emptyList<Int>()) }
     // The sounds picked for silent pads (a pad's key and a slot, [pickedCode]) and the pad whose picker is open (-1: none).
-    var picked by rememberSaveable { mutableStateOf(initialPicked.map { (pad, slot) -> pickedCode(pad, slot) }) }
+    // At first, the sounds Arc suggests for them (BeatCards.suggestSound), unless a screenshot gives its own.
+    val suggested = ui.silent?.suggested.orEmpty()
+    var picked by rememberSaveable { mutableStateOf(initialPicked.ifEmpty { suggested.toList() }.map { (pad, slot) -> pickedCode(pad, slot) }) }
     var picking by rememberSaveable { mutableStateOf(initialPicking?.let(::padKey) ?: -1) }
     // The FX: applied unless switched off. The pad shaping rows: all ticked, bar the ones unticked.
     var applyFx by rememberSaveable { mutableStateOf(true) }
@@ -327,8 +248,15 @@ fun ColumnScope.BeatImportSheetContent(
         }
     }
     val tempo = ui.tempo
-    val sceneRows = ui.scenes.count { it.index != null }
-    val rows = (if (ui.scenes.isEmpty()) ui.grids.count { it.goesTo != null } + (if (ui.scene != null) 1 else 0) else sceneRows + (if (ui.chain != null) 1 else 0)) + (if (tempo != null) 1 else 0)
+    // With REPLACE on, the scenes, the new scene and the chain are the ones that start at S01.
+    val replacing = ui.replace?.takeIf { replaceScenes }
+    val targets = replacing?.scenes?.ifEmpty { null } ?: ui.scenes
+    val newScene = if (replacing != null) replacing.scene else ui.scene
+    val chainUi = if (replacing != null) replacing.chain else ui.chain
+    val sceneRows = targets.count { it.index != null }
+    val rows = (if (ui.replace != null) 1 else 0) +
+        (if (ui.scenes.isEmpty()) ui.grids.count { it.goesTo != null } + (if (newScene != null) 1 else 0) else sceneRows + (if (chainUi != null) 1 else 0)) +
+        (if (tempo != null) 1 else 0)
     if (rows > 0) {
         GridPlate {
             var first = true
@@ -337,28 +265,35 @@ fun ColumnScope.BeatImportSheetContent(
                 if (!first) PlateLine()
                 first = false
             }
+            ui.replace?.let {
+                line()
+                // Where the card's scenes go: after the project's, or in their place (REPLACE).
+                ValueRow(ClaudeText.SCENES, if (replaceScenes) ClaudeText.scenesReplace(ui.projectScenes) else ClaudeText.scenesAfter(ui.projectScenes)) {
+                    SwitchChip(ClaudeText.REPLACE, ClaudeText.replaceScenesName(replaceScenes, ui.projectScenes), replaceScenes) { onReplaceScenes(!replaceScenes) }
+                }
+            }
             if (ui.scenes.isEmpty()) {
                 for (g in ui.grids) {
                     val n = g.goesTo ?: continue
                     line()
                     ValueRow(ClaudeText.GOES_TO, ClaudeText.goesTo(g.group, n))
                 }
-                ui.scene?.let {
+                newScene?.let {
                     line()
                     ValueRow(MirrorText.NEW_SCENE, MirrorText.sceneLabel(it))
                 }
             } else {
                 // One row for each scene: "Scene 1 · Drop" and where it goes, "new S03 · A 04 · B (same)".
-                for (sc in ui.scenes) {
+                for (sc in targets) {
                     val index = sc.index ?: continue
                     line()
                     StackedRow(
                         ClaudeText.cardScene(sc.number, sc.name),
-                        ClaudeText.cardSceneTarget(index, sc.parts),
+                        if (replacing != null) ClaudeText.cardSceneReplaced(index, sc.parts) else ClaudeText.cardSceneTarget(index, sc.parts),
                         description = sc.patterns?.let { ClaudeText.cardSceneName(sc.number, sc.name, index, it) },
                     )
                 }
-                ui.chain?.let { chain ->
+                chainUi?.let { chain ->
                     line()
                     StackedRow(MirrorText.CHAIN, ClaudeText.chainImport(chain.steps), description = ClaudeText.setChainName(setChain, chain.steps.size)) {
                         SwitchChip(ClaudeText.SET_CHAIN, ClaudeText.setChainName(setChain, chain.steps.size), setChain) { setChain = !setChain }
@@ -367,14 +302,16 @@ fun ColumnScope.BeatImportSheetContent(
             }
             if (tempo != null) {
                 line()
-                ValueRow(ClaudeText.TEMPO, tempo.toString()) {
-                    TempoChip(ui.tempoNow, tempo, setTempo) { setTempo = !setTempo }
+                // On, the row says the change ("136 → 85"); off, the tempo that stays and the card's beside it.
+                ValueRow(ClaudeText.TEMPO, if (setTempo) ClaudeText.tempoChange(ui.tempoNow, tempo) else ClaudeText.tempoKept(ui.tempoNow, tempo)) {
+                    SwitchChip(ClaudeText.SET_TEMPO, ClaudeText.tempoChipName(tempo.toString(), ui.tempoNow, setTempo), setTempo) { setTempo = !setTempo }
                 }
             }
         }
     }
-    if (ui.chain != null && setChain) Text(ClaudeText.SET_CHAIN_NOTE, style = ArcType.small, color = c.graphite)
-    if (ui.noRoom) Text(ClaudeText.NO_ROOM_FOR_SCENES, style = ArcType.small, color = c.warn)
+    if (replacing != null) Text(ClaudeText.replaceScenesNote(ui.projectScenes), style = ArcType.small, color = c.graphite)
+    if (chainUi != null && setChain) Text(ClaudeText.SET_CHAIN_NOTE, style = ArcType.small, color = c.graphite)
+    if (ui.noRoom && replacing == null) Text(ClaudeText.NO_ROOM_FOR_SCENES, style = ArcType.small, color = c.warn)
     ui.fx?.let { FxBlock(it, applyFx) { applyFx = !applyFx } }
     if (silent != null) {
         SilentBlock(
@@ -386,6 +323,8 @@ fun ColumnScope.BeatImportSheetContent(
                 else ClaudeText.soundName(pickedSlot(code), silent.choices?.names?.get(pickedSlot(code)))
             },
             onPick = { picking = padKey(it) },
+            // A pick still the one Arc suggested says so.
+            suggestedOf = { pad -> picked.any { pickedPad(it) == padKey(pad) && suggested[pad] == pickedSlot(it) } },
         )
     }
     sounds?.let { all ->
@@ -428,7 +367,7 @@ fun ColumnScope.BeatImportSheetContent(
                 val shaped = ui.shaping?.rows.orEmpty().filter { it.changes(soundGoing(it.pad)) && padKey(it.pad) !in shapeOff }.mapTo(HashSet()) { it.pad }
                 // The picked sounds that are ticked: they are in [pads] too, being SOUNDS rows.
                 val chosen = pickedRows.filter { it.pad in pads }.associate { it.pad to it.pick.slot!! }
-                onImport(setTempo && tempo != null, pads, applyFx && ui.fx != null, shaped, chosen, setChain && ui.chain != null)
+                onImport(setTempo && tempo != null, pads, applyFx && ui.fx != null, shaped, chosen, setChain && chainUi != null)
             },
             Modifier.weight(1f),
             style = KeyStyle.Signal,
@@ -459,7 +398,7 @@ class PickPlayerUi(
  * them what a pick does. [soundOf] gives the sound picked for a pad ("512 PIANO") while its SOUNDS row is ticked, else null.
  */
 @Composable
-private fun SilentBlock(silent: SilentUi, soundOf: (PhysicalPad) -> String?, onPick: (PhysicalPad) -> Unit) {
+private fun SilentBlock(silent: SilentUi, soundOf: (PhysicalPad) -> String?, onPick: (PhysicalPad) -> Unit, suggestedOf: (PhysicalPad) -> Boolean = { false }) {
     val c = LocalArcColors.current
     GridPlate {
         Row(
@@ -472,10 +411,11 @@ private fun SilentBlock(silent: SilentUi, soundOf: (PhysicalPad) -> String?, onP
         }
         for (row in silent.rows) {
             PlateLine()
-            SilentRow(row, soundOf(row.pad), silent.choices != null) { onPick(row.pad) }
+            val sound = soundOf(row.pad)
+            SilentRow(row, sound, silent.choices != null, sound != null && suggestedOf(row.pad)) { onPick(row.pad) }
         }
     }
-    Text(ClaudeText.SILENT_NOTE, style = ArcType.small, color = c.graphite)
+    Text(if (silent.rows.any { suggestedOf(it.pad) }) ClaudeText.SUGGESTED_NOTE else ClaudeText.SILENT_NOTE, style = ArcType.small, color = c.graphite)
 }
 
 /**
@@ -484,7 +424,7 @@ private fun SilentBlock(silent: SilentUi, soundOf: (PhysicalPad) -> String?, onP
  * the key is CHANGE.
  */
 @Composable
-private fun SilentRow(row: SilentRowUi, sound: String?, canPick: Boolean, onPick: () -> Unit) {
+private fun SilentRow(row: SilentRowUi, sound: String?, canPick: Boolean, suggested: Boolean, onPick: () -> Unit) {
     val c = LocalArcColors.current
     Row(
         Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp),
@@ -496,14 +436,17 @@ private fun SilentRow(row: SilentRowUi, sound: String?, canPick: Boolean, onPick
             Modifier
                 .weight(1f)
                 .semantics(mergeDescendants = true) {
-                    contentDescription = if (sound == null) ClaudeText.silentRowName(row.pad, row.notes) else ClaudeText.pickedRowName(row.pad, sound)
+                    contentDescription = if (sound == null) ClaudeText.silentRowName(row.pad, row.notes) else ClaudeText.pickedRowName(row.pad, sound, suggested)
                 },
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             if (sound == null) {
                 Text(ClaudeText.silentRow(row.pad, row.notes), style = ArcType.small, color = c.ink)
             } else {
-                Text(ClaudeText.padLabel(row.pad) + " \u00B7 " + Format.plural(row.notes, "note"), style = ArcType.small, color = c.graphite)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(ClaudeText.padLabel(row.pad) + " \u00B7 " + Format.plural(row.notes, "note"), style = ArcType.small, color = c.graphite)
+                    if (suggested) Text(ClaudeText.SUGGESTED.uppercase(), style = ArcType.caps.copy(fontSize = 10.sp), color = c.signal, maxLines = 1)
+                }
                 Text("\u2192 $sound", style = ArcType.small, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -621,24 +564,42 @@ private fun SoundsBlock(
 private fun PutOnPadsChip(on: Boolean, count: Int, onToggle: () -> Unit) =
     SwitchChip(ClaudeText.PUT_ON_PADS, ClaudeText.putOnPadsName(on, count), on, onToggle)
 
-/** A block's chip: [text] in navy while [on], a flat pill while it isn't; a tap switches it, and screen readers hear [description]. */
+/**
+ * A block's switch as a device key: a light, [text], and ON or OFF on the key itself (the light orange and ON in
+ * signal while [on], the light dark and OFF in graphite while not); a tap switches it, and screen readers hear
+ * [description] and its state.
+ */
 @Composable
 private fun SwitchChip(text: String, description: String, on: Boolean, onToggle: () -> Unit) {
     val c = LocalArcColors.current
-    Box(
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    Row(
         Modifier
-            .heightIn(min = 40.dp)
-            .clip(RoundedCornerShape(50))
-            .background(if (on) c.navy else c.shell)
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Switch, onClick = onToggle)
+            .padding(bottom = 3.dp)
+            .heightIn(min = 44.dp)
+            .cap(c.key, c.keyEdge, RoundedCornerShape(10.dp), capPress(pressed))
+            .clickable(interactionSource = source, indication = null, role = Role.Switch, onClick = onToggle)
             .semantics {
                 contentDescription = description
                 stateDescription = if (on) SettingsText.ON else SettingsText.OFF
             }
-            .padding(horizontal = 14.dp),
-        contentAlignment = Alignment.Center,
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(text.uppercase(), style = ArcType.capsKeySmall, color = if (on) c.onNavy else c.ink, maxLines = 1)
+        Canvas(Modifier.size(10.dp)) {
+            // Lit, the light glows a little past its edge.
+            if (on) drawCircle(c.signal.copy(alpha = 0.3f), radius = size.minDimension * 0.9f)
+            drawCircle(if (on) c.signal else c.graphite.copy(alpha = 0.45f))
+        }
+        Text(text.uppercase(), style = ArcType.capsKeySmall, color = c.ink, maxLines = 1)
+        Text(
+            (if (on) SettingsText.ON else SettingsText.OFF).uppercase(),
+            style = ArcType.caps.copy(fontSize = 10.sp),
+            color = if (on) c.signal else c.graphite,
+            maxLines = 1,
+        )
     }
 }
 
@@ -899,30 +860,6 @@ private fun StackedRow(label: String, value: String, description: String? = null
             Text(value, style = ArcType.bold, color = c.ink, maxLines = 3, overflow = TextOverflow.Ellipsis)
         }
         end?.invoke()
-    }
-}
-
-/**
- * The tempo chip: "SET · NOW 122". Off it is a flat pill (the tempo stays Arc's), on it is navy with
- * the tempo to be set ([card]); a tap switches it. Screen readers hear what it does.
- */
-@Composable
-private fun TempoChip(now: Int, card: Int, on: Boolean, onToggle: () -> Unit) {
-    val c = LocalArcColors.current
-    Box(
-        Modifier
-            .heightIn(min = 40.dp)
-            .clip(RoundedCornerShape(50))
-            .background(if (on) c.navy else c.shell)
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Switch, onClick = onToggle)
-            .semantics {
-                contentDescription = ClaudeText.tempoChipName(card.toString(), now, on)
-                stateDescription = if (on) SettingsText.ON else SettingsText.OFF
-            }
-            .padding(horizontal = 14.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(ClaudeText.tempoChip(now).uppercase(), style = ArcType.capsKeySmall, color = if (on) c.onNavy else c.ink, maxLines = 1)
     }
 }
 

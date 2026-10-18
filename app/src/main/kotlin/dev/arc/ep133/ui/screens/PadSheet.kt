@@ -343,13 +343,19 @@ internal fun PadCap(pad: PhysicalPad, name: String?, onDown: (() -> Unit)? = nul
     }
 }
 
+/**
+ * The factory kit picked in Arc (FactoryKit; the EP-133's by default): the hundreds of slots are named by its layout,
+ * so the EP-40 Riddim's 600-899 read as chords, shouts and FX, and loops.
+ */
+val LocalFactoryKit = androidx.compose.runtime.staticCompositionLocalOf { dev.arc.ep133.features.FactoryKit.EP133 }
+
 /** A hundred of slots as a key: "100–199" over its kind of sound in the factory layout ("SNARES"); the Device tab jumps with it too. */
 @Composable
 internal fun RangeKey(r: IntRange, on: Boolean, onClick: () -> Unit) {
     val c = LocalArcColors.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    val kind = FeatureText.factoryCategory(r.first)
+    val kind = FeatureText.factoryCategory(r.first, LocalFactoryKit.current)
     Column(
         Modifier
             .heightIn(min = 48.dp)

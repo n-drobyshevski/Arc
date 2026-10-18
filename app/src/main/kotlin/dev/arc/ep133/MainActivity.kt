@@ -109,6 +109,11 @@ class MainActivity : ComponentActivity() {
         if (uri != null) withNotifications { controller.uploadToPad(uri, pad, target) }
     }
 
+    // PASTE held on the Claude page: a .txt or .md file with a beat card in it.
+    private val cardFileLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { controller.receiveBeatFile(it) }
+    }
+
     private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) controller.importUri(uri)
     }
@@ -228,7 +233,8 @@ class MainActivity : ComponentActivity() {
 
     /**
      * A .pak opened from Files (or another app) lands here, and so does text shared to arc (Claude's reply, a beat
-     * card: its sheet opens over Live, or the toast says there is none in it).
+     * card: its sheet opens over Live, or the toast says there is none in it), and a .txt or .md card file shared to
+     * arc or opened with it.
      */
     private fun handleIntent(intent: Intent?) {
         val view = intent?.action == Intent.ACTION_VIEW
@@ -237,9 +243,13 @@ class MainActivity : ComponentActivity() {
         // Reopening the task from Recents replays the original intent: don't import twice.
         if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0) {
             if (view) {
-                intent.data?.let { controller.importUri(it) }
+                // A .pak, or a card file (by its type here, by its name in importUri).
+                intent.data?.let { if (intent.type?.startsWith("text/") == true) controller.receiveBeatFile(it) else controller.importUri(it) }
             } else {
-                controller.receiveBeat(intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString())
+                // Text, or a .txt or .md file shared as such.
+                val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+                val file = androidx.core.content.IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, android.net.Uri::class.java)
+                if (text == null && file != null) controller.receiveBeatFile(file) else controller.receiveBeat(text)
             }
         }
         setIntent(Intent(this, MainActivity::class.java))
@@ -562,7 +572,14 @@ class MainActivity : ComponentActivity() {
     private fun Root() {
         // The delay Live makes up for while its sound goes to Bluetooth, for the Bluetooth key's words: the flow, which
         // only the key reads (it is told every second).
-        CompositionLocalProvider(dev.arc.ep133.ui.components.LocalDelayMadeUp provides controller.delayMadeUpFor) { RootContent() }
+        // The kit picked (its pack saved), for the names of the hundreds of slots in the sound lists and the Device tab.
+        val state = controller.state.collectAsStateWithLifecycle()
+        val settings = controller.settings.collectAsStateWithLifecycle()
+        val kit by remember { androidx.compose.runtime.derivedStateOf { dev.arc.ep133.controller.activeKitOf(settings.value.factoryKit, state.value.backups) } }
+        CompositionLocalProvider(
+            dev.arc.ep133.ui.components.LocalDelayMadeUp provides controller.delayMadeUpFor,
+            dev.arc.ep133.ui.screens.LocalFactoryKit provides kit,
+        ) { RootContent() }
     }
 
     @Composable
@@ -1252,10 +1269,12 @@ class MainActivity : ComponentActivity() {
                                 onWithSounds = controller::setShareSounds,
                                 chainSteps = scene.chain.chain.steps.size,
                                 chainScenes = dev.arc.ep133.controller.chainSceneCount(scene.chain.chain.steps),
+                                lights = scene.groups.map { it.lights },
                                 onShareScene = { shareBeat(null, dev.arc.ep133.text.ClaudeText.sharedScene(scene.label)) },
                                 onShareChain = ::shareChain,
                                 onSharePattern = { g -> shareBeat(g, dev.arc.ep133.text.ClaudeText.sharedPattern(g, scene.groups.getOrNull(g)?.number ?: 1)) },
                                 onPaste = { controller.receiveBeat(clipboardText()) },
+                                onOpenFile = { cardFileLauncher.launch(arrayOf("text/plain", "text/markdown", "text/x-markdown", "application/octet-stream")) },
                                 waiting = claudeWaiting,
                                 onDismissWaiting = controller::stopWaitingForClaude,
                                 onGetSkill = ::openSkill,
@@ -1403,8 +1422,10 @@ class MainActivity : ComponentActivity() {
                                 onCancel = { closeBeatSheet() },
                                 onImport = { tempo, soundPads, fx, shapePads, picked, setChain ->
                                     if (playing?.startsWith("device:") == true || playing?.startsWith("factory:") == true) controller.stopPlayback()
-                                    controller.importBeat(tempo, soundPads, fx, shapePads, picked, setChain)
+                                    controller.importBeat(tempo, soundPads, fx, shapePads, picked, setChain, appSettings.replaceScenes && b.replace != null)
                                 },
+                                replaceScenes = appSettings.replaceScenes,
+                                onReplaceScenes = controller::setReplaceScenes,
                                 onCopyProblems = ::copyProblems,
                                 // PICK SOUND lists the sounds the card's sound lines choose from, played as the pad sheet plays them.
                                 player = dev.arc.ep133.ui.screens.PickPlayerUi(

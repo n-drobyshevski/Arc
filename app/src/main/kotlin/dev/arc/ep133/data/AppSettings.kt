@@ -66,6 +66,11 @@ data class AppSettings(
     /** CLAUDE's "With my sound list": a shared beat card is followed by the sounds Arc knows, for Claude to choose from. */
     val shareSounds: Boolean = true,
     /**
+     * The beat card sheet's REPLACE (Scenes): a card's scenes take the place of the project's (S01 on), or, off,
+     * follow them. The choice is kept for the next card.
+     */
+    val replaceScenes: Boolean = false,
+    /**
      * Which output Live plays through, a debug choice for the latency test
      * (Debug screen): kept on this phone only, never copied into library.json.
      */
@@ -203,6 +208,7 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
         makeUpDelay = prefs.getBoolean("makeUpDelay", true),
         liveTempo = Tempo.clamp(prefs.getInt("liveTempo", Tempo.DEFAULT)),
         shareSounds = prefs.getBoolean("shareSounds", true),
+        replaceScenes = prefs.getBoolean("replaceScenes", false),
         liveEngine = liveEngineOf(prefs.getString(LIVE_ENGINE, null)),
         sampleSource = SampleSource.of(prefs.getString("sampleSource", null) ?: "") ?: SampleSource.MIC,
         sampleStereo = prefs.getBoolean("sampleStereo", false),
@@ -326,6 +332,7 @@ internal fun AppSettings.values(): Map<String, String> = linkedMapOf(
     "makeUpDelay" to makeUpDelay.toString(),
     "liveTempo" to liveTempo.toString(),
     "shareSounds" to shareSounds.toString(),
+    "replaceScenes" to replaceScenes.toString(),
     "sampleSource" to sampleSource.id,
     "sampleStereo" to sampleStereo.toString(),
     "sampleGainMic" to sampleGainMic.toString(),
@@ -384,6 +391,7 @@ internal fun AppSettings.withIndex(map: Map<String, String>): AppSettings = copy
     // A tempo arc doesn't offer leaves the choice as it is.
     liveTempo = map["app.liveTempo"]?.toIntOrNull()?.takeIf { it in Tempo.MIN..Tempo.MAX } ?: liveTempo,
     shareSounds = map["app.shareSounds"]?.toBooleanStrictOrNull() ?: shareSounds,
+    replaceScenes = map["app.replaceScenes"]?.toBooleanStrictOrNull() ?: replaceScenes,
     sampleSource = map["app.sampleSource"]?.let(SampleSource::of) ?: sampleSource,
     sampleStereo = map["app.sampleStereo"]?.toBooleanStrictOrNull() ?: sampleStereo,
     sampleGainMic = sampleGainOf(map["app.sampleGainMic"]?.toFloatOrNull()) ?: sampleGainMic,

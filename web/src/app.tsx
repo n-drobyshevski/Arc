@@ -61,6 +61,7 @@ import { REVIEW_KEY, type ArcController } from './state/controller'
 import { emptyMirrorState, type MirrorUi, type TaskUi } from './state/types'
 import { APP_BUILD } from './version'
 import { AppProvider, useController, useNav } from './ui/AppContext'
+import { FactoryKitContext } from './ui/FactoryKitContext'
 import { HapticsContext } from './ui/useHaptic'
 import {
   Nav,
@@ -181,9 +182,14 @@ export function App(props: AppProps): JSX.Element {
     const offDrop = typeof document === 'undefined'
       ? () => undefined
       : attachDrop(document.body, { onFiles: (f) => void c.importFiles(f), filter: (f) => isPakName(f.name) })
+    // A beat card file (.txt or .md, as Claude may give one) dropped anywhere opens on the card's sheet.
+    const offCardDrop = typeof document === 'undefined'
+      ? () => undefined
+      : attachDrop(document.body, { onFiles: (f) => void c.receiveBeatFile(f[0]!), filter: (f) => BeatCards.isCardFile(f.name) })
     return () => {
       off()
       offDrop()
+      offCardDrop()
       nav.setBackGuard(() => false)
       if (!props.nav) nav.dispose()
     }
@@ -191,9 +197,11 @@ export function App(props: AppProps): JSX.Element {
 
   return (
     <AppProvider controller={c} nav={nav}>
-      <ErrorBoundary>
-        <Root />
-      </ErrorBoundary>
+      <FactoryKitContext.Provider value={() => c.factoryKit}>
+        <ErrorBoundary>
+          <Root />
+        </ErrorBoundary>
+      </FactoryKitContext.Provider>
     </AppProvider>
   )
 }
@@ -1417,6 +1425,7 @@ function claudeUi(c: ArcController): ClaudeActions | null {
     onShareScene: () => void c.shareBeat(null),
     onSharePattern: (g) => void c.shareBeat(g),
     onPaste: () => void c.pasteBeat(),
+    onOpenFile: () => void c.openBeatFile(),
     learnUrl: learnUrl(),
   }
 }

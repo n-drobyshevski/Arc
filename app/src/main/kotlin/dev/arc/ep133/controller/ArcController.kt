@@ -5275,7 +5275,7 @@ class ArcController(
      * What SHARE sends: [group]'s playing pattern, or (null) the scene playing, as an ARC BEAT card at the tempo Live
      * plays at and the TIMING swing, with the pads' names and a sound line for each pad it uses (the slot and name Live
      * shows on it); null when there are no notes in it. The project's FX and the settings of the pads it uses are written
-     * as the card's effect and `pad` lines, and the used pads with no sound as a comment. With "With my sound list" on, the sounds Arc knows follow the card ([soundSetOf]). The patterns are the project's as they stand, a pattern still recording included.
+     * as the card's effect and `pad` lines, the used pads with no sound as a comment, and the kit Live plays before the card when it isn't the EP-133's ([activeKit], [ClaudeText.kitLine]). With "With my sound list" on, the sounds Arc knows follow the card ([soundSetOf]). The patterns are the project's as they stand, a pattern still recording included.
      */
     fun beatShare(group: Int?): BeatShare? {
         if (group != null && group !in 0..3) return null
@@ -5291,7 +5291,7 @@ class ArcController(
         val shaping = { pad: dev.arc.ep133.features.PhysicalPad -> m?.target(pad)?.let { padSettings[padKey(it)] } }
         // The pads the notes use that have no sound are named in a comment, once the pads are read (the share's "# no sound on:").
         val held = { pad: dev.arc.ep133.features.PhysicalPad -> m?.soundSlot(pad) }
-        return beatShare(projectSeq, group, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true)
+        return beatShare(projectSeq, group, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true, activeKit())
     }
 
     /**
@@ -5311,7 +5311,7 @@ class ArcController(
         val list = if (settings.value.shareSounds) set else null
         val shaping = { pad: dev.arc.ep133.features.PhysicalPad -> m?.target(pad)?.let { padSettings[padKey(it)] } }
         val held = { pad: dev.arc.ep133.features.PhysicalPad -> m?.soundSlot(pad) }
-        return beatShareChain(projectSeq, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true)
+        return beatShareChain(projectSeq, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true, activeKit())
     }
 
     private val _claudeWaiting = MutableStateFlow<String?>(null)
@@ -5335,12 +5335,28 @@ class ArcController(
     /** "With my sound list" on or off (kept like the other Live preferences). */
     fun setShareSounds(on: Boolean) = changeSettings { it.copy(shareSounds = on) }
 
+    /** The beat card sheet's REPLACE: a card's scenes take the place of the project's, or follow them; kept for the next card. */
+    fun setReplaceScenes(on: Boolean) = changeSettings { it.copy(replaceScenes = on) }
+
     /**
      * A text from PASTE BEAT (the clipboard) or shared to arc: with an ARC BEAT line in it, the card is read and planned
      * into the project's patterns as they stand ([BeatCards.plan]) and its sheet opens ([beatImport]); with none the
      * toast says so. Nothing changes until [importBeat]. Works offline and while stopped or playing: the plan reads
      * the patterns once they are loaded, so a card never lands on a project's notes before they are read.
      */
+    /**
+     * A .txt or .md file with a beat card in it (shared to arc, opened with it, or picked with PASTE held): its text, as
+     * [receiveBeat] takes it. A file that can't be read, or is longer than a card ([BeatCards.MAX_CARD_FILE]), has none.
+     */
+    fun receiveBeatFile(uri: android.net.Uri): Job = scope.launch {
+        val text = withContext(Dispatchers.IO) {
+            runCatching { dev.arc.ep133.files.Files.read(context, uri) }.getOrNull()
+                ?.takeIf { it.size <= dev.arc.ep133.features.BeatCards.MAX_CARD_FILE }
+                ?.toString(Charsets.UTF_8)
+        }
+        receiveBeat(text)
+    }
+
     fun receiveBeat(text: String?) {
         if (text == null || !dev.arc.ep133.features.BeatCards.hasCard(text)) {
             toast(dev.arc.ep133.text.ClaudeText.NO_CARD)
@@ -5377,6 +5393,7 @@ class ArcController(
             silent = { card ->
                 silentUi(card, { pad -> m?.soundSlot(pad) }, m?.padsKnown() == true, soundChoicesOf(_state.value.mirror, _state.value.factoryNames), offline, project)
             },
+            kit = activeKit(),
         )
     }
 
@@ -5405,6 +5422,7 @@ class ArcController(
      *
      * A card of scenes adds a scene for each of its own, and with [setChain] (the sheet's SET CHAIN) its chain replaces the project's,
      * on the new scenes, and is turned on: part of the same one UNDO step, the sequencer's (the transport playing, the chain joins at once).
+     * With [replaceScenes] (the sheet's REPLACE) the card's scenes take the place of the project's, from S01, in that same step.
      */
     fun importBeat(
         setTempo: Boolean,
@@ -5413,6 +5431,7 @@ class ArcController(
         shapePads: Set<dev.arc.ep133.features.PhysicalPad> = emptySet(),
         pickedSounds: Map<dev.arc.ep133.features.PhysicalPad, Int> = emptyMap(),
         setChain: Boolean = true,
+        replaceScenes: Boolean = false,
     ) {
         val ui = _beatImport.value ?: return
         val card = ui.card ?: return
@@ -5420,7 +5439,7 @@ class ArcController(
         // The sequencer as it was: UNDO is that one, once the sounds are back with it.
         val before = projectSeq
         sceneEdit {
-            val a = applyBeat(projectSeq, card, patternRecorder, setChain)
+            val a = applyBeat(projectSeq, card, patternRecorder, setChain, replaceScenes)
             applied = a
             if (a.seq !== projectSeq) sceneDesk.cancel()
             a.seq
@@ -7102,6 +7121,8 @@ class ArcController(
     /** Import a document by URI. Runs in the app scope, so activity recreation cannot cut it short. */
     fun importUri(uri: android.net.Uri): Job = scope.launch {
         val (name, modified) = withContext(Dispatchers.IO) { dev.arc.ep133.files.Files.describe(context, uri) }
+        // A beat card file opened with arc, whatever type its provider reported.
+        if (dev.arc.ep133.features.BeatCards.isCardFile(name)) return@launch receiveBeatFile(uri).join()
         import(name, modified) { dev.arc.ep133.files.Files.read(context, uri) }.join()
     }
 

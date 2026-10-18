@@ -115,7 +115,10 @@ class FeatureTextTest {
     @Test
     fun `device, settings and pad edit text`() {
         assertEquals("free of 64 MB", FeatureText.freeOf(64.0 * 1048576))
-        assertEquals(listOf("Kicks", "Snares", "Hats", "Perc", "Bass", "Melodic", null), listOf(1, 100, 200, 300, 400, 500, 600).map(FeatureText::factoryCategory))
+        assertEquals(listOf("Kicks", "Snares", "Hats", "Perc", "Bass", "Melodic", null), listOf(1, 100, 200, 300, 400, 500, 600).map { FeatureText.factoryCategory(it) })
+        // The EP-40 Riddim's pack fills 600-899: chord stabs, shouts and dub FX, loops; the EP-133's guide leaves them free.
+        assertEquals(listOf("Melodic", "Chords", "Vox \u00B7 FX", "Loops", null), listOf(500, 600, 700, 800, 900).map { FeatureText.factoryCategory(it, dev.arc.ep133.features.FactoryKit.EP40) })
+        assertEquals(null, FeatureText.factoryCategory(700, dev.arc.ep133.features.FactoryKit.EP1320))
         assertEquals("Kicks", FeatureText.factoryCategory(99))
         assertEquals(null, FeatureText.factoryCategory(900))
         assertEquals("In P3 \u00B7 7", FeatureText.inProject(3, 7))
@@ -549,6 +552,18 @@ class FeatureTextTest {
         assertEquals(listOf("P01 S02", "P99 S10", "S02"), listOf(ClaudeText.patternCardName(1, 1), ClaudeText.patternCardName(99, 9), ClaudeText.sceneCardName(1)))
         assertEquals("Arc beat P01 S02", ClaudeText.shareSubject("P01 S02"))
         assertEquals("Analyse this beat:\n\n```\nARC BEAT 1\nswing 50\n```\n", ClaudeText.shareText("Analyse this beat:", "ARC BEAT 1\nswing 50\n"))
+        // A kit other than the EP-133's is named between the prompt and the card; the EP-133's own kit adds nothing.
+        assertEquals(null, ClaudeText.kitLine(dev.arc.ep133.features.FactoryKit.EP133))
+        assertEquals("My EP-133 plays the EP-40 Riddim factory kit.", ClaudeText.kitLine(dev.arc.ep133.features.FactoryKit.EP40))
+        assertEquals("My EP-133 plays the EP-1320 Medieval factory kit.", ClaudeText.kitLine(dev.arc.ep133.features.FactoryKit.EP1320))
+        assertEquals(
+            "Analyse this beat:\n\nMy EP-133 plays the EP-40 Riddim factory kit.\n\n```\nARC BEAT 1\n```\n",
+            ClaudeText.shareText("Analyse this beat:", "ARC BEAT 1\n", dev.arc.ep133.features.FactoryKit.EP40),
+        )
+        assertEquals(
+            ClaudeText.shareText("Analyse this beat:", "ARC BEAT 1\n"),
+            ClaudeText.shareText("Analyse this beat:", "ARC BEAT 1\n", dev.arc.ep133.features.FactoryKit.EP133),
+        )
         assertEquals("No beat card in that text.", ClaudeText.NO_CARD)
         // The prompt asks for the sound lines kept, or sounds chosen from the list that follows the card.
         assertTrue(ClaudeText.SHARE_PROMPT.contains("sound list") && ClaudeText.SHARE_PROMPT.contains("FX and pad lines") && ClaudeText.SHARE_PROMPT.endsWith(":"))
@@ -575,6 +590,18 @@ class FeatureTextTest {
         assertEquals("A \u00B7 04 (next free)", ClaudeText.goesTo(0, 4))
         assertEquals(listOf("Goes to", "New scene", "Tempo"), listOf(ClaudeText.GOES_TO, MirrorText.NEW_SCENE, ClaudeText.TEMPO))
         assertEquals("SET \u00B7 NOW 122", ClaudeText.tempoChip(122).uppercase())
+        assertEquals(listOf("SET", "136 \u2192 85", "136 \u00B7 card 85"), listOf(ClaudeText.SET_TEMPO.uppercase(), ClaudeText.tempoChange(136, 85), ClaudeText.tempoKept(136, 85)))
+        assertEquals(
+            listOf("After S05", "Replace S01\u2013S05", "Replace S01", "S03 \u00B7 A 04 \u00B7 B (same)", "Add the card's scenes after the project's 5 scenes", "Replace the project's 1 scene with the card's"),
+            listOf(
+                ClaudeText.scenesAfter(5),
+                ClaudeText.scenesReplace(5),
+                ClaudeText.scenesReplace(1),
+                ClaudeText.cardSceneReplaced(2, listOf(0 to 4, 1 to null)),
+                ClaudeText.replaceScenesName(false, 5),
+                ClaudeText.replaceScenesName(true, 1),
+            ),
+        )
         assertEquals(listOf("Set the tempo to 92, now 122", "Keep the tempo at 122, the card says 92"), listOf(true, false).map { ClaudeText.tempoChipName("92", 122, it) })
         assertEquals("Swing 58 \u00B7 placed in the notes", ClaudeText.swingLine(58))
         // Problems: listed, announced and copied for Claude.
@@ -785,6 +812,17 @@ class FeatureTextTest {
         assertEquals("S05 \u00B7 A04 B02 C01 D01", ClaudeText.cardSceneGoes(4, listOf(4, 2, 1, 1)))
         assertEquals("Plays the same patterns as the scene before.", ClaudeText.SCENE_SAME)
         assertEquals(listOf("Share chain \u00B7 1 scene", "Share chain \u00B7 3 scenes"), listOf(ClaudeText.shareChainKey(1), ClaudeText.shareChainKey(3)))
+        assertEquals(
+            listOf("Sent Scene S02", "Scene S02", "3 scenes \u00B7 6 steps", "Scene S02, no notes yet", "A \u00B7 01", "Chain, 1 scene"),
+            listOf(
+                ClaudeText.sent(ClaudeText.sharedScene("S02")),
+                ClaudeText.sceneTitle("S02"),
+                ClaudeText.chainLine(3, 6),
+                ClaudeText.pickScene("S02", true),
+                ClaudeText.pickPattern(0, 1, false),
+                ClaudeText.pickChain(1),
+            ),
+        )
         assertEquals("new S03 \u00B7 A 04 \u00B7 B 02 \u00B7 C (same)", ClaudeText.cardSceneTarget(2, listOf(0 to 4, 1 to 2, 2 to null)))
         assertEquals("S03\u00D72 \u2192 S04 \u2192 S03\u00D72 \u2192 S05", ClaudeText.chainImport(listOf(ChainStep(2, 2), ChainStep(3), ChainStep(2, 2), ChainStep(4))))
         assertEquals("Scene 2, Drop, becomes S05, patterns A 4, B 2, C 1, D 1", ClaudeText.cardSceneName(2, "Drop", 4, listOf(4, 2, 1, 1)))
@@ -829,6 +867,18 @@ class FeatureTextTest {
         assertEquals(
             listOf("Recording 0:12", "1 take \u00B7 last Oct 5, 2:23 PM", "3 takes \u00B7 last Oct 4", "No takes yet"),
             listOf(MirrorText.takesRecording(12.9), MirrorText.takesSummary(1, "Oct 5, 2:23 PM"), MirrorText.takesSummary(3, "Oct 4"), MirrorText.NO_TAKES),
+        )
+        assertEquals(
+            listOf("T03", "T12", "Takes \u00B7 3", "T03, 0:12, Oct 5, 2:23 PM", "T01, 1:13, Oct 4, playing", "Share WAV, T03", "Delete T02? Press DEL again"),
+            listOf(
+                MirrorText.takeNumber(3),
+                MirrorText.takeNumber(12),
+                MirrorText.takesCount(3),
+                MirrorText.takeRow(3, 12.4, "Oct 5, 2:23 PM", false),
+                MirrorText.takeRow(1, 73.0, "Oct 4", true),
+                MirrorText.litTake(FeatureText.SHARE_WAV, 3),
+                MirrorText.deleteTakeAgain(2),
+            ),
         )
         assertEquals("Play, One group \u00B7 Follow on", MirrorText.toolsRow(MirrorText.PLAY, MirrorText.playOneGroup(true)))
         assertEquals(

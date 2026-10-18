@@ -614,6 +614,23 @@ fun LiveRecordingKeysPreview() = Live(keysPlaying, keys = keysUi, rec = dev.arc.
 fun LiveToolsTakesPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, offline = "Last seen Oct 5, 2:02 PM", takes = someTakes)
 
 @PreviewTest
+@Preview(name = "Live tools takes dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakesDarkPreview() = Live(lastRead, dark = true, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, takes = someTakes)
+
+// The glass while a take records: REC, its number and the time; the TAKE key orange with the time on it.
+@PreviewTest
+@Preview(name = "Live tools takes recording", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakesRecordingPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, takes = someTakes, rec = dev.arc.ep133.features.RecState.Recording(7))
+
+// No takes yet, armed: the glass says it waits for the first sound, the strip's keys for a take faded.
+@PreviewTest
+@Preview(name = "Live tools takes armed", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakesArmedPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, rec = dev.arc.ep133.features.RecState.Armed)
+
+@PreviewTest
 @Preview(name = "Live offline note open", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
 fun LiveOfflineNotePreview() = Live(lastRead, offline = "Last seen Oct 5, 2:02 PM", noteOpen = true)
@@ -2286,7 +2303,11 @@ fun GuideFromEdgePreview() {
 // Beat cards. Live tools' CLAUDE section, after the view settings and before TAKES: SHARE SCENE, SHARE for the group shown
 // (A, pattern 1) and the orange PASTE BEAT, then the skill's link and Learn with Claude; its sample scene is S02.
 // "With my sound list" under the two SHARE keys, ticked, with the sounds Arc knows.
-private val claudeShares = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212)
+// The scene's first bars as the glass shows them: A's kick, B's snare, D's hats (C blank).
+private val claudeLights = listOf("X.......x.o.....", "....X.......X..x", "................", "o.o.o.oxo.o.o.oo").map { row ->
+    row.map { ch -> when (ch) { 'X' -> dev.arc.ep133.controller.Weight.ACCENT; 'o' -> dev.arc.ep133.controller.Weight.NORMAL; 'x' -> dev.arc.ep133.controller.Weight.GHOST; else -> null } }
+}
+private val claudeShares = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, lights = claudeLights)
 
 @PreviewTest
 @Preview(name = "Live tools claude", widthDp = 412, heightDp = 960, showBackground = true)
@@ -2297,7 +2318,22 @@ fun LiveToolsClaudePreview() = Live(lastRead, oneGroup = true, tools = true, too
 @PreviewTest
 @Preview(name = "Live tools claude chain", widthDp = 412, heightDp = 960, showBackground = true)
 @Composable
-fun LiveToolsClaudeChainPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE, claude = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, chainSteps = 4, chainScenes = 3))
+fun LiveToolsClaudeChainPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE, claude = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, chainSteps = 4, chainScenes = 3, lights = claudeLights))
+
+// A reply awaited: the glass says what went and to paste the reply, STOP beside its head.
+@PreviewTest
+@Preview(name = "Live tools claude waiting", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeWaitingPreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, lights = claudeLights, waiting = "Scene S02"),
+)
+
+// Nothing in the scene and no chain: the glass says so, and SCENE, the pattern, CHAIN and SHARE are faded.
+@PreviewTest
+@Preview(name = "Live tools claude empty", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeEmptyPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE, claude = ClaudeUi(scene = "S01", hasNotes = List(4) { false }, sounds = 212, withSounds = false))
 
 // Nothing to share: both SHARE keys dimmed (and still announced), PASTE BEAT as it was; the dark theme.
 // "With my sound list" is left unticked (kept like the other Live preferences).
@@ -2429,6 +2465,7 @@ private fun BeatSheet(
     silent: (BeatCard) -> SilentUi? = { null },
     initialPicked: List<Pair<PhysicalPad, Int>> = emptyList(),
     initialPicking: PhysicalPad? = null,
+    replaceScenes: Boolean = false,
 ) {
     val ui = beatImportUi(BeatCards.read(text), seq, 122.0, { names[it] }, fx = fx, shaping = shaping, sounds = sounds, silent = silent)
     Framed(Tab.LIVE, dark = dark) {
@@ -2437,6 +2474,7 @@ private fun BeatSheet(
             BeatImportSheetContent(
                 ui, onCancel = {}, onImport = { _, _, _, _, _, _ -> }, onCopyProblems = {},
                 initialSetTempo = initialSetTempo, initialPicked = initialPicked, initialPicking = initialPicking,
+                replaceScenes = replaceScenes,
             )
         }
     }
@@ -2460,6 +2498,12 @@ fun BeatSheetSceneDarkPreview() = BeatSheet(NIGHT_DRIVE, dark = true, initialSet
 @Preview(name = "Beat sheet scenes chain", widthDp = 360, heightDp = 1500, showBackground = true)
 @Composable
 fun BeatSheetScenesChainPreview() = BeatSheet(TRACK)
+
+// REPLACE on, in a project of three scenes: the card's scenes become S01-S03 and the chain names them, with the line that says so.
+@PreviewTest
+@Preview(name = "Beat sheet scenes replace", widthDp = 360, heightDp = 1560, showBackground = true)
+@Composable
+fun BeatSheetScenesReplacePreview() = BeatSheet(TRACK, seq = beatSeq.withScenes(List(3) { dev.arc.ep133.features.Scene() }, 0), replaceScenes = true)
 
 // A card that can't be read: its errors and warning by line, COPY PROBLEMS, and IMPORT off with the reason.
 @PreviewTest

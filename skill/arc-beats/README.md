@@ -40,12 +40,14 @@ Claude Code picks it up the next time it starts, and uses it whenever you talk a
 |---|---|
 | `SKILL.md` | The skill: what Claude does for each of the three jobs |
 | `references/beat-card.md` | The card format, the spec both Arc and the script follow |
-| `references/genres.md` | The assumed kit and 29 genre recipes (a techno family among them), each a valid card |
+| `references/genres.md` | The assumed kit and 36 genre recipes (a techno family among them, and seven for the EP-40 kit), each a valid card |
+| `references/factory-sounds.md` | The EP-133's and the EP-40 Riddim's factory sounds by slot, and a fresh EP-133 project's pads, for sound lines without a shared list |
+| `references/ep40-kit.md` | The EP-40 Riddim kit on an EP-133: its slots, loops and tempos, its pads, and the loop rules |
 | `references/lessons.md` | Twelve lessons from a first beat to sampling |
 | `references/analysis.md` | How to read the script's report, the checklist and the vocabulary |
 | `references/arc-app.md` | What each Arc screen does, for Claude to explain |
 | `references/ep133-guide.md` | The 100 official OS 2.5 key combinations. **Generated, do not edit** |
-| `scripts/beatcard.py` | `check` (also `--sounds` to check sound lines against your sound list), `analyse`, `grid` and `midi`; Python 3.9+, standard library only |
+| `scripts/beatcard.py` | `check` (also `--sounds` to check sound lines against your sound list, and `--kit ep40` for the EP-40 kit; `--sounds factory` or `factory-ep40` checks against a factory pack), `analyse`, `grid` and `midi`; Python 3.9+, standard library only |
 | `scripts/test_beatcard.py` | Tests; also checks every card in the references |
 
 ## Working on the skill
