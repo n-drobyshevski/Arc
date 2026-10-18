@@ -41,7 +41,6 @@ import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.layout.Arrangement
@@ -953,8 +952,9 @@ fun MirrorScreen(
         BackHandler(enabled = (panelOn || stepHost || sceneHost) && sample?.sheetOpen != true && panel.open) { closePanel() }
         // The 1–99 grid, open over the pads, goes first.
         BackHandler(enabled = sceneOn && scene?.ui?.gridGroup != null) { scene?.onGrid(null) }
-        // The pads hear of a finger the SAMPLE panel's swipe took ([holdToPlay]).
-        CompositionLocalProvider(LocalSamplePanel provides panel, LocalDownPressure provides downPressure) {
+        // The pads hear of a finger the SAMPLE panel's swipe took ([holdToPlay]); KEYS' scale and octave
+        // words, whether to tick as their hold's choices light ([PickWord]'s quick).
+        CompositionLocalProvider(LocalSamplePanel provides panel, LocalDownPressure provides downPressure, LocalLiveHaptics provides haptics) {
             SideZone(
                 open = toolsOpen,
                 onOpen = { toolsOpen = true },
@@ -2682,7 +2682,7 @@ private fun ModeRow(
                 name = MirrorText::scaleName,
                 onPick = actions.onScale,
                 description = MirrorText.scaleChoice(keys.scale),
-                swipe = true,
+                quick = true,
                 mark = Modifier.coachMark("live.scale", CoachText.SCALE, c.navy, c.onNavy),
                 // With the switch's caps in the row, the words keep to its middle.
                 top = viewSwitch == null,
@@ -2694,7 +2694,8 @@ private fun ModeRow(
                 name = MirrorText::octave,
                 onPick = actions.onOctave,
                 description = MirrorText.octaveChoice(keys.octave),
-                swipe = true,
+                quick = true,
+                fanReversed = true,
                 mark = Modifier.coachMark("live.octave", CoachText.OCTAVE, c.navy, c.onNavy),
                 // At the row's end: the list opens leftward, staying on screen.
                 alignEnd = true,
@@ -2765,7 +2766,7 @@ private fun SidewaysRow(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwit
                 name = MirrorText::scaleName,
                 onPick = actions.onScale,
                 description = MirrorText.scaleChoice(keys.scale),
-                swipe = true,
+                quick = true,
                 mark = Modifier.coachMark("live.scale", CoachText.SCALE, c.navy, c.onNavy),
                 top = false,
             )
@@ -2791,7 +2792,8 @@ private fun SidewaysRow(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwit
                 name = MirrorText::octave,
                 onPick = actions.onOctave,
                 description = MirrorText.octaveChoice(keys.octave),
-                swipe = true,
+                quick = true,
+                fanReversed = true,
                 mark = Modifier.coachMark("live.octave", CoachText.OCTAVE, c.navy, c.onNavy),
                 alignEnd = true,
                 top = false,
@@ -2910,7 +2912,7 @@ private fun SidewaysKeysPicks(keys: KeysUi, actions: KeysActions) {
             name = MirrorText::scaleName,
             onPick = actions.onScale,
             description = MirrorText.scaleChoice(keys.scale),
-            swipe = true,
+            quick = true,
             mark = Modifier.rotateVertical().coachMark("live.scale", CoachText.SCALE, c.navy, c.onNavy),
             alignEnd = true,
             top = false,
@@ -2922,7 +2924,8 @@ private fun SidewaysKeysPicks(keys: KeysUi, actions: KeysActions) {
             name = MirrorText::octave,
             onPick = actions.onOctave,
             description = MirrorText.octaveChoice(keys.octave),
-            swipe = true,
+            quick = true,
+            fanReversed = true,
             mark = Modifier.rotateVertical().coachMark("live.octave", CoachText.OCTAVE, c.navy, c.onNavy),
             alignEnd = true,
             top = false,
@@ -2989,11 +2992,19 @@ private fun <T> PickWord(
     /** The word at the top of its touch area, hugging the grid above. */
     top: Boolean = true,
     /**
-     * A short swipe along the word steps the choice without the list: right the next, left the
-     * one before (up and down on a word turned on its side, as it reads), stopping at either
-     * end. TalkBack has the same as the word's Next and Previous actions.
+     * Quick picks, without the list. A short flick along the word steps the choice: right the
+     * next, left the one before (up and down on a word turned on its side, as it reads), stopping
+     * at either end. Held still ([QuickPick.HOLD_MS]), the choices fan out in a half-circle beside
+     * the thumb, toward the screen's middle; a small move toward one lights it and letting go picks
+     * it ([QuickPick], [QuickPickFan]). TalkBack has the flick as the word's Next and Previous
+     * actions, and hears of the hold in its description ([MirrorText.QUICK_PICK_HINT]).
      */
-    swipe: Boolean = false,
+    quick: Boolean = false,
+    /**
+     * The hold's fan from the list's end to its start, top to bottom: the octaves high to low, so up
+     * is higher. The tap's list and the flick keep the list's order.
+     */
+    fanReversed: Boolean = false,
 ) {
     val c = LocalArcColors.current
     val window = LocalArcWindow.current
@@ -3012,21 +3023,125 @@ private fun <T> PickWord(
         }
     }
     val step by androidx.compose.runtime.rememberUpdatedState(stepTo)
-    val swiping = if (!swipe) {
+    // The hold's fan while it is open, the choice lit in it, and the finger (window px; drawn, not composed).
+    var fan by remember { mutableStateOf<QuickPick.Fan?>(null) }
+    var lit by remember { mutableStateOf<Int?>(null) }
+    val finger = remember { mutableStateOf<Offset?>(null) }
+    // What the gesture reads as it goes (it outlives a recomposition): how many choices, and the pick
+    // (nothing where it is the one picked already).
+    val count by androidx.compose.runtime.rememberUpdatedState(options.size)
+    // A pick from the fan, by its row top to bottom: the choice that row shows ([QuickPick.option]).
+    val pickAt: (Int) -> Unit = { row ->
+        val i = QuickPick.option(row, options.size, fanReversed)
+        if (i in options.indices && options[i] != selected) onPick(options[i])
+    }
+    val pickIndex by androidx.compose.runtime.rememberUpdatedState(pickAt)
+    // A tick as the fan opens and as each choice lights, with Live's haptics on (Settings).
+    val feel = LocalHapticFeedback.current
+    val buzz = LocalLiveHaptics.current
+    val tick by androidx.compose.runtime.rememberUpdatedState { if (buzz) feel.performHapticFeedback(HapticFeedbackType.SegmentTick) }
+    // The window's safe area, where the fan's rows fit.
+    val safe by androidx.compose.runtime.rememberUpdatedState(WindowInsets.safeDrawing)
+    val direction by androidx.compose.runtime.rememberUpdatedState(LocalLayoutDirection.current)
+    // The word as the gesture sees it: inside a turn on its side ([rotateVertical]), so its points go
+    // through localToRoot into upright window coordinates.
+    val word = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
+    val quickly = if (!quick) {
         Modifier
     } else {
         Modifier
-            .pointerInput(Unit) {
-                val far = PickSwipe.toPx()
-                var moved = 0f
-                // Past the touch slop the drag is the word's (the tap that opens the list is cancelled).
-                // In the word's own frame, so a word turned on its side ([rotateVertical]) steps up and down.
-                detectHorizontalDragGestures(
-                    onDragStart = { moved = 0f },
-                    onDragEnd = { if (moved >= far) step(1) else if (moved <= -far) step(-1) },
-                ) { change, d ->
-                    change.consume()
-                    moved += d
+            .onGloballyPositioned { word[0] = it }
+            // Keyed as [open] is: turning the phone gives the gesture the new list's switch.
+            .pointerInput(window.landscape) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val slop = viewConfiguration.touchSlop
+                    // Before the hold: a lift is the word's tap (WordButton's click opens the list), a move
+                    // past the touch slop a flick, along the word (true) or across it (false, and nothing).
+                    var along: Boolean? = null
+                    var lifted = false
+                    val waited = withTimeoutOrNull(QuickPick.HOLD_MS) {
+                        while (true) {
+                            val ch = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
+                            if (ch == null || !ch.pressed || ch.isConsumed) {
+                                lifted = true
+                                break
+                            }
+                            val d = ch.position - down.position
+                            if (d.getDistance() > slop) {
+                                along = kotlin.math.abs(d.x) >= kotlin.math.abs(d.y)
+                                if (along == true) ch.consume()
+                                break
+                            }
+                        }
+                    }
+                    if (lifted || along == false) return@awaitEachGesture
+                    if (along == true) {
+                        // The flick: the drag is the word's (consumed, so the click is cancelled), in its own
+                        // frame. As the swipe before it, the travel past the slop steps once it is [PickSwipe].
+                        val far = PickSwipe.toPx()
+                        var x = down.position.x
+                        while (true) {
+                            val ch = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
+                            if (ch.isConsumed) return@awaitEachGesture
+                            ch.consume()
+                            x = ch.position.x
+                            if (!ch.pressed) break
+                        }
+                        val moved = x - down.position.x
+                        val past = kotlin.math.abs(moved) - slop
+                        if (past >= far) step(if (moved > 0) 1 else -1)
+                        return@awaitEachGesture
+                    }
+                    if (waited != null) return@awaitEachGesture
+                    // Held still: the fan opens round where the thumb went down (its dead zone under it), in
+                    // window coordinates.
+                    val at = word[0]?.takeIf { it.isAttached } ?: return@awaitEachGesture
+                    val root = at.findRootCoordinates().size
+                    val pressAt = at.localToRoot(down.position)
+                    val area = androidx.compose.ui.geometry.Rect(
+                        safe.getLeft(this, direction).toFloat(),
+                        safe.getTop(this).toFloat(),
+                        (root.width - safe.getRight(this, direction)).toFloat(),
+                        (root.height - safe.getBottom(this)).toFloat(),
+                    )
+                    val opened = QuickPick.fan(count, pressAt.x, pressAt.y, area, density)
+                    // Too short a window even for the tightest rows: the hold opens the list instead.
+                    if (opened == null) open = true else fan = opened
+                    tick()
+                    // From here the finger is the hold's: read first ([PointerEventPass.Initial]) and consumed,
+                    // the lift too, so the word's click never also fires.
+                    var now: Int? = null
+                    var commit = false
+                    try {
+                        finger.value = pressAt
+                        while (true) {
+                            val e = awaitPointerEvent(PointerEventPass.Initial)
+                            val ch = e.changes.firstOrNull { it.id == down.id }
+                            e.changes.forEach { it.consume() }
+                            if (ch == null) break
+                            if (!ch.pressed) {
+                                commit = true
+                                break
+                            }
+                            if (opened == null) continue
+                            val p = at.localToRoot(ch.position)
+                            finger.value = p
+                            val hit = QuickPick.pick((p.x - opened.x) * opened.dir, p.y - opened.y, opened.slots, QuickPick.DEAD.toPx())?.i
+                            if (hit != now) {
+                                now = hit
+                                lit = hit
+                                if (hit != null) tick()
+                            }
+                        }
+                    } finally {
+                        fan = null
+                        lit = null
+                        finger.value = null
+                    }
+                    // Let go on a choice: picked, unless it is the one there already. In the dead zone, kept.
+                    val chosen = now
+                    if (commit && opened != null && chosen != null) pickIndex(chosen)
                 }
             }
             .semantics {
@@ -3036,8 +3151,29 @@ private fun <T> PickWord(
                 )
             }
     }
+    val said = if (quick) "$description ${MirrorText.QUICK_PICK_HINT}." else description
     Box(Modifier.onGloballyPositioned { anchor[0] = it }) {
-        dev.arc.ep133.ui.components.WordButton("$label \u25BE", { open = true }, mark.then(swiping), description = description, top = top)
+        dev.arc.ep133.ui.components.WordButton("$label \u25BE", { open = true }, mark.then(quickly), description = said, top = top)
+        fan?.let { f ->
+            // The window's size at its top left, over everything; not focusable, so the finger stays the word's.
+            val density = LocalDensity.current
+            val size = word[0]?.takeIf { it.isAttached }?.findRootCoordinates()?.size
+            androidx.compose.ui.window.Popup(
+                popupPositionProvider = TopLeftPopup,
+                properties = androidx.compose.ui.window.PopupProperties(focusable = false, clippingEnabled = false),
+            ) {
+                QuickPickFan(
+                    f,
+                    // In the fan's order, top to bottom (reversed for the octaves).
+                    names = options.indices.map { name(options[QuickPick.option(it, options.size, fanReversed)]) },
+                    current = QuickPick.option(options.indexOf(selected), options.size, fanReversed),
+                    lit = lit,
+                    modifier = if (size == null) Modifier else with(density) { Modifier.size(size.width.toDp(), size.height.toDp()) },
+                    finger = { finger.value },
+                    fade = !reducedMotion(),
+                )
+            }
+        }
         if (open) {
             val density = LocalDensity.current
             val safe = WindowInsets.safeDrawing
@@ -3106,8 +3242,21 @@ private fun <T> PickWord(
 /** A choice's row in a [PickWord] list (a word's touch height). */
 private val PickRow = 44.dp
 
-/** How far a [PickWord] swipe goes to step the choice: short, about the word's height. */
+/** How far a [PickWord] flick goes to step the choice: short, about the word's height. */
 private val PickSwipe = 32.dp
+
+/** Places a popup at the window's top left, whatever it hangs from: [PickWord]'s hold fan, the window's size. */
+private object TopLeftPopup : androidx.compose.ui.window.PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: androidx.compose.ui.unit.IntRect,
+        windowSize: androidx.compose.ui.unit.IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: androidx.compose.ui.unit.IntSize,
+    ) = androidx.compose.ui.unit.IntOffset.Zero
+}
+
+/** Whether Live ticks under the finger (Settings' haptics), for what deep in the screen can't be handed it ([PickWord]'s hold). */
+internal val LocalLiveHaptics = androidx.compose.runtime.staticCompositionLocalOf { true }
 private val ListPadding = 8.dp
 
 /**

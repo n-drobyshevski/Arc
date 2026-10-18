@@ -7,7 +7,7 @@ version fixes bugs. The version itself is set in `version.properties`.
 ## [Unreleased]
 
 ### Added
-- Live on Android: **a short swipe on KEYS' scale or octave word steps it**, without opening the list: right for the next scale or the octave up, left for the one before (on a phone on its side, where the words are turned, up and down), stopping at either end. A tap still opens the list, and TalkBack has the same as the words' **Next** and **Previous** actions. Under the grid, over the piano and in the sideways column alike; the key word and the web are unchanged.
+- Live on Android: **a short swipe on KEYS' scale or octave word steps it**, without opening the list: right for the next scale or the octave up, left for the one before (on a phone on its side, where the words are turned, up and down), stopping at either end. **Hold the word to pick from the list without opening it**: its choices fan out in a half-circle beside your thumb, toward the screen's middle, in the list's order (the octaves high to low, so up is higher); a small move toward one lights it and letting go picks it, while letting go under your thumb keeps what you had. A tick as the fan opens and as each choice lights (with Live's haptics on); where the window is too short for the fan, the hold opens the list instead. A tap still opens the list, and TalkBack has the swipe as the words' **Next** and **Previous** actions and hears of the hold in their description. Under the grid, over the piano and in the sideways column alike; the key word and the web are unchanged.
 
 ## [0.4.0] - 2026-10-18
 

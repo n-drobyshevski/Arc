@@ -167,6 +167,8 @@ object MirrorText {
     /** A pick word's TalkBack actions, the same as a short swipe along it (right, left). */
     const val PICK_NEXT = "Next"
     const val PICK_PREVIOUS = "Previous"
+    /** Added to a scale or octave word's description: held, its choices fan out beside the thumb to pick from. */
+    const val QUICK_PICK_HINT = "Hold to pick from the list"
 
     /** "KEY DO", the key word above the piano. */
     fun keyWord(root: Int, names: dev.arc.ep133.features.NoteNames) = "$KEY ${dev.arc.ep133.features.Keys.name(root, names)}"
