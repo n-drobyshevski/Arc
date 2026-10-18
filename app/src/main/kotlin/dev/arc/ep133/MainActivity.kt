@@ -562,7 +562,14 @@ class MainActivity : ComponentActivity() {
     private fun Root() {
         // The delay Live makes up for while its sound goes to Bluetooth, for the Bluetooth key's words: the flow, which
         // only the key reads (it is told every second).
-        CompositionLocalProvider(dev.arc.ep133.ui.components.LocalDelayMadeUp provides controller.delayMadeUpFor) { RootContent() }
+        // The kit picked (its pack saved), for the names of the hundreds of slots in the sound lists and the Device tab.
+        val state = controller.state.collectAsStateWithLifecycle()
+        val settings = controller.settings.collectAsStateWithLifecycle()
+        val kit by remember { androidx.compose.runtime.derivedStateOf { dev.arc.ep133.controller.activeKitOf(settings.value.factoryKit, state.value.backups) } }
+        CompositionLocalProvider(
+            dev.arc.ep133.ui.components.LocalDelayMadeUp provides controller.delayMadeUpFor,
+            dev.arc.ep133.ui.screens.LocalFactoryKit provides kit,
+        ) { RootContent() }
     }
 
     @Composable

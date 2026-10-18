@@ -115,7 +115,10 @@ class FeatureTextTest {
     @Test
     fun `device, settings and pad edit text`() {
         assertEquals("free of 64 MB", FeatureText.freeOf(64.0 * 1048576))
-        assertEquals(listOf("Kicks", "Snares", "Hats", "Perc", "Bass", "Melodic", null), listOf(1, 100, 200, 300, 400, 500, 600).map(FeatureText::factoryCategory))
+        assertEquals(listOf("Kicks", "Snares", "Hats", "Perc", "Bass", "Melodic", null), listOf(1, 100, 200, 300, 400, 500, 600).map { FeatureText.factoryCategory(it) })
+        // The EP-40 Riddim's pack fills 600-899: chord stabs, shouts and dub FX, loops; the EP-133's guide leaves them free.
+        assertEquals(listOf("Melodic", "Chords", "Vox \u00B7 FX", "Loops", null), listOf(500, 600, 700, 800, 900).map { FeatureText.factoryCategory(it, dev.arc.ep133.features.FactoryKit.EP40) })
+        assertEquals(null, FeatureText.factoryCategory(700, dev.arc.ep133.features.FactoryKit.EP1320))
         assertEquals("Kicks", FeatureText.factoryCategory(99))
         assertEquals(null, FeatureText.factoryCategory(900))
         assertEquals("In P3 \u00B7 7", FeatureText.inProject(3, 7))

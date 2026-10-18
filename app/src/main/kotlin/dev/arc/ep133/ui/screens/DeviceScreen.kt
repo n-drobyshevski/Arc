@@ -515,7 +515,7 @@ private fun BinderTab(r: IntRange, on: Boolean, onClick: () -> Unit) {
     val c = LocalArcColors.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    val kind = FeatureText.factoryCategory(r.first)
+    val kind = FeatureText.factoryCategory(r.first, LocalFactoryKit.current)
     Column(
         Modifier
             .width(80.dp)
@@ -649,7 +649,7 @@ internal fun Plate(onClick: (() -> Unit)?, enabled: Boolean, content: @Composabl
 @Composable
 private fun LibraryBar(range: IntRange, count: Int, modifier: Modifier = Modifier) {
     val c = LocalArcColors.current
-    val kind = FeatureText.factoryCategory(range.first)
+    val kind = FeatureText.factoryCategory(range.first, LocalFactoryKit.current)
     Row(
         modifier
             .fillMaxWidth()

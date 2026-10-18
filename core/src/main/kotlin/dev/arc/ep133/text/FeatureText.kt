@@ -51,10 +51,18 @@ object FeatureText {
      * The factory layout's kind of sound for the range of slots starting at
      * [first] (from the official guide's note on SOUND mode: kicks 1-99,
      * snares 100-199, hi-hats 200-299, percussion 300-399, bass 400-499,
-     * melodic 500-599; [FACTORY_BLOCKS]), or null from 600 up, which the
-     * guide leaves free.
+     * melodic 500-599; [FACTORY_BLOCKS]). From 600 up the guide leaves the
+     * slots free, so null, except with the EP-40 Riddim's kit ([kit]), whose
+     * pack fills them ([EP40_BLOCKS]): chord stabs, shouts and dub FX, loops.
      */
-    fun factoryCategory(first: Int): String? = FACTORY_BLOCKS.indexOfFirst { first in it }.takeIf { it >= 0 }?.let { FACTORY_KINDS[it] }
+    fun factoryCategory(first: Int, kit: dev.arc.ep133.features.FactoryKit = dev.arc.ep133.features.FactoryKit.EP133): String? =
+        FACTORY_BLOCKS.indexOfFirst { first in it }.takeIf { it >= 0 }?.let { FACTORY_KINDS[it] }
+            ?: EP40_BLOCKS.indexOfFirst { first in it }.takeIf { it >= 0 && kit == dev.arc.ep133.features.FactoryKit.EP40 }?.let { EP40_KINDS[it] }
+
+    /** The EP-40 Riddim pack's blocks past the guide's: chord stabs 600-628, vocal shouts and dub FX 700-754, loops 800-898. */
+    val EP40_BLOCKS: List<IntRange> = listOf(600..699, 700..799, 800..899)
+
+    private val EP40_KINDS = listOf("Chords", "Vox \u00B7 FX", "Loops")
 
     /** "12 \u00B7 2.1 MB", the sounds binder's bar after "Sounds". */
     fun soundsTotal(n: Int, bytes: Double) = "$n \u00B7 ${Format.bytes(bytes)}"

@@ -61,6 +61,7 @@ import { REVIEW_KEY, type ArcController } from './state/controller'
 import { emptyMirrorState, type MirrorUi, type TaskUi } from './state/types'
 import { APP_BUILD } from './version'
 import { AppProvider, useController, useNav } from './ui/AppContext'
+import { FactoryKitContext } from './ui/FactoryKitContext'
 import { HapticsContext } from './ui/useHaptic'
 import {
   Nav,
@@ -191,9 +192,11 @@ export function App(props: AppProps): JSX.Element {
 
   return (
     <AppProvider controller={c} nav={nav}>
-      <ErrorBoundary>
-        <Root />
-      </ErrorBoundary>
+      <FactoryKitContext.Provider value={() => c.factoryKit}>
+        <ErrorBoundary>
+          <Root />
+        </ErrorBoundary>
+      </FactoryKitContext.Provider>
     </AppProvider>
   )
 }

@@ -44,6 +44,7 @@ import { Segmented } from '../components/Segmented'
 import { RangeKey } from '../live/SoundPicker'
 import { WIDE_QUERY, useMedia } from '../useDesk'
 import './DeviceScreen.css'
+import { useFactoryKit } from '../FactoryKitContext'
 
 export interface DeviceScreenProps {
   state: UiState
@@ -609,7 +610,8 @@ export function Plate(props: {
 function LibraryBlock(props: { group: SlotBlock; children: ComponentChildren }): JSX.Element {
   const g = props.group
   const headId = `device-h${g.from}`
-  const kind = FeatureText.factoryCategory(g.from)
+  const kit = useFactoryKit()
+  const kind = FeatureText.factoryCategory(g.from, kit)
   return (
     <section id={`device-g${g.from}`} tabIndex={-1} class="device__block" aria-labelledby={headId}>
       <div class="device__bar-row">
@@ -713,7 +715,8 @@ function DetailChips(props: { d: SoundDetails }): JSX.Element {
 
 /** A binder tab (side by side): a range ("100–199" over "SNARES") on a cap rounded on its outer side; the one in view is dark and down. */
 function BinderTab(props: { range: SlotBlock; on: boolean; onClick: () => void }): JSX.Element {
-  const kind = FeatureText.factoryCategory(props.range.from)
+  const kit = useFactoryKit()
+  const kind = FeatureText.factoryCategory(props.range.from, kit)
   return (
     <button
       type="button"

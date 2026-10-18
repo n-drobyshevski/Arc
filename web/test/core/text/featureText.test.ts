@@ -96,7 +96,10 @@ describe('FeatureTextTest', () => {
 
   it('device, settings and pad edit text', () => {
     expect(FeatureText.freeOf(64.0 * 1048576)).toBe('free of 64 MB')
-    expect([1, 100, 200, 300, 400, 500, 600].map(FeatureText.factoryCategory)).toEqual(['Kicks', 'Snares', 'Hats', 'Perc', 'Bass', 'Melodic', null])
+    expect([1, 100, 200, 300, 400, 500, 600].map((n) => FeatureText.factoryCategory(n))).toEqual(['Kicks', 'Snares', 'Hats', 'Perc', 'Bass', 'Melodic', null])
+    // The EP-40 Riddim's pack fills 600-899: chord stabs, shouts and dub FX, loops; the EP-133's guide leaves them free.
+    expect([500, 600, 700, 800, 900].map((n) => FeatureText.factoryCategory(n, FactoryKit.EP40))).toEqual(['Melodic', 'Chords', 'Vox \u00B7 FX', 'Loops', null])
+    expect(FeatureText.factoryCategory(700, FactoryKit.EP1320)).toBeNull()
     expect(FeatureText.factoryCategory(99)).toBe('Kicks')
     expect(FeatureText.factoryCategory(900)).toBeNull()
     expect(FeatureText.inProject(3, 7)).toBe('In P3 \u00B7 7')
