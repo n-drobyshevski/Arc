@@ -675,10 +675,10 @@ private fun PlayPage(ui: ToolsUi) {
     }
 }
 
-/** Claude: the share and paste keys and the links, and what a beat card is folded at the foot. */
+/** Claude: the glass, the share and paste keys and the links, and what a beat card is folded at the foot. */
 @Composable
 private fun ClaudePage(claude: ClaudeUi, group: Int) {
-    ClaudeSection(claude, group, header = false)
+    ClaudeDeck(claude, group)
     Disclosure(ClaudeText.ABOUT_CARDS) {
         val c = LocalArcColors.current
         Text(ClaudeText.INFO_CARDS, style = ArcType.small, color = c.graphite)

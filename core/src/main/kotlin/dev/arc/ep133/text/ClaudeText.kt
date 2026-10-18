@@ -70,6 +70,35 @@ object ClaudeText {
     /** The chain's share, for a project with no chain: nothing to share. */
     const val NO_CHAIN_TO_SHARE = "Add scenes to the chain to share it"
 
+    // The Claude page as the device's display: what will go on the glass, and the keys under it.
+    /** The glass's head (upper-cased where shown): ready, or a reply awaited. */
+    const val READY = "Claude · ready"
+    const val WAITING = "Waiting for Claude"
+    /** "Sent Scene S02": what went, large on the glass while the reply is awaited ([what] as [sharedScene] gives it). */
+    fun sent(what: String) = "Sent $what"
+    /** "Scene S02", "Chain": what SHARE sends, large on the glass. */
+    fun sceneTitle(scene: String) = "Scene $scene"
+    const val CHAIN = "Chain"
+    /** "3 scenes · 6 steps": the chain's line on the glass. */
+    fun chainLine(scenes: Int, steps: Int) = "${Format.plural(scenes, "scene")} · ${Format.plural(steps, "step")}"
+    const val SCENE_EMPTY = "No notes in this scene yet"
+    const val PATTERN_EMPTY = "No notes in this pattern yet"
+    /** On the glass while the reply is awaited. */
+    const val COPY_THEN_PASTE = "Copy Claude's reply, then press PASTE"
+    /** The glass's dismiss word, beside the head. */
+    const val STOP = "Stop"
+    const val PICK_HINT = "Pick what to share, then press SHARE."
+    /** The keys' words (upper-cased where shown); the pattern's key says its place, "A · 01". */
+    const val KEY_SCENE = "Scene"
+    const val KEY_CHAIN = "Chain"
+    const val KEY_SOUNDS = "Sounds"
+    const val KEY_SHARE = "Share"
+    const val KEY_PASTE = "Paste"
+    /** The pick keys for screen readers: "Scene S02", "A · 01", "Chain, 3 scenes", and that there is nothing to share. */
+    fun pickScene(scene: String, empty: Boolean) = sceneTitle(scene) + if (empty) NOTHING_TO_SHARE else ""
+    fun pickPattern(group: Int, n: Int, empty: Boolean) = place(group, n) + if (empty) NOTHING_TO_SHARE else ""
+    fun pickChain(scenes: Int) = "$CHAIN, ${Format.plural(scenes, "scene")}"
+
     /** The two links under the card. */
     const val GET_SKILL = "Get the arc-beats skill"
     const val LEARN = "Learn with Claude"

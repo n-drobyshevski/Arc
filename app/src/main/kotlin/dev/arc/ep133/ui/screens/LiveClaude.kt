@@ -40,7 +40,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -79,11 +78,9 @@ import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.text.SettingsText
 import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcKey
-import dev.arc.ep133.ui.components.CaptionInfo
 import dev.arc.ep133.ui.components.GridPlate
 import dev.arc.ep133.ui.components.KeySize
 import dev.arc.ep133.ui.components.KeyStyle
-import dev.arc.ep133.ui.components.LinkRow
 import dev.arc.ep133.ui.components.PlateLine
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
@@ -112,6 +109,8 @@ class ClaudeUi(
     val withSounds: Boolean = true,
     val chainSteps: Int = 0,
     val chainScenes: Int = 0,
+    /** Each group's pattern, its first bar as step lights ([dev.arc.ep133.controller.stepLights]), for the glass. */
+    val lights: List<List<dev.arc.ep133.controller.Weight?>> = List(4) { dev.arc.ep133.controller.NO_LIGHTS },
     val onWithSounds: (Boolean) -> Unit = {},
     val onShareScene: () -> Unit = {},
     val onShareChain: () -> Unit = {},
@@ -130,91 +129,7 @@ class ClaudeUi(
     val hasChain: Boolean get() = chainSteps > 0
 }
 
-/**
- * Live tools' Claude page: a card with SHARE SCENE, SHARE for
- * the [group] shown (the shares are dimmed, and still announced, when there is
- * nothing to share), SHARE CHAIN · N SCENES when the project's chain has steps
- * (the chain as a card of scenes), the tick box "With my sound list" under them (when Arc
- * knows sounds) and PASTE BEAT, and under it two links: the skill's zip, and a
- * starter prompt to learn the EP-133 with Claude. With [header] the section
- * starts with a CLAUDE caption and the info key (what a beat card is, and how
- * to give Claude the arc-beats skill); the page has the Claude row's name for
- * a title instead and folds those notes at its foot.
- */
-@Composable
-internal fun ClaudeSection(claude: ClaudeUi, group: Int, header: Boolean = true) {
-    val c = LocalArcColors.current
-    val g = group.coerceIn(0, 3)
-    val number = claude.numbers.getOrElse(g) { 1 }
-    val patternEmpty = !claude.hasNotes.getOrElse(g) { false }
-    val sceneEmpty = !claude.sceneHasNotes
-    if (header) CaptionInfo(ClaudeText.CLAUDE, listOf(ClaudeText.INFO_CARDS, ClaudeText.INFO_SKILL))
-    GridPlate {
-        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(ClaudeText.BEAT_CARDS, style = ArcType.semi, color = c.ink)
-            Text(ClaudeText.BEAT_HINT, style = ArcType.small, color = c.graphite)
-            ArcKey(
-                ClaudeText.shareScene(claude.scene),
-                claude.onShareScene,
-                Modifier
-                    .fillMaxWidth()
-                    .semantics(mergeDescendants = true) { contentDescription = ClaudeText.shareSceneName(claude.scene, sceneEmpty) },
-                size = KeySize.Small,
-                enabled = !sceneEmpty,
-            )
-            ArcKey(
-                ClaudeText.sharePattern(g, number),
-                { claude.onSharePattern(g) },
-                Modifier
-                    .fillMaxWidth()
-                    .semantics(mergeDescendants = true) { contentDescription = ClaudeText.sharePatternName(g, number, patternEmpty) },
-                size = KeySize.Small,
-                enabled = !patternEmpty,
-            )
-            if (claude.hasChain) {
-                ArcKey(
-                    ClaudeText.shareChainKey(claude.chainScenes),
-                    claude.onShareChain,
-                    Modifier
-                        .fillMaxWidth()
-                        .semantics(mergeDescendants = true) { contentDescription = ClaudeText.shareChainName(claude.chainSteps) },
-                    size = KeySize.Small,
-                )
-            }
-            if (claude.sounds > 0) SoundListTick(claude.sounds, claude.withSounds, claude.onWithSounds)
-            ArcKey(
-                ClaudeText.PASTE_BEAT,
-                claude.onPaste,
-                Modifier
-                    .fillMaxWidth()
-                    .semantics(mergeDescendants = true) { contentDescription = ClaudeText.PASTE_BEAT_NAME },
-                style = KeyStyle.Signal,
-                size = KeySize.Small,
-            )
-        }
-    }
-    GridPlate { LinkRow(ClaudeText.GET_SKILL, claude.onGetSkill) }
-    GridPlate { LinkRow(ClaudeText.LEARN, claude.onLearn) }
-}
-
-/** A tick box row: [text] after a box, a tap anywhere on the row switches it. */
-@Composable
-private fun TickRow(text: String, on: Boolean, onChange: (Boolean) -> Unit) {
-    val c = LocalArcColors.current
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 44.dp)
-            .toggleable(value = on, interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Checkbox, onValueChange = onChange),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        TickBox(on)
-        Text(text, style = ArcType.small, color = c.ink, modifier = Modifier.weight(1f))
-    }
-}
-
-/** The box of a [TickRow] or a sound row: the row it sits in is what is tapped. */
+/** The box of a sound row: the row it sits in is what is tapped. */
 @Composable
 private fun TickBox(on: Boolean, enabled: Boolean = true) {
     val c = LocalArcColors.current
@@ -225,11 +140,6 @@ private fun TickBox(on: Boolean, enabled: Boolean = true) {
         )
     }
 }
-
-/** "With my sound list · 212 sounds": the shared card is followed by the sounds Arc knows. */
-@Composable
-private fun SoundListTick(count: Int, on: Boolean, onChange: (Boolean) -> Unit) =
-    TickRow(ClaudeText.withSoundList(count), on, onChange)
 
 /**
  * A beat card's sheet (a pasted card, or Claude's reply shared to arc): the

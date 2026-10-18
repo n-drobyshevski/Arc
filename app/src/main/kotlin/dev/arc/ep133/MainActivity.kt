@@ -1252,6 +1252,7 @@ class MainActivity : ComponentActivity() {
                                 onWithSounds = controller::setShareSounds,
                                 chainSteps = scene.chain.chain.steps.size,
                                 chainScenes = dev.arc.ep133.controller.chainSceneCount(scene.chain.chain.steps),
+                                lights = scene.groups.map { it.lights },
                                 onShareScene = { shareBeat(null, dev.arc.ep133.text.ClaudeText.sharedScene(scene.label)) },
                                 onShareChain = ::shareChain,
                                 onSharePattern = { g -> shareBeat(g, dev.arc.ep133.text.ClaudeText.sharedPattern(g, scene.groups.getOrNull(g)?.number ?: 1)) },

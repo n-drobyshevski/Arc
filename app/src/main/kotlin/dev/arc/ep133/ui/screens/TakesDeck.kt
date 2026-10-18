@@ -10,10 +10,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -35,12 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -57,9 +50,6 @@ import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.Format
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.text.Strings
-import dev.arc.ep133.ui.components.capEdge
-import dev.arc.ep133.ui.components.cap
-import dev.arc.ep133.ui.components.capPress
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
 
@@ -68,8 +58,7 @@ import dev.arc.ep133.ui.theme.LocalArcColors
  * on the glass, T01 the oldest, and under it one strip of keys. A tap on a
  * take lights it; PLAY, SHARE, SAVE, EP and DEL act on the lit one, and DEL
  * asks again on the glass. TAKE starts and stops a take, its time on the
- * glass while it records. Too narrow for six keys of [KeyMin], the strip is
- * two rows of three.
+ * glass while it records. The keys are a [DeckStrip].
  */
 @Composable
 internal fun TakesDeck(t: TakesUi, take: TakeUi, still: Boolean) {
@@ -139,19 +128,8 @@ internal fun TakesDeck(t: TakesUi, take: TakeUi, still: Boolean) {
             )
         },
     )
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val perRow = if (maxWidth >= KeyMin * keys.size + KeyGap * (keys.size - 1)) keys.size else keys.size / 2
-        Column(verticalArrangement = Arrangement.spacedBy(KeyGap + 3.dp)) {
-            for (row in keys.chunked(perRow)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(KeyGap)) { row.forEach { it() } }
-            }
-        }
-    }
+    DeckStrip(keys)
 }
-
-/** The narrowest a key of the strip gets; under it the strip takes two rows. */
-private val KeyMin = 48.dp
-private val KeyGap = 7.dp
 
 /**
  * The glass: its head (how many takes and their size; while a take records,
@@ -238,7 +216,7 @@ private fun TakesGlass(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                Box(Modifier.size(14.dp)) { if (playing) Canvas(Modifier.size(14.dp)) { draw(DeckGlyph.PLAY, ink) } }
+                Box(Modifier.size(14.dp)) { if (playing) Canvas(Modifier.size(14.dp)) { drawGlyph(DeckGlyph.PLAY, ink) } }
             }
         }
         if (confirming && lit != null) {
@@ -265,85 +243,3 @@ private fun GlassLine(ink: Color) = Box(Modifier.fillMaxWidth().height(1.dp).bac
 
 private val GlassHead = ArcType.displaySub.copy(fontSize = 13.sp, letterSpacing = 0.08.em)
 private val GlassRow = ArcType.displayHead.copy(fontSize = 17.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, letterSpacing = 0.06.em)
-
-private enum class DeckStyle { NORMAL, SIGNAL, NAVY }
-
-private enum class DeckGlyph { DOT, PLAY, STOP, SHARE, SAVE, SEND, DELETE }
-
-/** A key of the strip: a cap with [glyph] over its [label], read as [description]. */
-@Composable
-private fun RowScope.DeckKey(
-    glyph: DeckGlyph,
-    label: String,
-    description: String,
-    onClick: () -> Unit,
-    style: DeckStyle = DeckStyle.NORMAL,
-    enabled: Boolean = true,
-    glyphColor: Color? = null,
-) {
-    val c = LocalArcColors.current
-    val source = remember { MutableInteractionSource() }
-    val pressed by source.collectIsPressedAsState()
-    val (face, ink, edge) = when (style) {
-        DeckStyle.NORMAL -> Triple(c.key, c.ink, c.keyEdge)
-        DeckStyle.SIGNAL -> Triple(c.signal, c.onSignal, c.signalEdge)
-        DeckStyle.NAVY -> Triple(c.navy, c.onNavy, capEdge(c.navy))
-    }
-    Column(
-        Modifier
-            .weight(1f)
-            .padding(bottom = 3.dp)
-            .heightIn(min = 56.dp)
-            .cap(face, edge, RoundedCornerShape(8.dp), capPress(pressed && enabled), alpha = if (enabled) 1f else 0.45f)
-            .clickable(source, indication = null, enabled = enabled, onClick = onClick)
-            .semantics(mergeDescendants = true) {
-                contentDescription = description
-                role = Role.Button
-            }
-            .padding(vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
-    ) {
-        Canvas(Modifier.size(18.dp)) { draw(glyph, glyphColor ?: ink) }
-        Text(label.uppercase(), style = ArcType.capsKeySmall.copy(fontSize = 11.sp), color = ink, maxLines = 1)
-    }
-}
-
-private fun DrawScope.draw(glyph: DeckGlyph, color: Color) {
-    val w = size.minDimension
-    val s = w * 0.12f
-    fun line(a: Offset, b: Offset) = drawLine(color, a, b, s, StrokeCap.Round)
-    when (glyph) {
-        DeckGlyph.DOT -> drawCircle(color, radius = w * 0.3f)
-        DeckGlyph.PLAY -> drawPath(
-            Path().apply {
-                moveTo(w * 0.22f, w * 0.12f)
-                lineTo(w * 0.88f, w * 0.5f)
-                lineTo(w * 0.22f, w * 0.88f)
-                close()
-            },
-            color,
-        )
-        DeckGlyph.STOP -> drawRect(color, Offset(w * 0.2f, w * 0.2f), Size(w * 0.6f, w * 0.6f))
-        DeckGlyph.SHARE -> {
-            line(Offset(w * 0.22f, w * 0.78f), Offset(w * 0.78f, w * 0.22f))
-            line(Offset(w * 0.38f, w * 0.22f), Offset(w * 0.78f, w * 0.22f))
-            line(Offset(w * 0.78f, w * 0.22f), Offset(w * 0.78f, w * 0.62f))
-        }
-        DeckGlyph.SAVE -> {
-            line(Offset(w * 0.5f, w * 0.1f), Offset(w * 0.5f, w * 0.66f))
-            line(Offset(w * 0.26f, w * 0.44f), Offset(w * 0.5f, w * 0.68f))
-            line(Offset(w * 0.74f, w * 0.44f), Offset(w * 0.5f, w * 0.68f))
-            line(Offset(w * 0.18f, w * 0.9f), Offset(w * 0.82f, w * 0.9f))
-        }
-        DeckGlyph.SEND -> {
-            line(Offset(w * 0.12f, w * 0.5f), Offset(w * 0.86f, w * 0.5f))
-            line(Offset(w * 0.56f, w * 0.22f), Offset(w * 0.86f, w * 0.5f))
-            line(Offset(w * 0.56f, w * 0.78f), Offset(w * 0.86f, w * 0.5f))
-        }
-        DeckGlyph.DELETE -> {
-            line(Offset(w * 0.24f, w * 0.24f), Offset(w * 0.76f, w * 0.76f))
-            line(Offset(w * 0.76f, w * 0.24f), Offset(w * 0.24f, w * 0.76f))
-        }
-    }
-}

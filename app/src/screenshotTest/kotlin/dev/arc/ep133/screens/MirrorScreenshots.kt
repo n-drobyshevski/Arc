@@ -2303,7 +2303,11 @@ fun GuideFromEdgePreview() {
 // Beat cards. Live tools' CLAUDE section, after the view settings and before TAKES: SHARE SCENE, SHARE for the group shown
 // (A, pattern 1) and the orange PASTE BEAT, then the skill's link and Learn with Claude; its sample scene is S02.
 // "With my sound list" under the two SHARE keys, ticked, with the sounds Arc knows.
-private val claudeShares = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212)
+// The scene's first bars as the glass shows them: A's kick, B's snare, D's hats (C blank).
+private val claudeLights = listOf("X.......x.o.....", "....X.......X..x", "................", "o.o.o.oxo.o.o.oo").map { row ->
+    row.map { ch -> when (ch) { 'X' -> dev.arc.ep133.controller.Weight.ACCENT; 'o' -> dev.arc.ep133.controller.Weight.NORMAL; 'x' -> dev.arc.ep133.controller.Weight.GHOST; else -> null } }
+}
+private val claudeShares = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, lights = claudeLights)
 
 @PreviewTest
 @Preview(name = "Live tools claude", widthDp = 412, heightDp = 960, showBackground = true)
@@ -2314,7 +2318,22 @@ fun LiveToolsClaudePreview() = Live(lastRead, oneGroup = true, tools = true, too
 @PreviewTest
 @Preview(name = "Live tools claude chain", widthDp = 412, heightDp = 960, showBackground = true)
 @Composable
-fun LiveToolsClaudeChainPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE, claude = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, chainSteps = 4, chainScenes = 3))
+fun LiveToolsClaudeChainPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE, claude = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, chainSteps = 4, chainScenes = 3, lights = claudeLights))
+
+// A reply awaited: the glass says what went and to paste the reply, STOP beside its head.
+@PreviewTest
+@Preview(name = "Live tools claude waiting", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeWaitingPreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, lights = claudeLights, waiting = "Scene S02"),
+)
+
+// Nothing in the scene and no chain: the glass says so, and SCENE, the pattern, CHAIN and SHARE are faded.
+@PreviewTest
+@Preview(name = "Live tools claude empty", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeEmptyPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE, claude = ClaudeUi(scene = "S01", hasNotes = List(4) { false }, sounds = 212, withSounds = false))
 
 // Nothing to share: both SHARE keys dimmed (and still announced), PASTE BEAT as it was; the dark theme.
 // "With my sound list" is left unticked (kept like the other Live preferences).
