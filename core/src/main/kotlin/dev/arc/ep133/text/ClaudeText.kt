@@ -225,6 +225,10 @@ object ClaudeText {
     /** "Tempo  92": the card's tempo, whole BPM; and the chip that sets it, "SET · NOW 122" ([now] is Arc's). */
     const val TEMPO = "Tempo"
     fun tempoChip(now: Int) = "Set · now $now"
+    /** The tempo row's key (SET, with its light and ON or OFF), and the row's value: "136 \u2192 85" while it sets the card's, "136 \u00B7 card 85" while not. */
+    const val SET_TEMPO = "Set"
+    fun tempoChange(now: Int, card: Int) = "$now \u2192 $card"
+    fun tempoKept(now: Int, card: Int) = "$now \u00B7 card $card"
     fun tempoChipName(card: String, now: Int, on: Boolean) =
         if (on) "Set the tempo to $card, now $now" else "Keep the tempo at $now, the card says $card"
 

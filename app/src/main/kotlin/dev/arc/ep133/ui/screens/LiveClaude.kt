@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -56,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.arc.ep133.controller.BeatFxUi
 import dev.arc.ep133.controller.BeatGridUi
 import dev.arc.ep133.controller.BeatImportUi
@@ -77,6 +79,8 @@ import dev.arc.ep133.text.Format
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.text.SettingsText
 import dev.arc.ep133.text.Strings
+import dev.arc.ep133.ui.components.capPress
+import dev.arc.ep133.ui.components.cap
 import dev.arc.ep133.ui.components.ArcKey
 import dev.arc.ep133.ui.components.GridPlate
 import dev.arc.ep133.ui.components.KeySize
@@ -277,8 +281,9 @@ fun ColumnScope.BeatImportSheetContent(
             }
             if (tempo != null) {
                 line()
-                ValueRow(ClaudeText.TEMPO, tempo.toString()) {
-                    TempoChip(ui.tempoNow, tempo, setTempo) { setTempo = !setTempo }
+                // On, the row says the change ("136 → 85"); off, the tempo that stays and the card's beside it.
+                ValueRow(ClaudeText.TEMPO, if (setTempo) ClaudeText.tempoChange(ui.tempoNow, tempo) else ClaudeText.tempoKept(ui.tempoNow, tempo)) {
+                    SwitchChip(ClaudeText.SET_TEMPO, ClaudeText.tempoChipName(tempo.toString(), ui.tempoNow, setTempo), setTempo) { setTempo = !setTempo }
                 }
             }
         }
@@ -531,24 +536,42 @@ private fun SoundsBlock(
 private fun PutOnPadsChip(on: Boolean, count: Int, onToggle: () -> Unit) =
     SwitchChip(ClaudeText.PUT_ON_PADS, ClaudeText.putOnPadsName(on, count), on, onToggle)
 
-/** A block's chip: [text] in navy while [on], a flat pill while it isn't; a tap switches it, and screen readers hear [description]. */
+/**
+ * A block's switch as a device key: a light, [text], and ON or OFF on the key itself (the light orange and ON in
+ * signal while [on], the light dark and OFF in graphite while not); a tap switches it, and screen readers hear
+ * [description] and its state.
+ */
 @Composable
 private fun SwitchChip(text: String, description: String, on: Boolean, onToggle: () -> Unit) {
     val c = LocalArcColors.current
-    Box(
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    Row(
         Modifier
-            .heightIn(min = 40.dp)
-            .clip(RoundedCornerShape(50))
-            .background(if (on) c.navy else c.shell)
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Switch, onClick = onToggle)
+            .padding(bottom = 3.dp)
+            .heightIn(min = 44.dp)
+            .cap(c.key, c.keyEdge, RoundedCornerShape(10.dp), capPress(pressed))
+            .clickable(interactionSource = source, indication = null, role = Role.Switch, onClick = onToggle)
             .semantics {
                 contentDescription = description
                 stateDescription = if (on) SettingsText.ON else SettingsText.OFF
             }
-            .padding(horizontal = 14.dp),
-        contentAlignment = Alignment.Center,
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(text.uppercase(), style = ArcType.capsKeySmall, color = if (on) c.onNavy else c.ink, maxLines = 1)
+        Canvas(Modifier.size(10.dp)) {
+            // Lit, the light glows a little past its edge.
+            if (on) drawCircle(c.signal.copy(alpha = 0.3f), radius = size.minDimension * 0.9f)
+            drawCircle(if (on) c.signal else c.graphite.copy(alpha = 0.45f))
+        }
+        Text(text.uppercase(), style = ArcType.capsKeySmall, color = c.ink, maxLines = 1)
+        Text(
+            (if (on) SettingsText.ON else SettingsText.OFF).uppercase(),
+            style = ArcType.caps.copy(fontSize = 10.sp),
+            color = if (on) c.signal else c.graphite,
+            maxLines = 1,
+        )
     }
 }
 
@@ -809,30 +832,6 @@ private fun StackedRow(label: String, value: String, description: String? = null
             Text(value, style = ArcType.bold, color = c.ink, maxLines = 3, overflow = TextOverflow.Ellipsis)
         }
         end?.invoke()
-    }
-}
-
-/**
- * The tempo chip: "SET · NOW 122". Off it is a flat pill (the tempo stays Arc's), on it is navy with
- * the tempo to be set ([card]); a tap switches it. Screen readers hear what it does.
- */
-@Composable
-private fun TempoChip(now: Int, card: Int, on: Boolean, onToggle: () -> Unit) {
-    val c = LocalArcColors.current
-    Box(
-        Modifier
-            .heightIn(min = 40.dp)
-            .clip(RoundedCornerShape(50))
-            .background(if (on) c.navy else c.shell)
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Switch, onClick = onToggle)
-            .semantics {
-                contentDescription = ClaudeText.tempoChipName(card.toString(), now, on)
-                stateDescription = if (on) SettingsText.ON else SettingsText.OFF
-            }
-            .padding(horizontal = 14.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(ClaudeText.tempoChip(now).uppercase(), style = ArcType.capsKeySmall, color = if (on) c.onNavy else c.ink, maxLines = 1)
     }
 }
 
