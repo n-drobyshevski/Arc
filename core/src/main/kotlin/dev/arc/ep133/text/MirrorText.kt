@@ -39,17 +39,19 @@ object MirrorText {
     fun seen(day: String) = "Seen $day"
     // Not connected, with the factory sounds in the library: one of their projects (the first unless PROJECT steps on).
     const val FACTORY = "Factory sounds"
-    /** [kit] the one shown (FactoryKit): its sounds are named the EP-133's or the EP-1320's. */
+    /** [kit] the one shown (FactoryKit): its sounds are named the EP-133's, the EP-1320's or the EP-40's. */
     fun factoryNote(project: Int, kit: FactoryKit = FactoryKit.EP133) =
         "Not connected: these are the ${kit.model}'s factory sounds, project $project as it ships. Connect your EP-133 to see it live."
-    // The kit switch's keys, when both kits are saved (FactoryKit's models).
+    // The kit switch's keys, when two or more kits are saved (FactoryKit's models).
     const val KIT_EP133 = "EP-133"
     const val KIT_EP1320 = "EP-1320"
+    const val KIT_EP40 = "EP-40"
 
     /** The kit switch's key for [kit]. */
     fun kit(kit: FactoryKit) = when (kit) {
         FactoryKit.EP133 -> KIT_EP133
         FactoryKit.EP1320 -> KIT_EP1320
+        FactoryKit.EP40 -> KIT_EP40
     }
     // Not connected and never read: a way to play without it.
     const val GET_FACTORY = "Get the factory sounds to play without it"

@@ -24,6 +24,43 @@ import java.time.ZoneOffset
  * were read from it with the JS reference under Node.
  */
 class PakCompatTest {
+    @Test
+    fun `a pack zipped in one folder is read from inside it, macOS's forks left out`() {
+        val b = byteArrayOf(1)
+        // The EP-40's factory pack: everything under one folder, forks in __MACOSX.
+        assertEquals(
+            listOf("meta.json", "sounds/001 kick.wav", "projects/P01.tar"),
+            Paks.entries(
+                linkedMapOf(
+                    "ep-40-factory-content/meta.json" to b,
+                    "__MACOSX/ep-40-factory-content/._meta.json" to b,
+                    "ep-40-factory-content/sounds/001 kick.wav" to b,
+                    "__MACOSX/ep-40-factory-content/sounds/._001 kick.wav" to b,
+                    "ep-40-factory-content/projects/P01.tar" to b,
+                ),
+            ).keys.toList(),
+        )
+        // meta.json at the top (the EP-133's, arc's own): read as it is, forks still left out.
+        assertEquals(
+            listOf("meta.json", "sounds/001 kick.wav", "extra/notes.txt"),
+            Paks.entries(linkedMapOf("meta.json" to b, "sounds/001 kick.wav" to b, "extra/notes.txt" to b, "__MACOSX/._meta.json" to b)).keys.toList(),
+        )
+        // Files in more than one folder, or at the top: nothing taken off.
+        assertEquals(
+            listOf("a/sounds/001 kick.wav", "b/meta.json"),
+            Paks.entries(linkedMapOf("a/sounds/001 kick.wav" to b, "b/meta.json" to b)).keys.toList(),
+        )
+        assertEquals(
+            listOf("sounds/001 kick.wav", "projects/P01.tar"),
+            Paks.entries(linkedMapOf("sounds/001 kick.wav" to b, "projects/P01.tar" to b)).keys.toList(),
+        )
+        // Sounds alone, without meta.json: already a pack's layout, never taken for a folder.
+        assertEquals(
+            listOf("sounds/001 kick.wav", "sounds/002 snare.wav"),
+            Paks.entries(linkedMapOf("sounds/001 kick.wav" to b, "sounds/002 snare.wav" to b)).keys.toList(),
+        )
+    }
+
     /** generated_at of the fixture, 2026-10-04T13:05:24.116Z. */
     private val fixtureTime = 1_791_119_124_116L
 

@@ -393,10 +393,11 @@ fun MirrorScreen(
     /** Not connected: download the factory sounds (FactorySounds); null when they are in the library. */
     onGetFactory: (() -> Unit)? = null,
     /**
-     * The factory kit Live plays offline, when both kits are saved (null otherwise): the factory line's switch
-     * picks the other with [onFactoryKit].
+     * The factory kit Live plays offline, when two or more kits are saved (null otherwise): the factory line's
+     * switch offers those kits ([factoryKits], in order) and picks another with [onFactoryKit].
      */
     factoryKit: FactoryKit? = null,
+    factoryKits: List<FactoryKit> = emptyList(),
     onFactoryKit: (FactoryKit) -> Unit = {},
     /** Pad changes made offline, in arc only: how many, for Live tools' row with [onResetPads]. */
     offlinePads: Int = 0,
@@ -970,7 +971,7 @@ fun MirrorScreen(
                             group = stepGroup ?: group,
                             claude = claude, take = take, takes = takes,
                             onGetFactory = onGetFactory, offlinePads = offlinePads, onResetPads = onResetPads,
-                            factoryKit = factoryKit, onFactoryKit = onFactoryKit,
+                            factoryKit = factoryKit, factoryKits = factoryKits, onFactoryKit = onFactoryKit,
                             tapToPlay = onPad != null, sideways = sideways,
                             still = fixedNow != null || reduceMotion,
                         ),
@@ -1453,7 +1454,7 @@ fun MirrorScreen(
                                 if (editing && arpLine == null) {
                                     EditLine()
                                 } else {
-                                    Display(st, mirror, transport, take, still = fixedNow != null, compact = sideways, noteOpen = noteOpen, onNote = { noteOpen = it }, onGetFactory = onGetFactory, arp = arpLine, step = stepLine, factoryKit = factoryKit, onFactoryKit = onFactoryKit)
+                                    Display(st, mirror, transport, take, still = fixedNow != null, compact = sideways, noteOpen = noteOpen, onNote = { noteOpen = it }, onGetFactory = onGetFactory, arp = arpLine, step = stepLine, factoryKit = factoryKit, factoryKits = factoryKits, onFactoryKit = onFactoryKit)
                                 }
                             }
                             val fnRow: @Composable () -> Unit = { FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
@@ -1819,16 +1820,19 @@ private fun RowScope.SpokenLine(said: String, content: @Composable RowScope.() -
     )
 }
 
-/** The kit switch's widest on the display: its two keys, the line's room past them left free. */
-private val KitSwitchWidth = 220.dp
+/** The kit switch's widest on the display, per key: the line's room past them left free. */
+private val KitKeyWidth = 110.dp
 
-/** The factory kit switch (EP-133 / EP-1320), when both kits are saved: on the display's factory line and in Live tools. */
+/**
+ * The factory kit switch (EP-133 / EP-40 / EP-1320), when two or more kits are saved: [kits], the saved ones in
+ * order. On the display's factory line and in Live tools.
+ */
 @Composable
-internal fun KitSwitch(kit: FactoryKit, onKit: (FactoryKit) -> Unit, modifier: Modifier = Modifier) {
+internal fun KitSwitch(kit: FactoryKit, kits: List<FactoryKit>, onKit: (FactoryKit) -> Unit, modifier: Modifier = Modifier) {
     Segmented(
-        FactoryKit.entries.map(MirrorText::kit),
-        selected = kit.ordinal,
-        onSelect = { onKit(FactoryKit.entries[it]) },
+        kits.map(MirrorText::kit),
+        selected = kits.indexOf(kit),
+        onSelect = { onKit(kits[it]) },
         modifier = modifier.semantics { contentDescription = FeatureText.FACTORY_KIT },
         compact = true,
     )
@@ -1856,8 +1860,9 @@ private fun Display(
     arp: String? = null,
     /** CORRECT on the pattern's row while it plays with timing correct on ([StepLine]). */
     step: StepLine? = null,
-    /** Both factory kits saved: the one Live plays, switched on the factory line. */
+    /** Two or more factory kits saved: the one Live plays, switched on the factory line among [factoryKits]. */
     factoryKit: FactoryKit? = null,
+    factoryKits: List<FactoryKit> = emptyList(),
     onFactoryKit: (FactoryKit) -> Unit = {},
 ) {
     val c = LocalArcColors.current
@@ -1904,8 +1909,8 @@ private fun Display(
                 modifier = Modifier.weight(1f),
             )
         }
-        // Under the factory line, as wide as its two keys need.
-        if (kitSwitch != null) KitSwitch(kitSwitch, onFactoryKit, Modifier.padding(top = 4.dp).widthIn(max = KitSwitchWidth))
+        // Under the factory line, as wide as its keys need.
+        if (kitSwitch != null) KitSwitch(kitSwitch, factoryKits, onFactoryKit, Modifier.padding(top = 4.dp).widthIn(max = KitKeyWidth * factoryKits.size))
         if (transport != null) PatternRow(transport, track.beat, still, step)
         // The one-group view keeps to one screen; the all-groups view explains clock out.
         when {

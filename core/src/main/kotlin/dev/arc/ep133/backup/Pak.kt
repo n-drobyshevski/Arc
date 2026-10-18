@@ -53,7 +53,7 @@ object Paks {
 
     /** Parse a .pak (`openPak`). Throws for a file that is not a zip or holds nothing usable. */
     fun open(bytes: ByteArray): Pak {
-        val files = Zip.read(bytes)
+        val files = entries(Zip.read(bytes))
         fun json(k: String): JsonElement? {
             val b = files[k] ?: return null
             return JsJson.parseOrNull(decodeUtf8(b))
@@ -86,6 +86,26 @@ object Paks {
         }
         if (sounds.isEmpty() && projects.isEmpty()) throw PakError("This file has no sounds or projects in it")
         return Pak(meta, sidecar, sounds, projects)
+    }
+
+    private const val MAC_FORKS = "__MACOSX/"
+    private val LAYOUT = setOf("sounds", "projects")
+
+    /**
+     * A zip's files as a pack lays them out: macOS's resource forks
+     * ("__MACOSX/...") and directories left out, and a pack zipped from a
+     * folder (the EP-40's factory pack: "ep-40-factory-content/meta.json",
+     * ".../sounds/...") read as if its files were at the top. A pack with
+     * meta.json at the top (the EP-133's, arc's own), or with its sounds or
+     * projects at the top, is read as it is.
+     */
+    internal fun entries(files: Map<String, ByteArray>): Map<String, ByteArray> {
+        val kept = files.filterKeys { !it.startsWith(MAC_FORKS) && !it.endsWith("/") }
+        if ("meta.json" in kept || kept.isEmpty()) return kept
+        val top = kept.keys.first().substringBefore('/', "")
+        // A pack of sounds alone (or projects alone) without meta.json is already laid out as a pack.
+        if (top.isEmpty() || top.lowercase() in LAYOUT || kept.keys.any { !it.startsWith("$top/") }) return kept
+        return kept.mapKeysTo(LinkedHashMap()) { it.key.removePrefix("$top/") }
     }
 
     /** `sidecar.sounds?.[slot] ?? {}` */

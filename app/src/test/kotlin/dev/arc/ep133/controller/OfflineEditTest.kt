@@ -194,5 +194,48 @@ class OfflineEditTest {
         assertEquals(listOf(medievalPack), olderKitCopies(all, FactoryKit.EP1320, newer.id))
         assertEquals(emptyList<BackupRecord>(), olderKitCopies(all, FactoryKit.EP133, ep133Pack.id))
     }
-}
 
+    // ---------- the EP-40 Riddim's kit, a third ----------
+
+    private val riddimPack = rec("r", 4L, FactoryKit.EP40.source)
+
+    @Test
+    fun `the chosen kit's pack gone, Live plays the first saved of the EP-133's, the EP-40's and the EP-1320's`() {
+        val all = listOf(ep133Pack, riddimPack, medievalPack, medievalBackup)
+        assertEquals(FactoryKit.EP40, activeKitOf(FactoryKit.EP40, all))
+        assertEquals(FactoryKit.EP40, activeKitOf(FactoryKit.EP1320, listOf(riddimPack, medievalBackup)))
+        assertEquals(FactoryKit.EP40, activeKitOf(FactoryKit.EP133, listOf(riddimPack, medievalPack)))
+        assertEquals(FactoryKit.EP1320, activeKitOf(FactoryKit.EP40, listOf(medievalPack)))
+        assertEquals(FactoryKit.EP133, activeKitOf(FactoryKit.EP40, listOf(ep133Pack, medievalPack)))
+        // None saved: the EP-133's, whose sounds Live offers to get.
+        assertEquals(FactoryKit.EP133, activeKitOf(FactoryKit.EP40, listOf(medievalBackup)))
+    }
+
+    @Test
+    fun `the kit switch offers only the saved kits, in order, once two are saved`() {
+        assertEquals(FactoryKit.SHOWN, savedKits(listOf(medievalPack, riddimPack, ep133Pack)))
+        assertEquals(listOf(FactoryKit.EP40, FactoryKit.EP1320), savedKits(listOf(medievalPack, riddimPack, medievalBackup)))
+        assertEquals(listOf(FactoryKit.EP133, FactoryKit.EP40), savedKits(listOf(riddimPack, ep133Pack)))
+        assertTrue(kitsSaved(listOf(riddimPack, medievalPack)))
+        assertFalse(kitsSaved(listOf(riddimPack, medievalBackup)))
+        assertEquals(emptyList<FactoryKit>(), savedKits(listOf(medievalBackup)))
+    }
+
+    @Test
+    fun `connecting an EP-40 picks its kit when its pack is saved`() {
+        val all = listOf(ep133Pack, riddimPack, medievalPack)
+        assertEquals(FactoryKit.EP40, kitOnConnect("TE032AS006", FactoryKit.EP133, all))
+        assertEquals(FactoryKit.EP40, kitOnConnect("TE032AS006", FactoryKit.EP1320, all))
+        assertNull(kitOnConnect("TE032AS006", FactoryKit.EP40, all))
+        assertNull(kitOnConnect("TE032AS006", FactoryKit.EP133, listOf(ep133Pack, medievalPack)))
+        // Its unnamed sounds ("335.pcm") play from its own pack while it is connected.
+        assertEquals(FactoryKit.EP40, unnamedKit("TE032AS006", FactoryKit.EP133))
+    }
+
+    @Test
+    fun `a new EP-40 pack replaces only the EP-40's earlier one`() {
+        val newer = rec("r2", 9L, FactoryKit.EP40.source)
+        val all = listOf(ep133Pack, riddimPack, medievalPack, newer)
+        assertEquals(listOf(riddimPack), olderKitCopies(all, FactoryKit.EP40, newer.id))
+    }
+}

@@ -425,14 +425,19 @@ internal fun offlineSoundsOf(
 
 /**
  * The factory kit Live plays offline (an addition): [chosen] while its pack
- * is saved, else the EP-133's, so a deleted EP-1320 copy doesn't leave Live
- * with nothing.
+ * is saved, else the first saved of the EP-133's, the EP-40's and the
+ * EP-1320's, so a deleted pack doesn't leave Live with nothing; none saved,
+ * the EP-133's.
  */
 internal fun activeKitOf(chosen: FactoryKit, backups: List<BackupRecord>): FactoryKit =
-    chosen.takeIf { FactorySounds.inLibrary(backups, it) != null } ?: FactoryKit.EP133
+    chosen.takeIf { FactorySounds.inLibrary(backups, it) != null } ?: savedKits(backups).firstOrNull() ?: FactoryKit.EP133
 
-/** Both kits' packs saved: Settings and Live's factory line offer the kit switch. */
-internal fun kitsSaved(backups: List<BackupRecord>): Boolean = FactoryKit.entries.all { FactorySounds.inLibrary(backups, it) != null }
+/** The kits whose packs are saved, in the order arc offers them (FactoryKit.SHOWN). */
+internal fun savedKits(backups: List<BackupRecord>): List<FactoryKit> =
+    FactoryKit.SHOWN.filter { FactorySounds.inLibrary(backups, it) != null }
+
+/** Two or more kits' packs saved: Settings and Live's factory line offer the kit switch, with those kits. */
+internal fun kitsSaved(backups: List<BackupRecord>): Boolean = savedKits(backups).size >= 2
 
 /**
  * The kit to switch to as a device with [sku] connects: its own, when that
@@ -6848,15 +6853,15 @@ class ArcController(
             val bytes = withContext(Dispatchers.IO) { read() }
             val pak = withContext(Dispatchers.Default) { Paks.open(bytes) }
             val d = withContext(Dispatchers.Default) { Paks.describe(pak) }
-            // An EP-1320 factory pack goes in as that kit's (replacing an earlier one), not as an import.
+            // An EP-1320 or EP-40 factory pack goes in as that kit's (replacing an earlier one), not as an import.
             val kit = FactorySounds.importKit(pak)
             val saved = library.save(
                 record(
-                    title = if (kit != null) FeatureText.FACTORY_TITLE_1320 else dev.arc.ep133.text.LibraryRules.importTitle(name),
+                    title = if (kit != null) FeatureText.factoryTitle(kit) else dev.arc.ep133.text.LibraryRules.importTitle(name),
                     // generatedAt || file.lastModified || Date.now()
                     createdAt = d.generatedAt ?: lastModified?.takeIf { it != 0L } ?: System.currentTimeMillis(),
                     source = kit?.source ?: "import",
-                    fileName = if (kit != null) FactorySounds.FILE_NAME_1320 else name,
+                    fileName = if (kit != null) FactorySounds.fileName(kit) else name,
                     device = BackupDevice(d.device.product, d.device.sku, "", d.device.osVersion),
                     d = d,
                 ),
@@ -6865,7 +6870,7 @@ class ArcController(
             )
             if (kit != null) {
                 keptKit(kit, saved)
-                toastSaved(FeatureText.factory1320Saved(saved.record.soundCount), saved.copyError)
+                toastSaved(FeatureText.factorySaved(kit, saved.record.soundCount), saved.copyError)
                 return@launch
             }
             _state.update { it.copy(freshId = saved.record.id) }
@@ -6877,32 +6882,32 @@ class ArcController(
     }
 
     /**
-     * Downloads the EP-133's factory sounds from teenage engineering's EP
-     * Sample Tool and keeps them in the library (FactorySounds), as a task:
-     * the progress sheet shows how much has come, and Cancel stops it.
+     * Downloads [kit]'s factory sounds (the EP-133's or the EP-40's) from
+     * teenage engineering's EP Sample Tool and keeps them in the library
+     * (FactorySounds), as a task: the progress sheet shows how much has come,
+     * and Cancel stops it. The EP-40's become the kit Live plays, as a pack
+     * the user asked for; the EP-133's leave the kit as it is. The EP-1320's
+     * have no download: nothing happens.
      */
-    fun getFactorySounds(): Job = scope.launch {
-        if (FactorySounds.inLibrary(_state.value.backups, FactoryKit.EP133) != null) return@launch
+    fun getFactorySounds(kit: FactoryKit = FactoryKit.EP133): Job = scope.launch {
+        if (FactorySounds.download(kit) == null) return@launch
+        if (FactorySounds.inLibrary(_state.value.backups, kit) != null) return@launch
         // Tapped while something else runs (a read, a transfer): it goes next, not never.
         _state.first { !it.busy }
-        if (FactorySounds.inLibrary(_state.value.backups, FactoryKit.EP133) != null) return@launch
+        if (FactorySounds.inLibrary(_state.value.backups, kit) != null) return@launch
         val saved = runTask(FeatureText.GETTING_FACTORY, device = false) { onProgress, signal ->
             try {
                 withContext(Dispatchers.IO) {
-                    val path = FactorySounds.locate { p -> dev.arc.ep133.data.FactoryDownload.text(p, signal) }
-                    val bytes = dev.arc.ep133.data.FactoryDownload.bytes(path, signal) { done, total ->
-                        val all = maxOf(total ?: FactorySounds.KNOWN_SIZE, done)
+                    val (bytes, pak) = dev.arc.ep133.data.FactoryDownload.pack(kit, signal) { done, all ->
                         onProgress(Progress(done.toDouble() / all, FeatureText.factoryProgress(done, all)))
                     }
-                    val pak = Paks.open(bytes)
-                    if (!FactorySounds.isFactory(pak)) throw java.io.IOException(FeatureText.NOT_FACTORY)
                     val d = Paks.describe(pak)
                     library.save(
                         record(
-                            title = FeatureText.FACTORY_TITLE,
+                            title = FeatureText.factoryTitle(kit),
                             createdAt = d.generatedAt ?: System.currentTimeMillis(),
-                            source = FactorySounds.SOURCE,
-                            fileName = FactorySounds.FILE_NAME,
+                            source = kit.source,
+                            fileName = FactorySounds.fileName(kit),
                             device = BackupDevice(d.device.product, d.device.sku, "", d.device.osVersion),
                             d = d,
                         ),
@@ -6918,7 +6923,8 @@ class ArcController(
             }
         } ?: return@launch
         _state.update { it.copy(freshId = saved.record.id) }
-        toastSaved(FeatureText.factorySaved(saved.record.soundCount), saved.copyError)
+        if (kit != FactoryKit.EP133) setFactoryKit(kit)
+        toastSaved(FeatureText.factorySaved(kit, saved.record.soundCount), saved.copyError)
     }
 
     /**

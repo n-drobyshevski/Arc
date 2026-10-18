@@ -145,8 +145,9 @@ internal class ToolsUi(
     val onGetFactory: (() -> Unit)?,
     val offlinePads: Int,
     val onResetPads: () -> Unit,
-    /** Both factory kits saved: the one Live plays, and the switch's pick of the other. */
+    /** Two or more factory kits saved: the one Live plays, the saved ones the switch offers, and its pick. */
     val factoryKit: FactoryKit?,
+    val factoryKits: List<FactoryKit>,
     val onFactoryKit: (FactoryKit) -> Unit,
     val tapToPlay: Boolean,
     val sideways: Boolean,
@@ -248,7 +249,7 @@ private fun FrontPage(ui: ToolsUi, onPage: (ToolsPage) -> Unit) {
     val c = LocalArcColors.current
     val st = ui.mirror?.state ?: MirrorState()
     FactoryNotice(ui.mirror, ui.onGetFactory)
-    FactoryKitRow(ui.mirror, ui.factoryKit, ui.onFactoryKit)
+    FactoryKitRow(ui.mirror, ui.factoryKit, ui.factoryKits, ui.onFactoryKit)
     OfflinePadsNotice(ui.offlinePads, ui.onResetPads)
     NowDisplay(ui, st)
     // On its side the display is one line (in the top bar), so what clock out is for is told here.
@@ -392,12 +393,12 @@ private fun FactoryNotice(mirror: MirrorUi?, onGetFactory: (() -> Unit)?) {
     Notice(FeatureText.FACTORY_SOUNDS, FeatureText.FACTORY_NOTE, FeatureText.GET, onGetFactory)
 }
 
-/** Showing factory sounds with both kits saved: the switch between them, as on the display's factory line. */
+/** Showing factory sounds with two or more kits saved: the switch among them, as on the display's factory line. */
 @Composable
-private fun FactoryKitRow(mirror: MirrorUi?, kit: FactoryKit?, onKit: (FactoryKit) -> Unit) {
+private fun FactoryKitRow(mirror: MirrorUi?, kit: FactoryKit?, kits: List<FactoryKit>, onKit: (FactoryKit) -> Unit) {
     if (kit == null || mirror?.offline != MirrorText.FACTORY) return
     GridPlate {
-        SettingRow(FeatureText.FACTORY_KIT) { KitSwitch(kit, onKit) }
+        SettingRow(FeatureText.FACTORY_KIT) { KitSwitch(kit, kits, onKit) }
     }
 }
 

@@ -81,7 +81,7 @@ data class OfflinePads(val list: List<OfflinePad> = emptyList()) {
                 put("source", p.source.id)
                 // Only recorded samples have one: the other entries stay as they always were.
                 p.file?.let { put("file", it) }
-                // The EP-1320's factory sounds only: the EP-133's entries stay as they always were.
+                // Another kit's factory sounds only: the EP-133's entries stay as they always were.
                 if (p.kit != FactoryKit.EP133) put("kit", p.kit.id)
             })
         }

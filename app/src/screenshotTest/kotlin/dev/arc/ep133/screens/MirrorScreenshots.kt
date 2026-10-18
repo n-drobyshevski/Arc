@@ -226,10 +226,10 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f, claude: ClaudeUi? = null, toolsPage: ToolsPage? = null, factoryKit: dev.arc.ep133.features.FactoryKit? = null) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f, claude: ClaudeUi? = null, toolsPage: ToolsPage? = null, factoryKit: dev.arc.ep133.features.FactoryKit? = null, factoryKits: List<dev.arc.ep133.features.FactoryKit> = listOf(dev.arc.ep133.features.FactoryKit.EP133, dev.arc.ep133.features.FactoryKit.EP1320)) {
     // As the controller has it: the last read's day alone for a short line ("Seen Oct 5").
     val offlineShort = offline?.takeIf { it.startsWith("Last seen ") }?.let { MirrorText.seen(it.removePrefix("Last seen ").substringBefore(",")) }
-    // [factoryKit]: both kits saved, that one shown (its switch on the factory line).
+    // [factoryKit]: [factoryKits] saved (two or more), that one shown (its switch on the factory line).
     val mirror = MirrorUi(state, loading = loading, error = error, offline = offline, offlineShort = offlineShort, offlineProjects = offlineProjects, kit = factoryKit ?: dev.arc.ep133.features.FactoryKit.EP133)
     // PROJECT as MainActivity works it out; TEMPO's light caught on a beat while the click is on; FX named on its light,
     // held while [punch] gives the punch-ins.
@@ -269,6 +269,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             initialNoteOpen = noteOpen,
             onGetFactory = if (getFactory) ({}) else null,
             factoryKit = factoryKit,
+            factoryKits = factoryKits,
             onPad = if (playingPads.isNotEmpty()) ({ _, _, _, _ -> }) else null,
             playingPads = playingPads,
             keys = keys,
@@ -367,6 +368,20 @@ fun LiveFactoryPreview() = Live(lastRead.copy(activeProject = 1), offline = dev.
 @Composable
 fun LiveFactoryKitPreview() =
     Live(lastRead.copy(activeProject = 1), offline = dev.arc.ep133.text.MirrorText.FACTORY, noteOpen = true, factoryKit = dev.arc.ep133.features.FactoryKit.EP1320)
+
+// All three kits saved, the EP-40's shown: the switch's three keys under the factory line, at a small phone's width.
+@PreviewTest
+@Preview(name = "Live factory three kits", widthDp = 360, heightDp = 1180, showBackground = true)
+@Composable
+fun LiveFactoryThreeKitsPreview() =
+    Live(lastRead.copy(activeProject = 1), offline = dev.arc.ep133.text.MirrorText.FACTORY, noteOpen = true, factoryKit = dev.arc.ep133.features.FactoryKit.EP40, factoryKits = dev.arc.ep133.features.FactoryKit.SHOWN)
+
+// The three in Live tools, for the one-group view.
+@PreviewTest
+@Preview(name = "Live factory three kits tools", widthDp = 360, heightDp = 843, showBackground = true)
+@Composable
+fun LiveFactoryThreeKitsToolsPreview() =
+    Live(lastRead.copy(activeProject = 1), oneGroup = true, tools = true, offline = dev.arc.ep133.text.MirrorText.FACTORY, factoryKit = dev.arc.ep133.features.FactoryKit.EP40, factoryKits = dev.arc.ep133.features.FactoryKit.SHOWN)
 
 // The same switch in Live tools, for the one-group view.
 @PreviewTest
@@ -2084,6 +2099,17 @@ private val bothKitsState = connectedState.copy(
 @Preview(name = "Settings factory kits", widthDp = 393, heightDp = 1500, showBackground = true)
 @Composable
 fun SettingsFactoryKitsPreview() = Settings(dark = false, state = bothKitsState, settings = AppSettings(keepLast = 10, factoryKit = dev.arc.ep133.features.FactoryKit.EP1320))
+
+// All three kits saved: the EP-40's row says Saved too, and the kit row offers the three, the EP-40's picked.
+private val threeKitsState = bothKitsState.copy(
+    backups = bothKitsState.backups +
+        backup("r", dev.arc.ep133.text.FeatureText.FACTORY_TITLE_40, 1_791_200_000_000L, 471, 9).copy(source = dev.arc.ep133.features.FactoryKit.EP40.source),
+)
+
+@PreviewTest
+@Preview(name = "Settings three factory kits", widthDp = 360, heightDp = 1500, showBackground = true)
+@Composable
+fun SettingsThreeFactoryKitsPreview() = Settings(dark = false, state = threeKitsState, settings = AppSettings(keepLast = 10, factoryKit = dev.arc.ep133.features.FactoryKit.EP40))
 
 // A tablet: the sections listed on the left, the plates beside them.
 @PreviewTest

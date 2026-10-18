@@ -1,5 +1,8 @@
 package dev.arc.ep133.data
 
+import dev.arc.ep133.backup.Pak
+import dev.arc.ep133.backup.Paks
+import dev.arc.ep133.features.FactoryKit
 import dev.arc.ep133.features.FactorySounds
 import dev.arc.ep133.protocol.CancelSignal
 import dev.arc.ep133.protocol.CancelledError
@@ -25,15 +28,19 @@ object FactoryDownload {
         c.inputStream.use { it.readBytes() }.toString(Charsets.UTF_8)
     }
 
-    /** The file, with its progress as it arrives ([total] null when the server doesn't say). [origin]: tests serve their own. */
+    /**
+     * The file, with its progress as it arrives ([total] null when the server doesn't say). [origin]: tests serve
+     * their own; [expected], the size to make room for when the server doesn't say.
+     */
     fun bytes(
         path: String,
         signal: CancelSignal,
         origin: String = FactorySounds.ORIGIN,
+        expected: Long = FactorySounds.KNOWN_SIZE,
         onProgress: (done: Long, total: Long?) -> Unit,
     ): ByteArray = get(origin + path, signal) { c ->
         val total = c.contentLengthLong.takeIf { it > 0 && c.contentEncoding == null }
-        val out = ByteArrayOutputStream(total?.toInt() ?: FactorySounds.KNOWN_SIZE.toInt())
+        val out = ByteArrayOutputStream(total?.toInt() ?: expected.toInt())
         val buf = ByteArray(64 * 1024)
         var done = 0L
         c.inputStream.use { input ->
@@ -51,6 +58,29 @@ object FactoryDownload {
         if (total != null && done != total) throw IOException("The download stopped at $done of $total bytes")
         out.toByteArray()
     }
+
+    /**
+     * [kit]'s factory pack (one teenage engineering offers: FactorySounds.download), found through the EP Sample
+     * Tool's page and script, downloaded with its progress ([all] the kit's last known size when the server doesn't
+     * say), and checked to be that kit's: its bytes, and the pack read from them.
+     */
+    suspend fun pack(
+        kit: FactoryKit,
+        signal: CancelSignal,
+        origin: String = FactorySounds.ORIGIN,
+        onProgress: (done: Long, all: Long) -> Unit,
+    ): Pair<ByteArray, Pak> {
+        val d = requireNotNull(FactorySounds.download(kit)) { "No download for ${kit.model}" }
+        val path = FactorySounds.locate(kit) { p -> text(p, signal, origin) }
+        val bytes = bytes(path, signal, origin, d.knownSize) { done, total -> onProgress(done, maxOf(total ?: d.knownSize, done)) }
+        val pak = Paks.open(bytes)
+        if (!FactorySounds.isFactory(pak, kit)) throw IOException(notFactory(kit))
+        return bytes to pak
+    }
+
+    /** What a file that isn't [kit]'s factory pack is called. */
+    fun notFactory(kit: FactoryKit): String =
+        if (kit == FactoryKit.EP40) dev.arc.ep133.text.FeatureText.NOT_FACTORY_40 else dev.arc.ep133.text.FeatureText.NOT_FACTORY
 
     private fun <T> get(url: String, signal: CancelSignal, read: (HttpURLConnection) -> T): T {
         signal.check()
