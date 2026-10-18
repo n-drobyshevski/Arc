@@ -1,7 +1,8 @@
 name: Release
 
 # Push a tag vX.Y.Z (matching version.properties) to build arc-X.Y.Z.apk and
-# publish it as a GitHub Release, with that version's CHANGELOG.md notes.
+# arc-X.Y.Z.aab (for Google Play), signed with the upload key, and publish them
+# as a GitHub Release with that version's CHANGELOG.md notes.
 on:
   push:
     tags: ['v*']
@@ -16,6 +17,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Oboe's source (third_party/oboe), built into Live's native engine.
+          submodules: true
 
       - name: Check the tag, version and changelog agree
         id: version
@@ -57,28 +61,52 @@ jobs:
           echo "NDK $ndk, CMake $cmake"
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" "cmake;$cmake" > /dev/null
 
+      # The upload key, from the repository's secrets (README, "Versions and releases").
+      - name: Unpack the upload key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ARC_UPLOAD_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ARC_UPLOAD_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ARC_UPLOAD_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ARC_UPLOAD_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::The upload key's secrets (ARC_UPLOAD_KEYSTORE_BASE64, ARC_UPLOAD_KEYSTORE_PASSWORD, ARC_UPLOAD_KEY_ALIAS, ARC_UPLOAD_KEY_PASSWORD) are not all set."
+            exit 1
+          fi
+          keystore="$RUNNER_TEMP/upload.jks"
+          base64 --decode <<< "$KEYSTORE_BASE64" > "$keystore"
+          {
+            echo "ARC_UPLOAD_KEYSTORE=$keystore"
+            echo "ARC_UPLOAD_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "ARC_UPLOAD_KEY_ALIAS=$KEY_ALIAS"
+            echo "ARC_UPLOAD_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
       # ARC_RELEASE names the build exactly X.Y.Z (no -dev suffix).
       - name: Test, lint and build
         env:
           ARC_RELEASE: 'true'
-        run: ./gradlew test :app:lintDebug :app:assembleDebug --stacktrace
+        run: ./gradlew test :app:lintRelease :app:assembleRelease :app:bundleRelease --stacktrace
 
-      # The release APK is the debug-signed build (the same key as every CI build),
-      # so it installs over test builds. There is no release key yet.
-      - name: Check the APK is signed with the shared debug key
+      # Signed, and not with the shared debug key that signs every test build.
+      - name: Check the APK is signed with the upload key
         run: |
           tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
-          certs="$("$tools/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk)"
+          certs="$("$tools/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk)"
           echo "$certs"
-          grep -q "SHA-256 digest: 156dde54a742795f0dcccd03c5ff6cb0d1efd344de8aa8eea6095d3a70793fc0" <<< "$certs"
+          if grep -q "SHA-256 digest: 156dde54a742795f0dcccd03c5ff6cb0d1efd344de8aa8eea6095d3a70793fc0" <<< "$certs"; then
+            echo "::error::The release APK is signed with the shared debug key."
+            exit 1
+          fi
 
       - name: Publish the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk "arc-$VERSION.apk"
-          gh release create "$GITHUB_REF_NAME" "arc-$VERSION.apk" \
+          cp app/build/outputs/apk/release/app-release.apk "arc-$VERSION.apk"
+          cp app/build/outputs/bundle/release/app-release.aab "arc-$VERSION.aab"
+          gh release create "$GITHUB_REF_NAME" "arc-$VERSION.apk" "arc-$VERSION.aab" \
             --title "arc $VERSION" \
             --notes-file notes.md \
             --verify-tag

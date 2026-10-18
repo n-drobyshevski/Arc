@@ -248,6 +248,7 @@ Requirements:
 - For Live's native audio engine (`app/src/main/cpp`): NDK 29.0.14206865 and CMake 4.1.2 from the SDK. AGP installs both when the SDK licences are accepted, or install them first with `sdkmanager "ndk;29.0.14206865" "cmake;4.1.2"`.
 - A host C++ compiler (`clang++` or `g++`) for the native engine's host test, which `./gradlew test` runs. Without one it is skipped with a warning.
 - Gradle needs nothing installed beyond the included wrapper (Gradle 9.8).
+- Oboe's source, a git submodule at `third_party/oboe`: clone with `git clone --recurse-submodules`, or run `git submodule update --init` in a clone made without it. The native build stops and says so when it is missing.
 
 ```sh
 # once: tell Gradle where the SDK is
@@ -255,6 +256,7 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 
 ./gradlew test                  # all unit tests (core + app)
 ./gradlew :app:assembleDebug    # app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:assembleRelease  # minified (R8); unsigned unless the upload key is given (Versions and releases)
 ./gradlew :app:lintDebug        # Android lint, including the core module against minSdk 29
 ./gradlew :app:updateDebugScreenshotTest  # renders the screens in app/src/screenshotTest to PNGs
 ```
@@ -289,9 +291,15 @@ arc follows [Semantic Versioning](https://semver.org/). A major version breaks `
 - **To release:**
   1. Bump `version.properties` and move the `Unreleased` notes in `CHANGELOG.md` under `## [X.Y.Z] - date`. Commit and merge.
   2. `git tag vX.Y.Z && git push origin vX.Y.Z`.
-  3. The **Release** workflow checks that the tag matches `version.properties` and that the changelog has that section. It then runs the tests, lint and build, and publishes `arc-X.Y.Z.apk` as a GitHub Release with those notes.
+  3. The **Release** workflow checks that the tag matches `version.properties` and that the changelog has that section. It then runs the tests, lint and the minified release build, and publishes `arc-X.Y.Z.apk` (to install directly) and `arc-X.Y.Z.aab` (to upload to Google Play) as a GitHub Release with those notes.
 
-  The release APK is signed with the same shared debug key as every CI build, so it installs over test builds. There is no separate release key yet.
+- **The upload key:** release builds are signed with arc's upload key, never with the shared debug key (the workflow fails if they are). The key is kept only in the repository's Actions secrets, never in git. Google Play re-signs what it ships with its own app signing key; the upload key is what Play checks an upload against. To make it once:
+  ```sh
+  keytool -genkeypair -v -keystore arc-upload.jks -alias arc-upload -keyalg RSA -keysize 4096 -validity 10000
+  base64 -w0 arc-upload.jks   # the value of ARC_UPLOAD_KEYSTORE_BASE64
+  ```
+  Then add the secrets `ARC_UPLOAD_KEYSTORE_BASE64`, `ARC_UPLOAD_KEYSTORE_PASSWORD`, `ARC_UPLOAD_KEY_ALIAS` (`arc-upload`) and `ARC_UPLOAD_KEY_PASSWORD`, and keep `arc-upload.jks` and its passwords somewhere safe outside the repository. To sign a release build locally, set `ARC_UPLOAD_KEYSTORE` (the file's path) and the other three as environment variables; without all four, `assembleRelease` builds an unsigned APK.
+- **Moving from a test build to a release build:** releases up to 0.4.0, like every test build, were signed with the shared debug key. A release-signed build can't install over one of those, so uninstall arc once. The backups and `library.json` stay in Documents/arc: after installing, tap **Restore from Documents/arc**. What lives only in arc's own files (Live's patterns, its offline pad changes, the copies of the device's sounds) is lost, so note any patterns you want to keep. After that, each release installs over the previous one. Test builds keep the debug key, so they and a release build can't install over each other.
 
 ### Toolchain
 
@@ -306,10 +314,10 @@ arc follows [Semantic Versioning](https://semver.org/). A major version breaks `
 | Room | 2.8.5 (KSP) |
 | kotlinx.coroutines / kotlinx.serialization | 1.11.0 |
 | NDK / CMake | 29.0.14206865 / 4.1.2 (Live's native engine, c++_shared) |
-| Oboe | 1.11.0 (prefab AAR) |
+| Oboe | 1.11.0 (source, the `third_party/oboe` submodule, linked statically with the NDK's static C++ runtime) |
 | Tests | JUnit 5, kotlinx-coroutines-test |
 
-Apart from AndroidX, Kotlin and kotlinx libraries, the only third-party code is the bundled Manrope font and Google's Oboe audio library (Apache 2.0) with the NDK's C++ runtime, which Live's native engine uses. For tests only, Google's Compose Preview Screenshot Testing plugin renders screens to PNG (`app/src/screenshotTestDebug/reference/`); nothing from it ships in the app (SIL OFL, `app/src/main/assets/OFL-Manrope.txt`).
+Apart from AndroidX, Kotlin and kotlinx libraries, the only third-party code is the bundled Manrope font and Google's Oboe audio library (Apache 2.0) with the NDK's C++ runtime, both built into Live's native engine (`libarc_live.so`, which exports only its JNI functions). For tests only, Google's Compose Preview Screenshot Testing plugin renders screens to PNG (`app/src/screenshotTestDebug/reference/`); nothing from it ships in the app (SIL OFL, `app/src/main/assets/OFL-Manrope.txt`).
 
 ## Layout
 
