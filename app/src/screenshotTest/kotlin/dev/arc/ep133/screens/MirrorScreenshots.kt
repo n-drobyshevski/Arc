@@ -229,7 +229,7 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, skin: SkinChoice = SkinChoice.EP133, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f, claude: ClaudeUi? = null, trimming: String? = null, toolsPage: ToolsPage? = null, factoryKit: dev.arc.ep133.features.FactoryKit? = null, factoryKits: List<dev.arc.ep133.features.FactoryKit> = listOf(dev.arc.ep133.features.FactoryKit.EP133, dev.arc.ep133.features.FactoryKit.EP1320)) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, skin: SkinChoice = SkinChoice.EP133, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f, claude: ClaudeUi? = null, trimming: String? = null, toolsPage: ToolsPage? = null, factoryKit: dev.arc.ep133.features.FactoryKit? = null, factoryKits: List<dev.arc.ep133.features.FactoryKit> = listOf(dev.arc.ep133.features.FactoryKit.EP133, dev.arc.ep133.features.FactoryKit.EP1320), practice: dev.arc.ep133.ui.screens.LivePractice? = null) {
     // As the controller has it: the last read's day alone for a short line ("Seen Oct 5").
     val offlineShort = offline?.takeIf { it.startsWith("Last seen ") }?.let { MirrorText.seen(it.removePrefix("Last seen ").substringBefore(",")) }
     // [factoryKit]: [factoryKits] saved (two or more), that one shown (its switch on the factory line).
@@ -298,6 +298,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             scene = sceneUi,
             onSettings = {},
             claude = claude,
+            practice = practice,
         )
     }
 }
@@ -1378,6 +1379,48 @@ private val stepPanel = StepUi(
     recordHeld = true,
     status = MirrorText.stepPlaced("SNARE"),
     interval = Timing.SIXTEENTH,
+)
+
+// PRACTICE on group A: the kick (7), snare (9) and hats (4) to play, lit ahead (the kick now, the hat in a beat, the
+// snare in two), the lane with their hits coming in to the orange line, and WAIT, 75%, the loop and BACKING under it.
+private val practiceTargets = listOf(
+    dev.arc.ep133.features.PracticeTarget(9, 0, 127), dev.arc.ep133.features.PracticeTarget(6, 48, 100), dev.arc.ep133.features.PracticeTarget(6, 96, 100),
+    dev.arc.ep133.features.PracticeTarget(11, 192, 127), dev.arc.ep133.features.PracticeTarget(6, 144, 100), dev.arc.ep133.features.PracticeTarget(9, 288, 100),
+    dev.arc.ep133.features.PracticeTarget(6, 240, 100), dev.arc.ep133.features.PracticeTarget(6, 336, 64),
+)
+private val practiceFrame = dev.arc.ep133.controller.PracticeFrame(0.0, practiceTargets.map { it to it.tick.toDouble() }.filter { it.second > 0 || it.first.offset == 9 }, dev.arc.ep133.features.PracticeCounts())
+private val practiceUi = dev.arc.ep133.controller.PracticeUi(
+    dev.arc.ep133.features.PracticeSpec(0, speed = 75), "A \u00B7 01", listOf(9, 11, 6), mapOf(9 to "kick", 11 to "snare", 6 to "hat"), 69, 1,
+)
+
+@PreviewTest
+@Preview(name = "Live practice", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePracticePreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(), practice = dev.arc.ep133.ui.screens.LivePractice(practiceUi, frame = { practiceFrame }),
+)
+
+// Stopped after four passes: how it went in place of the lane, the hat most often early; the dark theme.
+@PreviewTest
+@Preview(name = "Live practice result dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePracticeResultDarkPreview() = Live(
+    lastRead, dark = true, oneGroup = true, transport = patternUi(),
+    practice = dev.arc.ep133.ui.screens.LivePractice(
+        practiceUi.copy(counts = dev.arc.ep133.features.PracticeCounts(onTime = 26, early = 4, late = 1, missed = 1, passes = 4, cleanRun = 1), worst = 6 to dev.arc.ep133.features.HitMark.EARLY),
+    ),
+)
+
+// WAIT: the beat stands at the kick and the hat on 1, both lit; the header counts the steps.
+@PreviewTest
+@Preview(name = "Live practice wait", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePracticeWaitPreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(),
+    practice = dev.arc.ep133.ui.screens.LivePractice(
+        practiceUi.copy(spec = practiceUi.spec.copy(wait = true), waiting = setOf(9, 6), waitStep = 0, waitSteps = 7),
+        frame = { practiceFrame },
+    ),
 )
 
 @PreviewTest
@@ -2576,6 +2619,7 @@ private fun BeatSheet(
     initialPicked: List<Pair<PhysicalPad, Int>> = emptyList(),
     initialPicking: PhysicalPad? = null,
     replaceScenes: Boolean = false,
+    practise: Boolean = false,
 ) {
     val ui = beatImportUi(BeatCards.read(text), seq, 122.0, { names[it] }, fx = fx, shaping = shaping, sounds = sounds, silent = silent)
     Framed(Tab.LIVE, dark = dark) {
@@ -2585,6 +2629,7 @@ private fun BeatSheet(
                 ui, onCancel = {}, onImport = { _, _, _, _, _, _ -> }, onCopyProblems = {},
                 initialSetTempo = initialSetTempo, initialPicked = initialPicked, initialPicking = initialPicking,
                 replaceScenes = replaceScenes,
+                onPractise = if (practise) ({}) else null,
             )
         }
     }
@@ -2596,11 +2641,12 @@ private fun BeatSheet(
 @Composable
 fun BeatSheetOneGroupPreview() = BeatSheet(BOOM_BAP)
 
-// Three groups: a new scene to play them, a long pattern's first two bars and "+2 bars", the swing said, the tempo chip chosen.
+// Three groups: a new scene to play them, a long pattern's first two bars and "+2 bars", the swing said, the tempo chip chosen,
+// IMPORT AND PRACTISE under IMPORT.
 @PreviewTest
 @Preview(name = "Beat sheet scene dark", widthDp = 393, heightDp = 1100, showBackground = true)
 @Composable
-fun BeatSheetSceneDarkPreview() = BeatSheet(NIGHT_DRIVE, dark = true, initialSetTempo = true)
+fun BeatSheetSceneDarkPreview() = BeatSheet(NIGHT_DRIVE, dark = true, initialSetTempo = true, practise = true)
 
 // Three scenes and a chain: each scene's grids under its title, a row for each scene ("Scene 1 · Intro" over where it goes: new S02 with
 // the patterns it takes, a group it leaves out "(same)"), and the CHAIN row with SET CHAIN on, on a small phone.

@@ -27,6 +27,10 @@ Sixteen steps a bar are counted **1 e and a, 2 e and a, 3 e and a, 4 e and a**: 
 - **An improver** (`- Me: I've had some practice`): two parts per step, start nearer the tempo, point out the ghost notes and the swing.
 - **A sure hand** (`- Me: I'm sure on the pads`): whole groups at once, then the feel: velocities, swing, where the fills go, how to vary it live.
 
+## Arc can run it
+
+Arc's **PRACTICE** (the PLAY tab on the Claude page, or **IMPORT AND PRACTISE** on the beat card sheet) plays the beat with the player's group left out, lights each pad before its hit and counts the hits in time. Suggest it for each step: a beginner with **WAIT** on (the beat waits for each hit: the order first) and **50%**, then WAIT off, then 75% and 100%. Ask them how many hits were in time and which pad Arc says was off most, and make the next step from that.
+
 ## Each step
 
 Give one step per message: what to play (pads, counts, hand), at what tempo, how to tell it is right, and what to do if it isn't (slower, or that part alone). Then stop and wait for them. When they say it works, the next step; when they say it doesn't, a smaller step or a slower tempo, never more words. When the whole beat plays, suggest recording it on the EP-133 (SEQ-1 or SEQ-4) and offer a variation to learn next.

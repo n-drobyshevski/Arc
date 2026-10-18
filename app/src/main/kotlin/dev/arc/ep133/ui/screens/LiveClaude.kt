@@ -127,6 +127,8 @@ class ClaudeUi(
     val onPrompt: (dev.arc.ep133.features.ClaudePrompt) -> Unit = {},
     /** SHARE: the prompt, with the card [pick] names ([group]'s pattern for PATTERN) when it goes with one. */
     val onShare: (pick: dev.arc.ep133.features.SharePick, group: Int) -> Unit = { _, _ -> },
+    /** PRACTICE (the PLAY tab): play along with [pick] on Live's pads ([group]'s pattern for PATTERN). */
+    val onPractice: (pick: dev.arc.ep133.features.SharePick, group: Int) -> Unit = { _, _ -> },
     /** COPY: as SHARE, onto the clipboard. */
     val onCopy: (pick: dev.arc.ep133.features.SharePick, group: Int) -> Unit = { _, _ -> },
     val onSavePrompt: (dev.arc.ep133.features.ClaudePrompt) -> Unit = {},
@@ -188,6 +190,8 @@ fun ColumnScope.BeatImportSheetContent(
     onCancel: () -> Unit,
     onImport: (setTempo: Boolean, soundPads: Set<PhysicalPad>, applyFx: Boolean, shapePads: Set<PhysicalPad>, picked: Map<PhysicalPad, Int>, setChain: Boolean) -> Unit,
     onCopyProblems: (List<CardProblem>) -> Unit,
+    /** IMPORT AND PRACTISE, after the import: practice on Live's pads (null hides it). */
+    onPractise: (() -> Unit)? = null,
     /** For screenshots: start with the tempo chip chosen. */
     initialSetTempo: Boolean = false,
     /** The preview of the sounds PICK SOUND lists: what plays, and the keys that play and stop it. */
@@ -369,19 +373,26 @@ fun ColumnScope.BeatImportSheetContent(
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
     }
+    val import = {
+        val pads = if (putOnPads) sounds?.changes.orEmpty().filter { padKey(it.pad) !in unticked }.mapTo(HashSet()) { it.pad } else emptySet()
+        val shaped = ui.shaping?.rows.orEmpty().filter { it.changes(soundGoing(it.pad)) && padKey(it.pad) !in shapeOff }.mapTo(HashSet()) { it.pad }
+        // The picked sounds that are ticked: they are in [pads] too, being SOUNDS rows.
+        val chosen = pickedRows.filter { it.pad in pads }.associate { it.pad to it.pick.slot!! }
+        onImport(setTempo && tempo != null, pads, applyFx && ui.fx != null, shaped, chosen, setChain && chainUi != null)
+    }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         ArcKey(Strings.CANCEL, onCancel, Modifier.weight(1f))
+        ArcKey(ClaudeText.IMPORT, import, Modifier.weight(1f), style = KeyStyle.Signal, enabled = blocked == null)
+    }
+    // IMPORT, then play along with it on Live's pads.
+    onPractise?.let { practise ->
         ArcKey(
-            ClaudeText.IMPORT,
+            dev.arc.ep133.text.PracticeText.IMPORT_PRACTICE,
             {
-                val pads = if (putOnPads) sounds?.changes.orEmpty().filter { padKey(it.pad) !in unticked }.mapTo(HashSet()) { it.pad } else emptySet()
-                val shaped = ui.shaping?.rows.orEmpty().filter { it.changes(soundGoing(it.pad)) && padKey(it.pad) !in shapeOff }.mapTo(HashSet()) { it.pad }
-                // The picked sounds that are ticked: they are in [pads] too, being SOUNDS rows.
-                val chosen = pickedRows.filter { it.pad in pads }.associate { it.pad to it.pick.slot!! }
-                onImport(setTempo && tempo != null, pads, applyFx && ui.fx != null, shaped, chosen, setChain && chainUi != null)
+                import()
+                practise()
             },
-            Modifier.weight(1f),
-            style = KeyStyle.Signal,
+            Modifier.fillMaxWidth(),
             enabled = blocked == null,
         )
     }

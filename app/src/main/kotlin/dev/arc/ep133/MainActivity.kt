@@ -962,6 +962,21 @@ class MainActivity : ComponentActivity() {
         // SCENES: the S01 chip beside STEP's (the scene's readout while the pattern plays) unrolls the panel over the function
         // keys, where the groups' patterns and the scenes are picked (a pick waits for its bar or pattern end while it plays),
         // COMMIT, CLR / DEL held, CHANGE, and COPY and PASTE of a pattern, a bar or a pad's notes. The panel stays open while it plays.
+        // PRACTICE: its panel on Live while one is on (from Claude's page, or the beat card sheet's IMPORT AND PRACTISE).
+        val practiceState by controller.practice.collectAsStateWithLifecycle()
+        val livePractice = practiceState?.let { pu ->
+            remember(pu, pattern.phase) {
+                dev.arc.ep133.ui.screens.LivePractice(
+                    ui = pu,
+                    frame = controller::practiceFrame,
+                    running = pattern.phase == dev.arc.ep133.features.TransportPhase.PLAYING || pattern.phase == dev.arc.ep133.features.TransportPhase.COUNT_IN,
+                    onPlay = controller::practicePlay,
+                    onStop = controller::practiceStop,
+                    onClose = controller::endPractice,
+                    onChange = controller::changePractice,
+                )
+            }
+        }
         val liveScene = remember(scene, pattern.phase) {
             dev.arc.ep133.ui.screens.LiveScene(
                 ui = scene,
@@ -1317,6 +1332,7 @@ class MainActivity : ComponentActivity() {
                             arp = liveArp,
                             step = liveStep,
                             scene = liveScene,
+                            practice = livePractice,
                             onSettings = { settingsOpen = true },
                             // CLAUDE in Live tools: the scene and the patterns of its groups, which the share keys name.
                             claude = dev.arc.ep133.ui.screens.ClaudeUi(
@@ -1336,6 +1352,7 @@ class MainActivity : ComponentActivity() {
                                 onPrompt = controller::setClaudePrompt,
                                 onShare = { pick, g -> sharePrompt(claudePrompt, pick, g, scene.label, scene.groups.getOrNull(g)?.number ?: 1) },
                                 onCopy = { pick, g -> sharePrompt(claudePrompt, pick, g, scene.label, scene.groups.getOrNull(g)?.number ?: 1, copy = true) },
+                                onPractice = controller::practisePick,
                                 onSavePrompt = controller::saveClaudePrompt,
                                 onDeletePrompt = controller::deleteClaudePrompt,
                                 onPaste = { controller.receiveBeat(clipboardText()) },
@@ -1491,6 +1508,7 @@ class MainActivity : ComponentActivity() {
                                 replaceScenes = appSettings.replaceScenes,
                                 onReplaceScenes = controller::setReplaceScenes,
                                 onCopyProblems = ::copyProblems,
+                                onPractise = controller::practiseImport,
                                 // PICK SOUND lists the sounds the card's sound lines choose from, played as the pad sheet plays them.
                                 player = dev.arc.ep133.ui.screens.PickPlayerUi(
                                     playing = playing,

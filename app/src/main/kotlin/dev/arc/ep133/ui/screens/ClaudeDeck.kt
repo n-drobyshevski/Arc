@@ -189,6 +189,12 @@ internal fun ClaudeDeck(claude: ClaudeUi, group: Int) {
                         )
                     }
                 }
+                // PLAY: practise it here too, on Live's pads, the rest of the beat underneath.
+                if (prompt.task == PromptTask.PLAY) {
+                    add {
+                        DeckKey(DeckGlyph.PLAY, dev.arc.ep133.text.PracticeText.PRACTICE, dev.arc.ep133.text.PracticeText.PRACTICE_NAME, { claude.onPractice(pick, g) }, style = DeckStyle.NAVY, enabled = !empty)
+                    }
+                }
                 // Words of one's own can be dropped for the builder's again.
                 if (prompt.text != null) {
                     add { DeckKey(DeckGlyph.RESET, PromptText.KEY_REBUILD, PromptText.REBUILD_NAME, { set(prompt.copy(text = null)) }) }

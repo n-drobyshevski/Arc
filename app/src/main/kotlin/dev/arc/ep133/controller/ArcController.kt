@@ -325,6 +325,15 @@ private const val BEAT_WAIT_MS = 2_000L
 /** PATTERN's count-in starts this much later still: time for the click to open its own output. */
 private const val COUNT_IN_LEAD_NS = 150_000_000L
 
+/** PRACTICE from Claude's page starts at this percent of the tempo. */
+private const val PRACTICE_START_SPEED = 75
+
+/** WAIT's lane shows this many steps ahead. */
+private const val PRACTICE_WAIT_AHEAD = 6
+
+/** A lesson's step opens the next after this many clean passes in a row. */
+internal const val LESSON_CLEAN_PASSES = 4
+
 /** The patterns started for SAMPLE's PTN take start this much later still: time to ask for the take before bar 1. */
 private const val PATTERN_TAKE_LEAD_NS = 100_000_000L
 
@@ -2191,6 +2200,7 @@ class ArcController(
         }
         lastPressAt = pressedAt
         if (ready != null) startHeld(key, hold, ready, 0, pressedAt, measured = true, shapeFor(pad))
+        if (record) practicePress(pad, pressedAt)
         // The pad tapped is also the sound KEYS plays; it is loaded right here, so no preload for it.
         setKeysPad(pad)
         if (record) recordPress(pad, null, key, pressedAt, hold, first = patternPadDown(pressedAt))
@@ -4090,16 +4100,19 @@ class ArcController(
      * from arc's copies or a backup ([loadPatternPad]); the line counts them.
      */
     private fun refreshPatternPlan() {
-        val p = projectPatterns
+        // A practice plays the scene with the player's hits taken out, at its own speed.
+        val practising = practiceRun
+        val p = practising?.patterns ?: projectPatterns
         val m = mirror
         // Where each pattern started, for the recording's ticks as for the sequencer's.
         val phase = sceneDesk.phase
         patternRecorder.phase = phase
         // The picks waiting, as the patterns that take over: read from the sequencer as it stands, so a note recorded meanwhile is in them.
         val queued = sceneDesk.targets(projectSeq).mapValues { (g, q) -> dev.arc.ep133.audio.QueuedSwitch(projectSeq.pattern(g, q.to), q.at) }
-        val pads = queued.entries.fold(p.usedPads()) { all, (g, q) -> all + q.pattern.playable().map { dev.arc.ep133.features.PhysicalPad(g, it.offset) } }
+        val pads = queued.entries.fold(p.usedPads()) { all, (g, q) -> all + q.pattern.playable().map { dev.arc.ep133.features.PhysicalPad(g, it.offset) } } +
+            (practising?.targets?.map { dev.arc.ep133.features.PhysicalPad(practising.spec.group, it.offset) } ?: emptyList())
         val (voices, missing) = patternVoices(pads, ::padInMemory, { pad, keys -> shapeFor(pad, keys) }) { pad -> m?.sampleOf(pad) != null }
-        val bpm = patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)
+        val bpm = practising?.bpm ?: patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)
         val old = patternScheduler.plan
         if (old.patterns !== p || old.skip !== patternSkip || old.bpm != bpm || old.queued != queued || old.phase != phase || !sameVoices(old.voices, voices)) {
             patternScheduler.plan = dev.arc.ep133.audio.SeqPlan(p, voices, patternSkip, bpm, queued, phase)
@@ -4170,7 +4183,11 @@ class ArcController(
     private fun patternRunning() = transport.state.phase.let { it == TransportPhase.COUNT_IN || it == TransportPhase.PLAYING }
 
     /** RECORD goes down at [at] (the touch's time): armed or disarmed; running, recording on or off. */
-    fun patternRecordDown(at: Long) = patternAct { transport.recordDown(at) }
+    fun patternRecordDown(at: Long) {
+        // RECORD ends a practice: what is recorded goes into the scene as it is.
+        endPractice()
+        patternAct { transport.recordDown(at) }
+    }
 
     /** RECORD comes up at [at]: held a while after it punched in, recording stops with it. */
     fun patternRecordUp(at: Long) = patternAct { transport.recordUp(at) }
@@ -5332,6 +5349,174 @@ class ArcController(
         if (patternLoop?.isActive == true) followPattern()
     }
 
+    // ---------- PRACTICE: play along with a pattern, Live's pads lit ahead of each hit (an addition) ----------
+
+    /** A practice going on: its [spec], the patterns the sequencer plays meanwhile, the hits to play and how they score. */
+    private class PracticeRun(
+        val spec: dev.arc.ep133.features.PracticeSpec,
+        val place: String,
+        val patterns: dev.arc.ep133.features.ProjectPatterns,
+        val targets: List<dev.arc.ep133.features.PracticeTarget>,
+        val length: Int,
+        val bpm: Double,
+        val names: Map<Int, String>,
+        var score: dev.arc.ep133.features.PracticeScore,
+        var wait: dev.arc.ep133.features.PracticeWait?,
+    )
+
+    private var practiceRun: PracticeRun? = null
+    private val _practice = MutableStateFlow<PracticeUi?>(null)
+
+    /** PRACTICE as Live's panel shows it; null when no practice is on. */
+    val practice: StateFlow<PracticeUi?> = _practice
+
+    /** The tempo practice plays at: Live's, at [speed] percent. */
+    private fun practiceBpm(speed: Int) = patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo) * speed / 100.0
+
+    /**
+     * PRACTICE on [group]'s pattern in the scene showing ([spec]'s pads, bars and speed): Live shows that group's pads
+     * (one group, PADS), STEP's and SCENE's panels close, the transport stops, and the pattern plays from a bar counted in
+     * with the player's hits taken out, the rest of the scene underneath ([dev.arc.ep133.features.Practice.patterns]).
+     * Nothing is recorded. A toast, and no practice, when the group has no pad hits there.
+     */
+    fun practise(spec: dev.arc.ep133.features.PracticeSpec, lesson: LessonPlace? = null) {
+        val g = spec.group.coerceIn(0, 3)
+        val pattern = projectPatterns.group(g)
+        val targets = dev.arc.ep133.features.Practice.targets(pattern, spec)
+        if (targets.isEmpty()) {
+            toast(dev.arc.ep133.text.PracticeText.nothingToPlay(ClaudeText.place(g, projectSeq.selected(g))), error = true)
+            return
+        }
+        if (patternRunning()) patternStop()
+        if (stepDesk.open) closeStep()
+        if (sceneDesk.open) closeScene()
+        if (!settings.value.liveOneGroup || settings.value.liveKeys) changeSettings { it.copy(liveOneGroup = true, liveKeys = false) }
+        val bpm = practiceBpm(spec.speed)
+        val length = dev.arc.ep133.features.Practice.length(pattern, spec)
+        val names = targets.map { it.offset }.toSet().associateWith { o -> mirrorName(dev.arc.ep133.features.PhysicalPad(g, o)) ?: dev.arc.ep133.features.PadNotes.LABELS[o] }
+        practiceRun = PracticeRun(
+            spec, ClaudeText.place(g, projectSeq.selected(g)), dev.arc.ep133.features.Practice.patterns(projectPatterns, spec), targets, length, bpm, names,
+            dev.arc.ep133.features.PracticeScore(targets, length, bpm),
+            if (spec.wait) dev.arc.ep133.features.PracticeWait(targets) else null,
+        )
+        practiceLesson = lesson
+        refreshPatternPlan()
+        showPractice()
+        if (!spec.wait) practicePlay()
+    }
+
+    /** Practice from Claude's page: [pick]'s group ([group] for a pattern; for the scene or the chain, the scene's first group with pad hits). */
+    fun practisePick(pick: dev.arc.ep133.features.SharePick, group: Int) {
+        val g = if (pick == dev.arc.ep133.features.SharePick.PATTERN) group else practiceGroup(projectPatterns, group)
+        practise(dev.arc.ep133.features.PracticeSpec(g, speed = PRACTICE_START_SPEED))
+    }
+
+    /** The settings of the practice on changed by [change] (speed, bars, WAIT, the backing): it starts over with them. */
+    fun changePractice(change: (dev.arc.ep133.features.PracticeSpec) -> dev.arc.ep133.features.PracticeSpec) {
+        val run = practiceRun ?: return
+        val next = change(run.spec)
+        if (next == run.spec) return
+        practise(next, practiceLesson)
+    }
+
+    /** PRACTICE's ▶: from the top again, the counts cleared (in WAIT, the first step). */
+    fun practicePlay() {
+        val run = practiceRun ?: return
+        run.score = dev.arc.ep133.features.PracticeScore(run.targets, run.length, run.bpm)
+        run.wait = if (run.spec.wait) dev.arc.ep133.features.PracticeWait(run.targets) else null
+        if (!run.spec.wait) {
+            if (patternRunning()) patternStop()
+            patternAct { transport.practise() }
+        }
+        showPractice()
+    }
+
+    /** PRACTICE's ■: the transport stops and the counts stay, with the pad most often off. */
+    fun practiceStop() {
+        if (practiceRun == null) return
+        if (patternRunning()) patternStop()
+        showPractice()
+    }
+
+    /** PRACTICE's ✕: it ends, the sequencer plays the scene as it is again. */
+    fun endPractice() {
+        if (practiceRun == null) return
+        if (patternRunning()) patternStop()
+        practiceRun = null
+        practiceLesson = null
+        _practice.value = null
+        refreshPatternPlan()
+    }
+
+    /** A lesson's place while one runs ([practise] with one). */
+    private var practiceLesson: LessonPlace? = null
+
+    /** [pad] pressed at [at] while practising: scored by its time heard, or in WAIT by whether the step waits for it. */
+    private fun practicePress(pad: dev.arc.ep133.features.PhysicalPad, at: Long) {
+        val run = practiceRun ?: return
+        if (pad.group != run.spec.group) return
+        val w = run.wait
+        if (w != null) {
+            w.press(pad.offset)
+        } else {
+            val tick = practiceTick(run, at) ?: return
+            run.score.advance(tick)
+            run.score.press(pad.offset, tick)
+        }
+        showPractice()
+    }
+
+    /** Where the practised group's loop is heard at [at], from its first start (negative counting in); null stopped. */
+    private fun practiceTick(run: PracticeRun, at: Long): Double? =
+        patternHeardTickAt(at)?.let { it - sceneDesk.phase.of(run.spec.group) }
+
+    /**
+     * The practice running at [now], for the pads and the lane: the tick heard, each pad's next hits (WAIT: the step's
+     * pads, now), the counts; the hits passed by are let go of. Null when no practice is on.
+     */
+    fun practiceFrame(now: Long): PracticeFrame? {
+        val run = practiceRun ?: return null
+        val w = run.wait
+        if (w != null) {
+            val upcoming = w.steps.drop(w.step).take(PRACTICE_WAIT_AHEAD).flatMap { s -> s.map { t -> t to (t.tick - w.tick).toDouble() } }
+                .filter { (t, d) -> d > 0 || t.offset in w.waiting }
+            return PracticeFrame(w.tick.toDouble(), upcoming, w.counts)
+        }
+        val tick = practiceTick(run, now) ?: return PracticeFrame(0.0, emptyList(), run.score.counts)
+        val passes = run.score.counts.passes
+        run.score.advance(tick)
+        if (run.score.counts.passes != passes) {
+            showPractice()
+            lessonPassed(run)
+        }
+        return PracticeFrame(tick, run.score.upcoming(tick), run.score.counts)
+    }
+
+    /** A pass closed in a lesson's step: enough clean ones in a row open the next ([LessonPlace.passesToGo]). */
+    private fun lessonPassed(run: PracticeRun) {
+        val l = practiceLesson ?: return
+        if (run.score.counts.cleanRun >= LESSON_CLEAN_PASSES) onLessonStepDone?.invoke(l.step)
+    }
+
+    /** Told when a lesson's step has had its clean passes (the lesson's runner opens the next). */
+    var onLessonStepDone: ((step: Int) -> Unit)? = null
+
+    private fun showPractice() {
+        val run = practiceRun ?: return
+        val w = run.wait
+        val counts = w?.counts ?: run.score.counts
+        _practice.value = PracticeUi(
+            run.spec, run.place, keypadOrder(run.names.keys), run.names, Math.round(run.bpm).toInt(), run.length / dev.arc.ep133.features.Seq.TICKS_PER_BAR,
+            running = w == null && patternRunning(),
+            counts = counts,
+            worst = run.score.worst(),
+            waiting = w?.waiting ?: emptySet(),
+            waitStep = w?.step ?: 0,
+            waitSteps = w?.steps?.size ?: 0,
+            lesson = practiceLesson?.let { it.copy(passesToGo = (LESSON_CLEAN_PASSES - counts.cleanRun).coerceAtLeast(0)) },
+        )
+    }
+
     // ---------- BEAT CARDS: share a pattern or scene to Claude, paste Claude's card back (an addition) ----------
 
     /**
@@ -5542,6 +5727,7 @@ class ArcController(
     ) {
         val ui = _beatImport.value ?: return
         val card = ui.card ?: return
+        lastImport = null
         var applied: BeatApplied? = null
         // The sequencer as it was: UNDO is that one, once the sounds are back with it.
         val before = projectSeq
@@ -5557,6 +5743,7 @@ class ArcController(
             toast(dev.arc.ep133.text.ClaudeText.groupFull(a.fullGroup), error = true)
             return
         }
+        lastImport = a
         _beatImport.value = null
         _claudeWaiting.value = null
         if (setTempo) card.tempo?.let { setTempo(dev.arc.ep133.features.Tempo.round(it)) }
@@ -5585,6 +5772,19 @@ class ArcController(
             return
         }
         scope.launch { putTail(a, entry, picks, shapes) }
+    }
+
+    /** Where the last IMPORT put the card (for IMPORT AND PRACTISE). */
+    private var lastImport: BeatApplied? = null
+
+    /**
+     * IMPORT AND PRACTISE: practice on what the last import placed, in the scene it selected: the first of its groups
+     * with pad hits ([practiceGroup]).
+     */
+    fun practiseImport() {
+        val a = lastImport ?: return
+        val first = a.placed.firstOrNull()?.first ?: 0
+        practise(dev.arc.ep133.features.PracticeSpec(practiceGroup(projectPatterns, first), speed = PRACTICE_START_SPEED))
     }
 
     /** The sounds an IMPORT put on pads, or would: one UNDO step with the patterns ([BeatUndo]). */
