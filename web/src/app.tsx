@@ -58,7 +58,7 @@ import { WebText } from './core/text/webText'
 import { attachDrop, isPakName } from './platform/files/pick'
 import { supported as hapticsSupported } from './platform/haptics'
 import { REVIEW_KEY, type ArcController } from './state/controller'
-import { emptyMirrorState, type MirrorUi, type TaskUi } from './state/types'
+import type { TaskUi } from './state/types'
 import { APP_BUILD } from './version'
 import { AppProvider, useController, useNav } from './ui/AppContext'
 import { HapticsContext } from './ui/useHaptic'
@@ -252,7 +252,7 @@ function Root(): JSX.Element {
   const claude = useMemo(() => claudeUi(c), [c])
   const sample = useMemo(() => sampleUi(c), [c])
   // PROJECT's key: only what it shows re-renders the shell, not each publish.
-  const projectKey = useMemo(() => projectKeySignal(() => liveMirror(c), () => c.state.value.busy), [c])
+  const projectKey = useMemo(() => projectKeySignal(() => c.liveMirror.value, () => c.state.value.busy), [c])
   // The top bar's mic key: its light read there alone.
   const micKey = useMemo(() => (sample === null ? null : { on: computed(() => c.sample.ui.value.on), onTap: () => c.toggleSample() }), [c, sample])
   // PROJECT held: the pads printed 1 to 9 pick a project instead of sounding.
@@ -1154,10 +1154,14 @@ const PAD_SETTLE_MS = 250
 function DevicePages(props: { dk: DeviceKeysUi; view: NavView }): null {
   const c = useController()
   const page = props.dk.layer.state.value.page
-  const pad = c.state.value.keysPad
+  // Each read on its own, so a publish re-renders this only when one of them changed.
+  const pad = useComputed(() => c.state.value.keysPad).value
   const sheet = editPadOf(props.view.sheets) !== null
-  const slot = pad !== null ? (c.editTarget(pad, true)?.slot ?? null) : null
-  const connected = c.state.value.device !== null
+  const slot = useComputed(() => {
+    const p = c.state.value.keysPad
+    return p !== null ? (c.editTarget(p, true)?.slot ?? null) : null
+  }).value
+  const connected = useComputed(() => c.state.value.device !== null).value
   const sound = page === 'SOUND' || page === 'EDIT'
   const padId = pad !== null ? padKey(pad) : null
   // The sheet opening takes the pad over (its own effect, before this one, has opened it): left open for it.
@@ -1189,7 +1193,7 @@ function DevicePages(props: { dk: DeviceKeysUi; view: NavView }): null {
   useEffect(() => {
     if (panel) props.dk.layer.panelOpened()
   }, [panel])
-  const project = c.state.value.mirror?.state.activeProject ?? null
+  const project = useComputed(() => c.state.value.mirror?.state.activeProject ?? null).value
   const projectWas = useRef(project)
   useEffect(() => {
     if (projectWas.current === project) return
@@ -1221,7 +1225,7 @@ function LiveProjectSheet(props: { view: NavView }): JSX.Element {
     <ProjectSheet
       open={open}
       // Closed, it reads no mirror, so a publish doesn't re-render it (the sheet keeps what it showed as it closes).
-      choices={open ? projectChoicesOf(liveMirror(c), c.state.value.busy) : []}
+      choices={open ? projectChoicesOf(c.liveMirror.value, c.state.value.busy) : []}
       onPick={(n) => c.selectProject(n)}
       onDismiss={() => nav.close(sheetLayer(PROJECT_SHEET))}
     />
@@ -1594,7 +1598,7 @@ function LiveBar(props: { pianoRange: NoteRange | null; editing: boolean }): JSX
   const c = useController()
   return (
     <LivePill
-      mirror={liveMirror(c)}
+      mirror={c.liveMirror.value}
       keys={liveKeys(c)}
       playing={livePlaying(c)}
       editing={props.editing}
@@ -1603,18 +1607,9 @@ function LiveBar(props: { pianoRange: NoteRange | null; editing: boolean }): JSX
   )
 }
 
-/** What Live shows: the mirror, or offline its last read, or a note to connect. */
-function liveMirror(c: ArcController): MirrorUi | null {
-  const state = c.state.value
-  return state.mirror ?? (state.device === null
-    ? { state: emptyMirrorState(c.padOrder()), loading: false, error: MirrorText.NOT_CONNECTED }
-    : null)
-}
-
-/** KEYS as the settings and the controller have it (MainActivity's KeysUi, less what plays). */
+/** KEYS as the settings and the controller have it (MainActivity's KeysUi, less what plays; its sound a signal). */
 function liveKeys(c: ArcController): KeysShown {
   const settings = c.settings.value
-  const state = c.state.value
   return {
     on: settings.liveKeys,
     root: settings.keysRoot,
@@ -1622,8 +1617,7 @@ function liveKeys(c: ArcController): KeysShown {
     octave: settings.keysOctave,
     names: settings.keysNames,
     showNames: settings.keysShowNames,
-    pad: state.keysPad,
-    padName: state.keysPad ? c.mirrorName(state.keysPad) : null,
+    sound: c.keysSound,
     pianoWhites: settings.pianoWhites,
   }
 }
@@ -1633,8 +1627,7 @@ function livePlaying(c: ArcController): LivePlaying {
   return { pads: c.playingPads, notes: c.playingNotes, arpPads: c.arpPads, arpNotes: c.arpNotes }
 }
 
-/** The section under the top bar (Root's `when (tab)`). */
-function TabScreen(props: {
+interface TabProps {
   view: NavView
   editPads: boolean
   onEditPads: (on: boolean) => void
@@ -1642,112 +1635,18 @@ function TabScreen(props: {
   inBar: boolean
   /** The piano's notes while it shows, for the line in the top bar. */
   onPianoRange: (r: NoteRange | null) => void
-}): JSX.Element {
+}
+
+/** The section under the top bar (Root's `when (tab)`). */
+function TabScreen(props: TabProps): JSX.Element {
   const c = useController()
   const nav = useNav()
   const v = props.view
-  const state = c.state.value
-  const settings = c.settings.value
+  // Not the mirror or KEYS's pad: Live alone follows those (LiveTab).
+  const state = c.stateShell.value
   switch (v.tab) {
-    case 'live': {
-      return (
-        <MirrorScreen
-          mirror={liveMirror(c)}
-          take={c.canRecord ? { state: c.rec.value, onTake: () => c.toggleTake() } : null}
-          deviceView={deviceView.value}
-          onDeviceView={(on) => setDeviceView(on)}
-          onGuide={(query) => {
-            guideSearch.value = { query }
-            nav.openScreen({ kind: 'guide' })
-          }}
-          takes={{
-            list: state.takes,
-            playing: c.playing.value,
-            keyOf: (t) => c.takeKey(t),
-            fmtWhen: (ms) => c.fmtDateTime(ms),
-            connected: state.device !== null,
-            canShare: c.canShareTakes,
-            onPlay: (t) => void c.playTake(t),
-            onStop: () => c.stopPlayback(),
-            onShare: (t) => void c.shareTake(t),
-            onSave: (t) => void c.saveTake(t),
-            onToDevice: (t) => {
-              void c.takeToDevice(t)
-              nav.selectTab('device')
-            },
-            onDelete: (t) => void c.deleteTake(t),
-          }}
-          onGetFactory={c.canGetFactory && FactorySounds.inLibrary(state.backups, FactoryKit.EP133) === null ? () => void c.getFactorySounds() : null}
-          factoryKit={
-            FactorySounds.savedKits(state.backups).length >= 2
-              ? { kit: c.factoryKit, kits: FactorySounds.savedKits(state.backups), onKit: (k) => c.setFactoryKit(k) }
-              : null
-          }
-          offlinePads={state.offlinePads > 0 ? { count: state.offlinePads, onReset: () => void c.resetOfflinePads() } : null}
-          onStop={() => c.stopPlayback()}
-          nameOf={(pad) => c.mirrorName(pad)}
-          oneGroup={settings.liveOneGroup}
-          onOneGroup={(on) => c.setLiveOneGroup(on)}
-          follow={settings.liveFollow}
-          onFollow={(on) => c.setLiveFollow(on)}
-          toolsOpen={v.side}
-          onTools={(open) => (open ? nav.open(overlayLayer('side')) : nav.close(overlayLayer('side')))}
-          // The tools' first row: they close and Settings opens in their place.
-          onSettings={() => nav.replace(overlayLayer('side'), screenLayer({ kind: 'settings' }))}
-          picker={keysPickerOf(v.dialogs)}
-          onPicker={(p) => {
-            // One list at a time: a dialog layer 'pick:<what>', so Back closes it (Kotlin's focusable Popup).
-            const cur = nav.current.dialogs.find((d) => d.startsWith(PICK))
-            if (p === null) {
-              if (cur !== undefined) nav.close(dialogLayer(cur))
-            } else if (cur === undefined) nav.open(dialogLayer(PICK + p))
-            else if (cur !== PICK + p) nav.replace(dialogLayer(cur), dialogLayer(PICK + p))
-          }}
-          onPad={(pad, hold, unsure, at) => void c.playPad(pad, hold, unsure, at)}
-          onPadHear={(pad) => void c.hearPad(pad)}
-          onPadKept={(pad) => void c.keepPad(pad)}
-          onPadUp={(pad) => c.releasePad(pad)}
-          onPadCut={(pad) => c.cutPad(pad)}
-          onPadPressure={(pad, p) => c.padPressure(pad, p)}
-          // Signals, read by each pad and key: a voice doesn't re-render this screen.
-          playing={livePlaying(c)}
-          haptics={settings.haptics}
-          keys={liveKeys(c)}
-          inBar={props.inBar}
-          onPianoRange={props.onPianoRange}
-          keysViewWide={settings.keysViewWide}
-          keysViewTall={settings.keysViewTall}
-          edit={{
-            on: props.editPads,
-            connected: state.device !== null,
-            offline: state.device === null ? (state.mirror?.offlineSounds ?? null) : null,
-            onChange: props.onEditPads,
-            onPad: (pad) => {
-              if (c.editTarget(pad) !== null) nav.open(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
-            },
-            onDropSlot: (pad, slot, source) => void c.assignPad(pad, slot, source),
-            onDropFile: (pad, file) => void c.uploadForPad(pad, [file]),
-            sounds: c.liveSounds(),
-            playing: c.playing.value,
-            onPlay: (slot, source) => void c.playLiveSound(slot, source),
-            onStop: () => c.stopPlayback(),
-            onUpload: (files) => void c.dropSamples(files),
-            nameNow: (pad) => c.padSoundName(pad),
-          }}
-          keysActions={{
-            onMode: (on) => c.setLiveKeys(on),
-            onRoot: (r) => c.setKeysRoot(r),
-            onScale: (s) => c.setKeysScale(s),
-            onOctave: (o) => c.setKeysOctave(o),
-            onNote: (n, hold, at) => void c.playNote(n, hold, at),
-            onNoteUp: (n) => c.releaseNote(n),
-            onNotePressure: (n, p) => c.notePressure(n, p),
-            onView: (wide, view) => c.setKeysView(wide, view),
-            onSelect: (pad) => c.selectKeysPad(pad),
-          }}
-        />
-      )
-    }
+    case 'live':
+      return <LiveTab {...props} />
     case 'device':
       return (
         <DeviceScreen
@@ -1777,6 +1676,117 @@ function TabScreen(props: {
         />
       )
   }
+}
+
+/**
+ * Live under the top bar (web addition, out of TabScreen): it alone follows the
+ * mirror, and KEYS's pad only where it shows (KeysShown.sound), so a pad played
+ * re-renders none of the screen.
+ */
+function LiveTab(props: TabProps): JSX.Element {
+  const c = useController()
+  const nav = useNav()
+  const v = props.view
+  const state = c.stateShell.value
+  const settings = c.settings.value
+  const mirror = c.liveMirror.value
+  return (
+    <MirrorScreen
+      mirror={mirror}
+      take={c.canRecord ? { state: c.rec.value, onTake: () => c.toggleTake() } : null}
+      deviceView={deviceView.value}
+      onDeviceView={(on) => setDeviceView(on)}
+      onGuide={(query) => {
+        guideSearch.value = { query }
+        nav.openScreen({ kind: 'guide' })
+      }}
+      takes={{
+        list: state.takes,
+        playing: c.playing.value,
+        keyOf: (t) => c.takeKey(t),
+        fmtWhen: (ms) => c.fmtDateTime(ms),
+        connected: state.device !== null,
+        canShare: c.canShareTakes,
+        onPlay: (t) => void c.playTake(t),
+        onStop: () => c.stopPlayback(),
+        onShare: (t) => void c.shareTake(t),
+        onSave: (t) => void c.saveTake(t),
+        onToDevice: (t) => {
+          void c.takeToDevice(t)
+          nav.selectTab('device')
+        },
+        onDelete: (t) => void c.deleteTake(t),
+      }}
+      onGetFactory={c.canGetFactory && FactorySounds.inLibrary(state.backups, FactoryKit.EP133) === null ? () => void c.getFactorySounds() : null}
+      factoryKit={
+        FactorySounds.savedKits(state.backups).length >= 2
+          ? { kit: c.factoryKit, kits: FactorySounds.savedKits(state.backups), onKit: (k) => c.setFactoryKit(k) }
+          : null
+      }
+      offlinePads={state.offlinePads > 0 ? { count: state.offlinePads, onReset: () => void c.resetOfflinePads() } : null}
+      onStop={() => c.stopPlayback()}
+      nameOf={(pad) => c.mirrorName(pad)}
+      oneGroup={settings.liveOneGroup}
+      onOneGroup={(on) => c.setLiveOneGroup(on)}
+      follow={settings.liveFollow}
+      onFollow={(on) => c.setLiveFollow(on)}
+      toolsOpen={v.side}
+      onTools={(open) => (open ? nav.open(overlayLayer('side')) : nav.close(overlayLayer('side')))}
+      // The tools' first row: they close and Settings opens in their place.
+      onSettings={() => nav.replace(overlayLayer('side'), screenLayer({ kind: 'settings' }))}
+      picker={keysPickerOf(v.dialogs)}
+      onPicker={(p) => {
+        // One list at a time: a dialog layer 'pick:<what>', so Back closes it (Kotlin's focusable Popup).
+        const cur = nav.current.dialogs.find((d) => d.startsWith(PICK))
+        if (p === null) {
+          if (cur !== undefined) nav.close(dialogLayer(cur))
+        } else if (cur === undefined) nav.open(dialogLayer(PICK + p))
+        else if (cur !== PICK + p) nav.replace(dialogLayer(cur), dialogLayer(PICK + p))
+      }}
+      onPad={(pad, hold, unsure, at) => void c.playPad(pad, hold, unsure, at)}
+      onPadHear={(pad) => void c.hearPad(pad)}
+      onPadKept={(pad) => void c.keepPad(pad)}
+      onPadUp={(pad) => c.releasePad(pad)}
+      onPadCut={(pad) => c.cutPad(pad)}
+      onPadPressure={(pad, p) => c.padPressure(pad, p)}
+      // Signals, read by each pad and key: a voice doesn't re-render this screen.
+      playing={livePlaying(c)}
+      haptics={settings.haptics}
+      keys={liveKeys(c)}
+      inBar={props.inBar}
+      onPianoRange={props.onPianoRange}
+      keysViewWide={settings.keysViewWide}
+      keysViewTall={settings.keysViewTall}
+      edit={{
+        on: props.editPads,
+        connected: state.device !== null,
+        offline: state.device === null ? (mirror?.offlineSounds ?? null) : null,
+        onChange: props.onEditPads,
+        onPad: (pad) => {
+          if (c.editTarget(pad) !== null) nav.open(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
+        },
+        onDropSlot: (pad, slot, source) => void c.assignPad(pad, slot, source),
+        onDropFile: (pad, file) => void c.uploadForPad(pad, [file]),
+        sounds: c.liveSounds(),
+        playing: c.playing.value,
+        onPlay: (slot, source) => void c.playLiveSound(slot, source),
+        onStop: () => c.stopPlayback(),
+        onUpload: (files) => void c.dropSamples(files),
+        nameNow: (pad) => c.padSoundName(pad),
+      }}
+      keysActions={{
+        onMode: (on) => c.setLiveKeys(on),
+        onRoot: (r) => c.setKeysRoot(r),
+        onScale: (s) => c.setKeysScale(s),
+        onOctave: (o) => c.setKeysOctave(o),
+        onNote: (n, hold, at) => void c.playNote(n, hold, at),
+        onNoteUp: (n) => c.releaseNote(n),
+        onNotePressure: (n, p) => c.notePressure(n, p),
+        onView: (wide, view) => c.setKeysView(wide, view),
+        onSelect: (pad) => c.selectKeysPad(pad),
+      }}
+    />
+  )
 }
 
 /** The progress sheet: modal (no Escape, no scrim, no Back), over any tab (ui/sheets/ProgressSheet). */

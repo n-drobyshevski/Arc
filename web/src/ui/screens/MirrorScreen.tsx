@@ -156,7 +156,7 @@ import { rowPadSize, sidewaysRowPad } from '../live/desk'
 import { chosenView, pianoFor, type PianoPlan } from '../live/keyboard'
 import { holdCap, releaseCap, useLiveKeys } from '../live/useLiveKeys'
 import { computerKeys } from '../keyPrefs'
-import { DEFAULT_KEYS, keysLit, keysNoteText, octaves, upperOctave, type KeysPicker, type KeysShown } from '../live/keys'
+import { DEFAULT_KEYS_SHOWN, keysLit, keysNoteText, octaves, upperOctave, type KeysPicker, type KeysShown } from '../live/keys'
 import { PianoKeyboard } from '../live/PianoKeyboard'
 import { PressTracker, rawMovesSupported, ticking, type PressTarget } from '../live/press'
 import { SLOT_MIME, SOURCE_MIME, SoundPicker } from '../live/SoundPicker'
@@ -474,7 +474,7 @@ function useBoxSize(el: { readonly current: HTMLElement | null }, on: boolean): 
 
 export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const { mirror, nameOf, onBack = null, fixedNow = null, oneGroup, follow } = props
-  const keys = props.keys ?? DEFAULT_KEYS
+  const keys = props.keys ?? DEFAULT_KEYS_SHOWN
   const actions = props.keysActions ?? {}
   const onPad = props.onPad ?? null
   const playing = props.playing ?? NOTHING_PLAYS
@@ -516,7 +516,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const plan: PianoPlan = device && shape.view !== KeysView.PIANO ? { ...shape, range: null } : shape
   const pianoRange = keys.on ? plan.range : null
   // STEP open on the KEYS sound's group: the piano's keys on the cursor's step outlined, the one picked ringed.
-  const pianoStep = useStepPiano(keys.pad)
+  const pianoStep = useStepPiano(() => keys.sound.value.pad)
   // The line in the top bar names a device note past the piano's ends.
   const rangeKey = pianoRange ? `${pianoRange.first}:${pianoRange.last}` : null
   useEffect(() => {
@@ -591,7 +591,9 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const stepOpen = useComputed(() => stepCtx?.ui.open ?? false).value
   // The group the open panel edits: with all four groups, its caption turns orange.
   const stepEdited = useComputed(() => (stepCtx?.ui.open ? stepCtx.ui.group : null)).value
-  const stepGroup = keys.on ? (keys.pad?.group ?? null) : group
+  // The KEYS sound's group alone: another pad of it played doesn't re-render the screen.
+  const keysGroup = useComputed(() => keys.sound.value.pad?.group ?? null)
+  const stepGroup = keys.on ? keysGroup.value : group
   useEffect(() => {
     if (stepOpen && stepGroup !== null) stepCtx?.onGroup(stepGroup)
   }, [stepOpen, stepGroup])
@@ -783,7 +785,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   )
   // A pad's note in KEYS' layout (KEYS held on the drawn device takes it as the key), as the keys would play it.
   const keysNoteAt = (offset: number): number => {
-    const k = latest.current.keys ?? DEFAULT_KEYS
+    const k = latest.current.keys ?? DEFAULT_KEYS_SHOWN
     return Keys.notes(k.root, k.scale, k.octave)[offset] ?? Keys.ROOT_NOTE
   }
   useEffect(() => {
@@ -2784,11 +2786,13 @@ function KeysDisplay(props: {
 }): JSX.Element {
   const { st, mirror, keys, playing, compact = false } = props
   // The note last pressed here: this line re-renders with what plays, not the screen.
-  const shown = { ...keys, playingNotes: playing.notes.value }
+  // And with the KEYS sound, read here too.
+  const { pad, padName } = keys.sound.value
+  const shown = { ...keys, pad, padName, playingNotes: playing.notes.value }
   const note = keysNoteText(shown, st.lastNote, props.pianoRange)
   // The arp playing names the line instead of the KEYS sound.
   const arpLine = useArpLine()
-  const sound = keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND
+  const sound = pad !== null ? MirrorText.keysSound(pad, padName) : MirrorText.NO_SOUND
   // Said beside the line, at most once a second (Kotlin's spoken()): a run of notes is read where it ends.
   const said =
     arpLine ?? [MirrorText.MODE_KEYS, note, mirror?.offline != null ? MirrorText.OFFLINE : null, sound].filter((w): w is string => w !== null).join(', ')
@@ -3031,7 +3035,7 @@ function KeyCapView(props: KeyCapProps): JSX.Element {
   // The arp sounding it: lit full (Kotlin's arpLit).
   const arpOn = useHas(props.arp, note)
   // STEP open on the KEYS sound's group: its notes on the cursor's step outlined, the one picked ringed.
-  const stepMark = useStepNoteMark(note, keys.pad)
+  const stepMark = useStepNoteMark(note, () => keys.sound.value.pad)
   // Held for the arp: outlined, and numbered in the order pressed.
   const arpOrder = useArpNote(note)
   const stepCtx = useStep()

@@ -119,7 +119,7 @@ import { MirrorController } from './mirror'
 import { PreviewCache, type DecodedSound } from './previewCache'
 import { createStore, type Store } from './store'
 import { errorText, isCancelled, Tasks, type OnProgress } from './tasks'
-import { initialState, type OfflineSounds, type Tab, type UiState, type UploadDraftItem } from './types'
+import { initialState, type MirrorUi, type OfflineSounds, type Tab, type UiState, type UploadDraftItem } from './types'
 
 /** MainActivity COPY_LIMIT: the clipboard gets the latest part of a long log. */
 export const COPY_LIMIT = 200_000
@@ -129,6 +129,9 @@ export const LIVE_AUDIO_KEEP_MS = 60_000
 
 /** The previews' cache keys for arc's pad copies ("pad:<slot>:<size>:<name>"); backups are "backup:<id>:<slot>". */
 const PAD_PREVIEW = 'pad:'
+
+/** The sound KEYS plays and its sample's name (ArcController.keysSound). */
+type KeysSound = { readonly pad: PhysicalPad | null; readonly padName: string | null }
 
 const PAK_SAVE_MIME = 'application/octet-stream'
 const PAK_SHARE_MIME = 'application/zip'
@@ -183,6 +186,18 @@ export class ArcController {
   readonly stateShell: ReadonlySignal<UiState>
   /** The device's tempo alone, from the mirror (web addition): null without a clock. */
   readonly deviceBpm: ReadonlySignal<number | null>
+  /**
+   * What Live shows: the mirror, or offline its last read, or a note to connect
+   * (web addition: one note, so its identity holds and a pad played re-renders none of Live).
+   */
+  readonly liveMirror: ReadonlySignal<MirrorUi | null>
+  /**
+   * The sound KEYS plays and its name (web addition): the same object while
+   * both are, so a publish re-renders nothing that names it.
+   */
+  readonly keysSound: ReadonlySignal<KeysSound>
+  /** Bumped when the pad order is set (web addition): liveMirror's note to connect follows it. */
+  private readonly orderSet = signal(0)
   /** The settings page's choices (ArcController.settings). */
   readonly settings: ReadonlySignal<AppSettings>
   /** The key of the sound playing (player.playing). */
@@ -285,6 +300,25 @@ export class ArcController {
       return shell
     })
     this.deviceBpm = computed(() => this.state.value.mirror?.state.bpm ?? null)
+    let notConnected: MirrorUi | null = null
+    this.liveMirror = computed(() => {
+      const s = this.state.value
+      if (s.mirror !== null || s.device !== null) return s.mirror
+      // The pad order is kept in the prefs, not a signal: setPadOrder bumps orderSet.
+      void this.orderSet.value
+      if (notConnected?.state.padOrder !== this.padOrder()) notConnected = this.mirror.notConnected()
+      return notConnected
+    })
+    let sound: KeysSound | null = null
+    this.keysSound = computed(() => {
+      const pad = this.state.value.keysPad
+      const padName = pad !== null ? this.mirrorName(pad) : null
+      // A pad is compared by its key (UiState.keysPad).
+      const was = sound?.pad ?? null
+      const samePad = was === null || pad === null ? was === pad : padKey(was) === padKey(pad)
+      if (sound === null || !samePad || sound.padName !== padName) sound = { pad, padName }
+      return sound
+    })
     this.settingsSignal = signal<AppSettings>(deps.settings.settings)
     this.settings = this.settingsSignal
     this.playing = deps.player.playing
@@ -1284,6 +1318,7 @@ export class ArcController {
 
   setPadOrder(order: PadOrder): void {
     this.mirror.setPadOrder(order)
+    this.orderSet.value++
   }
 
   /** The pad order Live uses (for the settings page). */

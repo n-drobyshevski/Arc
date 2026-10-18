@@ -397,7 +397,9 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
     !faderHeld ? '' : (dk?.faderAssign[group] ?? 'LEVEL') === p ? ' is-on' : faderParamSupported(p) ? ' is-avail' : ''
   const fxType = dk?.fxType ?? 'NONE'
   const fxPage = page === 'FX' || page === 'OUTPUT' || page === 'SIDECHAIN'
-  const plateHit = keys.on ? (keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND) : displayLine(st, mirror)
+  // KEYS: the sound read only then, so another pad played re-renders the device only with KEYS on.
+  const sound = keys.on ? keys.sound.value : null
+  const plateHit = sound !== null ? (sound.pad !== null ? MirrorText.keysSound(sound.pad, sound.padName) : MirrorText.NO_SOUND) : displayLine(st, mirror)
   const said = layer?.said.value ?? null
   // What a key just did is newer than a knob's value: it takes the line.
   useEffect(() => {

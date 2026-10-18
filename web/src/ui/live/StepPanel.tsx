@@ -123,30 +123,34 @@ export function useStepPadMark(pad: PhysicalPad): '' | 'lit' | 'picked' | null {
   }).value
 }
 
-/** A KEYS key's mark while the STEP panel is open on the KEYS sound's group ([pad]): as [useStepPadMark], by MIDI [note]. */
-export function useStepNoteMark(note: number, pad: PhysicalPad | null): '' | 'lit' | 'picked' | null {
+/**
+ * A KEYS key's mark while the STEP panel is open on the KEYS sound's group ([pad]): as [useStepPadMark], by MIDI [note].
+ * [pad] is read in the mark's computed (web addition): another pad played re-renders only the keys whose mark changes.
+ */
+export function useStepNoteMark(note: number, pad: () => PhysicalPad | null): '' | 'lit' | 'picked' | null {
   const s = useStep()
   const at = useRef({ note, pad })
   at.current = { note, pad }
   return useComputed(() => {
     if (s === null) return null
     const ui = s.ui
-    const { note: n, pad: p } = at.current
+    const n = at.current.note
+    const p = at.current.pad()
     if (!ui.open || p === null || ui.group !== p.group) return null
     if (stepPickedNote(ui, p) === n) return 'picked'
     return stepLitNotes(ui, p).has(n) ? 'lit' : ''
   }).value
 }
 
-/** The piano's marks while the STEP panel is open on the KEYS sound's group ([pad]): its notes on the cursor's step, and the one picked; null otherwise. */
-export function useStepPiano(pad: PhysicalPad | null): PianoStep | null {
+/** The piano's marks while the STEP panel is open on the KEYS sound's group ([pad], read as [useStepNoteMark]'s): its notes on the cursor's step, and the one picked; null otherwise. */
+export function useStepPiano(pad: () => PhysicalPad | null): PianoStep | null {
   const s = useStep()
   const at = useRef(pad)
   at.current = pad
   return useComputed(() => {
     if (s === null) return null
     const ui = s.ui
-    const p = at.current
+    const p = at.current()
     if (!ui.open || p === null || ui.group !== p.group) return null
     return { lit: stepLitNotes(ui, p), picked: stepPickedNote(ui, p) }
   }).value
