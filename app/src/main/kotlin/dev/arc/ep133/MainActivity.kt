@@ -46,6 +46,7 @@ import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.LibraryRules
 import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcSheet
+import dev.arc.ep133.ui.screens.KeysSheetContent
 import dev.arc.ep133.ui.components.ArcFrame
 import dev.arc.ep133.ui.components.CoachHost
 import dev.arc.ep133.ui.components.ArcToast
@@ -614,6 +615,8 @@ class MainActivity : ComponentActivity() {
         var projectSheet by rememberSaveable { mutableStateOf(false) }
         var patternSheet by rememberSaveable { mutableStateOf(false) }
         var fxSheet by rememberSaveable { mutableStateOf(false) }
+        // KEYS' scale, key or octave word tapped: the KEYS sheet, at that word's section.
+        var keysSheet by rememberSaveable { mutableStateOf<dev.arc.ep133.ui.screens.KeysSheetPart?>(null) }
         // FX held: the pads play the punch-ins until it lets go, which lets go of every one held.
         var punchMode by remember { mutableStateOf(false) }
         fun punchOff() {
@@ -1174,6 +1177,7 @@ class MainActivity : ComponentActivity() {
                                     onNoteUp = controller::releaseNote,
                                     onSelect = controller::selectKeysPad,
                                     onView = controller::setKeysView,
+                                    onSheet = { keysSheet = it },
                                 )
                             },
                             // Everything sounding, for the rings (several pads or notes for a chord):
@@ -1357,6 +1361,28 @@ class MainActivity : ComponentActivity() {
                                 onLatch = controller::setArpLatch,
                                 haptics = appSettings.haptics,
                             ),
+                        )
+                    }
+                    // KEYS' sheet: a pick applies at once and it stays open; it goes with KEYS.
+                    LaunchedEffect(keys.on) { if (!keys.on) keysSheet = null }
+                    ArcSheet(
+                        visible = keysSheet != null,
+                        onDismiss = { keysSheet = null },
+                        swipe = true,
+                        // On a phone on its side, wide enough for two columns of scales.
+                        widest = 720.dp,
+                        title = dev.arc.ep133.text.MirrorText.KEYS_SHEET,
+                    ) {
+                        KeysSheetContent(
+                            keys = keys,
+                            actions = dev.arc.ep133.ui.screens.KeysActions(
+                                onRoot = controller::setKeysRoot,
+                                onScale = controller::setKeysScale,
+                                onOctave = controller::setKeysOctave,
+                            ),
+                            onDone = { keysSheet = null },
+                            part = keysSheet ?: dev.arc.ep133.ui.screens.KeysSheetPart.SCALE,
+                            haptics = appSettings.haptics,
                         )
                     }
                     ArcSheet(visible = patternSheet, onDismiss = { patternSheet = false }) {

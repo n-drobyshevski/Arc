@@ -230,6 +230,11 @@ class KeysActions(
     val onSelect: (PhysicalPad) -> Unit = {},
     /** The view switch: grid or piano, remembered for a [wide] window or a tall one. */
     val onView: (wide: Boolean, view: KeysView) -> Unit = { _, _ -> },
+    /**
+     * A tap on the scale, key or octave word: the KEYS sheet ([KeysSheetContent]), opened at that
+     * word's section. Null keeps the words' own list.
+     */
+    val onSheet: ((KeysSheetPart) -> Unit)? = null,
 )
 
 /**
@@ -687,6 +692,7 @@ fun MirrorScreen(
                 onNoteUp = step.onNoteUp,
                 onSelect = keysActions.onSelect,
                 onView = keysActions.onView,
+                onSheet = keysActions.onSheet,
             )
         }
     } else if (correcting && keys.on && step != null) {
@@ -707,6 +713,7 @@ fun MirrorScreen(
                 },
                 onSelect = keysActions.onSelect,
                 onView = keysActions.onView,
+                onSheet = keysActions.onSheet,
             )
         }
     } else if (erasing && keys.on && transport != null) {
@@ -728,6 +735,7 @@ fun MirrorScreen(
                 },
                 onSelect = keysActions.onSelect,
                 onView = keysActions.onView,
+                onSheet = keysActions.onSheet,
             )
         }
     } else {
@@ -2681,6 +2689,7 @@ private fun ModeRow(
                 selected = keys.scale,
                 name = MirrorText::scaleName,
                 onPick = actions.onScale,
+                onOpen = actions.onSheet?.let { { it(KeysSheetPart.SCALE) } },
                 description = MirrorText.scaleChoice(keys.scale),
                 quick = true,
                 mark = Modifier.coachMark("live.scale", CoachText.SCALE, c.navy, c.onNavy),
@@ -2693,6 +2702,7 @@ private fun ModeRow(
                 selected = keys.octave,
                 name = MirrorText::octave,
                 onPick = actions.onOctave,
+                onOpen = actions.onSheet?.let { { it(KeysSheetPart.OCTAVE) } },
                 description = MirrorText.octaveChoice(keys.octave),
                 quick = true,
                 fanReversed = true,
@@ -2765,6 +2775,7 @@ private fun SidewaysRow(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwit
                 selected = keys.scale,
                 name = MirrorText::scaleName,
                 onPick = actions.onScale,
+                onOpen = actions.onSheet?.let { { it(KeysSheetPart.SCALE) } },
                 description = MirrorText.scaleChoice(keys.scale),
                 quick = true,
                 mark = Modifier.coachMark("live.scale", CoachText.SCALE, c.navy, c.onNavy),
@@ -2778,6 +2789,7 @@ private fun SidewaysRow(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwit
                 selected = keys.root,
                 name = { Keys.name(it, keys.names) },
                 onPick = actions.onRoot,
+                onOpen = actions.onSheet?.let { { it(KeysSheetPart.KEY) } },
                 description = MirrorText.keyChoice(keys.root, keys.names),
                 mark = Modifier.coachMark("live.key", CoachText.KEY, c.navy, c.onNavy),
                 columns = 6,
@@ -2791,6 +2803,7 @@ private fun SidewaysRow(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwit
                 selected = keys.octave,
                 name = MirrorText::octave,
                 onPick = actions.onOctave,
+                onOpen = actions.onSheet?.let { { it(KeysSheetPart.OCTAVE) } },
                 description = MirrorText.octaveChoice(keys.octave),
                 quick = true,
                 fanReversed = true,
@@ -2911,6 +2924,7 @@ private fun SidewaysKeysPicks(keys: KeysUi, actions: KeysActions) {
             selected = keys.scale,
             name = MirrorText::scaleName,
             onPick = actions.onScale,
+            onOpen = actions.onSheet?.let { { it(KeysSheetPart.SCALE) } },
             description = MirrorText.scaleChoice(keys.scale),
             quick = true,
             mark = Modifier.rotateVertical().coachMark("live.scale", CoachText.SCALE, c.navy, c.onNavy),
@@ -2923,6 +2937,7 @@ private fun SidewaysKeysPicks(keys: KeysUi, actions: KeysActions) {
             selected = keys.octave,
             name = MirrorText::octave,
             onPick = actions.onOctave,
+            onOpen = actions.onSheet?.let { { it(KeysSheetPart.OCTAVE) } },
             description = MirrorText.octaveChoice(keys.octave),
             quick = true,
             fanReversed = true,
@@ -2970,8 +2985,9 @@ private fun StepWord(glyph: String, description: String, id: String, enabled: Bo
 }
 
 /**
- * A word showing a choice ("MAJOR ▾"); a tap lists the choices over the keys,
- * the chosen one marked. The list opens toward the side with more room: up
+ * A word showing a choice ("MAJOR ▾"); a tap opens the KEYS sheet where there
+ * is one ([onOpen], KEYS' scale, key and octave in the app), or else lists the
+ * choices over the keys, the chosen one marked. The list opens toward the side with more room: up
  * from a row under the grid, down from one over the piano. On a phone on its
  * side the choices fill as many columns as that room needs ([columns] makes a
  * fixed grid instead); a list that still doesn't fit scrolls.
@@ -3005,6 +3021,8 @@ private fun <T> PickWord(
      * is higher. The tap's list and the flick keep the list's order.
      */
     fanReversed: Boolean = false,
+    /** What a tap opens instead of the list (KEYS' sheet, [KeysActions.onSheet]); null for the list. */
+    onOpen: (() -> Unit)? = null,
 ) {
     val c = LocalArcColors.current
     val window = LocalArcWindow.current
@@ -3046,6 +3064,9 @@ private fun <T> PickWord(
     // The word as the gesture sees it: inside a turn on its side ([rotateVertical]), so its points go
     // through localToRoot into upright window coordinates.
     val word = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
+    // A tap's: the sheet where there is one, else the list.
+    val tapped: () -> Unit = { if (onOpen != null) onOpen() else open = true }
+    val openUp by androidx.compose.runtime.rememberUpdatedState(tapped)
     val quickly = if (!quick) {
         Modifier
     } else {
@@ -3106,8 +3127,8 @@ private fun <T> PickWord(
                         (root.height - safe.getBottom(this)).toFloat(),
                     )
                     val opened = QuickPick.fan(count, pressAt.x, pressAt.y, area, density)
-                    // Too short a window even for the tightest rows: the hold opens the list instead.
-                    if (opened == null) open = true else fan = opened
+                    // Too short a window even for the tightest rows: the hold opens the list (or the sheet) instead.
+                    if (opened == null) openUp() else fan = opened
                     tick()
                     // From here the finger is the hold's: read first ([PointerEventPass.Initial]) and consumed,
                     // the lift too, so the word's click never also fires.
@@ -3153,7 +3174,7 @@ private fun <T> PickWord(
     }
     val said = if (quick) "$description ${MirrorText.QUICK_PICK_HINT}." else description
     Box(Modifier.onGloballyPositioned { anchor[0] = it }) {
-        dev.arc.ep133.ui.components.WordButton("$label \u25BE", { open = true }, mark.then(quickly), description = said, top = top)
+        dev.arc.ep133.ui.components.WordButton("$label \u25BE", tapped, mark.then(quickly), description = said, top = top)
         fan?.let { f ->
             // The window's size at its top left, over everything; not focusable, so the finger stays the word's.
             val density = LocalDensity.current
