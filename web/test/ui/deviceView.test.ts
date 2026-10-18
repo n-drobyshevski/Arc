@@ -1,4 +1,5 @@
 // The device view's pure parts (web only: ui/live/DeviceView.tsx, ui/live/shortcuts.ts).
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { MirrorText } from '../../src/core/text/mirrorText'
 import { WebText } from '../../src/core/text/webText'
@@ -93,5 +94,29 @@ describe('shortcut cards', () => {
   it('keep the first sentence of an action', () => {
     expect(firstSentence('Delete fader automation. With playback stopped, hold it.')).toBe('Delete fader automation.')
     expect(firstSentence('Open the system settings')).toBe('Open the system settings')
+  })
+})
+
+describe("the drawing's colours", () => {
+  const css = readFileSync(new URL('../../src/ui/live/DeviceView.css', import.meta.url), 'utf8')
+  const block = (selector: string): Set<string> => {
+    const start = css.indexOf(`${selector} {`)
+    expect(start, selector).toBeGreaterThanOrEqual(0)
+    const body = css.slice(start, css.indexOf('}', start))
+    return new Set([...body.matchAll(/(--ep-[\w-]+):/g)].map((m) => m[1]!))
+  }
+  const ep133 = block(':root')
+
+  it('every token the drawing uses is the EP-133\'s', () => {
+    const used = new Set([...css.matchAll(/var\((--ep-[\w-]+)/g)].map((m) => m[1]!))
+    for (const t of used) if (t !== '--ep-font' && t !== '--ep-thin') expect(ep133.has(t), t).toBe(true)
+  })
+
+  it('the EP-40 and the EP-1320 only redefine those, and recolour the body, the keys and the pads', () => {
+    for (const skin of ['EP40', 'EP1320']) {
+      const own = block(`:root[data-skin=${skin}]`)
+      for (const t of own) expect(ep133.has(t), `${skin} ${t}`).toBe(true)
+      for (const t of ['--ep-body-1', '--ep-plate-1', '--ep-glass-1', '--ep-black', '--ep-group', '--ep-rec', '--ep-play', '--ep-pad', '--ep-pad-ink']) expect(own.has(t), `${skin} ${t}`).toBe(true)
+    }
   })
 })

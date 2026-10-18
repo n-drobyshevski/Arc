@@ -9,6 +9,9 @@
 //   short cap over a printed tile), the LEDs and the deck's thin printing. It
 //   prints in Jost (only the drawing: the cards and panels keep Live's font),
 //   keeps its colours in both themes, and its icons and glyphs are drawn here.
+//   With Settings → Skin on the EP-40 or the EP-1320 it is that device: its
+//   colours (DeviceView.css), its name on the plate and its speaker; the keys
+//   keep the K.O. II's English words, which say what they do in arc.
 // - The pads are Live's own (MirrorScreen's Pad and KeyCap, [pads]) in the
 //   drawn ones' places ([padPlace]): they play as the grid's do (hold = gate,
 //   a finger per pad), EDIT, ERASE, STEP, ARP and SAMPLE mark them, sounds
@@ -66,6 +69,9 @@ import '@fontsource/jost/latin-300.css'
 import '@fontsource/jost/latin-400.css'
 import '@fontsource/jost/latin-500.css'
 import '@fontsource/jost/latin-700.css'
+// The skins' names on the plate (the browser fetches each only when a skin shows it).
+import '@fontsource/fredoka/latin-600.css'
+import '@fontsource/unifrakturmaguntia/latin-400.css'
 import type { ButtonHTMLAttributes, Component, ComponentChildren, CSSProperties, FunctionComponent, HTMLAttributes, JSX } from 'preact'
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { signal, type ReadonlySignal } from '@preact/signals'
@@ -75,6 +81,7 @@ import { ROWS } from '../../core/features/padNotes'
 import { parse } from '../../core/text/guideCombo'
 import { CLOSE } from '../../core/text/guideText'
 import { MirrorText } from '../../core/text/mirrorText'
+import { SkinChoice } from '../../core/text/settingsText'
 import { WebText } from '../../core/text/webText'
 import type { MirrorUi } from '../../state/types'
 import type { CoachId } from '../components/Coach'
@@ -105,6 +112,7 @@ import type { KeysShown } from './keys'
 import { cardName, cardSearch, shortcutsFor, type CardKey } from './shortcuts'
 import type { TakeUi } from './Takes'
 import { Spoken } from './spoken'
+import { resolvedSkin } from '../theme/theme'
 import './DeviceView.css'
 
 /** The unit's size (176 × 240 mm): everything below is placed in these units, then scaled. */
@@ -249,6 +257,8 @@ const at = (x: number, y: number, w?: number, h?: number): CSSProperties => ({
 const well = (x: number, y: number, w: number, h: number): JSX.Element => <i key={`w${x}:${y}`} class="ep-a ep-well" style={at(x, y, w, h)} aria-hidden="true" />
 
 export function DeviceView(props: DeviceViewProps): JSX.Element {
+  // The skin's device (Settings → Skin): its colours are the stylesheet's, its name and speaker drawn here.
+  const skin = resolvedSkin.value
   const { st, mirror, keys, now, group, take } = props
   const box = useRef<HTMLDivElement | null>(null)
   const [scale, setScale] = useState(0.4)
@@ -414,13 +424,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           <span class="ep-a ep-pow" aria-hidden="true" />
           <div class="ep-a ep-plate" aria-hidden="true" />
           {[[14, 80], [928, 80], [14, 406], [928, 406]].map(([x, y]) => <span key={`${x}:${y}`} class="ep-a ep-screw" style={at(x!, y!)} aria-hidden="true" />)}
-          <span class="ep-a ep-plate__title" aria-hidden="true">
-            K.O.
-            {/* The Roman two, drawn: two stems between a top and a bottom bar. */}
-            <svg viewBox="0 0 50 58">
-              <path d="M2 1.8H48M2 56.2H48M15 1.8V56.2M35 1.8V56.2" />
-            </svg>
-          </span>
+          <PlateTitle skin={skin} />
           {/* A page's line (a key to arc's own sheet for it), else the pattern's words, else the status. */}
           {dk !== null && page !== 'MAIN' ? (
             <PageLine dk={dk} page={page} group={group} />
@@ -436,7 +440,9 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           <Spoken text={plateHit} />
           {/* What a key did is said while it shows, and no more (the hit isn't said again after it). */}
           <Spoken text={said?.text ?? ''} />
-          <div class="ep-a ep-grille" aria-hidden="true"><Grille /></div>
+          <div class="ep-a ep-grille" aria-hidden="true">
+            {skin === SkinChoice.EP40 ? <SlatGrille /> : skin === SkinChoice.EP1320 ? <PerforatedGrille /> : <Grille />}
+          </div>
 
           {/* The display: the glass, its reflection, the icons and two pins. */}
           <div class="ep-a ep-disp" aria-hidden="true" />
@@ -1038,6 +1044,86 @@ function LcdLit(props: { fx: boolean; swing: boolean; free: boolean; main: boole
     </>
   )
 }
+
+/** The plate's name: the K.O. II's (Roman two drawn), the EP-40's RIDDIM, the EP-1320's Medieval. */
+function PlateTitle({ skin }: { skin: SkinChoice }): JSX.Element {
+  if (skin === SkinChoice.EP40) {
+    return (
+      <span class="ep-a ep-plate__title ep-plate__title--riddim" aria-hidden="true">
+        RIDDIM<small>SUPERTONE</small>
+      </span>
+    )
+  }
+  if (skin === SkinChoice.EP1320) {
+    return (
+      <span class="ep-a ep-plate__title ep-plate__title--medieval" aria-hidden="true">
+        <b>M</b>edieval
+      </span>
+    )
+  }
+  return (
+    <span class="ep-a ep-plate__title" aria-hidden="true">
+      K.O.
+      {/* The Roman two, drawn: two stems between a top and a bottom bar. */}
+      <svg viewBox="0 0 50 58">
+        <path d="M2 1.8H48M2 56.2H48M15 1.8V56.2M35 1.8V56.2" />
+      </svg>
+    </span>
+  )
+}
+
+/** The EP-40's speaker: cream slats across a black opening, each with a lit top and a shaded lip. Drawn once. */
+const SlatGrille = once(function SlatGrille(): JSX.Element {
+  const slats: JSX.Element[] = []
+  for (let i = 0; i < 12; i++) {
+    const y = 22 + i * 30
+    slats.push(
+      <g key={i}>
+        <rect x="22" y={y} width="415" height="18" rx="9" fill="url(#ep-slat)" />
+        <rect x="26" y={y + 1} width="407" height="2" rx="1" fill="#FFFFFF" opacity=".55" />
+      </g>,
+    )
+  }
+  return (
+    <svg viewBox="0 0 459 393" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="ep-slat" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#E6DDCB" /><stop offset=".6" stop-color="#D5CBB7" /><stop offset="1" stop-color="#A99D84" />
+        </linearGradient>
+      </defs>
+      <rect width="459" height="393" fill="#D5CBB7" />
+      <rect x="14" y="12" width="431" height="369" rx="16" fill="#121312" />
+      {slats}
+      <rect x="0" y="0" width="459" height="2" fill="#000" opacity=".22" />
+    </svg>
+  )
+})
+
+/** The EP-1320's speaker: a bronze plate drilled through with round holes, 16 × 13 on a 27-unit pitch. Drawn once. */
+const PerforatedGrille = once(function PerforatedGrille(): JSX.Element {
+  const holes: JSX.Element[] = []
+  for (let r = 0; r < 13; r++) {
+    for (let c = 0; c < 16; c++) {
+      const x = 27 + 27 * c + (r % 2 === 0 ? 0 : 13.5)
+      const y = 34 + 27 * r
+      if (x > 445) continue
+      holes.push(<circle key={`${r}:${c}`} cx={x} cy={y} r="8.4" fill="url(#ep-hole)" stroke="#2A170E" stroke-width="1.2" />)
+    }
+  }
+  return (
+    <svg viewBox="0 0 459 393" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="ep-bronze" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#9A643E" /><stop offset=".5" stop-color="#7A4A2E" /><stop offset="1" stop-color="#5A341F" />
+        </linearGradient>
+        <radialGradient id="ep-hole" cx=".42" cy=".38" r=".7"><stop offset="0" stop-color="#0E0806" /><stop offset="1" stop-color="#362017" /></radialGradient>
+      </defs>
+      <rect width="459" height="393" fill="url(#ep-bronze)" />
+      {holes}
+      <rect x="0" y="0" width="459" height="2" fill="#000" opacity=".22" />
+    </svg>
+  )
+})
 
 /**
  * The speaker: 14 × 12 holes on a 4 mm pitch; only the middle's disc is

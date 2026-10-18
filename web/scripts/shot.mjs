@@ -1,7 +1,7 @@
 // Dev helper: screenshot the app in Chromium.
 //   node scripts/shot.mjs <out.png> [hash] [--dark] [--skin=EP40] [--size=393x852] [--query=demo] [--wait=800]
 // Starts a Vite dev server, opens the page (optionally ?<query>#<hash>) and saves a PNG.
-// --skin sets html[data-skin] once the page has settled (the CSS only: a canvas keeps its colours).
+// --skin picks the skin in Settings first (as a person would; ?demo keeps settings in memory), then opens [hash].
 import { createServer } from 'vite'
 import { chromium } from '@playwright/test'
 
@@ -23,12 +23,16 @@ try {
   const page = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 2, colorScheme: args.includes('--dark') ? 'dark' : 'light' })
   page.on('console', (m) => { if (m.type() === 'error') console.error('[page]', m.text()) })
   page.on('pageerror', (e) => console.error('[pageerror]', e.message))
-  await page.goto(`http://127.0.0.1:${port}/${query ? `?${query}` : ''}${hash ? `#${hash.replace(/^#/, '')}` : ''}`)
-  await page.waitForTimeout(wait)
+  const base = `http://127.0.0.1:${port}/${query ? `?${query}` : ''}`
   if (skin) {
-    await page.evaluate((s) => document.documentElement.setAttribute('data-skin', s), skin)
-    await page.waitForTimeout(200)
+    const label = { EP133: 'EP-133', EP40: 'EP-40', EP1320: 'EP-1320' }[skin] ?? skin
+    await page.goto(`${base}#settings`)
+    await page.getByRole('radio', { name: label, exact: true }).click()
+    await page.evaluate((h) => { location.hash = h }, hash.replace(/^#/, '') || 'live')
+  } else {
+    await page.goto(`${base}${hash ? `#${hash.replace(/^#/, '')}` : ''}`)
   }
+  await page.waitForTimeout(wait)
   await page.screenshot({ path: out })
   console.log(out)
 } finally {
