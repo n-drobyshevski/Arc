@@ -6,6 +6,11 @@
 // pruned), so it is browsed, searched and restored like a backup, and Live
 // plays its projects ([PROJECT] first) while no EP-133 is connected.
 //
+// A second pack, the EP-1320 Medieval's ([FactoryKit.EP1320]): teenage
+// engineering publishes none for it, so arc keeps a copy of the person's own
+// Medieval backup (or an imported pack) under a source of its own. Live
+// offline shows one kit at a time.
+//
 // The pack's file name carries a build hash that changes when the tool is
 // rebuilt, so it is looked up in the tool's page and script ([locate]); the
 // last name known ([KNOWN_PAK]) stands in when that fails.
@@ -14,14 +19,58 @@
 // browser reads these paths through arc's own origin (vercel.json's rewrite
 // of /te/apps/ep-sample-tool/, and Vite's proxy in dev); [locate] takes paths
 // on ORIGIN either way.
+// FactoryKit is a frozen object per kit (compared by identity), its
+// companion's ofId / ofSource / ofSku on the same name.
 
 import type { Pak } from '../backup/pak'
 import type { LiveSnapshot } from './liveSnapshot'
+import type { BackupDevice } from '../text/libraryRules'
 import { ktTrim } from '../util/kotlinText'
 import { read as readPads } from './projectPads'
 
 /** A library entry's source for the factory pack (beside "device" and "import"). */
 export const SOURCE = 'factory'
+
+/** A kit's id, as stored (the factoryKit setting, an offline pad's "kit"). */
+export type FactoryKitId = 'ep133' | 'ep1320'
+
+/** A factory pack arc can keep: the EP-133's (downloaded) or the EP-1320 Medieval's (from your own backup). */
+export interface FactoryKit {
+  readonly id: FactoryKitId
+  /** Its library entries' source. */
+  readonly source: string
+  /** The device's sku (DeviceInfo.sku, meta.json's device_sku). */
+  readonly sku: string
+  readonly model: string
+}
+
+const EP133: FactoryKit = Object.freeze({ id: 'ep133', source: SOURCE, sku: 'TE032AS001', model: 'EP-133' })
+const EP1320: FactoryKit = Object.freeze({ id: 'ep1320', source: 'factory-ep1320', sku: 'TE032AS005', model: 'EP-1320' })
+const KITS: readonly FactoryKit[] = Object.freeze([EP133, EP1320])
+
+/** The Kotlin `enum class FactoryKit`, with its companion. */
+export const FactoryKit = {
+  EP133,
+  EP1320,
+  entries: KITS,
+  /** By [id] ("ep133", "ep1320"). */
+  ofId(id: string | null | undefined): FactoryKit | null {
+    return KITS.find((k) => k.id === id) ?? null
+  },
+  /** By a library entry's [source]. */
+  ofSource(source: string | null | undefined): FactoryKit | null {
+    return KITS.find((k) => k.source === source) ?? null
+  },
+  /** By a device's [sku]: TE032AS001 the EP-133's, TE032AS005 the EP-1320's, else null. */
+  ofSku(sku: string | null | undefined): FactoryKit | null {
+    return KITS.find((k) => k.sku === sku) ?? null
+  },
+} as const
+
+/** Whether [source] is a factory pack's, of any kit (never pruned). */
+export function isFactorySource(source: string | null | undefined): boolean {
+  return FactoryKit.ofSource(source) !== null
+}
 
 export const ORIGIN = 'https://teenage.engineering'
 
@@ -37,7 +86,10 @@ export const KNOWN_SIZE = 27_375_018
 /** The library entry's file name. */
 export const FILE_NAME = 'ep-133-factory-content.pak'
 
-/** The project Live shows first: the factory kit (drums on A, bass on B, keys on C). */
+/** The EP-1320 copy's file name. */
+export const FILE_NAME_1320 = 'ep-1320-factory-content.pak'
+
+/** The project Live shows first, for either kit: the factory kit (drums on A, bass on B, keys on C). */
 export const PROJECT = 1
 
 const SCRIPT = /src="(\/apps\/ep-sample-tool\/assets\/[A-Za-z0-9_.-]+\.js)"/
@@ -77,6 +129,34 @@ export function isFactory(pak: Pak): boolean {
   return meta('pak_type') === 'factory' && meta('device_name') === 'EP-133' && pak.sounds.size > 0
 }
 
+/** A string field of [pak]'s meta.json, else null. */
+function metaText(pak: Pak, k: string): string | null {
+  const v = pak.meta[k]
+  return typeof v === 'string' ? v : null
+}
+
+/**
+ * Whether [pak] can be [kit]'s pack: for the EP-133, [isFactory]; for the
+ * EP-1320, a pack with sounds made on one (its meta.json's sku, or a name
+ * with 1320 in it), a factory or a user pack alike (a reset device backs up
+ * as a user pack).
+ */
+export function fitsKit(pak: Pak, kit: FactoryKit): boolean {
+  if (kit === EP133) return isFactory(pak)
+  const name = metaText(pak, 'device_name')
+  return pak.sounds.size > 0 && (metaText(pak, 'device_sku') === EP1320.sku || (name !== null && name.includes('1320')))
+}
+
+/** Whether [b] can be copied as the EP-1320's factory sounds: an EP-1320 backup, not a factory pack already. */
+export function canUseAsFactory(b: { readonly source: string; readonly device: BackupDevice }): boolean {
+  return !isFactorySource(b.source) && (b.device.sku === EP1320.sku || b.device.product.includes('1320'))
+}
+
+/** The kit an imported [pak] is saved as: the EP-1320's for an EP-1320 factory pack, else null (an ordinary import). */
+export function importKit(pak: Pak): FactoryKit | null {
+  return metaText(pak, 'pak_type') === 'factory' && fitsKit(pak, EP1320) ? EP1320 : null
+}
+
 /** What Live shows from the pack: [project]'s pads and every sound's name; null when it has none. */
 export function snapshot(pak: Pak, savedAt: number, project: number = PROJECT): LiveSnapshot | null {
   const tar = pak.projects.get(project)
@@ -106,11 +186,14 @@ export function unnamed(slot: number, name: string): boolean {
   return ktTrim(name).toLowerCase() === String(slot).padStart(3, '0') + '.pcm'
 }
 
-/** The library's factory pack, if it has one (the newest, should there be two). */
-export function inLibrary<B extends { readonly source: string; readonly createdAt: number }>(backups: readonly B[]): B | null {
+/** The library's factory pack of [kit], if it has one (the newest, should there be two). */
+export function inLibrary<B extends { readonly source: string; readonly createdAt: number }>(
+  backups: readonly B[],
+  kit: FactoryKit = EP133,
+): B | null {
   let best: B | null = null
   for (const b of backups) {
-    if (b.source === SOURCE && (best === null || best.createdAt < b.createdAt)) best = b
+    if (b.source === kit.source && (best === null || best.createdAt < b.createdAt)) best = b
   }
   return best
 }
@@ -123,11 +206,16 @@ export const FactorySounds = {
   KNOWN_PAK,
   KNOWN_SIZE,
   FILE_NAME,
+  FILE_NAME_1320,
   PROJECT,
   scriptPath,
   pakPath,
   locate,
   isFactory,
+  isFactorySource,
+  fitsKit,
+  canUseAsFactory,
+  importKit,
   snapshot,
   projects,
   unnamed,

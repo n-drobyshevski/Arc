@@ -8,8 +8,9 @@
 // - SoundSource is a string union whose values are the Kotlin enum's `id`
 //   ('device', 'factory', 'rec'): `source.id` is `source`, `SoundSource.of`
 //   the same.
-// - OfflinePad's `file` is optional: absent is Kotlin's default null, so a
-//   pad written without it equals one read back without it.
+// - OfflinePad's `file` and `kit` are optional: absent is Kotlin's default
+//   (null, and the EP-133's kit), so a pad written without them equals one
+//   read back without them.
 // - The data classes are plain readonly interfaces; their methods are
 //   functions taking the value first (`pads.put(p)` is `put(pads, p)`), and
 //   `OfflinePads.EMPTY` / `fromJson` / `fits` are on the `OfflinePads` object
@@ -18,7 +19,7 @@
 //   primitive is read from the parsed value: a whole number in the Int range
 //   (1.0 parses as 1 in JS, where Kotlin rejects "1.0").
 
-import { SOURCE as FACTORY_SOURCE, unnamed } from './factorySounds'
+import { FactoryKit, SOURCE as FACTORY_SOURCE, unnamed, type FactoryKitId } from './factorySounds'
 import { PadSoundCache } from './padSoundCache'
 
 /**
@@ -43,7 +44,8 @@ export const SoundSource = {
  * [project]'s pad file for [group] (0..3, A..D) and [pad] (its number in the
  * project file, pNN, as in PadTarget), and the [slot] and [name] picked from
  * [source]'s list. A RECORDED sample has no slot yet ([slot] 0) and plays
- * from [file], its file name in arc's samples folder.
+ * from [file], its file name in arc's samples folder. A FACTORY sound plays
+ * from its [kit]'s pack (FactoryKit.id; absent, the EP-133's).
  */
 export interface OfflinePad {
   readonly project: number
@@ -53,6 +55,7 @@ export interface OfflinePad {
   readonly name: string
   readonly source: SoundSource
   readonly file?: string | null
+  readonly kit?: FactoryKitId | null
 }
 
 export interface OfflinePads {
@@ -96,6 +99,8 @@ export function toJson(pads: OfflinePads): string {
       source: p.source,
       // Only recorded samples have one: the other entries stay as they always were.
       ...(p.file != null ? { file: p.file } : {}),
+      // Only another kit's than the EP-133's: older entries read as the EP-133's.
+      ...(p.kit != null && p.kit !== FactoryKit.EP133.id ? { kit: p.kit } : {}),
     })),
   })
 }
@@ -146,7 +151,10 @@ export function fromJson(text: string): OfflinePads | null {
       if (typeof v !== 'string') continue
       file = v
     }
-    out = put(out, file !== undefined ? { project, group, pad, slot, name, source, file } : { project, group, pad, slot, name, source })
+    // A kit arc doesn't know (a newer one) reads as the EP-133's.
+    const kit = source === SoundSource.FACTORY && typeof f['kit'] === 'string' ? FactoryKit.ofId(f['kit']) : null
+    const base: OfflinePad = file !== undefined ? { project, group, pad, slot, name, source, file } : { project, group, pad, slot, name, source }
+    out = put(out, kit !== null && kit !== FactoryKit.EP133 ? { ...base, kit: kit.id } : base)
   }
   return out
 }

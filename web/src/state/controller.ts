@@ -69,7 +69,7 @@ import { describePak, openPak, type PakDescription, type PakSound } from '../cor
 import { project as exportProject, projectFileName, soundFileName, soundWav } from '../core/backup/pakExport'
 import { compare as compareWithDevice } from '../core/features/backupDiff'
 import { contents as deviceContents, projectLayout, soundDetails, type DeviceContents } from '../core/features/deviceBrowser'
-import { FactorySounds } from '../core/features/factorySounds'
+import { FactoryKit, FactorySounds, type FactoryKitId } from '../core/features/factorySounds'
 import { search as searchLibrary, type NameEntry } from '../core/features/librarySearch'
 import type { PadOrder } from '../core/features/padPush'
 import { compare as comparePaks } from '../core/features/pakCompare'
@@ -493,6 +493,7 @@ export class ArcController {
     let project: number | null = null
     let bpm: number | null = null
     let fxBpm: number | null = null
+    let sku: string | null = null
     const fxTempo = (): void => {
       const t = patternBpm(this.store.get().mirror?.state.bpm, this.pattern.metronome.peek().bpm)
       if (t === fxBpm) return
@@ -512,6 +513,12 @@ export class ArcController {
           bpm = b
           this.pattern.tempoChanged()
           fxTempo()
+        }
+        // A device connected: its kit, when its pack is saved, is Live's factory kit from now on.
+        const k = st.device?.info.sku ?? null
+        if (k !== sku) {
+          sku = k
+          if (k !== null) this.deviceKit(k)
         }
       }),
     )
@@ -601,16 +608,19 @@ export class ArcController {
 
   /**
    * Live without a device shows the factory sounds once they are in the
-   * library, and stops when they are deleted: it opens offline again. Else
-   * the sounds it offers offline follow the library ([MirrorController.refreshOffline]).
+   * library, and stops when they are deleted: it opens offline again, as it
+   * does when the pack it shows is no longer the active kit's (FactoryKit:
+   * replaced, or the EP-1320's deleted). Else the sounds it offers offline
+   * follow the library ([MirrorController.refreshOffline]).
    */
   private factoryChanged(): void {
     const st = this.store.get()
     const mi = st.mirror
     if (mi === null || (this.conn.session !== null && st.device !== null)) return
-    const has = FactorySounds.inLibrary(st.backups) !== null
-    if ((has && mi.error === MirrorText.NOT_CONNECTED) || (!has && mi.offline === MirrorText.FACTORY)) void this.mirror.openOffline()
-    else void this.mirror.refreshOffline()
+    const pack = this.live.factoryPack()
+    if ((pack !== null && mi.error === MirrorText.NOT_CONNECTED) || (mi.offline === MirrorText.FACTORY && pack?.id !== this.live.shownPackId)) {
+      void this.mirror.openOffline()
+    } else void this.mirror.refreshOffline()
   }
 
   /** library.backups collected: the list, the names for search, and the free space. */
@@ -628,7 +638,11 @@ export class ArcController {
       if (gen !== this.libraryGen || this.disposed) return
       this.names = names
       this.live.libraryChanged()
+      const first = !this.store.get().libraryLoaded
       this.store.update((s) => ({ ...s, backups: list, libraryLoaded: true, spaceLeft }))
+      // Connected before the library was first read: the device's kit, now that its pack can be seen.
+      const sku = this.store.get().device?.info.sku
+      if (first && sku !== undefined) this.deviceKit(sku)
       void this.runSearch()
       this.factoryChanged()
     } catch (e) {
@@ -1756,6 +1770,12 @@ export class ArcController {
     return true
   }
 
+  /** An offline change's kit: a factory sound's (the factory list's, MirrorUi.kit), when it isn't the EP-133's (OfflinePad.kit). */
+  private padKit(source: SoundSource): { kit?: FactoryKitId } {
+    const kit = FactoryKit.ofId(this.store.get().mirror?.kit) ?? this.live.factoryKit()
+    return source === SoundSource.FACTORY && kit !== FactoryKit.EP133 ? { kit: kit.id } : {}
+  }
+
   /** [pad] took [slot] (its target was [t]): names follow, and a toast with UNDO when the old sound is known. */
   private padAssigned(pad: PhysicalPad, t: PadTarget, slot: number): void {
     this.mirror.assigned(t, slot)
@@ -1790,7 +1810,7 @@ export class ArcController {
     const next =
       own
         ? OfflinePads.drop(pads, t.project, t.group, t.pad)
-        : OfflinePads.put(pads, { project: t.project, group: t.group, pad: t.pad, slot, name: snd.name, source })
+        : OfflinePads.put(pads, { project: t.project, group: t.group, pad: t.pad, slot, name: snd.name, source, ...this.padKit(source) })
     this.live.setOfflinePads(next)
     m.setLocal(next)
     // The new sound comes with its own settings, as on the device.
@@ -1997,7 +2017,8 @@ export class ArcController {
     const off = this.offlineSounds()
     const name = (source === SoundSource.FACTORY ? off?.factory : off?.device)?.find((e) => e.slot === slot)?.name
     if (name === undefined) return
-    const key = `${PAD_PREVIEW}${source}:${slot}:${name}`
+    // A factory sound's preview is its pack's: the other kit's in that slot is another sound.
+    const key = `${PAD_PREVIEW}${source}:${slot}:${name}` + (source === SoundSource.FACTORY ? `:${this.live.factoryPack()?.id ?? ''}` : '')
     let d = this.previews.get(key)
     if (d === null) {
       try {
@@ -2216,7 +2237,23 @@ export class ArcController {
   async import(name: string, lastModified: number | null, read: () => Promise<Uint8Array>): Promise<void> {
     try {
       const bytes = await read()
-      const d = describePak(await openPak(bytes))
+      const pak = await openPak(bytes)
+      const d = describePak(pak)
+      // An EP-1320 factory pack (someone's shared one) is kept as that kit's straight away.
+      if (FactorySounds.importKit(pak) === FactoryKit.EP1320) {
+        const kit = await this.saveKit(
+          FactoryKit.EP1320,
+          bytes,
+          d,
+          d.generatedAt ?? (lastModified !== null && lastModified !== 0 ? lastModified : this.deps.now()),
+          BackupDevice(d.device.product, d.device.sku, '', d.device.osVersion),
+        )
+        this.store.update((st) => ({ ...st, freshId: kit.record.id }))
+        this.toastSaved(FeatureText.factory1320Saved(kit.record.soundCount), kit.copyError)
+        // As with Use as factory sounds: else, with no EP-133 pack beside it, nothing would offer it.
+        this.setFactoryKit(FactoryKit.EP1320)
+        return
+      }
       const saved = await this.deps.library.save(
         this.record(
           importTitle(name),
@@ -2249,10 +2286,11 @@ export class ArcController {
    */
   async getFactorySounds(): Promise<void> {
     const net = this.deps.factory
-    if (net === undefined || FactorySounds.inLibrary(this.store.get().backups) !== null) return
+    // The EP-133's pack only: the EP-1320's has no download (useAsFactory).
+    if (net === undefined || FactorySounds.inLibrary(this.store.get().backups, FactoryKit.EP133) !== null) return
     // Tapped while something else runs (a read as the page starts, a transfer): it goes next, not never.
     if (this.store.get().busy) await this.store.waitFor((st) => !st.busy)
-    if (FactorySounds.inLibrary(this.store.get().backups) !== null) return
+    if (FactorySounds.inLibrary(this.store.get().backups, FactoryKit.EP133) !== null) return
     const saved = await this.tasks.runTask(FeatureText.GETTING_FACTORY, async (onProgress, signal) => {
       try {
         const path = await FactorySounds.locate((p) => net.text(p, signal))
@@ -2283,6 +2321,87 @@ export class ArcController {
     if (saved === null) return
     this.store.update((st) => ({ ...st, freshId: saved.record.id }))
     this.toastSaved(FeatureText.factorySaved(saved.record.soundCount), saved.copyError)
+  }
+
+  /** The factory kit Live plays offline (FactoryKit): the one chosen while its pack is saved, else the EP-133's. */
+  get factoryKit(): FactoryKit {
+    return this.live.factoryKit()
+  }
+
+  /**
+   * Live offline plays [kit]'s factory sounds from now on (kept in the
+   * settings), and opens again on its first project.
+   */
+  setFactoryKit(kit: FactoryKit): void {
+    if (kit.id === this.deps.settings.settings.factoryKit) return
+    this.changeSettings((s) => ({ ...s, factoryKit: kit.id }))
+    this.mirror.kitChanged()
+  }
+
+  /**
+   * Connected to a device whose kit's pack is saved (its sku, FactoryKit.ofSku)
+   * and isn't the one chosen: that kit is chosen, so Live offline opens on
+   * the kit of the device used last.
+   */
+  private deviceKit(sku: string): void {
+    const kit = FactoryKit.ofSku(sku)
+    if (kit === null || kit.id === this.deps.settings.settings.factoryKit || FactorySounds.inLibrary(this.store.get().backups, kit) === null) return
+    this.setFactoryKit(kit)
+  }
+
+  /**
+   * Copies [b], a backup of an EP-1320 Medieval, into the library as the
+   * EP-1320's factory sounds (FactoryKit.EP1320), as a task: teenage
+   * engineering offers no download for it. The backup stays as it is; an
+   * older copy is replaced, and Live plays the EP-1320's kit from now on.
+   */
+  async useAsFactory(b: BackupRecord): Promise<void> {
+    // A factory pack already (either kit's): nothing to copy.
+    if (FactorySounds.isFactorySource(b.source)) return
+    // Tapped while something else runs: it goes next, not never.
+    if (this.store.get().busy) await this.store.waitFor((st) => !st.busy)
+    const saved = await this.tasks.runTask(
+      FeatureText.SAVING_FACTORY,
+      async () => {
+        const bytes = await this.deps.library.bytes(b.id)
+        const pak = await openPak(bytes)
+        if (!FactorySounds.fitsKit(pak, FactoryKit.EP1320)) throw new Error(FeatureText.NOT_MEDIEVAL)
+        const d = describePak(pak)
+        return this.saveKit(FactoryKit.EP1320, bytes, d, this.deps.now(), BackupDevice(d.device.product, d.device.sku, '', d.device.osVersion))
+      },
+      { device: false },
+    )
+    if (saved === null) return
+    this.store.update((st) => ({ ...st, freshId: saved.record.id }))
+    this.toastSaved(FeatureText.factory1320Saved(saved.record.soundCount), saved.copyError)
+    this.setFactoryKit(FactoryKit.EP1320)
+  }
+
+  /**
+   * Saves [bytes] as [kit]'s factory pack (the EP-1320's: a copy of a backup,
+   * or an imported pack), then deletes any older one of that kit.
+   */
+  private async saveKit(
+    kit: FactoryKit,
+    bytes: Uint8Array,
+    d: PakDescription,
+    createdAt: number,
+    device: BackupDevice,
+  ): Promise<{ record: BackupRecord; copyError: string | null }> {
+    const older = this.store.get().backups.filter((r) => r.source === kit.source)
+    const saved = await this.deps.library.save(
+      this.record(FeatureText.FACTORY_TITLE_1320, createdAt, kit.source, FactorySounds.FILE_NAME_1320, device, d),
+      bytes,
+      d.soundNames,
+    )
+    for (const r of older) {
+      try {
+        await this.deps.library.delete(r.id)
+      } catch {
+        // Kept: the newest of a kit is the one Live plays.
+      }
+    }
+    return saved
   }
 
   /** Saves edits made in the detail sheet (saveDetailEdits). */

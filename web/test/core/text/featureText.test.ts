@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { ARP_ORDERS, arpNote } from '../../../src/core/features/arp'
 import { cardFx, type CardProblem } from '../../../src/core/features/beatCard'
 import { chain, chainPlay, chainStep } from '../../../src/core/features/chain'
+import { FactoryKit } from '../../../src/core/features/factorySounds'
 import { DiffResult, ProjectDiff, ProjectState, SoundDiff, SoundState } from '../../../src/core/features/backupDiff'
 import { NoteNames, SCALES, Scale } from '../../../src/core/features/keys'
 import { FX_TYPES, FxSettings, FxType, comp, sidechain } from '../../../src/core/features/fxSettings'
@@ -161,6 +162,14 @@ describe('FeatureTextTest', () => {
     // Project 1 unless PROJECT stepped on; a last read keeps its own note.
     expect(MirrorText.offlineNote(MirrorText.FACTORY)).toBe(MirrorText.factoryNote(1))
     expect(MirrorText.offlineNote(MirrorText.lastSeen('5 Oct, 14:02'), 3)).toBe(MirrorText.OFFLINE_NOTE)
+    // The EP-1320's kit names its own model.
+    expect(MirrorText.offlineNote(MirrorText.FACTORY, 2, FactoryKit.EP1320)).toBe(
+      "Not connected: these are the EP-1320's factory sounds, project 2 as it ships. Connect your EP-133 to see it live.",
+    )
+    expect(MirrorText.factoryNote(1, FactoryKit.EP133)).toBe(MirrorText.factoryNote(1))
+    expect(MirrorText.offlineNote(MirrorText.lastSeen('5 Oct, 14:02'), 3, FactoryKit.EP1320)).toBe(MirrorText.OFFLINE_NOTE)
+    expect([MirrorText.KIT_EP133, MirrorText.KIT_EP1320]).toEqual(['EP-133', 'EP-1320'])
+    expect(FactoryKit.entries.map((k) => MirrorText.kit(k))).toEqual(FactoryKit.entries.map((k) => k.model))
     expect(MirrorText.seen('5 Oct')).toBe('Seen 5 Oct')
     // PROJECT and SAMPLE write to the device too, as on Android.
     expect(MirrorText.LISTEN_ONLY.endsWith('switch projects with PROJECT, or keep a sample in SAMPLE.')).toBe(true)

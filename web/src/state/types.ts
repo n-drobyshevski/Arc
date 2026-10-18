@@ -23,6 +23,7 @@ import type { TakeInfo } from '../platform/storage/takeStore'
 import type { Pak } from '../core/backup/pak'
 import type { DiffResult } from '../core/features/backupDiff'
 import type { DeviceContents, SoundDetails } from '../core/features/deviceBrowser'
+import type { FactoryKitId } from '../core/features/factorySounds'
 import type { SearchGroup } from '../core/features/librarySearch'
 import type { MirrorState } from '../core/features/liveMirror'
 import type { SoundSource } from '../core/features/offlinePads'
@@ -140,6 +141,8 @@ export interface MirrorUi {
   readonly offlineSounds?: OfflineSounds | null | undefined
   /** Offline: the projects PROJECT steps through (the last read's and the factory pack's), in order. */
   readonly offlineProjects?: readonly number[] | undefined
+  /** Offline: the factory kit Live plays (FactoryKit.id): the factory sounds shown ([offline] FACTORY), and the factory list's. */
+  readonly kit?: FactoryKitId | null | undefined
   /** Connected: the project PROJECT asked the device for while it switches (null: none). */
   readonly projectTarget?: number | null | undefined
 }

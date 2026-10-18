@@ -124,6 +124,7 @@ import { LABELS as PAD_LABELS, ROWS, noteName, padKey, physicalPad, type Physica
 import { CoachText } from '../../core/text/coachText'
 import { CLOSE as GUIDE_CLOSE, LED_ROWS } from '../../core/text/guideText'
 import { MirrorText } from '../../core/text/mirrorText'
+import { FactoryKit, FactorySounds } from '../../core/features/factorySounds'
 import { FeatureText } from '../../core/text/featureText'
 import { WebText } from '../../core/text/webText'
 import { emptyMirrorState, type MirrorUi, type OfflineSounds } from '../../state/types'
@@ -269,6 +270,8 @@ export interface MirrorScreenProps {
   onStop?: () => void
   /** Not connected: download the factory sounds (FactorySounds); null when they can't be, or are in the library. */
   onGetFactory?: (() => void) | null
+  /** Both factory kits saved (FactoryKit): the one Live plays offline, and its switch on the factory line; null otherwise. */
+  factoryKit?: FactoryKitUi | null
   /**
    * Opens Settings, from the first row of Live tools (an addition; the caller
    * closes the tools with it). Not on the desk, where the nav rail has the
@@ -667,15 +670,24 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   )
   // Not connected (nothing read, or offline from the last read): the factory sounds to get, after it.
   const getFactory = mirror?.error === MirrorText.NOT_CONNECTED || mirror?.offline != null ? (props.onGetFactory ?? null) : null
-  const factoryRow = getFactory !== null && (
-    <RowCard>
-      <SettingRow
-        title={FeatureText.FACTORY_SOUNDS}
-        note={FeatureText.FACTORY_NOTE}
-        control={(ids) => <RowAction text={FeatureText.GET} describedBy={ids.titleId} onClick={getFactory} />}
-      />
-    </RowCard>
-  )
+  // Showing the factory sounds with both kits saved: which kit, instead.
+  const kitSwitch = mirror?.offline === MirrorText.FACTORY ? (props.factoryKit ?? null) : null
+  const factoryRow =
+    getFactory !== null ? (
+      <RowCard>
+        <SettingRow
+          title={FeatureText.FACTORY_SOUNDS}
+          note={FeatureText.FACTORY_NOTE}
+          control={(ids) => <RowAction text={FeatureText.GET} describedBy={ids.titleId} onClick={getFactory} />}
+        />
+      </RowCard>
+    ) : (
+      kitSwitch !== null && (
+        <RowCard>
+          <SettingRow title={FeatureText.FACTORY_KIT} control={(ids) => <KitSwitch kit={kitSwitch} labelledBy={ids.titleId} />} />
+        </RowCard>
+      )
+    )
   // Pads changed offline in arc only: how many, and Reset pads.
   const offlinePads = props.offlinePads ?? null
   const offlinePadsRow = offlinePads !== null && offlinePads.count > 0 && (
@@ -1183,7 +1195,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         <Caption text={MirrorText.TITLE} as="h1" />
         {onBack && <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />}
       </div>
-      {inBar ? null : editing && arpNow === null ? <EditStrip /> : <Display st={st} mirror={mirror} initialNoteOpen={props.initialNoteOpen ?? false} onGetFactory={props.onGetFactory ?? null} take={take} still={fixedNow !== null} />}
+      {inBar ? null : editing && arpNow === null ? <EditStrip /> : <Display st={st} mirror={mirror} initialNoteOpen={props.initialNoteOpen ?? false} onGetFactory={props.onGetFactory ?? null} factoryKit={props.factoryKit ?? null} take={take} still={fixedNow !== null} />}
       {fnRowAll}
       {modeRow}
       {/* Four groups in a row when there is room, two by two on a phone. */}
@@ -1713,12 +1725,15 @@ function Display(props: {
   mirror: MirrorUi | null
   initialNoteOpen: boolean
   onGetFactory: (() => void) | null
+  factoryKit: FactoryKitUi | null
   take?: TakeUi | null
   still?: boolean
 }): JSX.Element {
   const { st, mirror } = props
   const offline = showOffline(st, mirror)
   const getFactory = mirror?.error === MirrorText.NOT_CONNECTED ? props.onGetFactory : null
+  // The factory sounds shown, both kits saved: the kit switch on their line.
+  const kit = offline && mirror?.offline === MirrorText.FACTORY ? props.factoryKit : null
   // The arp playing names the line, in signal orange.
   const arpLine = useArpLine()
   // Why it is offline stays folded under the word until asked for, so the pads keep the room.
@@ -1758,14 +1773,23 @@ function Display(props: {
         <TakeBadge take={props.take} still={props.still} />
       </div>
       <PatternRow still={props.still} />
-      <p class={`live-display__line t-stat-free${arpLine !== null ? ' live-display__line--small live-display__line--arp' : displayLineSmall(st, mirror) ? ' live-display__line--small' : ''}`} aria-hidden="true">
-        {line}
-      </p>
+      {kit !== null ? (
+        <div class="live-display__kit">
+          <p class={`live-display__line t-stat-free${arpLine !== null ? ' live-display__line--small live-display__line--arp' : displayLineSmall(st, mirror) ? ' live-display__line--small' : ''}`} aria-hidden="true">
+            {line}
+          </p>
+          <KitSwitch kit={kit} label={FeatureText.FACTORY_KIT} />
+        </div>
+      ) : (
+        <p class={`live-display__line t-stat-free${arpLine !== null ? ' live-display__line--small live-display__line--arp' : displayLineSmall(st, mirror) ? ' live-display__line--small' : ''}`} aria-hidden="true">
+          {line}
+        </p>
+      )}
       {/* Offline, the folded note; never read, the factory sounds to get; else the all-groups view explains clock out. */}
       {offline ? (
         noteOpen && (
           <p id="live-offline-note" class="live-display__hint live-display__note t-display-hint">
-            {MirrorText.offlineNote(mirror?.offline ?? '')}
+            {MirrorText.offlineNote(mirror?.offline ?? '', st.activeProject ?? FactorySounds.PROJECT, kitShown(mirror))}
           </p>
         )
       ) : getFactory !== null ? (
@@ -1776,6 +1800,35 @@ function Display(props: {
         st.playing === null && st.bpm === null && <p class="live-display__hint t-display-hint">{MirrorText.NO_TRANSPORT}</p>
       )}
     </DisplayPanel>
+  )
+}
+
+/** The factory kit Live plays offline and its switch (FactoryKit), with both kits saved. */
+export interface FactoryKitUi {
+  readonly kit: FactoryKit
+  readonly onKit: (kit: FactoryKit) => void
+}
+
+/** The kit whose factory sounds Live shows offline (the EP-133's with a read, or nothing shown). */
+function kitShown(mirror: MirrorUi | null): FactoryKit {
+  return FactoryKit.ofId(mirror?.kit ?? null) ?? FactoryKit.EP133
+}
+
+/** EP-133 / EP-1320: the factory kit Live plays offline, as in Settings. */
+function KitSwitch(props: { kit: FactoryKitUi; label?: string; labelledBy?: string }): JSX.Element {
+  const { kit } = props
+  return (
+    <Segmented
+      compact
+      class="live-kit"
+      options={FactoryKit.entries.map((k) => MirrorText.kit(k))}
+      selected={Math.max(0, FactoryKit.entries.indexOf(kit.kit))}
+      onSelect={(i) => {
+        const k = FactoryKit.entries[i]
+        if (k !== undefined && k !== kit.kit) kit.onKit(k)
+      }}
+      {...(props.labelledBy !== undefined ? { labelledBy: props.labelledBy } : { label: props.label ?? FeatureText.FACTORY_KIT })}
+    />
   )
 }
 
@@ -2422,7 +2475,7 @@ function NotesFold(props: { st: MirrorState; mirror: MirrorUi | null; tapToPlay:
       {props.tapToPlay && <p>{WebText.LIVE_TAP_NOTE}</p>}
       {/* Pads that play here mean keys that do too, and sideways they are a piano. */}
       {props.tapToPlay && props.hint && <p>{WebText.LIVE_PIANO_HINT}</p>}
-      {mirror?.offline != null && <p>{MirrorText.offlineNote(mirror.offline)}</p>}
+      {mirror?.offline != null && <p>{MirrorText.offlineNote(mirror.offline, st.activeProject ?? FactorySounds.PROJECT, kitShown(mirror))}</p>}
       {st.padOrder === PadOrder.FROM_TOP && (
         <>
           <p>{MirrorText.LEARN_NOTE}</p>

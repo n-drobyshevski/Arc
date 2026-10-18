@@ -50,7 +50,7 @@
 import { computed, signal, useComputed } from '@preact/signals'
 import { Component, type ComponentChildren, type JSX } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { FactorySounds } from './core/features/factorySounds'
+import { FactoryKit, FactorySounds } from './core/features/factorySounds'
 import { MirrorText } from './core/text/mirrorText'
 import { SettingsText } from './core/text/settingsText'
 import { Strings } from './core/text/strings'
@@ -407,8 +407,14 @@ function Root(): JSX.Element {
         padSoundsSize={() => c.padSoundsSize()}
         onClearPadSounds={() => void c.clearPadSounds()}
         factorySounds={
-          c.canGetFactory ? { saved: FactorySounds.inLibrary(state.backups) !== null, onGet: () => void c.getFactorySounds() } : undefined
+          c.canGetFactory ? { saved: FactorySounds.inLibrary(state.backups, FactoryKit.EP133) !== null, onGet: () => void c.getFactorySounds() } : undefined
         }
+        factoryKits={{
+          saved1320: FactorySounds.inLibrary(state.backups, FactoryKit.EP1320) !== null,
+          both: FactoryKit.entries.every((k) => FactorySounds.inLibrary(state.backups, k) !== null),
+          kit: c.factoryKit,
+          onKit: (k) => c.setFactoryKit(k),
+        }}
         computerKeys={desk || fine ? { on: computerKeys.value, onChange: setComputerKeys, onShow: () => nav.open(sheetLayer(KEYS_SHEET)) } : undefined}
         onNoteNames={(n) => c.setKeysNames(n)}
         onShowNames={(on) => c.setKeysShowNames(on)}
@@ -1653,7 +1659,12 @@ function TabScreen(props: {
             },
             onDelete: (t) => void c.deleteTake(t),
           }}
-          onGetFactory={c.canGetFactory && FactorySounds.inLibrary(state.backups) === null ? () => void c.getFactorySounds() : null}
+          onGetFactory={c.canGetFactory && FactorySounds.inLibrary(state.backups, FactoryKit.EP133) === null ? () => void c.getFactorySounds() : null}
+          factoryKit={
+            FactoryKit.entries.every((k) => FactorySounds.inLibrary(state.backups, k) !== null)
+              ? { kit: c.factoryKit, onKit: (k) => c.setFactoryKit(k) }
+              : null
+          }
           offlinePads={state.offlinePads > 0 ? { count: state.offlinePads, onReset: () => void c.resetOfflinePads() } : null}
           onStop={() => c.stopPlayback()}
           nameOf={(pad) => c.mirrorName(pad)}

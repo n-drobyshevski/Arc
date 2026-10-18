@@ -46,6 +46,7 @@
 //   1024px, theme/desk.css): the two on one paper card.
 import type { ComponentChildren, JSX } from 'preact'
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
+import { FactoryKit } from '../../core/features/factorySounds'
 import { NOTE_NAMES, type NoteNames } from '../../core/features/keys'
 import type { PadOrder } from '../../core/features/padPush'
 import { choiceOf as pianoChoiceOf, fits as pianoFits, switchShown } from '../../core/features/piano'
@@ -96,6 +97,12 @@ export interface SettingsScreenProps {
   computerKeys?: { on: boolean; onChange: (on: boolean) => void; onShow: () => void } | undefined
   /** The factory sounds (FactorySounds): whether the library has them, and the download; absent where they can't be downloaded. */
   factorySounds?: { saved: boolean; onGet: () => void } | undefined
+  /**
+   * The EP-1320 Medieval's factory sounds (FactoryKit.EP1320, a copy of your
+   * own backup): whether they are saved; and the kit Live plays offline, its
+   * switch offered once both kits are saved.
+   */
+  factoryKits?: { saved1320: boolean; both: boolean; kit: FactoryKit; onKit: (kit: FactoryKit) => void } | undefined
   /** Web: whether this browser can vibrate (platform/haptics.ts); the Haptics row shows only then. */
   hapticsSupported?: boolean
   onHaptics?: (on: boolean) => void
@@ -253,6 +260,7 @@ export function pruneDialogId(keep: number): string {
 export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
   const { settings, state } = props
   const factory = props.factorySounds
+  const kits = props.factoryKits
   const nav = useNav()
   const v = nav.view.value
   // Two panes from 720 wide (Kotlin WideSettings).
@@ -603,6 +611,34 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
                         describedBy={ids.titleId}
                         disabled={factory.saved || state.busy}
                         onClick={factory.onGet}
+                      />
+                    )}
+                  />
+                )}
+                {kits !== undefined && (
+                  <SettingRow
+                    title={FeatureText.FACTORY_1320}
+                    note={kits.saved1320 ? FeatureText.FACTORY_1320_SAVED : FeatureText.FACTORY_1320_NOTE}
+                    control={
+                      kits.saved1320
+                        ? (ids) => <RowAction text={FeatureText.SAVED} describedBy={ids.titleId} disabled onClick={() => {}} />
+                        : undefined
+                    }
+                  />
+                )}
+                {kits !== undefined && kits.both && (
+                  <SettingRow
+                    title={FeatureText.FACTORY_KIT}
+                    control={(ids) => (
+                      <Segmented
+                        compact
+                        options={FactoryKit.entries.map((k) => MirrorText.kit(k))}
+                        selected={Math.max(0, FactoryKit.entries.indexOf(kits.kit))}
+                        onSelect={(i) => {
+                          const k = FactoryKit.entries[i]
+                          if (k !== undefined && k !== kits.kit) kits.onKit(k)
+                        }}
+                        labelledBy={ids.titleId}
                       />
                     )}
                   />

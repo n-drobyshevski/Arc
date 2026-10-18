@@ -40,6 +40,22 @@ describe('OfflinePadsTest', () => {
     expect(OfflinePads.fromJson('{"v":1}')).toEqual(OfflinePads.EMPTY)
   })
 
+  it("keeps a factory sound's kit when it isn't the EP-133's, and older entries read as the EP-133's", () => {
+    const medieval: OfflinePad = { ...kick, kit: 'ep1320' }
+    const p = OfflinePads.put(OfflinePads.put(OfflinePads.EMPTY, medieval), { ...snare, kit: 'ep133' })
+    expect(OfflinePads.toJson(p)).toBe(
+      '{"v":1,"pads":[{"project":1,"group":0,"pad":5,"slot":343,"name":"kick","source":"factory","kit":"ep1320"},' +
+        '{"project":1,"group":1,"pad":2,"slot":7,"name":"snare","source":"device"}]}',
+    )
+    expect(OfflinePads.fromJson(OfflinePads.toJson(p))!.list).toEqual([medieval, snare])
+    // Written without it (before kits), or with a kit arc doesn't know: the EP-133's.
+    expect(OfflinePads.fromJson('{"v":1,"pads":[{"project":1,"group":0,"pad":5,"slot":343,"name":"kick","source":"factory"}]}')!.list).toEqual([kick])
+    expect(OfflinePads.fromJson('{"v":1,"pads":[{"project":1,"group":0,"pad":5,"slot":343,"name":"kick","source":"factory","kit":"ep40"}]}')!.list).toEqual([kick])
+    expect(OfflinePads.fromJson('{"v":1,"pads":[{"project":1,"group":0,"pad":5,"slot":343,"name":"kick","source":"factory","kit":"ep133"}]}')!.list).toEqual([kick])
+    // Whatever its kit, a factory sound fits where the device has it.
+    expect(OfflinePads.fits(medieval, 1, new Map([[343, 'kick']]))).toBe(true)
+  })
+
   it("entries it can't read are skipped, and a later change of a pad wins", () => {
     const text = `{"v":1,"pads":[
       {"project":1,"group":0,"pad":5,"slot":343,"name":"kick","source":"factory"},

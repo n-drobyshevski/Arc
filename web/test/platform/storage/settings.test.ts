@@ -77,6 +77,7 @@ describe('SettingsStore', () => {
       sampleNormalize: false,
       sampleTrimSilence: false,
       samplePattern: false,
+      factoryKit: 'ep133',
     })
     expect(DEFAULT_SETTINGS).toEqual(s.settings)
   })
@@ -168,6 +169,7 @@ describe('SettingsStore', () => {
       'app.sampleNormalize',
       'app.sampleTrimSilence',
       'app.samplePattern',
+      'app.factoryKit',
     ])
   })
 
@@ -183,6 +185,19 @@ describe('SettingsStore', () => {
     expect(readSettings(JSON.stringify({ haptics: 'no' })).haptics).toBe(true)
     expect(settingsFromIndex({ 'app.haptics': 'true' }, s.settings).haptics).toBe(true)
     expect(settingsFromIndex({ 'app.haptics': 'off' }, s.settings).haptics).toBe(false)
+  })
+
+  it('keeps the factory kit by its id, an unknown one read as the EP-133\'s', () => {
+    const storage = memoryStorage()
+    const s = new SettingsStore(storage)
+    expect(s.settings.factoryKit).toBe('ep133')
+    s.update((c) => ({ ...c, factoryKit: 'ep1320' }))
+    expect(JSON.parse(storage.getItem(SETTINGS_KEY)!)).toEqual({ factoryKit: 'ep1320' })
+    expect(s.toIndex()).toEqual({ 'app.factoryKit': 'ep1320' })
+    expect(new SettingsStore(storage).settings.factoryKit).toBe('ep1320')
+    expect(readSettings(JSON.stringify({ factoryKit: 'ep40' })).factoryKit).toBe('ep133')
+    expect(settingsFromIndex({ 'app.factoryKit': 'ep133' }, s.settings).factoryKit).toBe('ep133')
+    expect(settingsFromIndex({ 'app.factoryKit': 'nope' }, s.settings).factoryKit).toBe('ep1320')
   })
 
   it('keeps the Keys view per window shape and the piano size, Auto stored as 0', () => {

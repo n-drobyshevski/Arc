@@ -7,7 +7,7 @@
 
 import type { ArpNote, ArpOrder } from '../features/arp'
 import { Chain, ChainPlay, type ChainStep } from '../features/chain'
-import { FactorySounds } from '../features/factorySounds'
+import { FactoryKit, FactorySounds } from '../features/factorySounds'
 import { FxSettings, FxType } from '../features/fxSettings'
 import { Keys, NoteNames, Scale } from '../features/keys'
 import type { Hit } from '../features/liveMirror'
@@ -45,14 +45,21 @@ export const MirrorText = {
   },
   // Not connected, with the factory sounds in the library: one of their projects (the first unless PROJECT steps on).
   FACTORY: 'Factory sounds',
-  factoryNote(project: number): string {
-    return `Not connected: these are the EP-133's factory sounds, project ${project} as it ships. Connect your EP-133 to see it live.`
+  factoryNote(project: number, kit: FactoryKit = FactoryKit.EP133): string {
+    return `Not connected: these are the ${kit.model}'s factory sounds, project ${project} as it ships. Connect your EP-133 to see it live.`
+  },
+  // The kit switch's keys, when both kits are saved (FactoryKit's models).
+  KIT_EP133: 'EP-133',
+  KIT_EP1320: 'EP-1320',
+  /** The kit switch's key for [kit]. */
+  kit(kit: FactoryKit): string {
+    return kit === FactoryKit.EP1320 ? MirrorText.KIT_EP1320 : MirrorText.KIT_EP133
   },
   // Not connected and never read: a way to play without it.
   GET_FACTORY: 'Get the factory sounds to play without it',
-  /** The note under "Offline" for the display's offline line ([lastSeen] or [FACTORY]), showing [project]. */
-  offlineNote(offline: string, project: number = FactorySounds.PROJECT): string {
-    return offline === MirrorText.FACTORY ? MirrorText.factoryNote(project) : MirrorText.OFFLINE_NOTE
+  /** The note under "Offline" for the display's offline line ([lastSeen] or [FACTORY]), showing [project] of [kit]. */
+  offlineNote(offline: string, project: number = FactorySounds.PROJECT, kit: FactoryKit = FactoryKit.EP133): string {
+    return offline === MirrorText.FACTORY ? MirrorText.factoryNote(project, kit) : MirrorText.OFFLINE_NOTE
   },
   PLAYING: 'Playing',
   STOPPED: 'Stopped',
