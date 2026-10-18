@@ -45,9 +45,10 @@ object Files {
     /**
      * ACTION_SEND through the system chooser. Throws if nothing can receive it.
      * With no [text] there is no subject or text either: a voice message's
-     * would go with it as a caption.
+     * would go with it as a caption. [replacing] gives some apps other extras
+     * (Telegram a take's voice message: [Telegram.replacing]).
      */
-    fun share(context: Context, uri: Uri, mime: String, subject: String, text: String?) {
+    fun share(context: Context, uri: Uri, mime: String, subject: String, text: String?, replacing: android.os.Bundle? = null) {
         val send = Intent(Intent.ACTION_SEND)
             .setType(mime)
             .putExtra(Intent.EXTRA_STREAM, uri)
@@ -55,6 +56,7 @@ object Files {
         if (text != null) send.putExtra(Intent.EXTRA_SUBJECT, subject).putExtra(Intent.EXTRA_TEXT, text)
         send.clipData = ClipData.newRawUri(subject, uri)
         val chooser = Intent.createChooser(send, null).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        if (replacing != null) chooser.putExtra(Intent.EXTRA_REPLACEMENT_EXTRAS, replacing)
         if (context !is android.app.Activity) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
             context.startActivity(chooser)

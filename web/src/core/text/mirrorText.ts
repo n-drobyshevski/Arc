@@ -653,7 +653,7 @@ export const MirrorText = {
   REC: 'Rec',
   TAKES: 'Takes',
   TAKES_NOTE:
-    "A take holds the pads and keys played on the phone, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out, and Voice shares one as a voice message (Telegram sends it as one).",
+    "A take holds the pads and keys played on the phone, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out (Share to Telegram sends it as a voice message), and Voice shares one as a voice message to any app.",
   TO_DEVICE: 'To EP-133',
   DELETE_TAKE: 'Delete this take?',
   NO_OUTPUT: 'There is no sound output to record from.',

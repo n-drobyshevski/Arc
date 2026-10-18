@@ -492,14 +492,38 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * SHARE: the take's WAV, except to Telegram's apps when there are any here:
+     * they get its voice message (made first), which they send as one. A voice
+     * message that can't be made leaves them the WAV too.
+     */
     private fun shareTake(t: dev.arc.ep133.data.TakeInfo) {
-        try {
-            val uri = androidx.core.content.FileProvider.getUriForFile(this, Files.AUTHORITY, controller.takeFile(t))
-            Files.share(this, uri, "audio/wav", t.name, t.name)
-        } catch (e: java.io.IOException) {
-            controller.toast(dev.arc.ep133.text.MirrorText.SHARE_TAKE_FAILED, error = true)
-        } catch (e: IllegalArgumentException) {
-            controller.toast(dev.arc.ep133.text.MirrorText.SHARE_TAKE_FAILED, error = true)
+        lifecycleScope.launch {
+            try {
+                val uri = androidx.core.content.FileProvider.getUriForFile(this@MainActivity, Files.AUTHORITY, controller.takeFile(t))
+                val telegram = dev.arc.ep133.files.Telegram.installed(this@MainActivity)
+                val voice = if (telegram.isEmpty()) {
+                    null
+                } else {
+                    try {
+                        val bytes = controller.takeVoice(t)
+                        val name = dev.arc.ep133.text.MirrorText.voiceFileName(t.name)
+                        withContext(Dispatchers.IO) { Files.shareableUri(this@MainActivity, name, bytes) }
+                    } catch (e: java.io.IOException) {
+                        null
+                    }
+                }
+                Files.share(
+                    this@MainActivity, uri, "audio/wav", t.name, t.name,
+                    replacing = voice?.let { dev.arc.ep133.files.Telegram.replacing(this@MainActivity, telegram, it) },
+                )
+            } catch (e: java.io.IOException) {
+                controller.toast(dev.arc.ep133.text.MirrorText.SHARE_TAKE_FAILED, error = true)
+            } catch (e: IllegalArgumentException) {
+                controller.toast(dev.arc.ep133.text.MirrorText.SHARE_TAKE_FAILED, error = true)
+            } catch (e: SecurityException) {
+                controller.toast(dev.arc.ep133.text.MirrorText.SHARE_TAKE_FAILED, error = true)
+            }
         }
     }
 

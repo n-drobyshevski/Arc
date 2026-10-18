@@ -510,7 +510,7 @@ object MirrorText {
     /** SAMPLE's take going on, for screen readers ("Pad A 1, Rec"). */
     const val REC = "Rec"
     const val TAKES = "Takes"
-    const val TAKES_NOTE = "A take holds the pads and keys played on the phone, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out, and Voice shares one as a voice message (Telegram sends it as one)."
+    const val TAKES_NOTE = "A take holds the pads and keys played on the phone, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out (Share to Telegram sends it as a voice message), and Voice shares one as a voice message to any app."
     const val TO_DEVICE = "To EP-133"
     const val DELETE_TAKE = "Delete this take?"
 
