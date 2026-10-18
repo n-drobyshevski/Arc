@@ -487,26 +487,44 @@ export class LiveMirror {
     this.renameLastHit()
   }
 
+  /** The active project (snapshot's activeProject, without taking one; an addition). */
+  get project(): number | null {
+    return this.activeProject
+  }
+
+  /** The pad order (snapshot's padOrder, without taking one; an addition). */
+  get order(): PadOrder {
+    return this.padOrder
+  }
+
+  /** The tempo at [now] (ms) from the clocks heard, null when too few or stale (snapshot's bpm; an addition). */
+  tempo(now: number): number | null {
+    const first = this.clocks[0]
+    const lastClock = this.clocks[this.clocks.length - 1]
+    if (first === undefined || lastClock === undefined || now - lastClock > CLOCK_TIMEOUT_MS || this.clocks.length < 25) return null
+    const span = lastClock - first
+    const ticks = this.clocks.length - 1
+    // 24 clocks per quarter note.
+    return span <= 0 ? null : (60000 * ticks) / (span * 24)
+  }
+
+  /** When the tempo goes stale: the last clock plus CLOCK_TIMEOUT_MS (ms; null without a clock; an addition). */
+  clockDeadline(): number | null {
+    const lastClock = this.clocks[this.clocks.length - 1]
+    return lastClock === undefined ? null : lastClock + CLOCK_TIMEOUT_MS
+  }
+
   /** The state at [now] (ms): released pads past their fade are dropped, and a stale tempo is cleared. */
   snapshot(now: number): MirrorState {
     for (const [k, l] of [...this.pads.entries()]) if (l.offAt != null && now - l.offAt > FADE_MS) this.pads.delete(k)
     for (const [n, l] of [...this.notes.entries()]) if (l.offAt != null && now - l.offAt > FADE_MS) this.notes.delete(n)
-    const first = this.clocks[0]
-    const lastClock = this.clocks[this.clocks.length - 1]
-    let bpm: number | null = null
-    if (first !== undefined && lastClock !== undefined && now - lastClock <= CLOCK_TIMEOUT_MS && this.clocks.length >= 25) {
-      const span = lastClock - first
-      const ticks = this.clocks.length - 1
-      // 24 clocks per quarter note.
-      bpm = span <= 0 ? null : (60000 * ticks) / (span * 24)
-    }
     return {
       pads: new Map(this.pads),
       keysHeld: new Map(this.keysHeld),
       lastKeysNote: this.lastKeysNote,
       lastHit: this.lastHit,
       playing: this.playing,
-      bpm,
+      bpm: this.tempo(now),
       activeProject: this.activeProject,
       learned: new Map(this.learned),
       pushesSeen: this.pushesSeen,
