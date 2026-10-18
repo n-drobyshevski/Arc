@@ -19,6 +19,7 @@ class PakFileProvider : FileProvider() {
             path.endsWith(".pak", ignoreCase = true) -> "application/zip"
             path.endsWith(".txt", ignoreCase = true) -> "text/plain"
             path.endsWith(".wav", ignoreCase = true) -> "audio/wav"
+            path.endsWith(".ogg", ignoreCase = true) -> "audio/ogg"
             else -> super.getType(uri)
         }
     }
@@ -41,14 +42,17 @@ object Files {
         return FileProvider.getUriForFile(context, AUTHORITY, f)
     }
 
-    /** ACTION_SEND through the system chooser. Throws if nothing can receive it. */
-    fun share(context: Context, uri: Uri, mime: String, subject: String, text: String) {
+    /**
+     * ACTION_SEND through the system chooser. Throws if nothing can receive it.
+     * With no [text] there is no subject or text either: a voice message's
+     * would go with it as a caption.
+     */
+    fun share(context: Context, uri: Uri, mime: String, subject: String, text: String?) {
         val send = Intent(Intent.ACTION_SEND)
             .setType(mime)
             .putExtra(Intent.EXTRA_STREAM, uri)
-            .putExtra(Intent.EXTRA_SUBJECT, subject)
-            .putExtra(Intent.EXTRA_TEXT, text)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        if (text != null) send.putExtra(Intent.EXTRA_SUBJECT, subject).putExtra(Intent.EXTRA_TEXT, text)
         send.clipData = ClipData.newRawUri(subject, uri)
         val chooser = Intent.createChooser(send, null).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         if (context !is android.app.Activity) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

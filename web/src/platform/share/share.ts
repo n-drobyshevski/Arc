@@ -78,7 +78,8 @@ export async function shareFile(
   const text = options.text ?? Strings.SHARE_TITLE_PREFIX + title
   const blob = await toBlob(data, mime)
   const file = new File([blob], name, { type: mime })
-  const payload: ShareDataLike = { files: [file], title, text }
+  // No text (a voice message's): nothing but the file, which an app would otherwise caption with it.
+  const payload: ShareDataLike = text === '' ? { files: [file] } : { files: [file], title, text }
   let can = false
   try {
     can = env.share !== undefined && env.canShare !== undefined && env.canShare({ files: [file] })

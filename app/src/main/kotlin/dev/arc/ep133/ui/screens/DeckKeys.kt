@@ -66,7 +66,7 @@ private val KeyGap = 7.dp
 
 internal enum class DeckStyle { NORMAL, SIGNAL, NAVY }
 
-internal enum class DeckGlyph { DOT, PLAY, STOP, SHARE, SAVE, SEND, DELETE, SCENE, PATTERN, CHAIN, PASTE }
+internal enum class DeckGlyph { DOT, PLAY, STOP, SHARE, VOICE, SAVE, SEND, DELETE, SCENE, PATTERN, CHAIN, PASTE }
 
 /**
  * A key of the strip: a cap with [glyph] over its [label], read as
@@ -150,6 +150,11 @@ internal fun DrawScope.drawGlyph(glyph: DeckGlyph, color: Color) {
             line(Offset(w * 0.22f, w * 0.78f), Offset(w * 0.78f, w * 0.22f))
             line(Offset(w * 0.38f, w * 0.22f), Offset(w * 0.78f, w * 0.22f))
             line(Offset(w * 0.78f, w * 0.22f), Offset(w * 0.78f, w * 0.62f))
+        }
+        // A voice message's waveform.
+        DeckGlyph.VOICE -> floatArrayOf(0.28f, 0.6f, 0.84f, 0.48f, 0.68f).forEachIndexed { i, h ->
+            val x = w * (0.14f + i * 0.18f)
+            line(Offset(x, w * (0.5f - h / 2)), Offset(x, w * (0.5f + h / 2)))
         }
         DeckGlyph.SAVE -> {
             line(Offset(w * 0.5f, w * 0.1f), Offset(w * 0.5f, w * 0.66f))

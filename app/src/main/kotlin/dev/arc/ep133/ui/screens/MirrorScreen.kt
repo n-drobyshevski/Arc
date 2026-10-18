@@ -358,6 +358,7 @@ class TakesUi(
     val onPlay: (TakeInfo) -> Unit = {},
     val onStop: () -> Unit = {},
     val onShare: (TakeInfo) -> Unit = {},
+    val onVoice: (TakeInfo) -> Unit = {},
     val onSave: (TakeInfo) -> Unit = {},
     val onToDevice: (TakeInfo) -> Unit = {},
     val onDelete: (TakeInfo) -> Unit = {},

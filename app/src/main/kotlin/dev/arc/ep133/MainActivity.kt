@@ -472,13 +472,13 @@ class MainActivity : ComponentActivity() {
     private fun sharePak(b: BackupRecord) =
         shareBytes(LibraryRules.fileNameFor(b.title), "application/zip", b.title) { controller.pakBytes(b) }
 
-    /** Shares [read]'s bytes as a file named [name] through the system share sheet. */
-    private fun shareBytes(name: String, mime: String, title: String, read: suspend () -> ByteArray) {
+    /** Shares [read]'s bytes as a file named [name] through the system share sheet ([text] with it, unless null). */
+    private fun shareBytes(name: String, mime: String, title: String, text: String? = Strings.SHARE_TITLE_PREFIX + title, read: suspend () -> ByteArray) {
         lifecycleScope.launch {
             try {
                 val bytes = read()
                 val uri = withContext(Dispatchers.IO) { Files.shareableUri(this@MainActivity, name, bytes) }
-                Files.share(this@MainActivity, uri, mime, title, Strings.SHARE_TITLE_PREFIX + title)
+                Files.share(this@MainActivity, uri, mime, title, text)
             } catch (e: java.io.IOException) {
                 controller.toast(if (e.message == "no app to share with") Strings.SHARE_FAILED else e.message ?: Strings.SHARE_FAILED, error = true)
             } catch (e: SecurityException) {
@@ -501,6 +501,12 @@ class MainActivity : ComponentActivity() {
         } catch (e: IllegalArgumentException) {
             controller.toast(dev.arc.ep133.text.MirrorText.SHARE_TAKE_FAILED, error = true)
         }
+    }
+
+    /** VOICE: the take as Ogg Opus, which Telegram sends as a voice message; no text, which it would add as a caption. */
+    private fun shareTakeVoice(t: dev.arc.ep133.data.TakeInfo) {
+        val name = dev.arc.ep133.text.MirrorText.voiceFileName(t.name)
+        shareBytes(name, dev.arc.ep133.formats.OggOpus.MIME, name, text = null) { controller.takeVoice(t) }
     }
 
     private fun saveTake(t: dev.arc.ep133.data.TakeInfo) {
@@ -1218,6 +1224,7 @@ class MainActivity : ComponentActivity() {
                                 onPlay = { controller.playTake(it) },
                                 onStop = controller::stopPlayback,
                                 onShare = ::shareTake,
+                                onVoice = ::shareTakeVoice,
                                 onSave = ::saveTake,
                                 onToDevice = {
                                     controller.takeToDevice(it)

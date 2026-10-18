@@ -56,7 +56,7 @@ import dev.arc.ep133.ui.theme.LocalArcColors
 /**
  * The Takes page as the device's display (an addition): the takes numbered
  * on the glass, T01 the oldest, and under it one strip of keys. A tap on a
- * take lights it; PLAY, SHARE, SAVE, EP and DEL act on the lit one, and DEL
+ * take lights it; PLAY, SHARE, VOICE (a voice message), SAVE, EP and DEL act on the lit one, and DEL
  * asks again on the glass. TAKE starts and stops a take, its time on the
  * glass while it records. The keys are a [DeckStrip].
  */
@@ -105,6 +105,7 @@ internal fun TakesDeck(t: TakesUi, take: TakeUi, still: Boolean) {
             )
         },
         { DeckKey(DeckGlyph.SHARE, MirrorText.TAKE_SHARE, MirrorText.litTake(FeatureText.SHARE_WAV, n), act(t.onShare), enabled = lit != null) },
+        { DeckKey(DeckGlyph.VOICE, MirrorText.TAKE_VOICE, MirrorText.litTake(MirrorText.VOICE_MESSAGE, n), act(t.onVoice), enabled = lit != null) },
         { DeckKey(DeckGlyph.SAVE, MirrorText.TAKE_SAVE, MirrorText.litTake(FeatureText.SAVE_WAV, n), act(t.onSave), enabled = lit != null) },
         { DeckKey(DeckGlyph.SEND, MirrorText.TAKE_SEND, MirrorText.litTake(MirrorText.TO_DEVICE, n), act(t.onToDevice), enabled = lit != null && t.connected) },
         {

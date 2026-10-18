@@ -2395,6 +2395,10 @@ class ArcController(
         startSound(key, sound)
     }
 
+    /** A take as a voice message (Ogg Opus, mono): the bytes VOICE shares. Throws IOException when it can't be made. */
+    suspend fun takeVoice(t: dev.arc.ep133.data.TakeInfo): ByteArray =
+        withContext(Dispatchers.Default) { dev.arc.ep133.audio.VoiceNote.encode(withContext(Dispatchers.IO) { takeFile(t).readBytes() }) }
+
     fun deleteTake(t: dev.arc.ep133.data.TakeInfo): Job = scope.launch {
         if (player.playing.value == takeKey(t)) stopPlayback()
         previews.remove(takeKey(t))

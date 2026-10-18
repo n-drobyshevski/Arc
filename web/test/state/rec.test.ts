@@ -81,6 +81,36 @@ describe('REC', () => {
     expect(h.c.state.value.takes).toEqual([])
   })
 
+  it('VOICE: the take as a mono Ogg Opus voice message, shared with no text; with no encoder, it says so', async () => {
+    const h = await liveHarness({ now: () => AT })
+    h.liveAudio.endTake(recorded())
+    const st = await until(h, (s) => s.takes.length === 1)
+    const t = st.takes[0]!
+    const deps = h.deps as { voice?: unknown }
+    expect(h.c.canShareVoice).toBe(false)
+    h.deps.share.canShareFiles = () => true
+    const fed: number[] = []
+    // Two 20 ms CELT packets for whatever comes in.
+    deps.voice = {
+      encodeOpus: async (pcm: Int16Array) => (fed.push(pcm.length), { packets: [new Uint8Array([0xf8, 1]), new Uint8Array([0xf8, 2])], config: null }),
+    }
+    expect(h.c.canShareVoice).toBe(true)
+    const share = vi.spyOn(h.deps.share, 'share')
+    await h.c.shareTakeVoice(t)
+    const [name, data, mime, , text] = share.mock.calls[0]!
+    expect([name, mime, text]).toEqual(['take-20261005-142301.ogg', 'audio/ogg', ''])
+    const bytes = await (data as () => Promise<Uint8Array>)()
+    // 4800 stereo frames at 48 kHz: 4800 mono samples.
+    expect(fed).toEqual([4800])
+    expect(String.fromCharCode(...bytes.subarray(0, 4))).toBe('OggS')
+    expect(String.fromCharCode(...bytes.subarray(28, 36))).toBe('OpusHead')
+    // A share that reads the bytes, as the browser's does.
+    deps.voice = undefined
+    h.deps.share.share = async (_n, d) => (await (d as () => Promise<Uint8Array>)(), 'shared')
+    await h.c.shareTakeVoice(t)
+    expect(h.toasts.at(-1)).toMatchObject({ text: MirrorText.NO_VOICE_ENCODER, error: true })
+  })
+
   it('To EP-133: the take is proposed for the first free slot, with its trim', async () => {
     const h = await liveOn()
     h.liveAudio.endTake(recorded())

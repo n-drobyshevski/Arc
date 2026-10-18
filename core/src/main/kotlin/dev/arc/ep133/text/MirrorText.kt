@@ -510,7 +510,7 @@ object MirrorText {
     /** SAMPLE's take going on, for screen readers ("Pad A 1, Rec"). */
     const val REC = "Rec"
     const val TAKES = "Takes"
-    const val TAKES_NOTE = "A take holds the pads and keys played on the phone, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out."
+    const val TAKES_NOTE = "A take holds the pads and keys played on the phone, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out, and Voice shares one as a voice message (Telegram sends it as one)."
     const val TO_DEVICE = "To EP-133"
     const val DELETE_TAKE = "Delete this take?"
 
@@ -534,6 +534,13 @@ object MirrorText {
     fun deleteTakeAgain(n: Int) = "Delete ${takeNumber(n)}? Press DEL again"
     const val NO_OUTPUT = "There is no sound output to record from."
     const val SHARE_TAKE_FAILED = "Sharing failed. Use Save WAV instead."
+    // VOICE: a take as a voice message (Ogg Opus, which Telegram sends as one).
+    const val TAKE_VOICE = "Voice"
+    const val VOICE_MESSAGE = "Share as a voice message"
+    const val NO_VOICE_ENCODER = "There's no Opus encoder here to make a voice message. Use Share instead."
+    const val VOICE_FAILED = "The voice message couldn't be made. Use Share instead."
+    /** "take-20261005-142301.ogg": a take's voice message. */
+    fun voiceFileName(take: String) = take.removeSuffix(".wav") + ".ogg"
 
     /** "0:12", "10:00". */
     fun takeLength(seconds: Double): String {

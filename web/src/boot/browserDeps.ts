@@ -36,6 +36,7 @@ import { pickFiles, readFile } from '../platform/files/pick'
 import { saveBytes } from '../platform/files/save'
 import { onLaunchFiles } from '../platform/files/launchQueue'
 import { canShareFiles, shareFile, shareText } from '../platform/share/share'
+import { browserVoiceEncoder } from '../platform/audio/voiceEncoder'
 import { IdbSampleStore, MemorySampleStore, type SampleStore } from '../platform/storage/sampleStore'
 import { IdbTakeStore, memoryTakeStore, type TakeStore } from '../platform/storage/takeStore'
 import { WebAudioPlayer } from '../platform/audio/player'
@@ -162,6 +163,7 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
     liveAudio,
     padSounds,
     takes,
+    voice: browserVoiceEncoder(),
     samples,
     lastRead: new LastReadPrefs(storage),
     offlinePads: new OfflinePadsPrefs(storage),
