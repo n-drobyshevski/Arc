@@ -510,7 +510,7 @@ object MirrorText {
     /** SAMPLE's take going on, for screen readers ("Pad A 1, Rec"). */
     const val REC = "Rec"
     const val TAKES = "Takes"
-    const val TAKES_NOTE = "A take holds the pads and keys played on the phone, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out."
+    const val TAKES_NOTE = "A take holds the pads and keys played on the phone, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Trim keeps a part of one (nothing is cut) and Dup copies it, to trim a copy another way. Save or Share copies one out, its trimmed part if it has one; Share to Telegram sends it as a voice message."
     const val TO_DEVICE = "To EP-133"
     const val DELETE_TAKE = "Delete this take?"
 
@@ -520,20 +520,56 @@ object MirrorText {
     /** "Takes · 3" (upper-cased where shown), the glass's head. */
     fun takesCount(count: Int) = "$TAKES · $count"
     /** "T03, 0:12, Oct 5, 2:23 PM", and ", playing": a take on the glass, for screen readers. */
-    fun takeRow(n: Int, seconds: Double, made: String, playing: Boolean) =
-        "${takeNumber(n)}, ${takeLength(seconds)}, $made" + if (playing) ", playing" else ""
+    fun takeRow(n: Int, seconds: Double, made: String, playing: Boolean, trimmed: Boolean = false) =
+        "${takeNumber(n)}, ${takeLength(seconds)}" + (if (trimmed) " trimmed" else "") + ", $made" + if (playing) ", playing" else ""
     const val TAKES_LIT_HINT = "Tap a take to light it; the keys act on it."
     /** The keys' words, upper-cased where shown. */
     const val TAKE_SHARE = "Share"
     const val TAKE_SAVE = "Save"
     const val TAKE_SEND = "EP"
     const val TAKE_DEL = "Del"
+    const val TAKE_TRIM = "Trim"
+    const val TAKE_DUP = "Dup"
+    const val DUPLICATE = "Duplicate"
+    /** "T05, a copy of T02": a duplicate made, its trim with it. */
+    fun takeDuplicated(copy: Int, of: Int) = "${takeNumber(copy)}, a copy of ${takeNumber(of)}"
+
+    // TRIM: a take's part, kept with it (nothing is cut), on the glass.
+    const val TRIM_HEAD = "Trim"
+    const val TRIM_START = "Start"
+    const val TRIM_END = "End"
+    const val TRIM_RESET = "Reset"
+    const val TRIM_DONE = "Done"
+    const val TRIM_DRAG = "Drag the handles"
+    const val TRIM_TAP_HINT = "Tap START or END while it plays to cut there. Nothing is cut from the take: RESET brings it all back."
+    /** On the list under the glass: what the lit take's trim means. */
+    fun trimmedHint(n: Int, seconds: Double) = "\u2702 ${takeNumber(n)} is trimmed to ${takeLength(seconds)}: SHARE, SAVE and EP send that part"
+    /** "0:18.4": a trim's edge, to a tenth of a second. */
+    fun trimTime(seconds: Double): String {
+        val tenths = (seconds * 10).toLong()
+        return "${tenths / 600}:${(tenths / 10 % 60).toString().padStart(2, '0')}.${tenths % 10}"
+    }
+    /** "0:18.4 → 0:39.0". */
+    fun trimSpan(start: Double, end: Double) = "${trimTime(start)} \u2192 ${trimTime(end)}"
+    /** For screen readers: the wave and its part ("Trim of T02: 0:18.4 to 0:39.0, 0:21 long"). */
+    fun trimDescription(n: Int, start: Double, end: Double) = "Trim of ${takeNumber(n)}: ${trimTime(start)} to ${trimTime(end)}, ${takeLength(end - start)} long"
+    const val TRIM_START_LATER = "Start later"
+    const val TRIM_START_EARLIER = "Start earlier"
+    const val TRIM_END_LATER = "End later"
+    const val TRIM_END_EARLIER = "End earlier"
+    /** The START and END keys, for screen readers. */
+    fun trimMark(edge: String, playing: Boolean) = if (playing) "$edge here" else "$edge (while it plays)"
     /** "Share WAV, T03": a key for the lit take, for screen readers. */
     fun litTake(action: String, n: Int) = "$action, ${takeNumber(n)}"
     /** "Delete T03? Press DEL again", on the glass after one press of DEL. */
     fun deleteTakeAgain(n: Int) = "Delete ${takeNumber(n)}? Press DEL again"
     const val NO_OUTPUT = "There is no sound output to record from."
     const val SHARE_TAKE_FAILED = "Sharing failed. Use Save WAV instead."
+    // A take as a voice message (Ogg Opus, which Telegram sends as one): SHARE gives it to Telegram.
+    const val NO_VOICE_ENCODER = "There's no Opus encoder here to make a voice message. Use Share instead."
+    const val VOICE_FAILED = "The voice message couldn't be made. Use Share instead."
+    /** "take-20261005-142301.ogg": a take's voice message. */
+    fun voiceFileName(take: String) = take.removeSuffix(".wav") + ".ogg"
 
     /** "0:12", "10:00". */
     fun takeLength(seconds: Double): String {

@@ -316,11 +316,16 @@ class MainActivity : ComponentActivity() {
         if (uri == null) return
         lifecycleScope.launch {
             try {
-                // A take is copied straight from its file: it can be long.
+                // A take is copied straight from its file (it can be long), or its trimmed part written.
                 if (what != null && what.startsWith("take:")) {
-                    val f = controller.takes.value.firstOrNull { it.name == what.removePrefix("take:") }?.let(controller::takeFile)
+                    val t = controller.takes.value.firstOrNull { it.name == what.removePrefix("take:") }
                         ?: throw java.io.IOException(Strings.FILE_MISSING)
-                    withContext(Dispatchers.IO) { Files.copyTo(this@MainActivity, uri, f) }
+                    if (t.trim == null) {
+                        withContext(Dispatchers.IO) { Files.copyTo(this@MainActivity, uri, controller.takeFile(t)) }
+                    } else {
+                        val wav = controller.takeWav(t)
+                        withContext(Dispatchers.IO) { Files.writeTo(this@MainActivity, uri, wav) }
+                    }
                     return@launch
                 }
                 val bytes = when {
@@ -472,13 +477,13 @@ class MainActivity : ComponentActivity() {
     private fun sharePak(b: BackupRecord) =
         shareBytes(LibraryRules.fileNameFor(b.title), "application/zip", b.title) { controller.pakBytes(b) }
 
-    /** Shares [read]'s bytes as a file named [name] through the system share sheet. */
-    private fun shareBytes(name: String, mime: String, title: String, read: suspend () -> ByteArray) {
+    /** Shares [read]'s bytes as a file named [name] through the system share sheet ([text] with it, unless null). */
+    private fun shareBytes(name: String, mime: String, title: String, text: String? = Strings.SHARE_TITLE_PREFIX + title, read: suspend () -> ByteArray) {
         lifecycleScope.launch {
             try {
                 val bytes = read()
                 val uri = withContext(Dispatchers.IO) { Files.shareableUri(this@MainActivity, name, bytes) }
-                Files.share(this@MainActivity, uri, mime, title, Strings.SHARE_TITLE_PREFIX + title)
+                Files.share(this@MainActivity, uri, mime, title, text)
             } catch (e: java.io.IOException) {
                 controller.toast(if (e.message == "no app to share with") Strings.SHARE_FAILED else e.message ?: Strings.SHARE_FAILED, error = true)
             } catch (e: SecurityException) {
@@ -492,14 +497,44 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * SHARE: the take's WAV (its trimmed part, if it has one), except to
+     * Telegram's apps when there are any here: they get its voice message
+     * (made first), which they send as one. A voice message that can't be
+     * made leaves them the WAV too.
+     */
     private fun shareTake(t: dev.arc.ep133.data.TakeInfo) {
-        try {
-            val uri = androidx.core.content.FileProvider.getUriForFile(this, Files.AUTHORITY, controller.takeFile(t))
-            Files.share(this, uri, "audio/wav", t.name, t.name)
-        } catch (e: java.io.IOException) {
-            controller.toast(dev.arc.ep133.text.MirrorText.SHARE_TAKE_FAILED, error = true)
-        } catch (e: IllegalArgumentException) {
-            controller.toast(dev.arc.ep133.text.MirrorText.SHARE_TAKE_FAILED, error = true)
+        lifecycleScope.launch {
+            try {
+                val uri = if (t.trim == null) {
+                    androidx.core.content.FileProvider.getUriForFile(this@MainActivity, Files.AUTHORITY, controller.takeFile(t))
+                } else {
+                    val wav = controller.takeWav(t)
+                    withContext(Dispatchers.IO) { Files.shareableUri(this@MainActivity, t.name, wav) }
+                }
+                val telegram = dev.arc.ep133.files.Telegram.installed(this@MainActivity)
+                val voice = if (telegram.isEmpty()) {
+                    null
+                } else {
+                    try {
+                        val bytes = controller.takeVoice(t)
+                        val name = dev.arc.ep133.text.MirrorText.voiceFileName(t.name)
+                        withContext(Dispatchers.IO) { Files.shareableUri(this@MainActivity, name, bytes, keep = true) }
+                    } catch (e: java.io.IOException) {
+                        null
+                    }
+                }
+                Files.share(
+                    this@MainActivity, uri, "audio/wav", t.name, t.name,
+                    replacing = voice?.let { dev.arc.ep133.files.Telegram.replacing(this@MainActivity, telegram, it) },
+                )
+            } catch (e: java.io.IOException) {
+                controller.toast(dev.arc.ep133.text.MirrorText.SHARE_TAKE_FAILED, error = true)
+            } catch (e: IllegalArgumentException) {
+                controller.toast(dev.arc.ep133.text.MirrorText.SHARE_TAKE_FAILED, error = true)
+            } catch (e: SecurityException) {
+                controller.toast(dev.arc.ep133.text.MirrorText.SHARE_TAKE_FAILED, error = true)
+            }
         }
     }
 
@@ -1218,6 +1253,11 @@ class MainActivity : ComponentActivity() {
                                 onPlay = { controller.playTake(it) },
                                 onStop = controller::stopPlayback,
                                 onShare = ::shareTake,
+                                onDuplicate = { controller.duplicateTake(it) },
+                                trimKeyOf = controller::takeTrimKey,
+                                onTrimPlay = { t, from, to -> controller.playTakeTrim(t, from, to) },
+                                onSetTrim = { t, trim -> controller.setTakeTrim(t, trim) },
+                                loadSound = controller::takeSound,
                                 onSave = ::saveTake,
                                 onToDevice = {
                                     controller.takeToDevice(it)

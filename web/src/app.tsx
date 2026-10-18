@@ -1664,9 +1664,11 @@ function TabScreen(props: {
             fmtWhen: (ms) => c.fmtDateTime(ms),
             connected: state.device !== null,
             canShare: c.canShareTakes,
+            canVoice: c.canShareVoice,
             onPlay: (t) => void c.playTake(t),
             onStop: () => c.stopPlayback(),
             onShare: (t) => void c.shareTake(t),
+            onVoice: (t) => void c.shareTakeVoice(t),
             onSave: (t) => void c.saveTake(t),
             onToDevice: (t) => {
               void c.takeToDevice(t)

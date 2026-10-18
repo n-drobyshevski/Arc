@@ -229,7 +229,7 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, skin: SkinChoice = SkinChoice.EP133, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f, claude: ClaudeUi? = null, toolsPage: ToolsPage? = null, factoryKit: dev.arc.ep133.features.FactoryKit? = null, factoryKits: List<dev.arc.ep133.features.FactoryKit> = listOf(dev.arc.ep133.features.FactoryKit.EP133, dev.arc.ep133.features.FactoryKit.EP1320)) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, skin: SkinChoice = SkinChoice.EP133, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f, claude: ClaudeUi? = null, trimming: String? = null, toolsPage: ToolsPage? = null, factoryKit: dev.arc.ep133.features.FactoryKit? = null, factoryKits: List<dev.arc.ep133.features.FactoryKit> = listOf(dev.arc.ep133.features.FactoryKit.EP133, dev.arc.ep133.features.FactoryKit.EP1320)) {
     // As the controller has it: the last read's day alone for a short line ("Seen Oct 5").
     val offlineShort = offline?.takeIf { it.startsWith("Last seen ") }?.let { MirrorText.seen(it.removePrefix("Last seen ").substringBefore(",")) }
     // [factoryKit]: [factoryKits] saved (two or more), that one shown (its switch on the factory line).
@@ -284,6 +284,8 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
                 playing = takes.firstOrNull()?.name,
                 fmtWhen = { if (it == TAKE_AT) "Oct 5, 2:23 PM" else "Oct 4, 9:41 PM" },
                 connected = offline == null,
+                trimming = trimming,
+                trimSound = if (trimming != null) beatSound else null,
             ),
             // EDIT, SOUND's key, as on the Live tab: on where [edit] says so.
             edit = dev.arc.ep133.ui.screens.EditUi(on = edit == true, onEdit = {}),
@@ -598,6 +600,23 @@ private val someTakes = listOf(
     dev.arc.ep133.data.TakeInfo("take-20261004-214102.wav", TAKE_AT - 60_000_000, 73.0, 14_016_044),
 )
 
+// The older take trimmed to 0:18.4-0:39.6 (at 8 kHz mono, so its wave is quick to draw).
+private val trimmedTakes = listOf(
+    someTakes[0].copy(frames = 99_200, rate = 8_000, channels = 1),
+    someTakes[1].copy(frames = 584_000, rate = 8_000, channels = 1, trim = dev.arc.ep133.features.TakeTrim(147_200, 316_800)),
+)
+
+// A beat's shape: a hit every half second, each fading, quieter ones between.
+private val beatSound = run {
+    val pcm = ShortArray(584_000) { i ->
+        val beat = i % 4_000
+        val loud = if (i / 4_000 % 2 == 0) 26_000.0 else 14_000.0
+        val decay = kotlin.math.exp(-beat / 700.0)
+        (loud * decay * kotlin.math.sin(i * 0.9) * (0.8 + 0.2 * kotlin.math.sin(i / 9_000.0))).toInt().toShort()
+    }
+    dev.arc.ep133.audio.PcmSound(pcm, 1, 8_000, false)
+}
+
 @PreviewTest
 @Preview(name = "Live rec armed", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
@@ -617,6 +636,23 @@ fun LiveToolsTakesPreview() = Live(lastRead, oneGroup = true, tools = true, tool
 @Preview(name = "Live tools takes dark", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
 fun LiveToolsTakesDarkPreview() = Live(lastRead, dark = true, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, takes = someTakes)
+
+// T02 (lit, playing) trimmed: ✂ and its part's length on the glass, the line under it saying what the trim does.
+@PreviewTest
+@Preview(name = "Live tools takes trimmed", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakesTrimmedPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, takes = listOf(trimmedTakes[0].copy(trim = dev.arc.ep133.features.TakeTrim(8_000, 64_000)), trimmedTakes[1]))
+
+// TRIM open on T01: its wave on the glass with the two handles, the part's length large, and PLAY, START, END, RESET, DONE.
+@PreviewTest
+@Preview(name = "Live tools take trim", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakeTrimPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, takes = trimmedTakes, trimming = trimmedTakes[1].name)
+
+@PreviewTest
+@Preview(name = "Live tools take trim dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakeTrimDarkPreview() = Live(lastRead, dark = true, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, takes = trimmedTakes, trimming = trimmedTakes[1].name)
 
 // The glass while a take records: REC, its number and the time; the TAKE key orange with the time on it.
 @PreviewTest

@@ -56,18 +56,25 @@ import dev.arc.ep133.ui.theme.LocalArcColors
 /**
  * The Takes page as the device's display (an addition): the takes numbered
  * on the glass, T01 the oldest, and under it one strip of keys. A tap on a
- * take lights it; PLAY, SHARE, SAVE, EP and DEL act on the lit one, and DEL
- * asks again on the glass. TAKE starts and stops a take, its time on the
- * glass while it records. The keys are a [DeckStrip].
+ * take lights it; PLAY, SHARE, TRIM, DUP, SAVE, EP and DEL act on the lit
+ * one, and DEL asks again on the glass. TRIM turns the glass into the take's
+ * wave ([TakeTrimDeck]); DUP copies the take, lit as the newest. TAKE starts
+ * and stops a take, its time on the glass while it records. The keys are a
+ * [DeckStrip].
  */
 @Composable
 internal fun TakesDeck(t: TakesUi, take: TakeUi, still: Boolean) {
     val c = LocalArcColors.current
     var litName by rememberSaveable { mutableStateOf<String?>(null) }
     var confirm by rememberSaveable { mutableStateOf<String?>(null) }
+    var trimName by rememberSaveable { mutableStateOf(t.trimming) }
     // The take lit by a tap while it is still there, else the one playing, else the newest.
     val lit = t.list.find { it.name == litName } ?: t.list.find { t.playing == t.keyOf(it) } ?: t.list.firstOrNull()
     val number = { info: TakeInfo -> t.list.size - t.list.indexOf(info) }
+    t.list.find { it.name == trimName }?.let { trimming ->
+        TakeTrimDeck(t, trimming, number(trimming), onClose = { trimName = null })
+        return
+    }
     val confirming = lit != null && confirm == lit.name
     TakesGlass(t, take, lit, number, confirming, still, onLight = {
         litName = it.name
@@ -77,7 +84,10 @@ internal fun TakesDeck(t: TakesUi, take: TakeUi, still: Boolean) {
         confirm = null
         litName = null
     })
-    if (t.list.isNotEmpty()) Text(MirrorText.TAKES_LIT_HINT, style = ArcType.tiny, color = c.graphite, modifier = Modifier.padding(horizontal = 4.dp))
+    if (t.list.isNotEmpty()) {
+        val hint = if (lit?.trim != null) MirrorText.trimmedHint(number(lit), lit.keptSeconds) else MirrorText.TAKES_LIT_HINT
+        Text(hint, style = ArcType.tiny, color = c.graphite, modifier = Modifier.padding(horizontal = 4.dp))
+    }
 
     val recording = take.state as? RecState.Recording
     val playing = lit != null && t.playing == t.keyOf(lit)
@@ -105,6 +115,18 @@ internal fun TakesDeck(t: TakesUi, take: TakeUi, still: Boolean) {
             )
         },
         { DeckKey(DeckGlyph.SHARE, MirrorText.TAKE_SHARE, MirrorText.litTake(FeatureText.SHARE_WAV, n), act(t.onShare), enabled = lit != null) },
+        { DeckKey(DeckGlyph.TRIM, MirrorText.TAKE_TRIM, MirrorText.litTake(MirrorText.TRIM_HEAD, n), act { trimName = it.name }, enabled = lit != null) },
+        {
+            DeckKey(
+                DeckGlyph.DUP, MirrorText.TAKE_DUP, MirrorText.litTake(MirrorText.DUPLICATE, n),
+                act {
+                    t.onDuplicate(it)
+                    // The copy is the newest: it lights.
+                    litName = null
+                },
+                enabled = lit != null,
+            )
+        },
         { DeckKey(DeckGlyph.SAVE, MirrorText.TAKE_SAVE, MirrorText.litTake(FeatureText.SAVE_WAV, n), act(t.onSave), enabled = lit != null) },
         { DeckKey(DeckGlyph.SEND, MirrorText.TAKE_SEND, MirrorText.litTake(MirrorText.TO_DEVICE, n), act(t.onToDevice), enabled = lit != null && t.connected) },
         {
@@ -201,13 +223,13 @@ private fun TakesGlass(
                     .fillMaxWidth()
                     .heightIn(min = 48.dp)
                     .selectable(on, interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.RadioButton) { onLight(info) }
-                    .semantics(mergeDescendants = true) { contentDescription = MirrorText.takeRow(n, info.seconds, t.fmtWhen(info.createdAt), playing) },
+                    .semantics(mergeDescendants = true) { contentDescription = MirrorText.takeRow(n, info.keptSeconds, t.fmtWhen(info.createdAt), playing, trimmed = info.trim != null) },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 val ink = if (on) c.signal else c.displayInk
                 Text(MirrorText.takeNumber(n), style = GlassRow, color = ink, modifier = Modifier.width(38.dp))
-                Text(MirrorText.takeLength(info.seconds), style = GlassRow, color = ink, maxLines = 1)
+                Text(MirrorText.takeLength(info.keptSeconds), style = GlassRow, color = ink, maxLines = 1)
                 Text(
                     t.fmtWhen(info.createdAt).replace(",", "").uppercase(),
                     style = GlassHead,
@@ -216,7 +238,13 @@ private fun TakesGlass(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                Box(Modifier.size(14.dp)) { if (playing) Canvas(Modifier.size(14.dp)) { drawGlyph(DeckGlyph.PLAY, ink) } }
+                // ▶ on the one playing, else scissors on a trimmed one (its length is the part's).
+                Box(Modifier.size(14.dp)) {
+                    when {
+                        playing -> Canvas(Modifier.size(14.dp)) { drawGlyph(DeckGlyph.PLAY, ink) }
+                        info.trim != null -> Canvas(Modifier.size(14.dp)) { drawGlyph(DeckGlyph.TRIM, ink) }
+                    }
+                }
             }
         }
         if (confirming && lit != null) {

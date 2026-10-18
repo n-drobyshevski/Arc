@@ -361,6 +361,19 @@ class TakesUi(
     val onSave: (TakeInfo) -> Unit = {},
     val onToDevice: (TakeInfo) -> Unit = {},
     val onDelete: (TakeInfo) -> Unit = {},
+    /** DUP: a copy of the take, its trim with it. */
+    val onDuplicate: (TakeInfo) -> Unit = {},
+    /** TRIM: the player's key for the part played while trimming. */
+    val trimKeyOf: (TakeInfo) -> String = { "take-trim:" + it.name },
+    /** TRIM's PLAY: frames from the first to the second. */
+    val onTrimPlay: (TakeInfo, Long, Long) -> Unit = { _, _, _ -> },
+    /** TRIM's DONE: the part kept, or null for the whole take. */
+    val onSetTrim: (TakeInfo, dev.arc.ep133.features.TakeTrim?) -> Unit = { _, _ -> },
+    /** A take's whole sound for TRIM's wave; null when it can't be read. */
+    val loadSound: suspend (TakeInfo) -> dev.arc.ep133.audio.PcmSound? = { null },
+    /** For screenshots: TRIM open on this take, its sound already decoded. */
+    val trimming: String? = null,
+    val trimSound: dev.arc.ep133.audio.PcmSound? = null,
 )
 
 /**

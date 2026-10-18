@@ -16,6 +16,18 @@
     <!-- Only while SAMPLE mode is open with the mic or USB as its source (InputCapture); asked for then. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- Telegram's apps (files/Telegram.kt): SHARE on a take gives them its voice message. -->
+    <queries>
+        <package android:name="org.telegram.messenger" />
+        <package android:name="org.telegram.messenger.web" />
+        <package android:name="org.telegram.messenger.beta" />
+        <package android:name="org.telegram.plus" />
+        <package android:name="tw.nekomimi.nekogram" />
+        <package android:name="xyz.nextalone.nagram" />
+        <package android:name="uz.unnarsx.cherrygram" />
+        <package android:name="it.octogram.android" />
+    </queries>
+
     <application
         android:name=".ArcApp"
         android:allowBackup="false"

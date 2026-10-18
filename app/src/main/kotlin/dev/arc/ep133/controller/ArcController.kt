@@ -2381,28 +2381,89 @@ class ArcController(
     /** The player's key for a take, to show Stop on its row. */
     fun takeKey(t: dev.arc.ep133.data.TakeInfo) = "take:" + t.name
 
-    /** Plays a take on the phone (a list's single sound: it stops the one before). */
-    fun playTake(t: dev.arc.ep133.data.TakeInfo): Job = scope.launch {
-        val token = ++playToken
+    /** The player's key for a take's part played while trimming. */
+    fun takeTrimKey(t: dev.arc.ep133.data.TakeInfo) = "take-trim:" + t.name
+
+    /** A take's whole sound, decoded (kept for playing again); null with a toast when it can't be read. */
+    suspend fun takeSound(t: dev.arc.ep133.data.TakeInfo): PcmSound? {
         val key = takeKey(t)
-        val sound = previews[key] ?: try {
+        return previews[key] ?: try {
             withContext(Dispatchers.IO) { PcmSound.ofWav(takeFile(t).readBytes()) }.also { previews.put(key, it) }
         } catch (e: Exception) {
             toast(e.message ?: e.toString(), error = true)
-            return@launch
+            null
         }
-        if (token != playToken) return@launch
-        startSound(key, sound)
     }
 
+    /** Plays frames [from] to [to] of [sound] under [key] (a list's single sound: it stops the one before). */
+    private suspend fun playPart(key: String, sound: PcmSound, from: Long, to: Long, token: Long) {
+        val ch = sound.channels
+        val part = if (from == 0L && to * ch >= sound.pcm.size) {
+            sound
+        } else {
+            withContext(Dispatchers.Default) {
+                val pcm = sound.pcm.copyOfRange((from * ch).toInt().coerceIn(0, sound.pcm.size), (to * ch).toInt().coerceIn(0, sound.pcm.size))
+                PcmSound(pcm, ch, sound.sampleRate, sound.silent)
+            }
+        }
+        if (token != playToken) return
+        startSound(key, part)
+    }
+
+    /** Plays a take on the phone, its trimmed part if it has one (a list's single sound: it stops the one before). */
+    fun playTake(t: dev.arc.ep133.data.TakeInfo): Job = scope.launch {
+        val token = ++playToken
+        val sound = takeSound(t) ?: return@launch
+        if (token != playToken) return@launch
+        playPart(takeKey(t), sound, t.trim?.start ?: 0L, t.trim?.end ?: t.frames, token)
+    }
+
+    /** TRIM's PLAY: frames [from] to [to] of the take, under [takeTrimKey]. */
+    fun playTakeTrim(t: dev.arc.ep133.data.TakeInfo, from: Long, to: Long): Job = scope.launch {
+        val token = ++playToken
+        val sound = takeSound(t) ?: return@launch
+        if (token != playToken) return@launch
+        playPart(takeTrimKey(t), sound, from, to, token)
+    }
+
+    /** TRIM's DONE: keeps [trim] with the take (null: the whole take again). */
+    fun setTakeTrim(t: dev.arc.ep133.data.TakeInfo, trim: dev.arc.ep133.features.TakeTrim?): Job = scope.launch {
+        try {
+            withContext(Dispatchers.IO) { takeStore.setTrim(t.name, trim) }
+        } catch (e: java.io.IOException) {
+            toast(e.message ?: e.toString(), error = true)
+        }
+        loadTakes()
+    }
+
+    /** DUP: a copy of the take, its trim with it, made the newest (so it is lit). */
+    fun duplicateTake(t: dev.arc.ep133.data.TakeInfo): Job = scope.launch {
+        val of = _takes.value.let { it.size - it.indexOf(t) }
+        try {
+            withContext(Dispatchers.IO) { takeStore.duplicate(t.name, System.currentTimeMillis()) }
+        } catch (e: java.io.IOException) {
+            toast(e.message ?: e.toString(), error = true)
+            return@launch
+        }
+        loadTakes()
+        toast(dev.arc.ep133.text.MirrorText.takeDuplicated(_takes.value.size, of))
+    }
+
+    /** The WAV SHARE, SAVE and EP send: the take's trimmed part, else all of it. */
+    suspend fun takeWav(t: dev.arc.ep133.data.TakeInfo): ByteArray = withContext(Dispatchers.IO) { takeStore.keptWav(t) }
+
+    /** A take as a voice message (Ogg Opus, mono), its trimmed part if it has one: what SHARE gives Telegram. Throws IOException when it can't be made. */
+    suspend fun takeVoice(t: dev.arc.ep133.data.TakeInfo): ByteArray =
+        withContext(Dispatchers.Default) { dev.arc.ep133.audio.VoiceNote.encode(takeWav(t)) }
+
     fun deleteTake(t: dev.arc.ep133.data.TakeInfo): Job = scope.launch {
-        if (player.playing.value == takeKey(t)) stopPlayback()
+        if (player.playing.value == takeKey(t) || player.playing.value == takeTrimKey(t)) stopPlayback()
         previews.remove(takeKey(t))
         withContext(Dispatchers.IO) { takeStore.delete(t.name) }
         loadTakes()
     }
 
-    /** Proposes a take for upload to a free slot (the Device tab's upload sheet, with its trim). */
+    /** Proposes a take for upload to a free slot (the Device tab's upload sheet, the take's trim set as its trim). */
     fun takeToDevice(t: dev.arc.ep133.data.TakeInfo): Job = scope.launch {
         val bytes = try {
             withContext(Dispatchers.IO) { takeFile(t).readBytes() }
@@ -2413,7 +2474,7 @@ class ArcController(
         // The Device tab reads the device as it opens; the free slot is picked once that is in.
         val contents = _state.value.browser.contents
             ?: kotlinx.coroutines.withTimeoutOrNull(10_000) { _state.first { it.browser.contents != null }.browser.contents }
-        val item = draftItem(t.name, bytes, contents?.occupiedSlots ?: emptySet(), HashSet())
+        val item = draftItem(t.name, bytes, contents?.occupiedSlots ?: emptySet(), HashSet()).let { d -> t.trim?.let { d.copy(trim = it.range()) } ?: d }
         _state.update { it.copy(browser = it.browser.copy(draft = listOf(item))) }
     }
 
