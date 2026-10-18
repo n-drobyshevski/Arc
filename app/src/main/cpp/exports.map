@@ -1,0 +1,5 @@
+/* The symbols libarc_live.so exports: the JNI functions NativeAudio binds by name (see proguard-rules.pro). */
+{
+    global: Java_*;
+    local: *;
+};

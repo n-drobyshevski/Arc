@@ -26,6 +26,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Oboe's source (third_party/oboe), built into Live's native engine.
+          submodules: true
 
       - uses: actions/setup-java@v4
         with:
@@ -53,7 +56,8 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" "cmake;$cmake" > /dev/null
 
       - name: Test, lint and build
-        run: ./gradlew test :app:lintDebug :app:assembleDebug --stacktrace
+        # The release build (unsigned here) checks R8 and the native release link on every change.
+        run: ./gradlew test :app:lintDebug :app:assembleDebug :app:assembleRelease --stacktrace
 
       # Every debug build is signed with app/debug.keystore, so test builds
       # install over each other. Fail if that ever stops being true.
