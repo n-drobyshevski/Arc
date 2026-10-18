@@ -71,6 +71,8 @@ class AppSettingsTest {
             makeUpDelay = false,
             liveTempo = 98,
             shareSounds = false,
+            claudePrompt = dev.arc.ep133.features.ClaudePrompt(dev.arc.ep133.features.PromptTask.BEAT, genre = "dub-techno", text = "a;b").encode(),
+            claudePrompts = dev.arc.ep133.features.SavedPrompt.encodeAll(listOf(dev.arc.ep133.features.SavedPrompt("Dub", dev.arc.ep133.features.ClaudePrompt()))),
         )
         val index = chosen.values().mapKeys { "app." + it.key }
         assertEquals(chosen, AppSettings().withIndex(index))

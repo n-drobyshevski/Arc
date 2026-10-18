@@ -32,7 +32,7 @@ Claude Code picks it up the next time it starts, and uses it whenever you talk a
 1. In Arc's **Live** screen open **Live tools**, find **CLAUDE**, and use **SHARE SCENE** or **SHARE** (the group shown) to send a beat to the Claude app, so Claude sees your pad names. Tick **With my sound list** first and Claude also gets the sounds on your EP-133, and can choose them for the pads with `sound` lines. Or ask Claude to make something new.
 2. Claude replies with a card in a code block. Copy it and tap **PASTE BEAT** (or share the reply to Arc), then **IMPORT** on the sheet, and play. One undo removes it. If the card picks sounds, the sheet lists each as old to new with a tick box; the ticked ones can be put on your pads (this is the one thing a card can change on the EP-133).
 
-[references/arc-app.md](references/arc-app.md) has the details Claude uses. **Learn with Claude**, also under CLAUDE, starts lesson 1 in the Claude app.
+[references/arc-app.md](references/arc-app.md) has the details Claude uses. On Android the Claude page builds the prompt for you: tabs for a new beat, improving one, a track or a lesson, and a sentence on the glass whose orange words (genre, tempo, kit, parts) you tap to change; EDIT changes the words by hand and prompts can be saved. On the web **Learn with Claude** starts lesson 1.
 
 ## What is in the folder
 

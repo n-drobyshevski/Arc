@@ -2336,8 +2336,8 @@ fun GuideFromEdgePreview() {
     }
 }
 
-// Beat cards. Live tools' CLAUDE section, after the view settings and before TAKES: SHARE SCENE, SHARE for the group shown
-// (A, pattern 1) and the orange PASTE BEAT, then the skill's link and Learn with Claude; its sample scene is S02.
+// Beat cards. Live tools' CLAUDE page, as it starts: IMPROVE, the scene S02 on the glass, SCENE, the pattern (A, 1) and
+// CHAIN to pick the card, the orange PASTE, SAVE and the skill's link.
 // "With my sound list" under the two SHARE keys, ticked, with the sounds Arc knows.
 // The scene's first bars as the glass shows them: A's kick, B's snare, D's hats (C blank).
 private val claudeLights = listOf("X.......x.o.....", "....X.......X..x", "................", "o.o.o.oxo.o.o.oo").map { row ->
@@ -2379,6 +2379,68 @@ fun LiveToolsClaudeEmptyPreview() = Live(lastRead, oneGroup = true, tools = true
 fun LiveToolsClaudeDarkPreview() = Live(
     lastRead, dark = true, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE, takes = someTakes, offline = "Last seen Oct 5, 2:02 PM",
     claude = ClaudeUi(scene = "S01", numbers = listOf(1, 1, 1, 1), sounds = 212, withSounds = false),
+)
+
+// The prompt builder: a new dub techno beat at 122 BPM on the EP-40 kit (Live's), with bass, chords and FX, the words
+// orange under the glass; two saved prompts under the keys, the first in use.
+private val dubBeat = dev.arc.ep133.features.ClaudePrompt(
+    dev.arc.ep133.features.PromptTask.BEAT, genre = "dub-techno", tempo = 122,
+    parts = setOf(dev.arc.ep133.features.PromptPart.BASS, dev.arc.ep133.features.PromptPart.CHORDS, dev.arc.ep133.features.PromptPart.FX),
+)
+private val savedPrompts = listOf(
+    dev.arc.ep133.features.SavedPrompt("Dub techno 122", dubBeat),
+    dev.arc.ep133.features.SavedPrompt("Steppers 78", dev.arc.ep133.features.ClaudePrompt(dev.arc.ep133.features.PromptTask.BEAT).withGenre(dev.arc.ep133.features.Genres.of("steppers"))),
+)
+private val claudeBeat = ClaudeUi(
+    scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, lights = claudeLights,
+    prompt = dubBeat, kit = dev.arc.ep133.features.FactoryKit.EP40, saved = savedPrompts,
+)
+
+@PreviewTest
+@Preview(name = "Live tools claude beat", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeBeatPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE, claude = claudeBeat)
+
+// The genre word tapped: lit orange on the glass, the techno family's recipes as keys with their tempos, ANY and DONE.
+@PreviewTest
+@Preview(name = "Live tools claude genre", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeGenrePreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(sounds = 212, prompt = dubBeat, saved = savedPrompts, picking = dev.arc.ep133.features.PromptSlot.GENRE),
+)
+
+// IMPROVE, asking for more drive toward dub techno, the scene on the glass; the dark theme.
+@PreviewTest
+@Preview(name = "Live tools claude improve dark", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeImproveDarkPreview() = Live(
+    lastRead, dark = true, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(
+        scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, lights = claudeLights,
+        prompt = dev.arc.ep133.features.ClaudePrompt(goal = dev.arc.ep133.features.PromptGoal.DRIVE, genre = "dub-techno"), saved = savedPrompts,
+    ),
+)
+
+// A prompt edited by hand: its own words on the glass, PROMPT · EDITED at its foot.
+@PreviewTest
+@Preview(name = "Live tools claude edited", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeEditedPreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(
+        sounds = 212,
+        prompt = dubBeat.copy(text = "Use the arc-beats skill. Write a new 4-bar dub techno beat at 122 BPM with a slow chord echo on C7 and a sub bass that only plays on the one. Choose the sounds from my sound list:"),
+    ),
+)
+
+// LEARN: the lesson word tapped, the twelve lessons as keys.
+@PreviewTest
+@Preview(name = "Live tools claude learn", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeLearnPreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(sounds = 212, prompt = dev.arc.ep133.features.ClaudePrompt(dev.arc.ep133.features.PromptTask.LEARN, lesson = 5), picking = dev.arc.ep133.features.PromptSlot.LESSON),
 )
 
 // Live tools' front page after a share: the display waits for Claude's reply, with PASTE BEAT and a dismiss.

@@ -116,14 +116,23 @@ class ClaudeUi(
     /** Each group's pattern, its first bar as step lights ([dev.arc.ep133.controller.stepLights]), for the glass. */
     val lights: List<List<dev.arc.ep133.controller.Weight?>> = List(4) { dev.arc.ep133.controller.NO_LIGHTS },
     val onWithSounds: (Boolean) -> Unit = {},
-    val onShareScene: () -> Unit = {},
-    val onShareChain: () -> Unit = {},
-    val onSharePattern: (group: Int) -> Unit = {},
+    /** The prompt on the glass ([dev.arc.ep133.text.PromptText]), and the kit Live plays (the prompt's own when it names none). */
+    val prompt: dev.arc.ep133.features.ClaudePrompt = dev.arc.ep133.features.ClaudePrompt(),
+    val kit: dev.arc.ep133.features.FactoryKit = dev.arc.ep133.features.FactoryKit.EP133,
+    /** The tempo Live plays at: the tempo's LIVE answer. */
+    val liveTempo: Int = dev.arc.ep133.features.Tempo.DEFAULT,
+    val saved: List<dev.arc.ep133.features.SavedPrompt> = emptyList(),
+    /** The word whose answers show as the page opens (the previews'); null: the sentence's keys. */
+    val picking: dev.arc.ep133.features.PromptSlot? = null,
+    val onPrompt: (dev.arc.ep133.features.ClaudePrompt) -> Unit = {},
+    /** SHARE: the prompt, with the card [pick] names ([group]'s pattern for PATTERN) when it goes with one. */
+    val onShare: (pick: dev.arc.ep133.features.SharePick, group: Int) -> Unit = { _, _ -> },
+    val onSavePrompt: (dev.arc.ep133.features.ClaudePrompt) -> Unit = {},
+    val onDeletePrompt: (index: Int) -> Unit = {},
     val onPaste: () -> Unit = {},
     /** PASTE held: a .txt or .md file with a beat card in it, from the system's file picker. */
     val onOpenFile: () -> Unit = {},
     val onGetSkill: () -> Unit = {},
-    val onLearn: () -> Unit = {},
     /** What was shared to Claude and not yet answered ("Scene S02", "A \u00B7 01", "Chain"); null when no reply is awaited. */
     val waiting: String? = null,
     /** The dismiss key on the display's waiting card: stop waiting. */

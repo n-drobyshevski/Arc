@@ -51,6 +51,8 @@ import dev.arc.ep133.protocol.Storage
 import dev.arc.ep133.protocol.TrafficLog
 import dev.arc.ep133.service.TransferService
 import dev.arc.ep133.text.BackupDevice
+import dev.arc.ep133.text.ClaudeText
+import dev.arc.ep133.text.PromptText
 import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.LibraryRules
 import dev.arc.ep133.text.BackupRecord
@@ -5338,7 +5340,7 @@ class ArcController(
      * shows on it); null when there are no notes in it. The project's FX and the settings of the pads it uses are written
      * as the card's effect and `pad` lines, the used pads with no sound as a comment, and the kit Live plays before the card when it isn't the EP-133's ([activeKit], [ClaudeText.kitLine]). With "With my sound list" on, the sounds Arc knows follow the card ([soundSetOf]). The patterns are the project's as they stand, a pattern still recording included.
      */
-    fun beatShare(group: Int?): BeatShare? {
+    fun beatShare(group: Int?, prompt: String = ClaudeText.SHARE_PROMPT, kit: FactoryKit = activeKit()): BeatShare? {
         if (group != null && group !in 0..3) return null
         val bpm = patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)
         val m = mirror
@@ -5352,7 +5354,7 @@ class ArcController(
         val shaping = { pad: dev.arc.ep133.features.PhysicalPad -> m?.target(pad)?.let { padSettings[padKey(it)] } }
         // The pads the notes use that have no sound are named in a comment, once the pads are read (the share's "# no sound on:").
         val held = { pad: dev.arc.ep133.features.PhysicalPad -> m?.soundSlot(pad) }
-        return beatShare(projectSeq, group, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true, activeKit())
+        return beatShare(projectSeq, group, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true, kit, prompt)
     }
 
     /**
@@ -5361,7 +5363,7 @@ class ArcController(
      * pads with no sound in a comment and, with "With my sound list" on, the sounds Arc knows, as [beatShare] has them. Null when the
      * chain has no steps.
      */
-    fun beatShareChain(): BeatShare? {
+    fun beatShareChain(prompt: String = ClaudeText.SHARE_CHAIN_PROMPT, kit: FactoryKit = activeKit()): BeatShare? {
         if (projectSeq.chain.isBlank) return null
         val bpm = patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)
         val m = mirror
@@ -5372,7 +5374,51 @@ class ArcController(
         val list = if (settings.value.shareSounds) set else null
         val shaping = { pad: dev.arc.ep133.features.PhysicalPad -> m?.target(pad)?.let { padSettings[padKey(it)] } }
         val held = { pad: dev.arc.ep133.features.PhysicalPad -> m?.soundSlot(pad) }
-        return beatShareChain(projectSeq, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true, activeKit())
+        return beatShareChain(projectSeq, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true, kit, prompt)
+    }
+
+    /**
+     * What the Claude page's SHARE sends for [prompt]: with a card, the [pick]'s ([beatShare] of [group]'s pattern or
+     * the scene, [beatShareChain]) after the prompt's words ([PromptText.prompt]), else the words alone ([promptShare],
+     * named [PromptText.NEW_BEAT] or [PromptText.TRACK_IDEA]) with the sounds Arc knows when "With my sound list" is on
+     * (a lesson goes without). The prompt's kit, else the one Live plays, follows the words. Null when the card has
+     * nothing in it.
+     */
+    fun promptShare(prompt: dev.arc.ep133.features.ClaudePrompt, pick: dev.arc.ep133.features.SharePick, group: Int): BeatShare? {
+        val kit = prompt.kit ?: activeKit()
+        val set = soundSetOf(_state.value.mirror, _state.value.factoryNames)
+        val learn = prompt.task == dev.arc.ep133.features.PromptTask.LEARN
+        val list = if (settings.value.shareSounds && !learn) set else null
+        val words = PromptText.prompt(prompt, pick, list != null)
+        if (prompt.withCard) {
+            return when (pick) {
+                dev.arc.ep133.features.SharePick.SCENE -> beatShare(null, words, kit)
+                dev.arc.ep133.features.SharePick.PATTERN -> beatShare(group, words, kit)
+                dev.arc.ep133.features.SharePick.CHAIN -> beatShareChain(words, kit)
+            }
+        }
+        val what = if (prompt.task == dev.arc.ep133.features.PromptTask.TRACK) PromptText.TRACK_IDEA else PromptText.NEW_BEAT
+        return promptShare(if (learn) PromptText.task(prompt.task) else what, words, if (learn) FactoryKit.EP133 else kit, list)
+    }
+
+    /** The Claude page's prompt as built ([AppSettings.claudePrompt]), and kept as it changes. */
+    fun setClaudePrompt(p: dev.arc.ep133.features.ClaudePrompt) = changeSettings { it.copy(claudePrompt = p.encode()) }
+
+    /** SAVE under SAVED: the prompt kept with a name of its own ([PromptText.withSaved]), and said. */
+    fun saveClaudePrompt(p: dev.arc.ep133.features.ClaudePrompt) {
+        val list = dev.arc.ep133.features.SavedPrompt.decodeAll(settings.value.claudePrompts)
+        val next = PromptText.withSaved(list, p)
+        if (next.size == list.size) return
+        changeSettings { it.copy(claudePrompts = dev.arc.ep133.features.SavedPrompt.encodeAll(next)) }
+        toast(PromptText.saved(next.last().name))
+    }
+
+    /** A saved prompt held: deleted, and said. */
+    fun deleteClaudePrompt(index: Int) {
+        val list = dev.arc.ep133.features.SavedPrompt.decodeAll(settings.value.claudePrompts)
+        val gone = list.getOrNull(index) ?: return
+        changeSettings { it.copy(claudePrompts = dev.arc.ep133.features.SavedPrompt.encodeAll(list - gone)) }
+        toast(PromptText.deleted(gone.name))
     }
 
     private val _claudeWaiting = MutableStateFlow<String?>(null)

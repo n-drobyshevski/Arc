@@ -1,6 +1,7 @@
 package dev.arc.ep133.ui.screens
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -34,6 +36,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.arc.ep133.text.MirrorText
@@ -66,7 +69,64 @@ private val KeyGap = 7.dp
 
 internal enum class DeckStyle { NORMAL, SIGNAL, NAVY }
 
-internal enum class DeckGlyph { DOT, PLAY, STOP, SHARE, TRIM, DUP, START, END, RESET, DONE, SAVE, SEND, DELETE, SCENE, PATTERN, CHAIN, PASTE }
+internal enum class DeckGlyph { DOT, PLAY, STOP, SHARE, TRIM, DUP, START, END, RESET, DONE, SAVE, SEND, DELETE, SCENE, PATTERN, CHAIN, PASTE, EDIT, NEXT }
+
+/**
+ * The answers to a question on the glass (an addition: the Claude page's prompt words): [keys] in rows of
+ * [columns], the last row's gaps left empty so each key keeps its width.
+ */
+@Composable
+internal fun KeyGrid(keys: List<@Composable RowScope.() -> Unit>, columns: Int = 4) {
+    Column(verticalArrangement = Arrangement.spacedBy(KeyGap + 3.dp)) {
+        for (row in keys.chunked(columns)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(KeyGap)) {
+                row.forEach { it() }
+                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+/**
+ * A key with a word on it instead of a glyph (an answer: "Dub" over "118-126"): navy when it is the one picked
+ * ([selected], read as such) or a part that is in ([checked], read as on or off).
+ */
+@Composable
+internal fun RowScope.WordKey(
+    label: String,
+    description: String,
+    onClick: () -> Unit,
+    sub: String? = null,
+    selected: Boolean? = null,
+    checked: Boolean? = null,
+    enabled: Boolean = true,
+) {
+    val c = LocalArcColors.current
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val on = selected == true || checked == true
+    val (face, ink, edge) = if (on) Triple(c.navy, c.onNavy, capEdge(c.navy)) else Triple(c.key, c.ink, c.keyEdge)
+    Column(
+        Modifier
+            .weight(1f)
+            .padding(bottom = 3.dp)
+            .heightIn(min = 52.dp)
+            .cap(face, edge, RoundedCornerShape(8.dp), capPress(pressed && enabled), alpha = if (enabled) 1f else 0.45f)
+            .clickable(interactionSource = source, indication = null, enabled = enabled, onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription = description
+                role = if (checked != null) Role.Checkbox else if (selected != null) Role.RadioButton else Role.Button
+                selected?.let { this.selected = it }
+                checked?.let { stateDescription = MirrorText.onOff(it) }
+            }
+            .padding(horizontal = 3.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
+    ) {
+        Text(label.uppercase(), style = ArcType.capsKeySmall.copy(fontSize = 11.sp, lineHeight = 13.sp), color = ink, maxLines = 2, textAlign = TextAlign.Center)
+        sub?.let { Text(it, style = ArcType.capsKeySmall.copy(fontSize = 9.sp, lineHeight = 11.sp), color = if (on) c.onNavy.copy(alpha = 0.75f) else c.signal, maxLines = 3, textAlign = TextAlign.Center) }
+    }
+}
 
 /**
  * A key of the strip: a cap with [glyph] over its [label], read as
@@ -207,6 +267,18 @@ internal fun DrawScope.drawGlyph(glyph: DeckGlyph, color: Color) {
         DeckGlyph.CHAIN -> {
             line(Offset(w * 0.2f, w * 0.5f), Offset(w * 0.8f, w * 0.5f))
             for (x in listOf(0.16f, 0.5f, 0.84f)) drawCircle(color, radius = w * 0.13f, center = Offset(w * x, w * 0.5f))
+        }
+        // A pencil, its point down to the left.
+        DeckGlyph.EDIT -> {
+            line(Offset(w * 0.2f, w * 0.66f), Offset(w * 0.64f, w * 0.22f))
+            line(Offset(w * 0.34f, w * 0.8f), Offset(w * 0.78f, w * 0.36f))
+            line(Offset(w * 0.64f, w * 0.22f), Offset(w * 0.78f, w * 0.36f))
+            line(Offset(w * 0.2f, w * 0.66f), Offset(w * 0.12f, w * 0.88f))
+            line(Offset(w * 0.12f, w * 0.88f), Offset(w * 0.34f, w * 0.8f))
+        }
+        DeckGlyph.NEXT -> {
+            line(Offset(w * 0.36f, w * 0.18f), Offset(w * 0.68f, w * 0.5f))
+            line(Offset(w * 0.68f, w * 0.5f), Offset(w * 0.36f, w * 0.82f))
         }
         // A clipboard.
         DeckGlyph.PASTE -> {

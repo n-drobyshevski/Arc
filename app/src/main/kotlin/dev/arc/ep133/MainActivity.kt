@@ -262,24 +262,28 @@ class MainActivity : ComponentActivity() {
         null
     }
 
-    /** SHARE (scene when [group] is null) through the system chooser: the card's prompt and text, as plain text. */
-    /** SHARE CHAIN: the project's chain as a card of scenes, to Claude. */
-    private fun shareChain() {
-        val share = controller.beatShareChain() ?: return
-        if (sendText(share.subject, share.text, dev.arc.ep133.text.ClaudeText.SHARE_CHAIN_TITLE)) {
-            controller.waitForClaude(dev.arc.ep133.text.ClaudeText.CHAIN_CARD_NAME)
+    /**
+     * The Claude page's SHARE through the system chooser, as plain text: [prompt] with the card [pick] names when it goes
+     * with one ([group]'s pattern, the scene [sceneLabel] or the chain), else alone. Then the display waits for the reply
+     * ("Scene S02", "A \u00B7 01", "Chain", "New beat"); not for a lesson.
+     */
+    private fun sharePrompt(prompt: dev.arc.ep133.features.ClaudePrompt, pick: dev.arc.ep133.features.SharePick, group: Int, sceneLabel: String, number: Int) {
+        val share = controller.promptShare(prompt, pick, group) ?: return
+        val learn = prompt.task == dev.arc.ep133.features.PromptTask.LEARN
+        val title = when {
+            learn -> dev.arc.ep133.text.ClaudeText.LEARN_TITLE
+            prompt.withCard && pick == dev.arc.ep133.features.SharePick.CHAIN -> dev.arc.ep133.text.ClaudeText.SHARE_CHAIN_TITLE
+            else -> dev.arc.ep133.text.ClaudeText.SHARE_TITLE
         }
-    }
-
-    /** [what] is named on the display while Claude's reply is awaited ("Scene S02", "A \u00B7 01"). */
-    private fun shareBeat(group: Int?, what: String) {
-        val share = controller.beatShare(group) ?: return
-        if (sendText(share.subject, share.text, dev.arc.ep133.text.ClaudeText.SHARE_TITLE)) controller.waitForClaude(what)
-    }
-
-    /** Learn with Claude: a starter prompt to send to the Claude app. */
-    private fun learnWithClaude() {
-        sendText(dev.arc.ep133.text.ClaudeText.LEARN, dev.arc.ep133.text.ClaudeText.LEARN_PROMPT, dev.arc.ep133.text.ClaudeText.LEARN_TITLE)
+        if (!sendText(share.subject, share.text, title) || learn) return
+        controller.waitForClaude(
+            when {
+                !prompt.withCard -> if (prompt.task == dev.arc.ep133.features.PromptTask.TRACK) dev.arc.ep133.text.PromptText.TRACK_IDEA else dev.arc.ep133.text.PromptText.NEW_BEAT
+                pick == dev.arc.ep133.features.SharePick.SCENE -> dev.arc.ep133.text.ClaudeText.sharedScene(sceneLabel)
+                pick == dev.arc.ep133.features.SharePick.PATTERN -> dev.arc.ep133.text.ClaudeText.sharedPattern(group, number)
+                else -> dev.arc.ep133.text.ClaudeText.CHAIN_CARD_NAME
+            },
+        )
     }
 
     /** Whether the system chooser opened. */
@@ -678,6 +682,9 @@ class MainActivity : ComponentActivity() {
         // The mirror listens only while its tab is in front (not under the debug, settings or guide screen).
         val live = tab == Tab.LIVE && !debug && !settingsOpen && !guideOpen
         val appSettings by controller.settings.collectAsStateWithLifecycle()
+        // CLAUDE's prompt and saved prompts, read from the settings once each time they change.
+        val claudePrompt = remember(appSettings.claudePrompt) { dev.arc.ep133.features.ClaudePrompt.decode(appSettings.claudePrompt) }
+        val savedPrompts = remember(appSettings.claudePrompts) { dev.arc.ep133.features.SavedPrompt.decodeAll(appSettings.claudePrompts) }
 
         fun selectTab(t: Tab) {
             if (t == tab) return
@@ -1310,15 +1317,19 @@ class MainActivity : ComponentActivity() {
                                 chainSteps = scene.chain.chain.steps.size,
                                 chainScenes = dev.arc.ep133.controller.chainSceneCount(scene.chain.chain.steps),
                                 lights = scene.groups.map { it.lights },
-                                onShareScene = { shareBeat(null, dev.arc.ep133.text.ClaudeText.sharedScene(scene.label)) },
-                                onShareChain = ::shareChain,
-                                onSharePattern = { g -> shareBeat(g, dev.arc.ep133.text.ClaudeText.sharedPattern(g, scene.groups.getOrNull(g)?.number ?: 1)) },
+                                prompt = claudePrompt,
+                                kit = dev.arc.ep133.controller.activeKitOf(appSettings.factoryKit, state.backups),
+                                liveTempo = appSettings.liveTempo,
+                                saved = savedPrompts,
+                                onPrompt = controller::setClaudePrompt,
+                                onShare = { pick, g -> sharePrompt(claudePrompt, pick, g, scene.label, scene.groups.getOrNull(g)?.number ?: 1) },
+                                onSavePrompt = controller::saveClaudePrompt,
+                                onDeletePrompt = controller::deleteClaudePrompt,
                                 onPaste = { controller.receiveBeat(clipboardText()) },
                                 onOpenFile = { cardFileLauncher.launch(arrayOf("text/plain", "text/markdown", "text/x-markdown", "application/octet-stream")) },
                                 waiting = claudeWaiting,
                                 onDismissWaiting = controller::stopWaitingForClaude,
                                 onGetSkill = ::openSkill,
-                                onLearn = ::learnWithClaude,
                             ),
                         )
                         Tab.DEVICE -> DeviceScreen(
