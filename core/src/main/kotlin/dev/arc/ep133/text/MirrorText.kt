@@ -164,6 +164,21 @@ object MirrorText {
     // The piano in landscape: − and + step the octave, and the key gets its own word.
     const val OCTAVE_DOWN = "Octave down"
     const val OCTAVE_UP = "Octave up"
+    /** A pick word's TalkBack actions, the same as a short swipe along it (right, left). */
+    const val PICK_NEXT = "Next"
+    const val PICK_PREVIOUS = "Previous"
+    /** Added to a scale or octave word's description: held, its choices fan out beside the thumb to pick from. */
+    const val QUICK_PICK_HINT = "Hold to pick from the list"
+
+    // The KEYS sheet a tap on the scale, key or octave word opens: the scales with their notes as dots, the keys, the octaves.
+    const val OCTAVE = "Octave"
+    /** The sheet's title for screen readers. */
+    const val KEYS_SHEET = "Scale, key and octave"
+    const val CLOSE_KEYS_SHEET = "Close scale, key and octave"
+    /** A scale's row for screen readers: "Major, 7 notes". */
+    fun scaleRow(s: dev.arc.ep133.features.Scale) = "${scaleName(s)}, ${s.intervals.size} notes"
+    /** An octave's cap for screen readers: "Octave 4". */
+    fun octaveCap(n: Int) = "$OCTAVE $n"
 
     /** "KEY DO", the key word above the piano. */
     fun keyWord(root: Int, names: dev.arc.ep133.features.NoteNames) = "$KEY ${dev.arc.ep133.features.Keys.name(root, names)}"
