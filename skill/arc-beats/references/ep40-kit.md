@@ -5,7 +5,8 @@ The EP-40 Riddim is teenage engineering's reggae and dub sibling of the EP-133. 
 ## When it applies
 - The share says so: Arc adds the sentence *My EP-133 plays the EP-40 Riddim factory kit.* after its request, before the card, whenever the EP-40 kit is the one the user picked in Arc.
 - Or the sound list is the pack's: names like `55 ep 40 kick`, `742 syren`, `619 pianchrd cmaj` and loops that end in a tempo, `824 jammy drms a 85`. `scripts/beatcard.py` notices this too (or take `--kit ep40`).
-- When neither is there, the EP-133's own layout ([genres.md](genres.md), "The assumed kit") is the assumption, as before. Don't guess the EP-40 kit from a genre request alone; ask, or say which kit you assumed.
+- Or the user asks for it ("use the EP-40 sounds", "make it with the Riddim kit"): use this page and the EP-40 list in [factory-sounds.md](factory-sounds.md), and say the slots are the EP-40's, so they play where those sounds are (Arc's Live with the EP-40 kit, or an EP-133 they are loaded onto).
+- When none of these is there, the EP-133's own layout ([genres.md](genres.md), "The assumed kit") is the assumption, as before. Don't guess the EP-40 kit from a genre request alone; ask, or say which kit you assumed.
 
 ## The pack's slots
 471 sounds, grouped by slot. They are names the list gives, so the usual rule holds: copy slot and name from the user's list, never from this page, because the user may have moved them.
