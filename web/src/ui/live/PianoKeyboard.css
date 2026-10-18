@@ -170,3 +170,61 @@
 .piano__key--black.is-step-lit { outline: 2px solid var(--signal); outline-offset: -4px; }
 .piano__key.is-step-picked,
 .piano__key--black.is-step-picked { outline: 3px solid var(--signal); outline-offset: -5px; }
+
+/* Web only, on the desk (MirrorScreen's piano page, .piano--device): the keys are the drawn EP-133's
+ * caps (live/DeviceView.css .ep-key) in its colours, the same in both themes: a face lit from the top
+ * left (a sheen and a bright rim) over a shaded lower lip, in a well of 1 to 5 px, the print in Jost.
+ * The naturals are its pale caps, the sharps its black ones, raised over them with a soft shadow.
+ * A lit key's face and lip mix towards signal orange as everywhere (--glow), and a press is the
+ * caps' travel (--cap-p): the face goes down and its lip shrinks. */
+.piano--device {
+  --piano-white: #E4E1DD;
+  --piano-black: #262626;
+  --key-out: #CBC8C4;
+  --key-out-black: #3A3938;
+  --piano-line: transparent;
+  --on-piano-black: #EDEDEC;
+  --piano-digit: #7A7672;
+  --piano-signal: #FF4C00;
+  --ink: #3A3836;
+  font-family: 'Jost', var(--font);
+}
+/* After the theme's own (same weight, later wins): the device's orange for the root in both themes. */
+.piano.piano--device .piano__plate { --piano-root: #F15A22; }
+.piano--device .piano__key {
+  border: solid transparent;
+  background:
+    radial-gradient(140% 60% at 22% 0%, rgb(255 255 255 / var(--sheen)), transparent 65%),
+    linear-gradient(180deg, color-mix(in oklab, var(--cap-face) 88%, white), var(--cap-face) 55%);
+  background-clip: padding-box;
+  box-shadow:
+    inset 2px 0 0 rgb(255 255 255 / var(--rim)),
+    inset -2px calc(-6px + 3px * var(--cap-p)) 0 var(--cap-edge),
+    inset 0 -16px 14px -10px rgb(0 0 0 / 0.12),
+    inset 0 0 0 1px rgb(0 0 0 / 0.14),
+    0 0 var(--cap-glow-blur) var(--cap-glow);
+}
+.piano--device .piano__key--white {
+  --sheen: 0.35;
+  --rim: 0.5;
+  --cap-edge: color-mix(in oklab, var(--signal-edge) var(--glow-pct), color-mix(in oklab, var(--piano-base) 82%, #4A4440));
+  border-width: 0 5px 7px 2px;
+  border-radius: 0 0 12px 12px / 0 0 14px 14px;
+}
+.piano--device .piano__key--black {
+  --sheen: 0.07;
+  --rim: 0.06;
+  --cap-edge: color-mix(in oklab, #7A2200 var(--glow-pct), #141414);
+  border-width: 0 4px 7px 2px;
+  border-radius: 0 0 10px 10px / 0 0 12px 12px;
+  outline: none;
+  box-shadow:
+    inset 2px 0 0 rgb(255 255 255 / var(--rim)),
+    inset -2px calc(-6px + 3px * var(--cap-p)) 0 var(--cap-edge),
+    inset -3px -8px 2px -1px color-mix(in srgb, var(--cap-edge) 60%, transparent),
+    inset 0 0 0 1px rgb(0 0 0 / 0.3),
+    2px calc(4px - 2px * var(--cap-p)) 8px rgb(0 0 0 / 0.35),
+    0 0 var(--cap-glow-blur) var(--cap-glow);
+}
+.piano--device .piano__name { font-weight: 400; letter-spacing: 0.08em; }
+.piano--device .piano__digit { font-weight: 400; }

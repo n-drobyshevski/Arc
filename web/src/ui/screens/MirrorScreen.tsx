@@ -1225,7 +1225,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       data-coach-ink={COACH_YELLOW_INK}
     >
       <PianoKeyboard
-        class={desk ? 'piano--flat' : undefined}
+        class={desk ? 'piano--flat piano--device' : undefined}
         range={pianoRange}
         st={st}
         keys={keys}
