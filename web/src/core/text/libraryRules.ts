@@ -35,7 +35,7 @@ export interface BackupRecord {
   readonly title: string
   readonly notes: string
   readonly createdAt: number
-  /** "device", "import", or a factory kit's (FactoryKit.source: "factory", "factory-ep1320"). */
+  /** "device", "import", or a factory kit's (FactoryKit.source: "factory", "factory-ep1320", "factory-ep40"). */
   readonly source: string
   readonly fileName: string | null
   readonly device: BackupDevice
@@ -156,7 +156,7 @@ export function facts(b: BackupRecord, madeText: string): Array<[string, string]
     'From',
     b.source === 'import'
       ? 'Imported file' + (b.fileName ? `, ${b.fileName}` : '')
-      : b.source === FactoryKit.EP133.source
+      : b.source === FactoryKit.EP133.source || b.source === FactoryKit.EP40.source
         ? FACTORY_FROM
         : b.source === FactoryKit.EP1320.source
           ? FACTORY_1320_FROM

@@ -97,12 +97,15 @@ export interface SettingsScreenProps {
   computerKeys?: { on: boolean; onChange: (on: boolean) => void; onShow: () => void } | undefined
   /** The factory sounds (FactorySounds): whether the library has them, and the download; absent where they can't be downloaded. */
   factorySounds?: { saved: boolean; onGet: () => void } | undefined
+  /** The EP-40 Riddim's factory sounds (FactoryKit.EP40), downloaded like the EP-133's; absent where they can't be. */
+  factorySounds40?: { saved: boolean; onGet: () => void } | undefined
   /**
    * The EP-1320 Medieval's factory sounds (FactoryKit.EP1320, a copy of your
    * own backup): whether they are saved; and the kit Live plays offline, its
-   * switch offered once both kits are saved.
+   * switch offered once two or more kits are saved ([saved], in the order
+   * listed: EP-133, EP-40, EP-1320).
    */
-  factoryKits?: { saved1320: boolean; both: boolean; kit: FactoryKit; onKit: (kit: FactoryKit) => void } | undefined
+  factoryKits?: { saved1320: boolean; saved: readonly FactoryKit[]; kit: FactoryKit; onKit: (kit: FactoryKit) => void } | undefined
   /** Web: whether this browser can vibrate (platform/haptics.ts); the Haptics row shows only then. */
   hapticsSupported?: boolean
   onHaptics?: (on: boolean) => void
@@ -260,6 +263,7 @@ export function pruneDialogId(keep: number): string {
 export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
   const { settings, state } = props
   const factory = props.factorySounds
+  const factory40 = props.factorySounds40
   const kits = props.factoryKits
   const nav = useNav()
   const v = nav.view.value
@@ -615,6 +619,20 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
                     )}
                   />
                 )}
+                {factory40 !== undefined && (
+                  <SettingRow
+                    title={FeatureText.FACTORY_40}
+                    note={factory40.saved ? FeatureText.FACTORY_40_SAVED : FeatureText.FACTORY_40_NOTE}
+                    control={(ids) => (
+                      <RowAction
+                        text={factory40.saved ? FeatureText.SAVED : FeatureText.GET}
+                        describedBy={ids.titleId}
+                        disabled={factory40.saved || state.busy}
+                        onClick={factory40.onGet}
+                      />
+                    )}
+                  />
+                )}
                 {kits !== undefined && (
                   <SettingRow
                     title={FeatureText.FACTORY_1320}
@@ -626,16 +644,16 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
                     }
                   />
                 )}
-                {kits !== undefined && kits.both && (
+                {kits !== undefined && kits.saved.length >= 2 && (
                   <SettingRow
                     title={FeatureText.FACTORY_KIT}
                     control={(ids) => (
                       <Segmented
                         compact
-                        options={FactoryKit.entries.map((k) => MirrorText.kit(k))}
-                        selected={Math.max(0, FactoryKit.entries.indexOf(kits.kit))}
+                        options={kits.saved.map((k) => MirrorText.kit(k))}
+                        selected={Math.max(0, kits.saved.indexOf(kits.kit))}
                         onSelect={(i) => {
-                          const k = FactoryKit.entries[i]
+                          const k = kits.saved[i]
                           if (k !== undefined && k !== kits.kit) kits.onKit(k)
                         }}
                         labelledBy={ids.titleId}

@@ -195,8 +195,10 @@ describe('SettingsStore', () => {
     expect(JSON.parse(storage.getItem(SETTINGS_KEY)!)).toEqual({ factoryKit: 'ep1320' })
     expect(s.toIndex()).toEqual({ 'app.factoryKit': 'ep1320' })
     expect(new SettingsStore(storage).settings.factoryKit).toBe('ep1320')
-    expect(readSettings(JSON.stringify({ factoryKit: 'ep40' })).factoryKit).toBe('ep133')
+    expect(readSettings(JSON.stringify({ factoryKit: 'ep40' })).factoryKit).toBe('ep40')
+    expect(readSettings(JSON.stringify({ factoryKit: 'ep99' })).factoryKit).toBe('ep133')
     expect(settingsFromIndex({ 'app.factoryKit': 'ep133' }, s.settings).factoryKit).toBe('ep133')
+    expect(settingsFromIndex({ 'app.factoryKit': 'ep40' }, s.settings).factoryKit).toBe('ep40')
     expect(settingsFromIndex({ 'app.factoryKit': 'nope' }, s.settings).factoryKit).toBe('ep1320')
   })
 

@@ -48,12 +48,13 @@ export const MirrorText = {
   factoryNote(project: number, kit: FactoryKit = FactoryKit.EP133): string {
     return `Not connected: these are the ${kit.model}'s factory sounds, project ${project} as it ships. Connect your EP-133 to see it live.`
   },
-  // The kit switch's keys, when both kits are saved (FactoryKit's models).
+  // The kit switch's keys, when two or more kits are saved (FactoryKit's models).
   KIT_EP133: 'EP-133',
   KIT_EP1320: 'EP-1320',
+  KIT_EP40: 'EP-40',
   /** The kit switch's key for [kit]. */
   kit(kit: FactoryKit): string {
-    return kit === FactoryKit.EP1320 ? MirrorText.KIT_EP1320 : MirrorText.KIT_EP133
+    return kit === FactoryKit.EP1320 ? MirrorText.KIT_EP1320 : kit === FactoryKit.EP40 ? MirrorText.KIT_EP40 : MirrorText.KIT_EP133
   },
   // Not connected and never read: a way to play without it.
   GET_FACTORY: 'Get the factory sounds to play without it',

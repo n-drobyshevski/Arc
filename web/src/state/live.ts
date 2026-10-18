@@ -24,8 +24,8 @@
 //   device (offlineSounds): the last read's list, dimmed where arc has no
 //   audio, and the factory pack's. A factory sound put on a pad plays from
 //   the pack first (loadPadAudio);
-// - the factory kit (an addition): the EP-133's pack or the EP-1320's, one
-//   at a time ([factoryKit]); a pack's sounds are kept in memory under keys
+// - the factory kit (an addition): the EP-133's pack, the EP-40's or the
+//   EP-1320's, one at a time ([factoryKit]); a pack's sounds are kept in memory under keys
 //   with the pack's record id in them ([packKey]), so two packs with the
 //   same slot and name never share one.
 //
@@ -372,10 +372,14 @@ export class LiveSounds {
 
   // ---------- the factory kit ----------
 
-  /** The kit Live's factory sounds come from: the one chosen (the factoryKit setting) while its pack is saved, else the EP-133's. */
+  /**
+   * The kit Live's factory sounds come from: the one chosen (the factoryKit
+   * setting) while its pack is saved, else the first saved (EP-133, EP-40,
+   * EP-1320), else the EP-133's (FactorySounds.activeKitOf).
+   */
   factoryKit(): FactoryKit {
     const kit = FactoryKit.ofId(this.host.deps.settings.settings.factoryKit) ?? FactoryKit.EP133
-    return kit !== FactoryKit.EP133 && FactorySounds.inLibrary(this.host.store.get().backups, kit) === null ? FactoryKit.EP133 : kit
+    return FactorySounds.activeKitOf(kit, this.host.store.get().backups)
   }
 
   /** The [factoryKit]'s pack in the library, if saved. */

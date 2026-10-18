@@ -77,9 +77,39 @@ function prop(v: JsonValue | undefined, key: string): JsonValue | undefined {
   return Object.hasOwn(v, key) ? v[key] : undefined
 }
 
+/** A zip made on a Mac carries resource forks under this folder: never part of the pack. */
+const MAC_FORKS = '__MACOSX/'
+
+/** A pack's own top folders: a zip whose files are all under one of these is laid out as a pack already. */
+const LAYOUT = new Set(['sounds', 'projects'])
+
+/**
+ * A zip's files as a pack lays them out (an addition): macOS's resource
+ * forks ([MAC_FORKS]) left out, and a pack zipped from a folder (the EP-40's
+ * factory pack: "ep-40-factory-content/meta.json", ".../sounds/...") read as
+ * if its files were at the top. A pack with meta.json at the top (the
+ * EP-133's, arc's own), or with its sounds or projects at the top, is read
+ * as it is. (readZip already leaves directories out.)
+ */
+export function pakFiles(zip: ReadonlyMap<string, Uint8Array>): Map<string, Uint8Array> {
+  const kept = new Map<string, Uint8Array>()
+  for (const [path, data] of zip) if (!path.startsWith(MAC_FORKS) && !path.endsWith('/')) kept.set(path, data)
+  if (kept.has('meta.json') || kept.size === 0) return kept
+  const first = kept.keys().next().value!
+  const slash = first.indexOf('/')
+  const top = slash < 0 ? '' : first.slice(0, slash)
+  // A pack of sounds alone (or projects alone) without meta.json is already laid out as a pack.
+  if (top === '' || LAYOUT.has(top.toLowerCase())) return kept
+  const prefix = top + '/'
+  for (const path of kept.keys()) if (!path.startsWith(prefix)) return kept
+  const out = new Map<string, Uint8Array>()
+  for (const [path, data] of kept) out.set(path.slice(prefix.length), data)
+  return out
+}
+
 /** Parse a .pak (`openPak`). Throws for a file that is not a zip or holds nothing usable. */
 export async function openPak(bytes: Uint8Array): Promise<Pak> {
-  const files = await readZip(bytes)
+  const files = pakFiles(await readZip(bytes))
   const json = (k: string): JsonValue | null => {
     const b = files.get(k)
     if (!b) return null

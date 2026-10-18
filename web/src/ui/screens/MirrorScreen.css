@@ -1583,7 +1583,7 @@
   height: var(--row-pad);
 }
 
-/* Offline on the factory sounds, both kits saved: the line and the kit switch (EP-133 / EP-1320) beside it. */
+/* Offline on the factory sounds, two or more kits saved: the line and the kit switch (EP-133 / EP-40 / EP-1320) beside it. */
 .live-display__kit {
   display: flex;
   align-items: center;
@@ -1596,4 +1596,9 @@
 @media (max-width: 479px) {
   .live-display__kit { flex-direction: column; align-items: flex-start; gap: var(--space-8); }
   .live-display__kit > .live-display__line { flex: none; max-width: 100%; }
+}
+/* Three kits need a little more room beside the line: under it until there is. */
+@media (min-width: 480px) and (max-width: 559px) {
+  .live-display__kit--three { flex-direction: column; align-items: flex-start; gap: var(--space-8); }
+  .live-display__kit--three > .live-display__line { flex: none; max-width: 100%; }
 }
