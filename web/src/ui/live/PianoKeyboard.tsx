@@ -34,15 +34,16 @@
 //   KeyMotion: straight down, a spring back up). A pressed key goes down at
 //   once (data-down set on the element in the handler, as the pads do), not
 //   at the next render, and a quick tap keeps it a moment (live/capDown.ts);
-//   each render then brings every key's data-down in line with what holds or
-//   sounds, so it isn't in the markup Preact diffs.
+//   each key then brings its own data-down in line with what holds or sounds
+//   when that changes, so it isn't in the markup Preact diffs.
 // - A key under the mouse is tinted (hover). The haptic tick ([haptics],
 //   platform/haptics.ts) follows a finger's press, not the computer keyboard's.
 // - A press hands on its event's timeStamp ([onNote]'s at: the pointerdown,
 //   the move that slid onto the key, or the keydown; Kotlin's uptimeMillis),
 //   for the latency note.
-// - [playingNotes] is the controller's signal, read here, so a voice starting
-//   or ending re-renders the piano, not Live's whole screen.
+// - [playingNotes] is the controller's signal, and the fingers' notes one of
+//   the piano's: each key (memoized, [PianoKey]) reads its own note from them,
+//   so a voice or finger starting or ending re-renders that key, not the piano.
 // - STEP open on the KEYS sound's group ([step], Kotlin's PadStep on the
 //   piano): the keys with a note on the cursor's step are outlined in signal
 //   orange, the one picked for − / + ringed, and a long press on a key picks
@@ -53,11 +54,11 @@
 //   modifier held.
 import type { JSX, TargetedKeyboardEvent, TargetedPointerEvent } from 'preact'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
-import type { ReadonlySignal } from '@preact/signals'
-import { Keys, MAX_OCTAVE, MIN_OCTAVE, type Scale } from '../../core/features/keys'
+import { signal, type ReadonlySignal, type Signal } from '@preact/signals'
+import { Keys, MAX_OCTAVE, MIN_OCTAVE, type NoteNames, type Scale } from '../../core/features/keys'
 import type { MirrorState } from '../../core/features/liveMirror'
 import { NoteTouches, type NoteEvent } from '../../core/features/noteTouches'
-import { KeyMark, Piano, rangeNotes, type NoteRange, type PianoKey } from '../../core/features/piano'
+import { KeyMark, Piano, rangeNotes, type NoteRange, type PianoKey as LaidKey } from '../../core/features/piano'
 import { MirrorText } from '../../core/text/mirrorText'
 import { tick } from '../../platform/haptics'
 import { glow, glowCss } from './glow'
@@ -65,6 +66,7 @@ import { COMPUTER_KEYS, computerHint, computerNote, octaveStep, playsKeys } from
 import type { KeysShown } from './keys'
 import type { PianoStep } from './StepPanel'
 import { capDown, capUp } from './capDown'
+import { memo, sameNotes, useHas } from './memo'
 import { rawMovesSupported } from './press'
 import '@fontsource/jost/latin-300.css'
 import '@fontsource/jost/latin-400.css'
@@ -127,7 +129,6 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
   const { range, st, keys, now, computer = false } = props
   // The letters on the keys only while Settings → Computer keyboard is on (they play only then).
   const hints = computer && computerKeys.value
-  const playingNotes = props.playingNotes.value
   const plate = useRef<HTMLDivElement | null>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
   useLayoutEffect(() => {
@@ -152,7 +153,7 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
     generation.current++
     return Piano.layout(range, size.w, size.h)
   }, [range.first, range.last, size.w, size.h])
-  const laidRef = useRef<PianoKey[]>(laid)
+  const laidRef = useRef<LaidKey[]>(laid)
   laidRef.current = laid
 
   // The latest callbacks, for the long-lived handlers.
@@ -171,7 +172,8 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
 
   const touches = useMemo(() => new NoteTouches(), [])
   const fingers = useRef(new Map<number, Finger>())
-  const [fingered, setFingered] = useState<ReadonlySet<number>>(() => new Set())
+  // The notes the fingers hold, read by each key (not by the piano).
+  const fingered = useMemo(() => signal<ReadonlySet<number>>(new Set()), [])
   /** The key element of [note], if it shows. */
   const keyOf = (note: number): HTMLElement | null => plate.current?.querySelector<HTMLElement>(`[data-note="${note}"]`) ?? null
   /** [events] played; [finger]: by a finger (a tick on each press, where on); [at]: their input event's timeStamp. */
@@ -192,7 +194,10 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
       }
     }
     if (pressed && finger && cb.current.haptics) tick()
-    if (events.length > 0) setFingered(touches.held)
+    if (events.length > 0) {
+      const held = touches.held
+      if (!sameNotes(fingered.peek(), held)) fingered.value = held
+    }
   }
   // Also when the keys leave the screen (PADS, a narrower window) under a finger.
   useEffect(() => () => {
@@ -353,14 +358,12 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
   }
   const white = laid.find((k) => !k.black)?.rect.width ?? 0
   const own = Piano.lowest(keys.octave) + 12
-  // Each key down while a finger holds it or it sounds here, as this render has it (live/capDown.ts).
-  useLayoutEffect(() => {
-    for (const el of plate.current?.querySelectorAll<HTMLElement>('[data-note]') ?? []) {
-      const n = Number(el.dataset.note)
-      if (fingered.has(n) || playingNotes.has(n)) capDown(el)
-      else capUp(el)
-    }
-  })
+  // The keys' handlers, the same across renders (they read the latest props).
+  const act = useMemo<KeyAct>(() => ({
+    play: (note) => cb.current.onNote(note, false),
+    pick: (note) => cb.current.onPick?.(note),
+    focus: (note) => setFocusNote(note),
+  }), [])
   return (
     <div class={`piano${props.class ? ` ${props.class}` : ''}`}>
       <div
@@ -379,59 +382,31 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
         onKeyDown={onKeyDown}
       >
         {laid.map((k) => {
-          const mark = Piano.mark(k.note, keys.root, keys.scale)
           const step = props.step
-          const stepMark = step == null ? null : step.picked === k.note ? 'picked' : step.lit.has(k.note) ? 'lit' : ''
-          const cls =
-            `piano__key piano__key--${k.black ? 'black' : 'white'} cap-3d` +
-            (mark === KeyMark.ROOT ? ' is-root' : mark === KeyMark.OUT ? ' is-out' : '') +
-            (playingNotes.has(k.note) ? ' is-playing' : '') +
-            (stepMark === 'picked' ? ' is-step-picked' : stepMark === 'lit' ? ' is-step-lit' : '')
           const r = k.rect
           const gap = k.black ? 0 : WHITE_GAP / 2
-          const hint = hints ? computerHint(k.note, keys.octave) : null
           return (
-            <button
+            <PianoKey
               key={k.note}
-              type="button"
-              class={cls}
-              data-note={k.note}
-              aria-label={MirrorText.pianoKey(k.note, keys.names, mark) + (stepMark === 'picked' ? MirrorText.PICKED : stepMark === 'lit' ? MirrorText.ON_STEP : '')}
-              aria-description={describe(MirrorText.PLAY, stepMark !== null && props.onPick ? MirrorText.PICK : null)}
-              aria-keyshortcuts={shortcuts(undefined, stepMark !== null && props.onPick !== undefined)}
-              tabIndex={k.note === tabNote ? 0 : -1}
-              // STEP's Pick to nudge (Kotlin's custom action) on Shift+Enter.
-              onKeyDown={(e) => {
-                if (stepMark === null || !isSecondaryKey(e) || !cb.current.onPick) return
-                e.preventDefault()
-                e.stopPropagation()
-                if (!e.repeat) cb.current.onPick(k.note)
-              }}
-              onFocus={() => setFocusNote(k.note)}
-              style={{
-                left: `${r.left + gap}px`,
-                top: `${r.top}px`,
-                width: `${Math.max(0, r.width - 2 * gap)}px`,
-                height: `${r.height}px`,
-                '--glow': glowCss(lit.get(k.note) ?? 0),
-              }}
-              // The keyboard's (Enter, Space) or a screen reader's Play: the whole sound.
-              onClick={(e) => {
-                if (e.detail === 0) cb.current.onNote(k.note, false)
-              }}
-            >
-              {hint !== null && <span class="piano__hint" aria-hidden="true">{hint}</span>}
-              {/* Each C carries its octave; OCT's own C in ink. */}
-              {!k.black && k.note % 12 === 0 && (
-                <span class={`piano__digit${k.note === own ? ' piano__digit--own' : ''}`} aria-hidden="true">
-                  {Keys.octaveOf(k.note)}
-                </span>
-              )}
-              {keys.showNames && mark !== KeyMark.OUT && (
-                <span class="piano__name" aria-hidden="true">{Keys.name(k.note, keys.names)}</span>
-              )}
-              {mark === KeyMark.ROOT && <span class="piano__bar" aria-hidden="true" />}
-            </button>
+              note={k.note}
+              black={k.black}
+              left={r.left + gap}
+              top={r.top}
+              width={Math.max(0, r.width - 2 * gap)}
+              height={r.height}
+              mark={Piano.mark(k.note, keys.root, keys.scale)}
+              stepMark={step == null ? null : step.picked === k.note ? 'picked' : step.lit.has(k.note) ? 'lit' : ''}
+              names={keys.names}
+              showNames={keys.showNames}
+              hint={hints ? computerHint(k.note, keys.octave) : null}
+              own={k.note === own}
+              tab={k.note === tabNote}
+              glow={glowCss(lit.get(k.note) ?? 0)}
+              pickable={props.onPick !== undefined}
+              playing={props.playingNotes}
+              fingered={fingered}
+              act={act}
+            />
           )
         })}
         {/* A device note the piano doesn't reach: an orange tick at that end. */}
@@ -442,6 +417,105 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
   )
 }
 
+/** A key's handlers, kept by the piano across renders. */
+interface KeyAct {
+  /** The keyboard's (Enter, Space) or a screen reader's Play: the whole sound. */
+  play: (note: number) => void
+  pick: (note: number) => void
+  focus: (note: number) => void
+}
+
+interface PianoKeyProps {
+  note: number
+  black: boolean
+  left: number
+  top: number
+  width: number
+  height: number
+  mark: KeyMark
+  /** STEP open: 'picked', 'lit' (a note on the cursor's step) or ''; null without STEP. */
+  stepMark: 'picked' | 'lit' | '' | null
+  names: NoteNames
+  showNames: boolean
+  /** The computer keyboard's letter on it, if any. */
+  hint: string | null
+  /** OCT's own C (its digit in ink). */
+  own: boolean
+  /** In the Tab order. */
+  tab: boolean
+  glow: string
+  pickable: boolean
+  playing: ReadonlySignal<ReadonlySet<number>>
+  fingered: Signal<ReadonlySet<number>>
+  act: KeyAct
+}
+
+/** A key renders again only when what it shows changed (every prop a value, or kept by the piano). */
+const PianoKey = memo(PianoKeyView, (a: PianoKeyProps, b: PianoKeyProps) => {
+  for (const k in b) if (a[k as keyof PianoKeyProps] !== b[k as keyof PianoKeyProps]) return false
+  return true
+})
+
+/** One key: outlined while its note sounds here, down while a finger holds it or it sounds (read by the key itself). */
+function PianoKeyView(props: PianoKeyProps): JSX.Element {
+  const { note, black, mark, stepMark, names, act } = props
+  const playing = useHas(props.playing, note)
+  const down = useHas(props.fingered, note) || playing
+  const el = useRef<HTMLButtonElement | null>(null)
+  // Down while a finger holds it or it sounds here, once that changes (live/capDown.ts).
+  useLayoutEffect(() => {
+    if (!el.current) return
+    if (down) capDown(el.current)
+    else capUp(el.current)
+  }, [down])
+  const cls =
+    `piano__key piano__key--${black ? 'black' : 'white'} cap-3d` +
+    (mark === KeyMark.ROOT ? ' is-root' : mark === KeyMark.OUT ? ' is-out' : '') +
+    (playing ? ' is-playing' : '') +
+    (stepMark === 'picked' ? ' is-step-picked' : stepMark === 'lit' ? ' is-step-lit' : '')
+  return (
+    <button
+      ref={el}
+      type="button"
+      class={cls}
+      data-note={note}
+      aria-label={MirrorText.pianoKey(note, names, mark) + (stepMark === 'picked' ? MirrorText.PICKED : stepMark === 'lit' ? MirrorText.ON_STEP : '')}
+      aria-description={describe(MirrorText.PLAY, stepMark !== null && props.pickable ? MirrorText.PICK : null)}
+      aria-keyshortcuts={shortcuts(undefined, stepMark !== null && props.pickable)}
+      tabIndex={props.tab ? 0 : -1}
+      // STEP's Pick to nudge (Kotlin's custom action) on Shift+Enter.
+      onKeyDown={(e) => {
+        if (stepMark === null || !isSecondaryKey(e) || !props.pickable) return
+        e.preventDefault()
+        e.stopPropagation()
+        if (!e.repeat) act.pick(note)
+      }}
+      onFocus={() => act.focus(note)}
+      style={{
+        left: `${props.left}px`,
+        top: `${props.top}px`,
+        width: `${props.width}px`,
+        height: `${props.height}px`,
+        '--glow': props.glow,
+      }}
+      onClick={(e) => {
+        if (e.detail === 0) act.play(note)
+      }}
+    >
+      {props.hint !== null && <span class="piano__hint" aria-hidden="true">{props.hint}</span>}
+      {/* Each C carries its octave; OCT's own C in ink. */}
+      {!black && note % 12 === 0 && (
+        <span class={`piano__digit${props.own ? ' piano__digit--own' : ''}`} aria-hidden="true">
+          {Keys.octaveOf(note)}
+        </span>
+      )}
+      {props.showNames && mark !== KeyMark.OUT && (
+        <span class="piano__name" aria-hidden="true">{Keys.name(note, names)}</span>
+      )}
+      {mark === KeyMark.ROOT && <span class="piano__bar" aria-hidden="true" />}
+    </button>
+  )
+}
 
 /**
  * The key in the Tab order among [notes] (the piano's, lowest first): the

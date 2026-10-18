@@ -110,9 +110,9 @@
 // plays the pad while held. Offline (an addition) it changes the pads in arc
 // only, from the last read's sounds or the factory pack's ([EditUi.offline]);
 // the tools then count those changes, with Reset pads ([offlinePads]).
-import { Fragment, h, type ButtonHTMLAttributes, type Component, type ComponentChildren, type CSSProperties, type FunctionComponent, type JSX, type TargetedDragEvent } from 'preact'
+import { Fragment, type ButtonHTMLAttributes, type ComponentChildren, type CSSProperties, type JSX, type TargetedDragEvent } from 'preact'
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { computed, signal, useComputed, type ReadonlySignal } from '@preact/signals'
+import { signal, useComputed, type ReadonlySignal } from '@preact/signals'
 import { Keys, MAX_OCTAVE, MIN_OCTAVE, SCALES, type NoteNames, type Scale } from '../../core/features/keys'
 import type { MirrorState, PadLight } from '../../core/features/liveMirror'
 import { KeysView, type NoteRange } from '../../core/features/piano'
@@ -158,6 +158,7 @@ import { holdCap, releaseCap, useLiveKeys } from '../live/useLiveKeys'
 import { computerKeys } from '../keyPrefs'
 import { DEFAULT_KEYS_SHOWN, keysLit, keysNoteText, octaves, upperOctave, type KeysPicker, type KeysShown } from '../live/keys'
 import { PianoKeyboard } from '../live/PianoKeyboard'
+import { memo, sameNotes, useHas } from '../live/memo'
 import { PressTracker, rawMovesSupported, ticking, type PressTarget } from '../live/press'
 import { SLOT_MIME, SOURCE_MIME, SoundPicker } from '../live/SoundPicker'
 import { dragMayHaveAudio, isAudioFile } from '../../platform/files/pick'
@@ -333,26 +334,6 @@ const perfNow = (): number => (typeof performance !== 'undefined' ? performance.
 
 const NOTHING: ReadonlySignal<ReadonlySet<number>> = signal<ReadonlySet<number>>(new Set())
 const NOTHING_PLAYS: LivePlaying = { pads: NOTHING, notes: NOTHING }
-
-/** Whether [key] is in [set], read so that only a change of that answer re-renders the caller. */
-function useHas(set: ReadonlySignal<ReadonlySet<number>>, key: number): boolean {
-  return useMemo(() => computed(() => set.value.has(key)), [set, key]).value
-}
-
-/**
- * [render] as a component that renders again only when [same] says its props
- * changed (preact/compat's memo, without the rest of compat).
- */
-function memo<P extends object>(render: FunctionComponent<P>, same: (a: P, b: P) => boolean): FunctionComponent<P> {
-  function shouldUpdate(this: Component<P>, next: P): boolean {
-    return !same(this.props, next)
-  }
-  function Memoed(this: Component<P>, props: P): JSX.Element {
-    this.shouldComponentUpdate = shouldUpdate
-    return h(render, props)
-  }
-  return Memoed as FunctionComponent<P>
-}
 
 /** Sets [el]'s --glow to [value] unless it already has it (the frame loop runs 60 times a second). */
 function setGlow(el: HTMLElement, value: string): void {
@@ -1214,9 +1195,13 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const stepColumn = sideways && stepOpen && !sampleOpen
   // The piano: the notes held for the arp stay down with what sounds (Kotlin's playingNotes with arpHeld), LATCH or not.
   const arpCtx = useArp()
+  // The same set while its notes are, so a voice elsewhere doesn't re-render the piano.
+  const pianoWas = useRef<ReadonlySet<number> | null>(null)
   const pianoNotes = useComputed(() => {
     const held = arpCtx !== null ? arpHeldNotes(arpCtx.ui) : []
-    return held.length === 0 ? playing.notes.value : new Set([...playing.notes.value, ...held])
+    const next = held.length === 0 ? playing.notes.value : new Set([...playing.notes.value, ...held])
+    if (pianoWas.current === null || !sameNotes(pianoWas.current, next)) pianoWas.current = next
+    return pianoWas.current
   })
   const pianoKeys = pianoRange !== null ? (
     <div

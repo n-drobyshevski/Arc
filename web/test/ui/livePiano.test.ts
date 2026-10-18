@@ -27,12 +27,20 @@ import {
 } from '../../src/ui/live/keyboard'
 import { DEFAULT_KEYS, keysNoteText, type KeysUi } from '../../src/ui/live/keys'
 import { stepNote, tabStop } from '../../src/ui/live/PianoKeyboard'
+import { sameNotes } from '../../src/ui/live/memo'
 import { LIVE_PILL_WINDOW, landscape, liveInBar, short } from '../../src/ui/live/window'
 import { editPadOf } from '../../src/ui/sheets/PadEditSheet'
 
 const AUTO = KeysView.AUTO
 
 describe('the piano in Live', () => {
+  it('keeps a set of notes while the same notes sound in the same order (first pressed first)', () => {
+    expect(sameNotes(new Set([60, 64]), new Set([60, 64]))).toBe(true)
+    expect(sameNotes(new Set(), new Set())).toBe(true)
+    expect(sameNotes(new Set([60, 64]), new Set([64, 60]))).toBe(false)
+    expect(sameNotes(new Set([60]), new Set([60, 64]))).toBe(false)
+  })
+
   it('takes Live\'s box less its chrome', () => {
     expect(pianoWidth(1200, true)).toBe(1200 - 16 - 28 - 42)
     expect(pianoWidth(852, false)).toBe(852 - 58 - 22)

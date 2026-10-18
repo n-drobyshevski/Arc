@@ -158,6 +158,14 @@ function toInt(s: string): number {
   return n
 }
 
+/** Whether [a] and [b] hold the same notes in the same order (ui/live/memo.ts sameNotes). */
+function sameNotes(a: ReadonlySet<number>, b: ReadonlySet<number>): boolean {
+  if (a.size !== b.size) return false
+  const it = b.values()
+  for (const n of a) if (it.next().value !== n) return false
+  return true
+}
+
 /**
  * Whether [a] and [b] differ in nothing but the mirror and KEYS's pad (ArcController.stateShell).
  * Every UiState field is required, so [b]'s keys are all of them.
@@ -346,6 +354,7 @@ export class ArcController {
       }
       return out
     })
+    let notes: ReadonlySet<number> | null = null
     this.playingNotes = computed(() => {
       const out = new Set<number>()
       const keysPad = this.store.state.value.keysPad
@@ -360,7 +369,9 @@ export class ArcController {
         if (keysPad === null || !arpVoiceKey(p) || p[3] === 'n' || Number(p[1]) !== keysPad.group || Number(p[2]) !== keysPad.offset) continue
         out.add(Keys.ROOT_NOTE + Number(p[3]))
       }
-      return out
+      // The same set while the notes are: a pad's voice alone doesn't re-render the keys.
+      if (notes === null || !sameNotes(notes, out)) notes = out
+      return notes
     })
     this.arpPads = computed(() => {
       const out = new Set<number>()

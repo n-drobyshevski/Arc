@@ -295,6 +295,21 @@ describe('Live: playing pads', () => {
     expect(h.c.arpNotes.value.size).toBe(0)
   })
 
+  it("the KEYS notes keep their set while only pads' voices change, so the piano doesn't render again", async () => {
+    const h = await liveOn()
+    await copied(h)
+    const voices = h.liveAudio.voices as Signal<ReadonlySet<string>>
+    voices.value = new Set(['note:60', 'live:0:1'])
+    const notes = h.c.playingNotes.value
+    voices.value = new Set(['note:60', 'live:0:1', 'live:0:2'])
+    expect(h.c.playingNotes.value).toBe(notes)
+    voices.value = new Set(['note:60'])
+    expect(h.c.playingNotes.value).toBe(notes)
+    voices.value = new Set(['note:60', 'note:64'])
+    expect(h.c.playingNotes.value).not.toBe(notes)
+    expect([...h.c.playingNotes.value]).toEqual([60, 64])
+  })
+
   it('plays a pad from the copy while held, rings it, and fades it on release', async () => {
     const h = await liveOn()
     await copied(h)
