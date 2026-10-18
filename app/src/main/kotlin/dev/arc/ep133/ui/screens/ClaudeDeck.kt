@@ -69,7 +69,8 @@ import dev.arc.ep133.ui.theme.LocalArcColors
  * own text to change by hand, and SAVED keeps prompts to come back to. A prompt that goes with a card (an IMPROVE, a
  * TRACK from this beat) shows it on the glass as before: SCENE, the pattern (A · 01) and CHAIN pick it (lit navy; one
  * with nothing to share is faded). SOUNDS switches the sound list on (its light orange), SHARE sends the prompt and
- * PASTE brings a card in (held, it opens a .txt or .md card file). While a reply is awaited the glass says so instead.
+ * COPY puts it on the clipboard; under them the wide PASTE CARD brings Claude's card in (held, it opens a .txt or .md
+ * card file). While a reply is awaited the glass says so instead.
  */
 @Composable
 internal fun ClaudeDeck(claude: ClaudeUi, group: Int) {
@@ -199,6 +200,7 @@ internal fun ClaudeDeck(claude: ClaudeUi, group: Int) {
                         },
                     )
                 }
+                add { DeckKey(DeckGlyph.DUP, PromptText.KEY_COPY, PromptText.COPY_NAME, { claude.onCopy(pick, g) }, enabled = !empty) }
                 add {
                     DeckKey(
                         DeckGlyph.SHARE,
@@ -216,15 +218,17 @@ internal fun ClaudeDeck(claude: ClaudeUi, group: Int) {
                         enabled = !empty,
                     )
                 }
-                // Held, PASTE opens a card file instead (a .txt or .md Claude gave as a file).
-                add {
-                    DeckKey(
-                        DeckGlyph.PASTE, ClaudeText.KEY_PASTE, ClaudeText.PASTE_BEAT_NAME, claude.onPaste, style = DeckStyle.SIGNAL,
-                        onLongClick = claude.onOpenFile, longClickLabel = ClaudeText.OPEN_CARD_FILE,
-                    )
-                }
             }
             DeckStrip(keys)
+            // What comes back, apart from what goes: Claude's card. Held, it opens a card file (a .txt or .md Claude gave as a file).
+            DeckStrip(
+                listOf {
+                    DeckKey(
+                        DeckGlyph.PASTE, PromptText.KEY_PASTE_CARD, PromptText.PASTE_CARD_NAME, claude.onPaste, style = DeckStyle.SIGNAL,
+                        onLongClick = claude.onOpenFile, longClickLabel = ClaudeText.OPEN_CARD_FILE,
+                    )
+                },
+            )
             SavedPrompts(claude.saved, prompt, set, claude.onSavePrompt, claude.onDeletePrompt)
             GridPlate { LinkRow(ClaudeText.GET_SKILL, claude.onGetSkill) }
         }

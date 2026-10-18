@@ -127,6 +127,8 @@ class ClaudeUi(
     val onPrompt: (dev.arc.ep133.features.ClaudePrompt) -> Unit = {},
     /** SHARE: the prompt, with the card [pick] names ([group]'s pattern for PATTERN) when it goes with one. */
     val onShare: (pick: dev.arc.ep133.features.SharePick, group: Int) -> Unit = { _, _ -> },
+    /** COPY: as SHARE, onto the clipboard. */
+    val onCopy: (pick: dev.arc.ep133.features.SharePick, group: Int) -> Unit = { _, _ -> },
     val onSavePrompt: (dev.arc.ep133.features.ClaudePrompt) -> Unit = {},
     val onDeletePrompt: (index: Int) -> Unit = {},
     val onPaste: () -> Unit = {},

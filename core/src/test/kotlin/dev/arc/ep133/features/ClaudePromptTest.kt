@@ -85,37 +85,44 @@ class ClaudePromptTest {
         assertEquals(ClaudeText.SHARE_PROMPT, PromptText.prompt(ClaudePrompt(), SharePick.PATTERN, sounds = false))
         assertEquals(ClaudeText.SHARE_CHAIN_PROMPT, PromptText.prompt(ClaudePrompt(), SharePick.CHAIN, sounds = true))
         assertEquals(
-            "Analyse this EP-133 beat from Arc with the arc-beats skill, then make it busier and take it toward dub techno: suggest one edit as a new card. " +
-                "Keep its sound, FX and pad lines, or choose sounds from my sound list if one follows the card:",
+            "Use the arc-beats skill to improve this EP-133 beat from Arc. I'll paste your new card back into Arc next to mine, so give it a short new name.\n" +
+                "- First: analyse it, its groove, its energy and what makes it work\n" +
+                "- Ask: make it busier\n" +
+                "- Direction: toward dub techno\n" +
+                "- Edits: one, as one new card\n" +
+                "Keep its sound, FX and pad lines unless an edit needs to change them, or choose sounds from my sound list if one follows the card. The card:",
             PromptText.prompt(ClaudePrompt(goal = PromptGoal.BUSIER, genre = "dub-techno", edits = 1), SharePick.SCENE, true),
         )
-        assertTrue(PromptText.prompt(ClaudePrompt(goal = PromptGoal.FILL), SharePick.CHAIN, true).contains("then add a fill: suggest 2-3 edits as a new card of scenes with a chain line."))
+        assertTrue(PromptText.prompt(ClaudePrompt(goal = PromptGoal.FILL, edits = 5), SharePick.CHAIN, true).contains("\n- Ask: add a fill\n- Edits: 4-5, as one new card of scenes with a chain line\n"))
     }
 
     @Test
-    fun `a new beat, a track and a lesson say what was picked`() {
+    fun `a new beat, a track and a lesson say what was picked, as a list`() {
         val beat = ClaudePrompt(PromptTask.BEAT, genre = "dub-techno", tempo = 122, parts = setOf(PromptPart.FX, PromptPart.BASS, PromptPart.CHORDS))
         assertEquals(
-            "Use the arc-beats skill. Write a new 4-bar dub techno beat at 122 BPM for my EP-133, with a bassline, chords and FX that suit it. Choose the sounds from my sound list:",
+            "Use the arc-beats skill to write a new beat for my EP-133. I'll paste your card into the Arc app and play it, so give one complete ARC BEAT card that passes the skill's check.\n" +
+                "- Style: dub techno (start from the skill's recipe)\n" +
+                "- Tempo: 122 BPM\n" +
+                "- Length: 4 bars\n" +
+                "- Parts: drums, a bassline, chords and FX that suit it\n" +
+                "Reply with the card in one code block, then 2-4 lines on the feel and one thing to try changing.\n" +
+                "Choose the sounds from my sound list, which follows:",
             PromptText.prompt(beat, SharePick.SCENE, sounds = true),
         )
-        assertEquals(
-            "Use the arc-beats skill. Write a new 1-bar beat in any style you like for my EP-133, drums only.",
-            PromptText.prompt(ClaudePrompt(PromptTask.BEAT, bars = 1, parts = emptySet()), SharePick.SCENE, sounds = false),
-        )
-        assertEquals(
-            "Use the arc-beats skill. Write a track idea as a card of scenes with a chain line: about 32 bars of steppers at 78 BPM for my EP-133, " +
-                "with an intro, a drop, a breakdown and a second drop.",
-            PromptText.prompt(ClaudePrompt(PromptTask.TRACK).withGenre(Genres.of("steppers")), SharePick.SCENE, sounds = false),
-        )
-        assertEquals(
-            "Use the arc-beats skill. Continue this EP-133 arrangement from Arc into a track idea: a card of scenes with a chain line, about 64 bars in any style you like, " +
-                "with this arrangement as its first scenes. Keep its sound, FX and pad lines, or choose sounds from my sound list if one follows the card:",
-            PromptText.prompt(ClaudePrompt(PromptTask.TRACK, length = 64, fromPick = true), SharePick.CHAIN, sounds = true),
-        )
+        val plain = PromptText.prompt(ClaudePrompt(PromptTask.BEAT, bars = 1, parts = emptySet()), SharePick.SCENE, sounds = false)
+        assertTrue(plain.contains("\n- Style: any style you like\n- Length: 1 bar\n- Parts: drums only\n"))
+        assertFalse(plain.contains("Tempo") || plain.contains("sound list"))
+        val track = PromptText.prompt(ClaudePrompt(PromptTask.TRACK).withGenre(Genres.of("steppers")), SharePick.SCENE, sounds = false)
+        assertTrue(track.startsWith("Use the arc-beats skill to write a track idea for my EP-133: a card of scenes with a chain line"))
+        assertTrue(track.contains("\n- Style: steppers (start from the skill's recipe)\n- Tempo: 78 BPM\n- Length: about 32 bars\n- Shape: an intro, a drop"))
+        assertTrue(track.endsWith("then a line for each scene saying what changes."))
+        val more = PromptText.prompt(ClaudePrompt(PromptTask.TRACK, length = 64, fromPick = true), SharePick.CHAIN, sounds = true)
+        assertTrue(more.startsWith("Use the arc-beats skill to continue this EP-133 arrangement from Arc into a track idea"))
+        assertTrue(more.contains("\n- Start: this arrangement as its first scenes, ") && more.endsWith("The card:"))
         assertEquals(ClaudeText.LEARN_PROMPT, PromptText.prompt(ClaudePrompt(PromptTask.LEARN), SharePick.SCENE, true))
         assertEquals(
-            "Use the arc-beats skill. Teach me lesson 5 of the EP-133 K.O. II, Swing and timing, one step at a time. I use the Arc app on Android.",
+            "Use the arc-beats skill to teach me the EP-133 K.O. II, starting at lesson 5 (Swing and timing). I use the Arc app on Android. " +
+                "Go one step at a time: explain the step, give me something to try on the device, and wait for me before the next one.",
             PromptText.prompt(ClaudePrompt(PromptTask.LEARN, lesson = 5), SharePick.SCENE, true),
         )
         // Words of one's own go as they are.

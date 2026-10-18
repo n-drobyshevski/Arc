@@ -140,9 +140,12 @@ object PromptText {
     }
 
     // ---------- The prompt ----------
-    private const val SKILL = "Use the arc-beats skill."
-    private const val KEEP = "Keep its sound, FX and pad lines, or choose sounds from my sound list if one follows the card:"
-    private const val FROM_LIST = "Choose the sounds from my sound list:"
+    // Written as Anthropic's prompting guide has it: the skill and the task first, why (the card goes back into Arc), the
+    // choices as a list, then what the reply should be; the card or the sound list, the data, follows the words.
+    private const val KEEP = "Keep its sound, FX and pad lines unless an edit needs to change them, or choose sounds from my sound list if one follows the card."
+    private const val FROM_LIST = "Choose the sounds from my sound list, which follows:"
+    private const val THE_CARD = "The card:"
+    private const val REPLY = "Reply with the card in one code block, then 2-4 lines on the feel and one thing to try changing."
 
     /** "a, b and c". */
     private fun list(words: List<String>) = if (words.size < 2) words.joinToString("") else words.dropLast(1).joinToString(", ") + " and " + words.last()
@@ -155,6 +158,8 @@ object PromptText {
         PromptPart.FX -> "FX that suit it"
     }
 
+    private fun lines(vararg l: String?) = l.filterNotNull().joinToString("\n")
+
     /**
      * The prompt [p] builds: the words before its card when it has one ([pick] says which), else the whole message
      * before the sound list ([sounds]: one follows). A hand-edited [ClaudePrompt.text] goes as it is.
@@ -163,42 +168,62 @@ object PromptText {
         p.text?.let { return it }
         val g = Genres.of(p.genre)
         val chain = pick == SharePick.CHAIN
-        val at = p.tempo?.let { " at $it BPM" } ?: ""
-        val choose = if (sounds) " $FROM_LIST" else ""
+        val style = "- Style: " + (g?.let { "${it.words} (start from the skill's recipe)" } ?: "any style you like")
+        val tempo = p.tempo?.let { "- Tempo: $it BPM" }
+        val choose = if (sounds) FROM_LIST else null
         return when (p.task) {
-            PromptTask.BEAT -> {
-                val style = g?.let { "${it.words} beat" } ?: "beat in any style you like"
-                val with = if (p.parts.isEmpty()) ", drums only" else ", with " + list(PromptPart.entries.filter { it in p.parts }.map(::partWords))
-                "$SKILL Write a new ${p.bars}-bar $style$at for my EP-133$with.$choose"
-            }
+            PromptTask.BEAT -> lines(
+                "Use the arc-beats skill to write a new beat for my EP-133. I'll paste your card into the Arc app and play it, so give one complete ARC BEAT card that passes the skill's check.",
+                style,
+                tempo,
+                "- Length: ${p.bars} ${if (p.bars == 1) "bar" else "bars"}",
+                "- Parts: " + (if (p.parts.isEmpty()) "drums only" else "drums, " + list(PromptPart.entries.filter { it in p.parts }.map(::partWords))),
+                REPLY,
+                choose,
+            )
             PromptTask.IMPROVE -> {
-                val asks = listOfNotNull(goal(p.goal).takeIf { p.goal != PromptGoal.BETTER }, g?.let { "take it toward ${it.words}" })
-                val then = if (asks.isEmpty()) "then suggest" else "then ${list(asks)}: suggest"
-                if (chain) {
-                    "Analyse this EP-133 arrangement from Arc with the arc-beats skill: comment on its energy curve, contrast, length and transitions, " +
-                        "$then ${edits(p.edits)} as a new card of scenes with a chain line. $KEEP"
-                } else {
-                    "Analyse this EP-133 beat from Arc with the arc-beats skill, $then ${edits(p.edits)} as a new card. $KEEP"
-                }
+                val what = if (chain) "arrangement" else "beat"
+                lines(
+                    "Use the arc-beats skill to improve this EP-133 $what from Arc. I'll paste your new card back into Arc next to mine, so give it a short new name.",
+                    "- First: analyse it, " + if (chain) "its energy curve, contrast, length and transitions" else "its groove, its energy and what makes it work",
+                    goal(p.goal).takeIf { p.goal != PromptGoal.BETTER }?.let { "- Ask: $it" },
+                    g?.let { "- Direction: toward ${it.words}" },
+                    "- Edits: ${edits(p.edits).removeSuffix(" edits").removeSuffix(" edit")}, as one new card" + if (chain) " of scenes with a chain line" else "",
+                    "$KEEP $THE_CARD",
+                )
             }
             PromptTask.TRACK -> {
-                val style = g?.let { "of ${it.words}" } ?: "in any style you like"
+                val length = "- Length: about ${p.length} bars"
                 if (p.fromPick) {
                     val what = if (chain) "arrangement" else "beat"
-                    "$SKILL Continue this EP-133 $what from Arc into a track idea: a card of scenes with a chain line, about ${p.length} bars $style$at, " +
-                        "with this $what as its first ${if (chain) "scenes" else "scene"}. $KEEP"
+                    lines(
+                        "Use the arc-beats skill to continue this EP-133 $what from Arc into a track idea: a card of scenes with a chain line that I'll paste into Arc and play.",
+                        style,
+                        tempo,
+                        length,
+                        "- Start: this $what as its first ${if (chain) "scenes" else "scene"}, then change one or two things from scene to scene",
+                        "$KEEP $THE_CARD",
+                    )
                 } else {
-                    "$SKILL Write a track idea as a card of scenes with a chain line: about ${p.length} bars $style$at for my EP-133, " +
-                        "with an intro, a drop, a breakdown and a second drop.$choose"
+                    lines(
+                        "Use the arc-beats skill to write a track idea for my EP-133: a card of scenes with a chain line that I'll paste into Arc and play.",
+                        style,
+                        tempo,
+                        length,
+                        "- Shape: an intro, a drop, a breakdown and a second drop, changing one or two things from scene to scene",
+                        "Reply with the card in one code block, then a line for each scene saying what changes.",
+                        choose,
+                    )
                 }
             }
-            PromptTask.LEARN -> if (p.lesson == 1) {
-                ClaudeText.LEARN_PROMPT
-            } else {
-                "$SKILL Teach me lesson ${p.lesson} of the EP-133 K.O. II, ${ClaudePrompt.LESSONS[p.lesson - 1]}, one step at a time. I use the Arc app on Android."
-            }
+            PromptTask.LEARN -> learn(p.lesson)
         }
     }
+
+    /** A lesson's prompt: from lesson [n] of the skill's lessons.md, a step at a time, waiting for the user between them. */
+    fun learn(n: Int) =
+        "Use the arc-beats skill to teach me the EP-133 K.O. II, starting at lesson $n (${ClaudePrompt.LESSONS[n - 1]}). I use the Arc app on Android. " +
+            "Go one step at a time: explain the step, give me something to try on the device, and wait for me before the next one."
 
     /** What a share without a card is named by while its reply is awaited, and its subject ("Arc · New beat"). */
     const val NEW_BEAT = "New beat"
@@ -206,8 +231,8 @@ object PromptText {
     fun subject(what: String) = "Arc · $what"
 
     // ---------- The page ----------
-    const val HINT = "Tap an orange word to change it. SHARE sends the prompt to Claude; hold PASTE to open a card file."
-    const val HINT_CARD = "Tap an orange word to change it. SCENE, the pattern or CHAIN picks the card that goes with it."
+    const val HINT = "Tap an orange word to change it. SHARE or COPY takes the prompt to Claude; PASTE CARD brings its card back."
+    const val HINT_CARD = "Tap an orange word to change it. SCENE, the pattern or CHAIN picks the card that goes with the prompt."
     const val HINT_EDITED = "Your own words go as they are. EDIT changes them, REBUILD brings the sentence back."
     const val HINT_EDITING = "Write the prompt your way. The card, the kit and the sound list still follow it."
     const val HINT_PICK = "Pick one, then DONE. NEXT goes on to the next word."
@@ -228,6 +253,13 @@ object PromptText {
 
     /** The keys. */
     const val KEY_EDIT = "Edit"
+    const val KEY_COPY = "Copy"
+    const val COPY_NAME = "Copy the prompt, to paste into Claude"
+    /** Said once COPY has put the prompt (and its card) on the clipboard. */
+    const val COPIED = "Prompt copied. Paste it into a chat with Claude."
+    /** The wide key under the strip: Claude's reply coming back. Held, it opens a card file. */
+    const val KEY_PASTE_CARD = "Paste card"
+    const val PASTE_CARD_NAME = "Paste Claude's card from the clipboard"
     const val KEY_REBUILD = "Rebuild"
     const val KEY_DONE = "Done"
     const val KEY_NEXT = "Next"

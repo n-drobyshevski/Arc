@@ -267,7 +267,7 @@ class MainActivity : ComponentActivity() {
      * with one ([group]'s pattern, the scene [sceneLabel] or the chain), else alone. Then the display waits for the reply
      * ("Scene S02", "A \u00B7 01", "Chain", "New beat"); not for a lesson.
      */
-    private fun sharePrompt(prompt: dev.arc.ep133.features.ClaudePrompt, pick: dev.arc.ep133.features.SharePick, group: Int, sceneLabel: String, number: Int) {
+    private fun sharePrompt(prompt: dev.arc.ep133.features.ClaudePrompt, pick: dev.arc.ep133.features.SharePick, group: Int, sceneLabel: String, number: Int, copy: Boolean = false) {
         val share = controller.promptShare(prompt, pick, group) ?: return
         val learn = prompt.task == dev.arc.ep133.features.PromptTask.LEARN
         val title = when {
@@ -275,7 +275,9 @@ class MainActivity : ComponentActivity() {
             prompt.withCard && pick == dev.arc.ep133.features.SharePick.CHAIN -> dev.arc.ep133.text.ClaudeText.SHARE_CHAIN_TITLE
             else -> dev.arc.ep133.text.ClaudeText.SHARE_TITLE
         }
-        if (!sendText(share.subject, share.text, title) || learn) return
+        // COPY: the same text on the clipboard, to paste into a chat already open.
+        val sent = if (copy) copyText(share.subject, share.text) else sendText(share.subject, share.text, title)
+        if (!sent || learn) return
         controller.waitForClaude(
             when {
                 !prompt.withCard -> if (prompt.task == dev.arc.ep133.features.PromptTask.TRACK) dev.arc.ep133.text.PromptText.TRACK_IDEA else dev.arc.ep133.text.PromptText.NEW_BEAT
@@ -284,6 +286,16 @@ class MainActivity : ComponentActivity() {
                 else -> dev.arc.ep133.text.ClaudeText.CHAIN_CARD_NAME
             },
         )
+    }
+
+    /** COPY: [text] on the clipboard, said; whether it went. */
+    private fun copyText(subject: String, text: String): Boolean = try {
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(subject, text))
+        controller.toast(dev.arc.ep133.text.PromptText.COPIED)
+        true
+    } catch (e: RuntimeException) {
+        controller.toast(e.message ?: e.toString(), error = true)
+        false
     }
 
     /** Whether the system chooser opened. */
@@ -1323,6 +1335,7 @@ class MainActivity : ComponentActivity() {
                                 saved = savedPrompts,
                                 onPrompt = controller::setClaudePrompt,
                                 onShare = { pick, g -> sharePrompt(claudePrompt, pick, g, scene.label, scene.groups.getOrNull(g)?.number ?: 1) },
+                                onCopy = { pick, g -> sharePrompt(claudePrompt, pick, g, scene.label, scene.groups.getOrNull(g)?.number ?: 1, copy = true) },
                                 onSavePrompt = controller::saveClaudePrompt,
                                 onDeletePrompt = controller::deleteClaudePrompt,
                                 onPaste = { controller.receiveBeat(clipboardText()) },
