@@ -569,7 +569,9 @@ export class ArcController {
           void this.pattern.switchProject(p)
           this.fx.desk.switchTo(p)
         }
-        const b = st.mirror?.state.bpm ?? null
+        // The EP-133's tempo to 0.1 BPM, as the pattern plays it: its clock's jitter below that sends nothing.
+        const d = st.mirror?.state.bpm ?? null
+        const b = d !== null && d > 0 ? patternBpm(d, 0) : null
         if (b !== bpm) {
           bpm = b
           this.pattern.tempoChanged()

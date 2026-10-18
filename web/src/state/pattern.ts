@@ -308,7 +308,8 @@ export class PatternDesk {
   /** The device's tempo changed (or stopped coming): the plan follows. */
   tempoChanged(): void {
     this.refreshPlan()
-    this.publishArp()
+    // The arp's plan has the tempo too, but only while it has notes: with none it stays null.
+    if (this.settings.arpOn && this.arpDesk.notes.length > 0) this.publishArp()
   }
 
   private get recorder(): PatternRecorder {
@@ -396,17 +397,22 @@ export class PatternDesk {
       }
     }
     const old = this.sent
-    if (
-      old === null ||
-      old.patterns !== p ||
-      old.skip !== this.skip ||
-      old.bpm !== bpm ||
-      old.phase !== phase ||
-      !sameQueued(old.queued, queued) ||
-      !sameVoices(old.voices, voices) ||
-      !sameShapes(old.shapes, shapes) ||
-      !sameShapes(old.keysShapes, keysShapes)
-    ) {
+    const kept =
+      old !== null &&
+      old.patterns === p &&
+      old.skip === this.skip &&
+      old.phase === phase &&
+      sameQueued(old.queued, queued) &&
+      sameVoices(old.voices, voices) &&
+      sameShapes(old.shapes, shapes) &&
+      sameShapes(old.keysShapes, keysShapes)
+    if (kept && old.bpm === bpm) {
+      // Nothing changed.
+    } else if (kept && audio.seqTempo) {
+      // Only the tempo moved: it goes alone, not the whole plan (web only).
+      this.sent = { ...old, bpm }
+      audio.seqTempo(bpm)
+    } else {
       this.sent = { patterns: p, skip: this.skip, bpm, voices, shapes, keysShapes, queued, phase }
       audio.seqPlan({ patterns: p, voices, skip: this.skip, bpm, phase, shapes, keysShapes, queued })
     }

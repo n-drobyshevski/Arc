@@ -57,6 +57,21 @@ describe('ARP', () => {
     expect(p.arp.value.sounding).toBe(false)
   })
 
+  it("follows the EP-133's tempo while it has notes, and sends nothing for it with none", async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    const tempo = (bpm: number): void => h.c.store.update((s) => ({ ...s, mirror: { ...s.mirror!, state: { ...s.mirror!.state, bpm } } }))
+    p.setArpOn(true)
+    const arps = h.liveAudio.arps.length
+    tempo(124)
+    expect(h.liveAudio.arps.length).toBe(arps)
+    p.setArpLatch(true)
+    await h.c.playPad(A4, true, false, now())
+    h.c.releasePad(A4, now())
+    tempo(131.04)
+    expect(h.liveAudio.arps.at(-1)?.bpm).toBe(131)
+  })
+
   it('LATCH keeps the notes after the fingers are up; off, they go', async () => {
     const h = await liveOn()
     const p = h.c.pattern

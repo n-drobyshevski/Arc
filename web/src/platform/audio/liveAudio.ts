@@ -723,6 +723,13 @@ export class LiveAudio {
     if (this.stream) this.sendPlan(this.stream, plan)
   }
 
+  /** The plan as it is but at [bpm]: the mixer has its sounds already, so only the tempo goes (web only). */
+  seqTempo(bpm: number): void {
+    if (this.plan === null) return
+    this.plan = { ...this.plan, bpm }
+    if (this.stream) send(this.stream, { t: 'seqBpm', bpm })
+  }
+
   /** Starts the pattern (LiveAudioDeps.seqPlay). False when there is no output. */
   seqPlay(countInBars: number, leadMs: number, atMs: number | null): boolean {
     const s = this.ensure()

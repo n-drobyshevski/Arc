@@ -1788,6 +1788,26 @@ describe('LiveAudio PATTERN', () => {
     expect(b.link.sent.at(-1)).toEqual({ t: 'stopSeq' })
   })
 
+  it('a new tempo goes alone, and the next play sends the plan at it (web only)', async () => {
+    const b = new FakeBackend()
+    const live = new LiveAudio(b)
+    live.preload('kick', tone(300), 1, RATE)
+    live.seqPlan(plan(new Map([[0, 'kick']])))
+    expect(live.seqPlay(0, 0, null)).toBe(true)
+    await flush()
+    b.ctx.timestamp = { contextTime: 1, performanceTime: 5000 }
+    for (let i = 0; i < 20; i++) b.link.render(1 + (i * 128) / RATE)
+    const plans = b.link.sent.filter((m) => m.t === 'plan').length
+    live.seqTempo(132)
+    expect(b.link.sent.at(-1)).toEqual({ t: 'seqBpm', bpm: 132 })
+    expect(b.link.sent.filter((m) => m.t === 'plan').length).toBe(plans)
+    for (let i = 20; i < 40; i++) b.link.render(1 + (i * 128) / RATE)
+    expect(live.timeline.value?.clock.bpm).toBe(132)
+    live.seqStop()
+    live.seqPlay(0, 0, null)
+    expect(b.link.sent.filter((m) => m.t === 'plan').at(-1)).toMatchObject({ bpm: 132, voices: [{ pad: 0, id: 1 }] })
+  })
+
   it("plays each pad as its shapes say, else on its group's FX bus", async () => {
     const b = new FakeBackend()
     const live = new LiveAudio(b)

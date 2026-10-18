@@ -38,6 +38,8 @@ export interface FakeLiveAudio extends LiveAudioDeps {
   // PATTERN
   /** The plans handed over, in order. */
   readonly plans: LiveSeqPlan[]
+  /** The tempos sent alone (the plan otherwise as it was), in order. */
+  readonly tempos: number[]
   /** PATTERN calls in order: "play:<countIn>:<leadMs>:<atMs>", "stop", "arm:<bool>". */
   readonly seqLog: string[]
   readonly timeline: Signal<LiveTimeline | null>
@@ -190,10 +192,14 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
       for (const l of [...takeL]) l(take, limit)
     },
     plans: [],
+    tempos: [],
     seqLog: [],
     timeline,
     seqPlan(plan) {
       a.plans.push(plan)
+    },
+    seqTempo(bpm) {
+      a.tempos.push(bpm)
     },
     seqPlay(countInBars, leadMs, atMs) {
       a.seqLog.push(`play:${countInBars}:${leadMs}:${atMs}`)

@@ -24,11 +24,12 @@
 //
 // PATTERN (PatternScheduler.kt): 'plan' hands the host's PatternScheduler
 // what it plays (the patterns, and the pads' sounds by the ids loaded here),
-// 'play' and 'stopSeq' start and stop it, and 'seqArmed' asks for the
-// output's stamps while RECORD waits for a press. It reports its clock
-// ('timeline'), the pads it has no sound for ('missing') and, while it runs
-// or is armed, where the mix is ('stamp': mix frame [frame] plays at context
-// time [time]), for the main thread's own stamp.
+// 'seqBpm' only its tempo (web only), 'play' and 'stopSeq' start and stop
+// it, and 'seqArmed' asks for the output's stamps while RECORD waits for a
+// press. It reports its clock ('timeline'), the pads it has no sound for
+// ('missing') and, while it runs or is armed, where the mix is ('stamp': mix
+// frame [frame] plays at context time [time]), for the main thread's own
+// stamp.
 //
 // TEMPO's click ('click') is mixed in after TAKE has the block, at the
 // metronome level's gain ('clickLevel', web only: the drawn EP-133's TEMPO
@@ -93,6 +94,8 @@ export type ToMixer =
       /** The patterns waiting to take over a group (scenes), each from its global tick. */
       readonly queued?: readonly { readonly group: number; readonly pattern: Pattern; readonly atTick: number }[]
     }
+  /** The plan as it is but at [bpm] (web only: the EP-133's clock moved, nothing else did). */
+  | { readonly t: 'seqBpm'; readonly bpm: number }
   /** PatternScheduler.play: tick 0 at mix frame [atFrame] (a press), else a lookahead and [leadMs] on, after [countInBars]. */
   | { readonly t: 'play'; readonly countInBars: number; readonly leadMs: number; readonly atFrame: number | null; readonly atPress: boolean }
   | { readonly t: 'stopSeq' }
@@ -317,6 +320,9 @@ export class MixerHost {
         this.seq.plan = { patterns: m.patterns, voices, skip: new Map(m.skip), bpm: m.bpm, phase: m.phase, queued }
         return
       }
+      case 'seqBpm':
+        this.seq.plan = { ...this.seq.plan, bpm: m.bpm }
+        return
       case 'play':
         this.seq.play(m.countInBars, m.leadMs, m.atFrame, m.atPress)
         this.stampedAt = Number.NEGATIVE_INFINITY
