@@ -102,6 +102,10 @@ export function padAudioOf(pcm: Uint8Array, channels: number, sampleRate: number
 
 const padBytes = (a: PadAudio): number => a.pcm.length * 2
 
+/** Whether library record [b] is still the one [o] was opened from (same id, size and time). */
+const sameRecord = (b: BackupRecord, o: { readonly id: string; readonly size: number; readonly createdAt: number }): boolean =>
+  b.id === o.id && b.size === o.size && b.createdAt === o.createdAt
+
 /** Whether this platform stores 16-bit numbers little end first (every browser in practice). */
 const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1
 
@@ -211,8 +215,12 @@ export class LiveSounds {
   readonly cache: PadSoundCache
   /** The device's sound list from Live's read (names and sizes), to tell which copies are current. */
   private deviceSounds = new Map<number, SoundEntry>()
-  /** The last backup a pad played from, opened, so the next taps are quick. */
-  private openPak: { id: string; pak: Pak } | null = null
+  /**
+   * The last backup a pad played from, opened (or opening: the taps meanwhile
+   * wait for that one open), so the next taps are quick; by its record's size
+   * and time too, as a saved id can come back with other bytes.
+   */
+  private openPak: { id: string; size: number; createdAt: number; pak: Promise<Pak> } | null = null
   // The factory sounds' first project as Live shows it, by the library entry it came from.
   private factorySnap: { id: string; snap: LiveSnapshot | null } | null = null
   // Every factory project with pads, by the library entry they came from (PROJECT offline).
@@ -225,6 +233,8 @@ export class LiveSounds {
   // A sample's bytes for a preview, made once per sample.
   private readonly previewBytes = new WeakMap<PadAudio, Uint8Array>()
   private preloadGen = 0
+  // The preload's sample on its way to memory, by key: a press meanwhile waits for it (an addition).
+  private readonly preloadLoads = new Map<string, Promise<PadAudio | null>>()
   // Bumped to end the copying loop (mirror closed, project changed).
   private cacheGen = 0
   // Live's pads and keys sound while held (a gate): the voices whose finger is still down.
@@ -549,9 +559,10 @@ export class LiveSounds {
     void this.cache.flush().catch(() => undefined)
   }
 
-  /** The library changed: the backup opened for playing may be gone. */
-  libraryChanged(): void {
-    this.openPak = null
+  /** The library changed to [list]: the backup opened for playing may be gone, or saved over. */
+  libraryChanged(list: readonly BackupRecord[]): void {
+    const o = this.openPak
+    if (o !== null && !list.some((b) => sameRecord(b, o))) this.openPak = null
   }
 
   // ---------- samples in memory ----------
@@ -652,12 +663,10 @@ export class LiveSounds {
         if (gen !== this.preloadGen || this.host.mirror() !== m) return
         const key = this.keyOf(sample)
         if (this.padMemory.has(key) || this.padLoads.has(key)) continue
-        let a: PadAudio | null
-        try {
-          a = await this.loadSample(sample)
-        } catch {
-          a = null
-        }
+        const load = this.loadSample(sample).catch(() => null)
+        this.preloadLoads.set(key, load)
+        const a = await load
+        if (this.preloadLoads.get(key) === load) this.preloadLoads.delete(key)
         if (a === null) continue
         if (gen === this.preloadGen && this.host.mirror() === m) this.keepUnder(key, a)
       }
@@ -695,7 +704,7 @@ export class LiveSounds {
 
   /** The WAV of the factory [pack]'s sound in [slot], while it has this [name]. */
   private async fromPack(pack: BackupRecord, slot: number, name: string): Promise<Uint8Array | null> {
-    const snd = (await this.pakOf(pack.id)).sounds.get(slot)
+    const snd = (await this.pakOf(pack)).sounds.get(slot)
     return snd !== undefined && PadSoundCache.sameName(snd.name, name) ? snd.wav : null
   }
 
@@ -721,14 +730,19 @@ export class LiveSounds {
     const backups = this.host.store.get().backups
     const b = newestBackupWith(slot, name, this.host.names(), backups) ?? (FactorySounds.unnamed(slot, name) ? this.unnamedPack() : null)
     if (b === null) return null
-    return (await this.pakOf(b.id)).sounds.get(slot)?.wav ?? null
+    return (await this.pakOf(b)).sounds.get(slot)?.wav ?? null
   }
 
-  /** A library entry opened, the last one kept open. */
-  private async pakOf(id: string): Promise<Pak> {
-    if (this.openPak?.id === id) return this.openPak.pak
-    const pak = await openPak(await this.host.deps.library.bytes(id))
-    this.openPak = { id, pak }
+  /** A library entry opened, the last one kept open; one open for the calls that overlap, a failed one not kept. */
+  private pakOf(b: BackupRecord): Promise<Pak> {
+    const o = this.openPak
+    if (o !== null && sameRecord(b, o)) return o.pak
+    const pak = (async () => openPak(await this.host.deps.library.bytes(b.id)))()
+    const open = { id: b.id, size: b.size, createdAt: b.createdAt, pak }
+    this.openPak = open
+    pak.catch(() => {
+      if (this.openPak === open) this.openPak = null
+    })
     return pak
   }
 
@@ -742,7 +756,7 @@ export class LiveSounds {
     if (this.factorySnap?.id === b.id) return this.factorySnap.snap
     let snap: LiveSnapshot | null
     try {
-      snap = FactorySounds.snapshot(await this.pakOf(b.id), b.createdAt)
+      snap = FactorySounds.snapshot(await this.pakOf(b), b.createdAt)
     } catch {
       snap = null
     }
@@ -766,7 +780,7 @@ export class LiveSounds {
     if (this.factorySnaps?.id === b.id) return this.factorySnaps
     const snaps = new Map<number, LiveSnapshot>()
     try {
-      const pak = await this.pakOf(b.id)
+      const pak = await this.pakOf(b)
       for (const n of FactorySounds.projects(pak)) {
         const snap = FactorySounds.snapshot(pak, b.createdAt, n)
         if (snap !== null) snaps.set(n, snap)
@@ -907,7 +921,10 @@ export class LiveSounds {
     const { host } = this
     const { slot, name, factory } = sample
     try {
-      let audio = await this.loadPadAudio(slot, name, this.packOf(sample))
+      // The preload loading this sound: the press waits for that load, its own only if it found nothing.
+      const pre = (await this.preloadLoads.get(key)) ?? null
+      if (pre !== null && this.padMemory.has(key)) return { key, audio: this.fromMemory(key) ?? pre }
+      let audio = pre ?? (await this.loadPadAudio(slot, name, this.packOf(sample)))
       if (audio === null) {
         if (host.session() !== null && host.store.get().device !== null) {
           const r = await host.tasks.exclusive(`play:${slot}`, false, async (s) => {

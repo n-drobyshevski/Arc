@@ -698,7 +698,7 @@ export class ArcController {
       }
       if (gen !== this.libraryGen || this.disposed) return
       this.names = names
-      this.live.libraryChanged()
+      this.live.libraryChanged(list)
       const first = !this.store.get().libraryLoaded
       this.store.update((s) => ({ ...s, backups: list, libraryLoaded: true, spaceLeft }))
       // Connected before the library was first read: the device's kit, now that its pack can be seen.
