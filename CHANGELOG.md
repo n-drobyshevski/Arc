@@ -7,6 +7,8 @@ version fixes bugs. The version itself is set in `version.properties`.
 ## [Unreleased]
 
 ### Added
+- **Try arc**, a short tour on the real Live screen for a new install, in place of the guide overlay on the first start. Each step waits until it is done: bring back the library from Documents/arc (or a library folder) when it is empty, connect the EP-133 (with a check of MIDI access, the cable and the connection), press a pad on the EP-133 and see it light, hold that pad here to hear it, and make a first backup; it ends by pointing at **?**, GUIDE and the more-tools strip. Every step can be skipped, the tour resumes where it stopped, and where MIDI is missing it says so (on the web, with a way to the demo). Existing installs don't get it by themselves.
+- Settings → **Help**: **Try arc again**, and **What's what** shows the guide overlay.
 - Live: **REC** records what you play on the phone (pads and keys, chords and KEYS pitch included), with or without the EP-133. It starts with the first sound after REC and stops at the next tap (or 10 minutes), leaving out the silence at the end. Takes are stereo WAVs listed in Live tools → Takes, where each plays, shares, saves, deletes, or goes **To EP-133** through the upload sheet while the device is connected.
 - Web app (`web/`, https://arc-pi-mauve.vercel.app): the whole Android app in the browser, for Chrome, Edge and other Chromium browsers on computers and Android, over USB-C with WebMIDI. Same `.pak` files and `library.json` as the Android app.
   - Live starts on one group (the large grid with A–D); the view switch in Live tools still shows all four.
@@ -35,7 +37,8 @@ version fixes bugs. The version itself is set in `version.properties`.
 - The GUIDE tab on the left edge is quiet grey, like an unselected key, instead of solid navy.
 - No bar along the bottom: the top left shows the section as a tag (like the PO app's EDIT tag) that lists Backups, Live and Device on a tap, and the EP-133 shortcut guide is a GUIDE tab on the left edge that slides it in. Long-press the tag for the debug screen.
 - Quieter controls after the pocket operator app: icon keys in the top bar (back up, connection, guide, settings) and in the Backups and Device headers (search, import, refresh, add samples), named on long-press and to screen readers; only the selected tab is a block; view switches are underlined words; play keys are outlines until they play; Follow is a target icon.
-- A guide overlay (**?**, and once on the first start) tags every control on screen with its name, like the PO app's tutorial.
+- A guide overlay (**?**, and once on the first start of an install that already has backups) tags every control on screen with its name, like the PO app's tutorial. It counts as seen once it is closed, and Back closes it.
+- The plug-in hint names the connection key at the top ("then tap the connection key at the top") instead of a Connect key the page doesn't have.
 - Live's secondary controls (view switch, Follow, KEYS strip, pad numbering and notes) moved into a side panel, opened from a hatched strip on the right edge like the PO app's "more tools", so the page is just the display, the pads and A–D.
 - Live's one-group view shows the display as one line (play state, tempo, project and the pad just played), so the pads get the room.
 
