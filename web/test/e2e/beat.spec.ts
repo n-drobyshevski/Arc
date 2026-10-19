@@ -2,7 +2,8 @@
 // (its shares dimmed with no notes, PASTE BEAT), a beat card pasted on Live opening its
 // sheet (the grid, where it goes, the tempo chip), IMPORT placing it with a toast, and
 // PASTE BEAT reading the clipboard. A card of scenes imported sets a chain: SHARE CHAIN
-// shares it, followed by the sound list while "With my sound list" is ticked. A card's
+// shares it, followed by the sound list while "With my sound list" is ticked; its sheet
+// shows each scene and the chain, and with SET CHAIN off IMPORT leaves the chain. A card's
 // SOUNDS and SILENT PADS: its sound ticked, a sound picked for a silent pad with PICK
 // SOUND, both put on the pads by IMPORT. A card's FX and PAD SHAPING: APPLY FX switched,
 // a pad line ticked, and IMPORT applying the FX.
@@ -101,6 +102,40 @@ test('SHARE CHAIN: a card of scenes sets the chain, shared with the sound list o
   const plain = (await sent())[1]!
   expect(plain).not.toContain("My EP-133's sounds")
   expect(plain.endsWith('\n```\n')).toBe(true)
+})
+
+test("SCENES and SET CHAIN: a card's scenes under their titles, a row for each, and SET CHAIN off keeps the project's chain", async ({ page }) => {
+  await page.goto('/?demo#/live')
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
+  await page.evaluate((text) => {
+    const data = new DataTransfer()
+    data.setData('text/plain', text)
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }))
+  }, SCENES)
+  const sheet = page.getByRole('dialog', { name: 'Two' })
+  await expect(sheet).toBeVisible()
+  // Each scene's grids under its title, and a row saying the new scene it becomes.
+  await expect(sheet.getByRole('heading', { name: 'Scene 1 \u00B7 One' })).toBeVisible()
+  await expect(sheet.getByRole('heading', { name: 'Scene 2 \u00B7 Two' })).toBeVisible()
+  await expect(sheet.getByRole('note', { name: /^Scene 1, One, becomes S02, patterns A \d+, B \d+, C \d+, D \d+$/ })).toBeVisible()
+  await expect(sheet.getByRole('note', { name: /^Scene 2, Two, becomes S03, patterns / })).toBeVisible()
+  // The chain on the new scenes, set by IMPORT unless SET CHAIN is off.
+  await expect(sheet).toContainText('S02\u00D72 \u2192 S03')
+  const setChain = sheet.getByRole('switch', { name: "Set the project's chain from the card, 2 steps" })
+  await expect(setChain).toHaveAttribute('aria-checked', 'true')
+  await expect(sheet).toContainText("Replaces this project's chain with the card's")
+  await setChain.click()
+  await expect(sheet.getByRole('switch', { name: "Leave the project's chain as it is, 2 steps" })).toHaveAttribute('aria-checked', 'false')
+  await expect(sheet).not.toContainText("Replaces this project's chain with the card's")
+
+  await sheet.getByRole('button', { name: 'Import' }).click()
+  await expect(sheet).toBeHidden()
+  await expect(page.getByRole('status').filter({ hasText: 'Imported to scenes S02\u2013S03. UNDO takes it back.' })).toBeVisible()
+  // No chain was set: nothing for SHARE CHAIN.
+  await page.getByRole('button', { name: 'Live tools' }).click()
+  const claude = page.getByRole('dialog', { name: 'Live tools' }).getByRole('region', { name: 'Claude' })
+  await expect(claude).toBeVisible()
+  await expect(claude.getByRole('button', { name: /^Share the chain with Claude/ })).toHaveCount(0)
 })
 
 test('SOUNDS and SILENT PADS: a card\'s sound and one picked for a silent pad go on the pads with IMPORT', async ({ page }) => {

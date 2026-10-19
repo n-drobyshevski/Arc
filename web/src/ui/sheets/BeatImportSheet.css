@@ -33,8 +33,15 @@
   box-sizing: border-box;
 }
 .beat-row__value { flex: 1 1 auto; min-width: 0; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A stacked row (a card scene, the chain): the label over its value, which wraps to three lines. */
+.beat-row__stack { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.beat-row__label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.beat-row__long { color: var(--ink); overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 
-/* A block's switch (the tempo chip, PUT ON PADS, APPLY FX): a flat pill, navy while on. */
+/* A card scene's title over its grids: "SCENE 2 · DROP". */
+.beat-scene__title { margin: 0; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* A block's switch (the tempo chip, PUT ON PADS, APPLY FX, SET CHAIN): a flat pill, navy while on. */
 .beat-chip {
   flex: none;
   min-height: 40px;

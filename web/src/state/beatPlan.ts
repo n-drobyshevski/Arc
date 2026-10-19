@@ -14,10 +14,11 @@
 // blocks in one [BeatBlocks]. SoundRowUi's and SoundsUi's getters are fields,
 // set by soundRowUi and soundsUiOf, BeatFxUi's [changes] is a field set by
 // beatFxUi. The picks for silent pads and the pads padShapes takes are keyed
-// by padKey. Not yet here: the synth rows (SynthVoice) and the suggested sounds.
+// by padKey. Not yet here: the synth rows (SynthVoice), the suggested sounds
+// and REPLACE (BeatReplaceUi, projectScenes).
 
 import { FactoryKit, FactorySounds } from '../core/features/factorySounds'
-import { BeatCards, SoundStatus, allSections, cardPadIsEmpty, cardSection, cardSound, type BeatCard, type CardPad, type CardProblem, type CardRead, type CardSection, type CardSound, type SoundPick } from '../core/features/beatCard'
+import { BeatCards, SoundStatus, allSections, cardPadIsEmpty, isMultiScene, cardSection, cardSound, type BeatCard, type CardImport, type CardPad, type CardProblem, type CardRead, type CardSection, type CardSound, type SoundPick } from '../core/features/beatCard'
 import type { ChainStep } from '../core/features/chain'
 import type { FxSettings } from '../core/features/fxSettings'
 import { PadSettings } from '../core/features/padSettings'
@@ -260,6 +261,28 @@ export interface BeatGridUi {
   readonly rows: readonly BeatRowUi[]
   readonly goesTo: number | null
   readonly moreBars: number
+}
+
+/**
+ * A card scene on the sheet: its [number] (from 1) and [name], its [grids],
+ * where it goes ([index]: the new scene it becomes; null when none can be
+ * added), the pattern each of its groups gets ([patterns]: the new scene's)
+ * and [parts], what its row says: the groups the card has in any scene, each
+ * with the pattern number this scene's section takes, or null where it leaves
+ * the group out ("B (same)").
+ */
+export interface BeatSceneUi {
+  readonly number: number
+  readonly name: string | null
+  readonly grids: readonly BeatGridUi[]
+  readonly index: number | null
+  readonly patterns: readonly number[] | null
+  readonly parts: readonly (readonly [number, number | null])[]
+}
+
+/** The chain a card sets, as steps on the new scenes ([steps]): the CHAIN row and its SET CHAIN chip. */
+export interface BeatChainUi {
+  readonly steps: readonly ChainStep[]
 }
 
 /**
@@ -648,7 +671,11 @@ export function isBefore(c: ProjectSeq, before: ProjectSeq): boolean {
  * lines choose (null when it has none), its [fx] against the project's and
  * the [shaping] its pad lines give (null when it has none), and the [silent]
  * pads it plays that have no sound (null when it has none, or the pads aren't
- * known).
+ * known). A card of scenes also has its [scenes] (each with its grids; empty
+ * for a card without `scene` lines, whose [grids] are all), its [chain] on the
+ * new scenes (null when it has none or no scene can be added) and [noRoom]:
+ * the project has too many scenes for the card's, which only place their
+ * patterns.
  */
 export interface BeatImportUi {
   readonly read: CardRead
@@ -665,6 +692,9 @@ export interface BeatImportUi {
   readonly fx: BeatFxUi | null
   readonly shaping: PadShapingUi | null
   readonly silent: SilentUi | null
+  readonly scenes: readonly BeatSceneUi[]
+  readonly chain: BeatChainUi | null
+  readonly noRoom: boolean
 }
 
 /**
@@ -710,11 +740,11 @@ export function beatImportUi(read: CardRead, seq: ProjectSeq, now: number, names
   const card = read.card
   const nowBpm = Tempo.round(now)
   if (card === null) {
-    return { read, title: ClaudeText.CARD, summary: null, grids: [], placed: [], scene: null, tempo: null, tempoNow: nowBpm, swing: null, blocked: ClaudeText.FIX_ERRORS, sounds: null, fx: null, shaping: null, silent: null }
+    return { read, title: ClaudeText.CARD, summary: null, grids: [], placed: [], scene: null, tempo: null, tempoNow: nowBpm, swing: null, blocked: ClaudeText.FIX_ERRORS, sounds: null, fx: null, shaping: null, silent: null, scenes: [], chain: null, noRoom: false }
   }
   const plan = BeatCards.plan(seq, card)
-  // The plan places the sections in the card's order, or none when a group is full.
-  const grids = card.sections.map((s, i) => beatGrid(s, card.swing, names, plan.placed[i]?.[1] ?? null))
+  // The plan places the sections in the card's order (scene by scene), or none when a group is full.
+  const grids = allSections(card).map((s, i) => beatGrid(s, card.swing, names, plan.placed[i]?.[1] ?? null))
   const pads = new Set(grids.flatMap((g) => g.rows.map((r) => r.pad.group * 12 + r.pad.offset))).size
   const bars = grids.reduce((m, g) => Math.max(m, g.bars), 0)
   const hits = grids.reduce((sum, g) => sum + g.rows.reduce((s, r) => s + r.hits, 0), 0)
@@ -734,7 +764,30 @@ export function beatImportUi(read: CardRead, seq: ProjectSeq, now: number, names
     fx: blocks.fx?.(card) ?? null,
     shaping: blocks.shaping?.(card) ?? null,
     silent: blocks.silent?.(card) ?? null,
+    scenes: isMultiScene(card) ? sceneRows(card, grids, plan) : [],
+    chain: plan.chain !== null && plan.newScene ? { steps: plan.chain } : null,
+    noRoom: isMultiScene(card) && plan.fullGroup === null && !plan.newScene,
   }
+}
+
+// The card's scenes as the sheet draws them: each with its slice of [grids] and, where [plan] adds the scenes, the new scene it becomes and the pattern each section took.
+function sceneRows(card: BeatCard, grids: readonly BeatGridUi[], plan: CardImport): BeatSceneUi[] {
+  const groups = [...new Set(allSections(card).map((s) => s.group))].sort((a, b) => a - b)
+  let at = 0
+  return card.scenes.map((sc, i) => {
+    const mine = grids.slice(at, at + sc.sections.length)
+    const taken = new Map(sc.sections.map((s, j) => [s.group, plan.placed[at + j]?.[1] ?? null] as const))
+    at += sc.sections.length
+    const index = plan.scenes[i] ?? null
+    return {
+      number: i + 1,
+      name: sc.name,
+      grids: mine,
+      index,
+      patterns: index === null ? null : plan.seq.scenes[index]!.patterns,
+      parts: groups.map((g) => [g, taken.get(g) ?? null] as const),
+    }
+  })
 }
 
 /**
@@ -774,12 +827,20 @@ export function beatGrid(s: CardSection, swing: number, names: PadNames, goesTo:
   return { group: s.group, bars: p.bars, step, perBar, shownBars: shown, rows, goesTo, moreBars: p.bars - shown }
 }
 
-/** A card applied: the sequencer [seq] after it, where the patterns went ([placed]), the index of the scene it added ([scene]) and the group with no free pattern ([fullGroup]: nothing was done). */
+/**
+ * A card applied: the sequencer [seq] after it, where the patterns went
+ * ([placed]), the index of the scene it added ([scene]; the first of them for
+ * a card of scenes, which added [scenes] of them), whether it set the
+ * project's chain ([chainSet]) and the group with no free pattern
+ * ([fullGroup]: nothing was done).
+ */
 export interface BeatApplied {
   readonly seq: ProjectSeq
   readonly placed: readonly (readonly [number, number])[]
   readonly scene: number | null
   readonly fullGroup: number | null
+  readonly scenes: number
+  readonly chainSet: boolean
 }
 
 /**
@@ -789,14 +850,32 @@ export interface BeatApplied {
  * already), all as ONE checkpoint of [recorder] (PatternRecorder.editSeq): a
  * single UNDO puts back the banks, the scenes and the picks as they were.
  * [BeatApplied.seq] is [seq] itself when a group is full.
+ *
+ * A card of scenes adds one scene for each of its own after the project's,
+ * the first selected, and with [setChain] on (and a chain in the card) the
+ * project's chain becomes the card's on the new scenes, turned on: all in the
+ * same one checkpoint. With no room for the scenes (the project has too many)
+ * the patterns are placed, and the first scene's picked in the scene playing.
  */
-export function applyBeat(seq: ProjectSeq, card: BeatCard, recorder: PatternRecorder): BeatApplied {
-  const plan = BeatCards.plan(seq, card)
-  if (plan.fullGroup !== null) return { seq, placed: [], scene: null, fullGroup: plan.fullGroup }
+export function applyBeat(seq: ProjectSeq, card: BeatCard, recorder: PatternRecorder, setChain = true): BeatApplied {
+  const plan = BeatCards.plan(seq, card, setChain)
+  if (plan.fullGroup !== null) return { seq, placed: [], scene: null, fullGroup: plan.fullGroup, scenes: 0, chainSet: false }
   let after = plan.seq
-  if (!plan.newScene) for (const [g, n] of plan.placed) after = SceneOps.selectPattern(after, g, n)
+  if (!plan.newScene) {
+    // A card of scenes names a group's pattern in each scene: the first scene's is the one picked.
+    const picks = isMultiScene(card) ? plan.placed.slice(0, card.scenes[0]!.sections.length) : plan.placed
+    for (const [g, n] of picks) after = SceneOps.selectPattern(after, g, n)
+  }
   const out = recorder.editSeq(seq, after)
-  return { seq: out, placed: plan.placed, scene: plan.newScene ? out.scene : null, fullGroup: null }
+  const chainSet = plan.newScene && setChain && plan.chain !== null
+  return {
+    seq: out,
+    placed: plan.placed,
+    scene: plan.newScene ? (plan.scenes[0] ?? out.scene) : null,
+    fullGroup: null,
+    scenes: plan.newScene ? plan.scenes.length : 0,
+    chainSet,
+  }
 }
 
 /**
@@ -805,5 +884,8 @@ export function applyBeat(seq: ProjectSeq, card: BeatCard, recorder: PatternReco
  * [pads] shaped and the [padsSkipped] that could not be.
  */
 export function beatImported(applied: BeatApplied, sounds = 0, skipped = 0, fx = false, pads = 0, padsSkipped = 0): string {
-  return ClaudeText.imported(applied.placed, applied.scene === null ? null : MirrorText.sceneLabel(applied.scene), sounds, skipped, fx, pads, padsSkipped)
+  // A card of scenes names the scenes it made: "S04–S06".
+  const first = applied.scene
+  const scene = first === null ? null : applied.scenes > 1 ? MirrorText.sceneLabel(first) + '\u2013' + MirrorText.sceneLabel(first + applied.scenes - 1) : MirrorText.sceneLabel(first)
+  return ClaudeText.imported(applied.placed, scene, sounds, skipped, fx, pads, padsSkipped, Math.max(applied.scenes, 1), applied.chainSet)
 }

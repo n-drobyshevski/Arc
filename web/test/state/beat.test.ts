@@ -3,7 +3,7 @@
 // none), PASTE BEAT reads the clipboard (or waits for a paste where the page can't read it),
 // a card opens its sheet, IMPORT places it as one UNDO step, and COPY PROBLEMS copies them.
 // A share carries the pads' sound lines and, with "With my sound list" on, the sounds Arc knows;
-// SHARE CHAIN shares the project's chain. IMPORT puts the card's ticked sounds and the ones
+// SHARE CHAIN shares the project's chain; a card of scenes imported sets its chain unless SET CHAIN is off. IMPORT puts the card's ticked sounds and the ones
 // picked for silent pads on the pads (on the EP-133, or offline in arc), in the same UNDO step;
 // writes that throw stop it with its error toast. The card's FX replace the project's and its
 // pad lines shape the ticked pads (on the EP-133, or as offline pad settings), in that same step.
@@ -138,6 +138,28 @@ describe('BEAT CARDS', () => {
     const card = BeatCards.read(shared[0]!).card!
     expect(card.scenes.length).toBe(2)
     expect(card.chain).toEqual([[1, 2], [2, 1]])
+  })
+
+  it("IMPORT of a card of scenes: its scenes, the chain with SET CHAIN and one UNDO; SET CHAIN off leaves the project's chain", async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    await h.c.receiveBeat(SCENES)
+    const ui = p.beat.value!
+    expect(ui.scenes.map((s) => [s.name, s.index])).toEqual([['One', 1], ['Two', 2]])
+    expect(ui.chain?.steps.length).toBe(2)
+    expect(ui.noRoom).toBe(false)
+    p.importBeat(false)
+    const done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    expect(done.toast?.text).toBe('Imported to scenes S02\u2013S03. Chain set. UNDO takes it back.')
+    expect(p.scene.value.chain.length).toBe(2)
+    p.undo()
+    expect(p.scene.value.chain).toEqual([])
+    // SET CHAIN off: the scenes go in, the chain stays the project's (none).
+    await h.c.receiveBeat(SCENES)
+    p.importBeat(false, new Set(), new Map(), false, new Set(), false)
+    const off = await until(h, (st) => st.toast?.text === 'Imported to scenes S02\u2013S03. UNDO takes it back.')
+    expect(off.toast).not.toBeNull()
+    expect(p.scene.value.chain).toEqual([])
   })
 
   it('PASTE BEAT: a card opens its sheet, IMPORT places it as one UNDO step', async () => {

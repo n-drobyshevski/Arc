@@ -7,8 +7,8 @@
 // ShareParts object, beatImportUi's blocks its BeatBlocks; soundSetOf and soundChoicesOf take the connected list as an
 // argument (Kotlin's MirrorUi.sounds); the picks for silent pads are keyed by padKey.
 // BeatFxUi's `same` is ClaudeText.isSame; padShapes takes pad keys.
-// Left for the steps that port them: the prompt share (PromptText), the scene imports with REPLACE and SET CHAIN, and
-// the synth rows (the four synth tests and "the sheet and IMPORT plan the same sounds", which needs a synth line).
+// Left for the steps that port them: the prompt share (PromptText), REPLACE (the projectScenes and replace asserts of
+// "the sheet names where each section goes"), and the synth rows (the four synth tests and "the sheet and IMPORT plan the same sounds", which needs a synth line).
 import { describe, expect, it } from 'vitest'
 import { FactoryKit } from '../../src/core/features/factorySounds'
 import { BeatCards, SoundStatus, beatCard, cardFx, cardPad, cardSection, cardSound, type BeatCard, type CardSection, type CardSound } from '../../src/core/features/beatCard'
@@ -266,6 +266,102 @@ describe('BeatPlanTest', () => {
     expect(applied.seq).toBe(seq)
     expect(applied.placed.length).toBe(0)
     expect(recorder.canUndo).toBe(false)
+  })
+
+  // ---- scenes and the chain ----
+
+  const track = `ARC BEAT 1
+name Track
+tempo 168
+chain 1x2 2 1x2 3
+
+scene Intro
+[A] bars 1 step 1/16
+A7 kick | X... .... X... .... |
+[B] bars 2 step 1/16
+B7 bass | X... .... .... X... | .... .... X... .... |
+
+scene Drop
+[A] bars 1 step 1/16
+A7 kick | X.x. X.x. X.x. X.x. |
+A9 snare | .... X... .... X..o |
+[B] bars 2 step 1/16
+B7 bass | X.x. ..x. X... x... | X.x. ..x. X... x... |
+
+scene Breakdown
+[B] bars 2 step 1/16
+B8 bass | X... .... .... .... | .... .... .... .... |
+`
+
+  it('a card of scenes adds a scene for each of its own and sets the chain, in the one undo step', () => {
+    const recorder = new PatternRecorder()
+    // The project has a chain of its own, which the card's replaces.
+    const seq = ProjectSeq.withChain(ProjectSeq.DEFAULT, chain([chainStep(0, 4)], false))
+    recorder.seq = seq
+    const applied = applyBeat(seq, BeatCards.read(track).card!, recorder)
+    expect(applied.scene).toBe(1)
+    expect(applied.scenes).toBe(3)
+    expect(applied.chainSet).toBe(true)
+    expect(applied.seq.scenes.length).toBe(4)
+    expect(applied.seq.scene).toBe(1)
+    expect(applied.seq.chain).toEqual(chain([chainStep(1, 2), chainStep(2), chainStep(1, 2), chainStep(3)], true))
+    // Scene 3 has no A section: it plays scene 2's pattern.
+    expect(applied.seq.scenes[3]!.patterns[0]).toBe(applied.seq.scenes[2]!.patterns[0])
+    expect(beatImported(applied)).toBe('Imported to scenes S02\u2013S04. Chain set. UNDO takes it back.')
+    // One UNDO: the scenes, the patterns and the chain as they were.
+    expect(recorder.undo(applied.seq)).toEqual(seq)
+    expect(recorder.canUndo).toBe(false)
+  })
+
+  it("with SET CHAIN off the project's chain stays and the toast does not say it was set", () => {
+    const recorder = new PatternRecorder()
+    const seq = ProjectSeq.withChain(ProjectSeq.DEFAULT, chain([chainStep(0, 4)], true))
+    recorder.seq = seq
+    const applied = applyBeat(seq, BeatCards.read(track).card!, recorder, false)
+    expect(applied.chainSet).toBe(false)
+    expect(applied.seq.chain).toEqual(seq.chain)
+    expect(applied.seq.scenes.length).toBe(4)
+    expect(beatImported(applied)).toBe('Imported to scenes S02\u2013S04. UNDO takes it back.')
+  })
+
+  it("the sheet lists a card's scenes with where each goes, a group left out as same, and the chain on the new scenes", () => {
+    const ui = beatImportUi(BeatCards.read(track), ProjectSeq.DEFAULT, 120.0, nameOf)
+    expect(ui.scenes.length).toBe(3)
+    expect(ui.scenes.map((s) => s.name)).toEqual(['Intro', 'Drop', 'Breakdown'])
+    expect(ui.scenes.map((s) => s.grids.length)).toEqual([2, 2, 1])
+    expect(ui.grids.length).toBe(5)
+    expect(ui.scenes.map((s) => s.index)).toEqual([1, 2, 3])
+    // Groups A and B are in the card: the Breakdown leaves out A.
+    expect(ui.scenes[2]!.parts.map(([g]) => g)).toEqual([0, 1])
+    expect(ui.scenes[2]!.parts[0]![1]).toBeNull()
+    const b = ui.scenes[2]!.parts[1]![1]!
+    expect(ClaudeText.cardSceneTarget(3, ui.scenes[2]!.parts)).toBe(`new S04 \u00B7 A (same) \u00B7 B 0${b}`)
+    expect(ui.chain?.steps).toEqual([chainStep(1, 2), chainStep(2), chainStep(1, 2), chainStep(3)])
+    expect(ClaudeText.chainImport(ui.chain!.steps)).toBe('S02\u00D72 \u2192 S03 \u2192 S02\u00D72 \u2192 S04')
+    expect(ui.scene).toBe(1)
+    expect(ui.noRoom).toBe(false)
+    expect(ui.blocked).toBeNull()
+    // A card with no scene lines has none of it.
+    const plain = beatImportUi(read(card([section(0, pat([hit(0)]))])), ProjectSeq.DEFAULT, 120.0, nameOf)
+    expect(plain.scenes).toEqual([])
+    expect(plain.chain).toBeNull()
+  })
+
+  it("with no room for the scenes the sheet says so, shows no chain, and the import picks the first scene's patterns", () => {
+    let seq = ProjectSeq.DEFAULT
+    for (let i = 0; i < Seq.MAX_SCENES - 2; i++) seq = SceneOps.newScene(seq)
+    const ui = beatImportUi(BeatCards.read(track), seq, 120.0, nameOf)
+    expect(ui.noRoom).toBe(true)
+    expect(ui.chain).toBeNull()
+    expect(ui.scenes.every((s) => s.index === null)).toBe(true)
+    const recorder = new PatternRecorder()
+    recorder.seq = seq
+    const applied = applyBeat(seq, BeatCards.read(track).card!, recorder)
+    expect(applied.scene).toBeNull()
+    expect(applied.chainSet).toBe(false)
+    expect(applied.seq.scenes.length).toBe(seq.scenes.length)
+    // A and B each take the pattern of the card's first scene that has them.
+    expect([ProjectSeq.selected(applied.seq, 0), ProjectSeq.selected(applied.seq, 1)]).toEqual([applied.placed[0]![1], applied.placed[1]![1]])
   })
 
   it('a chain is shared as a card of its scenes in the order they first play, with the passes', () => {
@@ -588,7 +684,7 @@ describe('BeatPlanTest', () => {
     expect(padShapes(c, new Set([padKey(snare)]))).toEqual([[snare, cardPad({ pitch: 2.0, release: 40, mode: PlayMode.KEY })]])
     expect(padShapes(c, new Set([padKey(snare), padKey(kick)])).map(([p]) => p.offset)).toEqual([9, 11])
     expect(padShapes(c, new Set())).toEqual([])
-    expect(beatImported({ seq: ProjectSeq.DEFAULT, placed: [[0, 2]], scene: null, fullGroup: null }, 0, 0, true)).toBe('Imported to A \u00B7 02. FX applied. UNDO takes it back.')
+    expect(beatImported({ seq: ProjectSeq.DEFAULT, placed: [[0, 2]], scene: null, fullGroup: null, scenes: 0, chainSet: false }, 0, 0, true)).toBe('Imported to A \u00B7 02. FX applied. UNDO takes it back.')
   })
 })
 

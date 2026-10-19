@@ -18,10 +18,16 @@
 // after it, with APPLY FX (on to begin with). Its `pad` lines are a PAD
 // SHAPING block after the sounds: a row for each pad, each setting old to
 // new, ticked; a pad a new sound is going onto starts from the defaults.
+// A card of scenes draws each scene's grids under its title, and the plate
+// has a row for each scene ("Scene 1 · Drop" over "new S03 · A 04 · B
+// (same)") and one for its chain on the new scenes, with SET CHAIN (on to
+// begin with; the note under the plate says what it does). With no room for
+// the scenes the sheet says so, and shows no chain.
 // IMPORT puts it all in as one UNDO step; it is off, and says why, when the
 // card can't be read or a group is full. [onImport] gets whether the tempo
 // is to be set, the pads whose sounds are to be put on, the sounds picked
-// for silent pads, whether the FX are applied and the pads to shape.
+// for silent pads, whether the FX are applied, the pads to shape and
+// whether the card's chain is set.
 //
 // Web deltas:
 // - The grid's cells are spans in a row that scrolls sideways when long,
@@ -37,7 +43,9 @@
 //   the synth rows and the suggested sounds come with their ports.
 // - A pad shaping row is a checkbox button like a sound row; the FX and pad
 //   rows' screen reader names are on the row (Kotlin's merged semantics).
-import type { JSX } from 'preact'
+// - SET CHAIN is a pill too. The no room line is a warning's amber bar with
+//   ink words (as a problem is), where Kotlin writes the words in amber.
+import { Fragment, type JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type { ReadonlySignal } from '@preact/signals'
 import { SoundStatus, type CardProblem } from '../../core/features/beatCard'
@@ -80,9 +88,10 @@ export interface BeatImportSheetProps {
   /**
    * IMPORT: whether the tempo is set, the pads (pad keys) whose sounds go
    * on, the sounds picked for silent pads (pad key to slot), whether the
-   * card's FX are applied, and the pads (pad keys) whose settings are shaped.
+   * card's FX are applied, the pads (pad keys) whose settings are shaped, and
+   * whether the card's chain becomes the project's.
    */
-  onImport(setTempo: boolean, soundPads: ReadonlySet<number>, picked: ReadonlyMap<number, number>, applyFx: boolean, shapePads: ReadonlySet<number>): void
+  onImport(setTempo: boolean, soundPads: ReadonlySet<number>, picked: ReadonlyMap<number, number>, applyFx: boolean, shapePads: ReadonlySet<number>, setChain: boolean): void
   onCopyProblems(problems: readonly CardProblem[]): void
   /** A text pasted into the box. */
   onPaste(text: string): void
@@ -97,7 +106,8 @@ export interface BeatImportSheetProps {
 /**
  * What the card's sheet chose so far: the tempo, PUT ON PADS, the unticked
  * rows (pad keys), the picks for silent pads (pad key to slot), the pad whose
- * picker is open, APPLY FX and the unticked pad shaping rows (pad keys).
+ * picker is open, APPLY FX, the unticked pad shaping rows (pad keys) and SET
+ * CHAIN.
  */
 interface Choices {
   readonly setTempo: boolean
@@ -107,9 +117,11 @@ interface Choices {
   readonly picking: number | null
   readonly applyFx: boolean
   readonly shapeOff: ReadonlySet<number>
+  readonly setChain: boolean
 }
 
-const NO_CHOICES: Choices = { setTempo: false, putOnPads: true, unticked: new Set(), picked: new Map(), picking: null, applyFx: true, shapeOff: new Set() }
+// The card's chain: set as the project's unless switched off.
+const NO_CHOICES: Choices = { setTempo: false, putOnPads: true, unticked: new Set(), picked: new Map(), picking: null, applyFx: true, shapeOff: new Set(), setChain: true }
 
 export function BeatImportSheet(props: BeatImportSheetProps): JSX.Element {
   const { ui } = props
@@ -187,7 +199,7 @@ function PasteBox(props: { onPaste(text: string): void; onCancel(): void }): JSX
 
 function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; choices: Choices; onChoices(c: Choices): void }): JSX.Element {
   const { ui, choices } = props
-  const { setTempo, putOnPads, unticked, picked, applyFx, shapeOff } = choices
+  const { setTempo, putOnPads, unticked, picked, applyFx, shapeOff, setChain } = choices
   const tempo = ui.tempo
   const silent = ui.silent
   // The picks as SOUNDS rows, in pad order: only for pads the card still leaves silent.
@@ -206,10 +218,35 @@ function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; choices: Cho
   // Whether a new sound is going onto the pad (its row ticked): its settings start again, which the shaping rows start from.
   const going = new Set(ticked.map((r) => padKey(r.pad)))
   const soundGoing = (pad: PhysicalPad): boolean => going.has(padKey(pad))
-  const goes = ui.grids.filter((g) => g.goesTo !== null)
+  const chain = ui.chain
   const rows: JSX.Element[] = []
-  for (const g of goes) rows.push(<ValueRow key={`g${g.group}`} label={ClaudeText.GOES_TO} value={ClaudeText.goesTo(g.group, g.goesTo!)} />)
-  if (ui.scene !== null) rows.push(<ValueRow key="scene" label={MirrorText.NEW_SCENE} value={MirrorText.sceneLabel(ui.scene)} />)
+  if (ui.scenes.length === 0) {
+    for (const g of ui.grids) {
+      if (g.goesTo !== null) rows.push(<ValueRow key={`g${g.group}`} label={ClaudeText.GOES_TO} value={ClaudeText.goesTo(g.group, g.goesTo)} />)
+    }
+    if (ui.scene !== null) rows.push(<ValueRow key="scene" label={MirrorText.NEW_SCENE} value={MirrorText.sceneLabel(ui.scene)} />)
+  } else {
+    // One row for each scene: "Scene 1 · Drop" and where it goes, "new S03 · A 04 · B (same)".
+    for (const sc of ui.scenes) {
+      if (sc.index === null) continue
+      rows.push(
+        <StackedRow
+          key={`s${sc.number}`}
+          label={ClaudeText.cardScene(sc.number, sc.name)}
+          value={ClaudeText.cardSceneTarget(sc.index, sc.parts)}
+          description={sc.patterns === null ? null : ClaudeText.cardSceneName(sc.number, sc.name, sc.index, sc.patterns)}
+        />,
+      )
+    }
+    if (chain !== null) {
+      const name = ClaudeText.setChainName(setChain, chain.steps.length)
+      rows.push(
+        <StackedRow key="chain" label={MirrorText.CHAIN} value={ClaudeText.chainImport(chain.steps)} description={name}>
+          <SwitchChip text={ClaudeText.SET_CHAIN} description={name} on={setChain} onToggle={() => props.onChoices({ ...choices, setChain: !setChain })} />
+        </StackedRow>,
+      )
+    }
+  }
   if (tempo !== null) {
     rows.push(
       <ValueRow key="tempo" label={ClaudeText.TEMPO} value={String(tempo)}>
@@ -223,7 +260,7 @@ function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; choices: Cho
     // The picked sounds that are ticked: they are in [pads] too, being SOUNDS rows.
     const chosen = new Map(pickedRows.filter((r) => pads.has(padKey(r.pad))).map((r) => [padKey(r.pad), r.pick.slot!]))
     const shaped = new Set((ui.shaping?.rows ?? []).filter((r) => r.changes(soundGoing(r.pad)) && !shapeOff.has(padKey(r.pad))).map((r) => padKey(r.pad)))
-    props.onImport(setTempo && tempo !== null, pads, chosen, applyFx && ui.fx !== null, shaped)
+    props.onImport(setTempo && tempo !== null, pads, chosen, applyFx && ui.fx !== null, shaped, setChain && chain !== null)
   }
   return (
     <>
@@ -231,13 +268,29 @@ function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; choices: Cho
         <h2 id="beat-sheet-title" class="t-heading beat-sheet__title">{ui.title}</h2>
         {ui.summary !== null && <p class="t-small beat-sheet__dim">{ui.summary}</p>}
       </div>
-      {ui.grids.map((g) => (
-        <BeatGrid key={g.group} g={g} />
-      ))}
+      {ui.scenes.length === 0
+        ? ui.grids.map((g) => <BeatGrid key={g.group} g={g} />)
+        : // A card of scenes: the grids of each scene under its title.
+          ui.scenes.map((sc) => (
+            <Fragment key={sc.number}>
+              <h3 class="t-caps beat-sheet__dim beat-scene__title">{ClaudeText.cardScene(sc.number, sc.name)}</h3>
+              {sc.grids.length === 0 && <p class="t-small beat-sheet__dim">{ClaudeText.SCENE_SAME}</p>}
+              {sc.grids.map((g) => (
+                <BeatGrid key={g.group} g={g} />
+              ))}
+            </Fragment>
+          ))}
       {rows.length > 0 && (
         <GridPlate>
           {rows.flatMap((r, i) => (i === 0 ? [r] : [<PlateLine key={`l${i}`} />, r]))}
         </GridPlate>
+      )}
+      {chain !== null && setChain && <p class="t-small beat-sheet__dim">{ClaudeText.SET_CHAIN_NOTE}</p>}
+      {ui.noRoom && (
+        <div class="beat-problem" role="note">
+          <span class="beat-problem__bar" aria-hidden="true" />
+          <span class="t-small beat-problem__text">{ClaudeText.NO_ROOM_FOR_SCENES}</span>
+        </div>
       )}
       {ui.fx !== null && <FxBlock fx={ui.fx} on={applyFx} onToggle={() => props.onChoices({ ...choices, applyFx: !applyFx })} />}
       {silent !== null && (
@@ -691,6 +744,29 @@ function ValueRow(props: { label: string; value: string; children?: JSX.Element 
     <div class="beat-row">
       <span class="t-small beat-sheet__dim">{props.label}</span>
       <span class="t-bold beat-row__value">{props.value}</span>
+      {props.children}
+    </div>
+  )
+}
+
+/**
+ * A row of the sheet with its [value] under its [label] (a long value wraps,
+ * up to three lines), and a chip at the end: a card scene's row ("Scene 1 ·
+ * Drop" over "new S03 · A 04 · B (same)") and the chain's. Screen readers
+ * hear [description] for it.
+ */
+function StackedRow(props: { label: string; value: string; description: string | null; children?: JSX.Element }): JSX.Element {
+  const said = props.description !== null
+  return (
+    <div class="beat-row">
+      <div class="beat-row__stack" role={said ? 'note' : undefined} aria-label={props.description ?? undefined}>
+        <span class="t-small beat-sheet__dim beat-row__label" aria-hidden={said || undefined}>
+          {props.label}
+        </span>
+        <span class="t-bold beat-row__long" aria-hidden={said || undefined}>
+          {props.value}
+        </span>
+      </div>
       {props.children}
     </div>
   )

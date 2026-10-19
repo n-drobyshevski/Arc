@@ -1723,8 +1723,13 @@ export class PatternDesk {
    * whose `pad` lines the sheet had ticked: once their sounds are on, each
    * pad's settings are written on the EP-133, or kept as offline pad
    * settings (host.shapeBeatPads). All of it is one UNDO step with the
-   * patterns and the sounds (BeatUndo). Web delta: [picked] comes before
-   * [applyFx] and [shapePads], where the Kotlin has it after them.
+   * patterns and the sounds (BeatUndo).
+   *
+   * A card of scenes adds a scene for each of its own, and with [setChain]
+   * (the sheet's SET CHAIN) its chain replaces the project's, on the new
+   * scenes, and is turned on: part of the same one UNDO step, the
+   * sequencer's. Web delta: [picked] comes before [applyFx] and [shapePads],
+   * where the Kotlin has it after them.
    */
   importBeat(
     setTempo: boolean,
@@ -1732,6 +1737,7 @@ export class PatternDesk {
     picked: ReadonlyMap<number, number> = new Map(),
     applyFx = false,
     shapePads: ReadonlySet<number> = new Set(),
+    setChain = true,
   ): void {
     const ui = this._beat.peek()
     const card = ui?.read.card ?? null
@@ -1740,7 +1746,7 @@ export class PatternDesk {
     // The sequencer as it was: UNDO is that one, once the sounds are back with it.
     const before = this.seq
     this.sceneEdit(() => {
-      const a = applyBeat(this.seq, card, this.recorder)
+      const a = applyBeat(this.seq, card, this.recorder, setChain)
       applied = a
       if (a.seq !== this.seq) this.sceneDesk.cancel()
       return a.seq
