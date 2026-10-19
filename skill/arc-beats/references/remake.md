@@ -75,14 +75,15 @@ python scripts/remake_audio.py --from-json song.remake/raw.json --loop-bars 4   
 | Bars and tempo | Beat This! (beats and downbeats); the bars from a straight line through the beats, at the phase most downbeats agree with | The tempo to a tenth, where each bar starts, even where the tracker doubles the downbeats in a loud drop |
 | Stems | Demucs: drums, bass, other, vocals | Everything below works on one stem at a time |
 | Drums | ADTOF on the drum stem (kick, snare, tom, hat, cymbal); without it, band onsets | Kick and hats; a snare or clap buried in the mix can be missed |
-| Bass and chords | Basic Pitch on the bass and other stems; one chord a bar, matched with a bias to the key | The key and the roots; the chord quality (7, sus) less so. Deep sub-bass reads late; the script measures that lag against the kicks and takes it off |
+| Bass and chords | Basic Pitch on the bass and other stems, each bass note started at the bass stem's own attack; one chord a bar, in the key whose scale holds the most of them | The key and the roots; the chord quality (7, sus) less so |
 | Sections | Where the bars' texture changes, grouped into parts that sound alike, neighbours of one part joined | The cuts and the repeats; the names (intro, chorus) are yours to give |
 
 It writes `raw.json` (the models' output), `analysis.json` (bar by bar) and `card.txt`: a scene for each part, looping as long as its chords run before they repeat (`--loop-bars` fixes it), and the chain with the real bar counts. `--from-json raw.json` works it all out again in a second, so try `--loop-bars` there. A song of 3 to 4 minutes gives 12 to 16 scenes. Then:
 
 - **Name the scenes** after the song's sections, from the cuts and the web (step 1 still pins the song).
-- **Add the sounds and FX** (step 3): the draft has none, and group D is empty.
-- **Write the hook** on D in the song's key and register (the script reports the vocal's range in `analysis.json`; it never transcribes a melody). Step 5 holds: no melody copied note for note, no lyrics.
+- **Pick the sounds by ear, not by name**: run `scripts/match_sounds.py song.remake` (it needs `transformers<4.48` too, and downloads the factory pack from teenage engineering, or takes it with `--pack`; `--sounds sounds.txt` keeps to the factory sounds still in the user's list). It cuts clean hits and long notes from the stems, compares them with CLAP to the factory sounds of the right kind and to a grid of `synth` lines, and writes `card-sounds.txt`: a sound or synth line on each pad, and the KEYS notes moved to the pick's own pitch. That matters: `note C4` plays a sound as it was recorded, and the factory basses and keys are recorded anywhere from C1 to C5, so notes written at the song's pitch on the wrong root play octaves off. A chord sample keeps only its chords' roots and plays its own chord quality on each; when the song mixes major and minor chords say so, and offer a keys sound with the real voicings instead. `sounds.json` holds the top five for each part.
+- **Add the FX** (step 3): the draft has none.
+- **Write the hook** on D in the song's key and register (the script reports the vocal's range in `analysis.json`; it never transcribes a melody), at the song's pitch, before `match_sounds.py`, so it moves the hook to D's pick too. Step 5 holds: no melody copied note for note, no lyrics.
 - **Compare the length**: `analyse` gives the chain's bars and seconds; a few bars over the song's length is the rounding of passes.
 - **Say it is measured**: the `#` lines it writes say what each fact came from; keep them, and add what you found on the web.
 

@@ -2527,6 +2527,69 @@ class RemakeAudio(unittest.TestCase):
         self.assertEqual(self.ra.bass_lag(late[:5], kicks, step), 0.0)  # too few to tell
 
 
+class MatchSounds(unittest.TestCase):
+    """match_sounds.py after the models: pitches, chord samples and the card edits."""
+
+    @classmethod
+    def setUpClass(cls):
+        import match_sounds
+        cls.ms = match_sounds
+
+    CARD = "\n".join([
+        "ARC BEAT 1", "tempo 120", "chain 1 2", "",
+        "scene One", "[A] bars 1 step 1/16", "A7 kick        | x... x... x... x... |", "",
+        "[B] bars 1", "pad B7 mode key", "notes", "B7 at 1.1.1 note D#1 gate 96", "B7 at 1.3.1 note F#1 gate 96", "",
+        "[C] bars 2", "pad C7 mode key", "notes",
+        "C7 at 1.1.1 note A3 gate 384", "C7 at 1.1.1 note C#4 gate 384", "C7 at 1.1.1 note E4 gate 384",
+        "C7 at 2.1.1 note C#4 gate 384", "C7 at 2.1.1 note E4 gate 384", "C7 at 2.1.1 note G#4 gate 384", "",
+        "scene Two", "[B] bars 1", "notes", "B7 at 1.1.1 note B0 gate 96", "",
+    ])
+
+    def test_pitches_and_shifts(self):
+        self.assertEqual(self.ms.note_midi("C4"), 60)
+        self.assertEqual(self.ms.note_name(self.ms.note_midi("D#1")), "D#1")
+        self.assertEqual(self.ms.shift_for(43, False), 17)  # a bass recorded at G2: D#1 is written G#2
+        self.assertEqual(self.ms.shift_for(40, True), -4)  # a chord recorded at E2: by the least, octaves free
+        self.assertEqual(self.ms.nearest_with_class(41, 4), 40)
+        self.assertEqual(self.ms.score(0.8, 12), 0.8)
+        self.assertLess(self.ms.score(0.8, 24), 0.8)
+
+    def test_chord_samples(self):
+        self.assertEqual(self.ms.chord_root("liquid chord em7"), 4)
+        self.assertEqual(self.ms.chord_root("waterchord am7"), 9)
+        self.assertEqual(self.ms.chord_root("chordy f9sus4"), 5)
+        self.assertIsNone(self.ms.chord_root("pling chord"))
+        self.assertTrue(self.ms.is_chord_sample("search chord"))
+        self.assertFalse(self.ms.is_chord_sample("soothe string"))
+        self.assertTrue(self.ms.mixed_chords(self.CARD, "C7"))  # A major, then C# minor
+        self.assertFalse(self.ms.mixed_chords(self.CARD, "B7"))
+
+    def test_moving_notes(self):
+        moved = self.ms.move_notes(self.CARD, "B7", 17, False)
+        self.assertIn("B7 at 1.1.1 note G#2 gate 96", moved)
+        self.assertIn("B7 at 1.1.1 note E2 gate 96", moved)  # the second scene's too
+        self.assertIn("C7 at 1.1.1 note A3 gate 384", moved)  # another pad: as it was
+        roots = self.ms.move_notes(self.CARD, "C7", -4, True)
+        self.assertIn("C7 at 1.1.1 note F3 gate 384", roots)  # the chord's root only, moved
+        self.assertIn("C7 at 2.1.1 note A3 gate 384", roots)  # C#4, the second chord's root
+        self.assertEqual(roots.count("C7 at"), 2)
+        high = self.ms.move_notes(self.CARD, "C7", 48, False)
+        self.assertTrue(all(self.ms.note_midi(l.split()[4]) <= 96 for l in high.split("\n") if l.startswith("C7 at")))
+
+    def test_apply_picks(self):
+        picks = {
+            "kick": {"line": "sound A7 26 kick sp", "shift": None, "chord": False},
+            "bass": {"line": "sound B7 429 reese", "shift": 17, "chord": False},
+            "keys": {"line": "sound C7 542 liquid chord em7", "shift": -4, "chord": True},
+        }
+        card = self.ms.apply_picks(self.CARD, picks)
+        self.assertIn("[A] bars 1 step 1/16\nsound A7 26 kick sp\n", card)
+        self.assertIn("[B] bars 1\nsound B7 429 reese\npad B7 mode key", card)
+        self.assertEqual(card.count("sound B7"), 1)  # once, in the first section of the group
+        self.assertIn("B7 at 1.1.1 note G#2", card)
+        self.assertTrue(bc.parse_card(card).ok, [str(p) for p in bc.parse_card(card).problems])
+
+
 class SkillFiles(unittest.TestCase):
     def test_every_card_in_the_references_is_valid_and_has_no_warnings(self):
         total = 0

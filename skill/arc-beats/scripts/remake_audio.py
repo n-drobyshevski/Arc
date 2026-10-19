@@ -15,9 +15,9 @@ What it measures, each with a model made for the job:
   stems            Demucs htdemucs (drums, bass, other, vocals)
   drums            ADTOF on the drum stem (kick, snare, tom, hat, cymbal); without
                    it, onsets in three bands of the drum stem (kick, snare, hat)
-  bass and chords  Basic Pitch on the bass and other stems, the bass moved back by
-                   its lag behind the kicks; one chord a bar, with a bias to the key
-                   all their notes give
+  bass and chords  Basic Pitch on the bass and other stems, each bass note started at
+                   the bass stem's own attack (Basic Pitch starts deep notes late); one
+                   chord a bar, in the key whose scale holds the most of them
   sections         where the bars' texture changes (which stems play, how busy
                    the drums are), grouped into parts that sound alike
 
@@ -212,6 +212,20 @@ def bass_lag(notes: Sequence[Sequence[float]], kicks: Sequence[float], step: flo
         return 0.0
     lag = median(gaps)
     return lag if lag > step / 2 else 0.0
+
+
+def snap_to_onsets(notes: Sequence[Sequence[float]], onsets: Sequence[float], step: float) -> List[list]:
+    """Each note started at the bass stem's own attack before it (within two and a half sixteenths),
+    if there is one: Basic Pitch needs a long window for a deep note, so it starts it late."""
+    onsets = sorted(onsets)
+    out = []
+    for s, e, p, amp in notes:
+        i = bisect_right(onsets, s + 0.01) - 1
+        if i >= 0 and s - onsets[i] <= 2.5 * step:
+            shift = s - onsets[i]
+            s, e = s - shift, e - shift
+        out.append([s, e, p, amp])
+    return out
 
 
 def swing_ticks(swing: int) -> int:
@@ -598,6 +612,11 @@ def measure(path: str, out: str, start: Optional[float], end: Optional[float]) -
         _, _, events = predict(stems[stem], onset_threshold=0.5, frame_threshold=0.3, minimum_note_length=80)
         notes[stem] = sorted([round(float(s), 3), round(float(e), 3), int(p), round(float(amp), 3)] for s, e, p, amp, _ in events if lo <= p <= hi)
 
+    # Where the bass stem's notes start, timed by its energy: Basic Pitch starts deep notes late.
+    y, sr = librosa.load(stems["bass"], sr=22050, mono=True)
+    onsets = librosa.onset.onset_detect(y=y, sr=sr, hop_length=128, backtrack=True, units="time")
+    bass_onsets = [round(float(t), 3) for t in onsets]
+
     # Each stem's loudness, ten values a second, for the sections.
     envelopes = {}
     for s, f in stems.items():
@@ -613,6 +632,7 @@ def measure(path: str, out: str, start: Optional[float], end: Optional[float]) -
         "drum_hits": {k: [round(t, 3) for t in v] for k, v in hits.items()},
         "drum_source": source,
         "notes": notes,
+        "bass_onsets": bass_onsets,
         "envelopes": envelopes,
     }
 
@@ -623,8 +643,12 @@ def derive(raw: dict) -> dict:
     hits = raw["drum_hits"]
     grid = drum_grid(hits, bars)
     bass, other, vocals = (raw["notes"].get(s, []) for s in ("bass", "other", "vocals"))
-    lag = bass_lag(bass, hits.get("kick", []), median([length for _, length in bars]) / STEPS)
-    bass = [[s - lag, e - lag, p, amp] for s, e, p, amp in bass]
+    step = median([length for _, length in bars]) / STEPS
+    if raw.get("bass_onsets"):
+        bass = snap_to_onsets(bass, raw["bass_onsets"], step)
+    else:
+        lag = bass_lag(bass, hits.get("kick", []), step)
+        bass = [[s - lag, e - lag, p, amp] for s, e, p, amp in bass]
     weights = [x + y for x, y in zip(pitch_weights(bass), pitch_weights(other))]
 
     def chords_in(scale: Optional[set]) -> List[Optional[dict]]:

@@ -202,6 +202,7 @@ Python 3.9+, no installs. Run from the skill folder (or use the full path to the
 | `python3 scripts/beatcard.py grid CARD` | Prints the step grid, with the swing, the FX, the sound lines and the pad lines shown, for looking at; a card of scenes prints the chain and each scene |
 | `python3 scripts/beatcard.py synth CARD` | Lists each synth line: its type, the name it gets on the device, its length and settings. `-o DIR` writes the sounds as WAV files, the same bytes Arc makes; `--pad A7` picks one, `--json` for the fields |
 | `python scripts/remake_audio.py SONG.mp3` | Claude Code only, with the audio models installed (its docstring): measures a song's bars, tempo, drums, bass, chords, key and sections and drafts a card of scenes to finish (remake.md, "From the audio") |
+| `python scripts/match_sounds.py SONG.remake` | Claude Code only, after it: picks each part's factory sound or synth line by how close it sounds (CLAP) and moves the KEYS notes to the pick's own pitch (remake.md, "From the audio") |
 | `python3 scripts/beatcard.py midi CARD -o beat.mid` | Writes a standard MIDI file at the card's tempo for a DAW. Pads become the EP-133's notes 36-83 and KEYS notes 60 + semi on separate tracks. A card of scenes is written in the chain's order, each scene for its passes (`--loops 2` plays the chain twice), with a marker for each pass |
 
 `CARD` is a file; the card may sit inside a longer chat message or a code fence, as Arc does. When a user pastes an error message from Arc, treat it like the script's: it names a line and a reason.
