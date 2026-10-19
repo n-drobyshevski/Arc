@@ -114,6 +114,7 @@ import { SoundSource } from './core/features/offlinePads'
 import { Tempo } from './core/features/tempo'
 import { SAMPLE_BARS } from './platform/storage/settings'
 import { ClipMode } from './state/scenePlan'
+import { chainSceneCount } from './state/beatPlan'
 import { PunchContext, type PunchUi } from './ui/live/LivePunch'
 import { StepContext, type StepActions } from './ui/live/StepPanel'
 import { SceneContext, type SceneActions } from './ui/live/ScenePanel'
@@ -1445,7 +1446,21 @@ function claudeUi(c: ArcController): ClaudeActions | null {
     get hasNotes() {
       return p.ui.value.hasNotes
     },
+    get sounds() {
+      return c.shareSoundCount.value
+    },
+    get withSounds() {
+      return c.settings.value.shareSounds
+    },
+    get chainSteps() {
+      return p.scene.value.chain.length
+    },
+    get chainScenes() {
+      return chainSceneCount(p.scene.value.chain)
+    },
+    onWithSounds: (on) => c.setShareSounds(on),
     onShareScene: () => void c.shareBeat(null),
+    onShareChain: () => void c.shareChain(),
     onSharePattern: (g) => void c.shareBeat(g),
     onPaste: () => void c.pasteBeat(),
     onOpenFile: () => void c.openBeatFile(),

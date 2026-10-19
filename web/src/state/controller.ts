@@ -99,7 +99,7 @@ import { WebText } from '../core/text/webText'
 import { ktTrim } from '../core/util/kotlinText'
 import { APP_BUILD } from '../version'
 import { describeFile, PAK_ACCEPT, WAV_ACCEPT, type ReadableFile } from '../platform/files/pick'
-import { BeatCards } from '../core/features/beatCard'
+import { BeatCards, cardSound } from '../core/features/beatCard'
 import { logFileName } from '../platform/files/save'
 import type { FileData } from '../platform/files/save'
 import { FileListTarget, type ExternalTarget } from '../platform/storage/external'
@@ -116,7 +116,7 @@ import { PadEditDesk } from './padEdit'
 import { PatternDesk } from './pattern'
 import { SampleDesk } from './sample'
 import { physicalPadOf } from './samplePlan'
-import { deviceKitOf, type DeviceKit } from './beatPlan'
+import { deviceKitOf, soundSetOf, type BeatShare, type DeviceKit, type ShareParts } from './beatPlan'
 import { patternBpm } from './patternPlan'
 import { MirrorController } from './mirror'
 import { PreviewCache, type DecodedSound } from './previewCache'
@@ -207,6 +207,13 @@ export class ArcController {
    * both are, so a publish re-renders nothing that names it.
    */
   readonly keysSound: ReadonlySignal<KeysSound>
+  /**
+   * How many sounds Arc knows for a share's sound list (soundSetOf's size: the
+   * EP-133's, the last read's or the factory pack's; 0 for none), which
+   * "With my sound list" counts. Web addition: a computed, the same number
+   * while a publish leaves the list as it is.
+   */
+  readonly shareSoundCount: ReadonlySignal<number>
   /** Bumped when the pad order is set (web addition): liveMirror's note to connect follows it. */
   private readonly orderSet = signal(0)
   /** The settings page's choices (ArcController.settings). */
@@ -329,6 +336,17 @@ export class ArcController {
       const samePad = was === null || pad === null ? was === pad : padKey(was) === padKey(pad)
       if (sound === null || !samePad || sound.padName !== padName) sound = { pad, padName }
       return sound
+    })
+    // Counted again only when the list it counts can have changed, not on each publish.
+    let counted: { connected: boolean; offline: OfflineSounds | null | undefined; list: readonly SoundEntry[]; size: number } | null = null
+    this.shareSoundCount = computed(() => {
+      const m = this.state.value.mirror
+      if (m === null) return 0
+      const connected = m.offline == null
+      const list = this.live.deviceSoundList()
+      if (counted !== null && counted.connected === connected && counted.offline === m.offlineSounds && counted.list === list) return counted.size
+      counted = { connected, offline: m.offlineSounds, list, size: soundSetOf(m, list)?.size ?? 0 }
+      return counted.size
     })
     this.settingsSignal = signal<AppSettings>(deps.settings.settings)
     this.settings = this.settingsSignal
@@ -2914,14 +2932,77 @@ export class ArcController {
   readonly beatPasting: ReadonlySignal<boolean> = this._beatPasting
 
   /**
+   * What SHARE sends: [group]'s playing pattern, or (null) the scene playing,
+   * as an ARC BEAT card at the tempo Live plays at and the TIMING swing, with
+   * the pads' names and a sound line for each pad it uses (the slot and name
+   * Live shows on it); null when there are no notes in it. The project's FX
+   * and the settings of the pads it uses are written as the card's effect and
+   * `pad` lines, the used pads with no sound as a comment, and the kit the
+   * EP-133's sounds are before the card ([shareKit], ClaudeText.kitLine). With
+   * "With my sound list" on, the sounds Arc knows follow the card (soundSetOf).
+   * The patterns are the project's as they stand, a pattern still recording
+   * included.
+   */
+  beatShare(group: number | null, prompt?: string, kit?: FactoryKit): BeatShare | null {
+    return this.pattern.beatShare(group, this.shareParts(prompt, kit))
+  }
+
+  /**
+   * What SHARE CHAIN sends: the project's chain as a card of scenes
+   * (beatShareChain: the scenes in the order they first play, the `chain` line
+   * with the passes), with the pads' names, a sound line for each pad, the
+   * project's FX and the pads' settings, the pads with no sound in a comment
+   * and, with "With my sound list" on, the sounds Arc knows, as [beatShare]
+   * has them. Null when the chain has no steps.
+   */
+  beatShareChain(prompt?: string, kit?: FactoryKit): BeatShare | null {
+    return this.pattern.beatShareChain(this.shareParts(prompt, kit))
+  }
+
+  // What a share carries besides the notes, as Live knows the pads now.
+  private shareParts(prompt: string | undefined, kit: FactoryKit | undefined): ShareParts {
+    const dk = this.shareDeviceKit()
+    const m = this.mirror.current
+    const set = soundSetOf(this.store.get().mirror, this.live.deviceSoundList(), dk.names)
+    return {
+      // The pad's sound as the list names it, the factory pack's name standing in for an unnamed "200.pcm".
+      sounds: (pad) => {
+        const slot = m?.slotOf(pad) ?? null
+        return slot === null ? null : cardSound(slot, set?.names.get(slot) ?? m?.nameOf(pad) ?? null)
+      },
+      list: this.settings.value.shareSounds ? set : null,
+      // The project's FX and each pad's settings go in the card too (the pad lines only where they differ from the defaults).
+      fx: this.fx.desk.fx.peek(),
+      pads: (pad) => this.padSettingsOf(pad),
+      // The pads the notes use that have no sound are named in a comment, once the pads are read (the share's "# no sound on:").
+      held: (pad) => m?.soundSlot(pad) ?? null,
+      padsKnown: m?.padsKnown() === true,
+      kit: kit ?? dk.kit,
+      ...(prompt === undefined ? {} : { prompt }),
+    }
+  }
+
+  /**
    * SHARE (the scene playing when [group] is null): the card's prompt and text
    * through the share sheet, or, where the browser has none, copied to the
    * clipboard with a toast saying so. Nothing when there are no notes.
    */
   async shareBeat(group: number | null): Promise<void> {
-    const share = this.pattern.beatShare(group, this.shareKit())
+    const share = this.beatShare(group)
     if (share === null) return
     await this.sendText(share.subject, share.text)
+  }
+
+  /** SHARE CHAIN: the chain's card as SHARE sends a pattern's; nothing when the chain has no steps. */
+  async shareChain(): Promise<void> {
+    const share = this.beatShareChain()
+    if (share === null) return
+    await this.sendText(share.subject, share.text)
+  }
+
+  /** "With my sound list" on or off (kept like the other Live preferences). */
+  setShareSounds(on: boolean): void {
+    this.changeSettings((s) => ({ ...s, shareSounds: on }))
   }
 
   /**

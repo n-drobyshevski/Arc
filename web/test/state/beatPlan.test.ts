@@ -3,16 +3,39 @@
 // Web deltas: Weight is a string union ('GHOST' | 'NORMAL' | 'ACCENT'); BeatImportUi.card / .problems are
 // beatCardOf(ui) / beatProblems(ui); [placed] pairs are [group, n] tuples; the names callback gives string | null,
 // its map keyed by padKey; the test's `with` helper is withP (`with` is reserved in JS); the sequencer is compared
-// with toEqual (plain data, as Kotlin's data class equals) and assertSame is toBe.
+// with toEqual (plain data, as Kotlin's data class equals) and assertSame is toBe. beatShare's named arguments are its
+// ShareParts object; soundSetOf takes the connected list as an argument (Kotlin's MirrorUi.sounds).
+// Left for the steps that port them: the prompt share (PromptText), the scene imports with REPLACE and SET CHAIN, the
+// sheet's SOUNDS, SILENT PADS, FX and PAD SHAPING blocks, synth rows, the offline restore and isBefore.
 import { describe, expect, it } from 'vitest'
 import { FactoryKit } from '../../src/core/features/factorySounds'
-import { BeatCards, beatCard, cardSection, type BeatCard, type CardSection } from '../../src/core/features/beatCard'
+import { BeatCards, beatCard, cardPad, cardSection, cardSound, type BeatCard, type CardSection, type CardSound } from '../../src/core/features/beatCard'
+import { chain, chainStep } from '../../src/core/features/chain'
+import { FxSettings, FxType, comp } from '../../src/core/features/fxSettings'
+import { SoundSource } from '../../src/core/features/offlinePads'
 import { padKey, physicalPad, type PhysicalPad } from '../../src/core/features/padNotes'
+import { PadSettings, PlayMode } from '../../src/core/features/padSettings'
 import { Pattern, ProjectSeq, Seq, Timing, pattern, patternNote, type PatternNote } from '../../src/core/features/pattern'
+import type { SoundEntry } from '../../src/core/protocol/device'
 import { PatternRecorder } from '../../src/core/features/patternRecorder'
 import { SceneOps } from '../../src/core/features/scenes'
 import { ClaudeText } from '../../src/core/text/claudeText'
-import { applyBeat, beatCardOf, beatGrid, beatImportUi, beatImported, beatProblems, beatShare, type BeatGridUi } from '../../src/state/beatPlan'
+import {
+  applyBeat,
+  beatCardOf,
+  beatGrid,
+  beatImportUi,
+  beatImported,
+  beatProblems,
+  beatShare,
+  beatShareChain,
+  chainForCard,
+  chainSceneCount,
+  soundSet,
+  soundSetOf,
+  type BeatGridUi,
+} from '../../src/state/beatPlan'
+import { emptyMirrorState, type MirrorUi } from '../../src/state/types'
 
 const kick = physicalPad(0, 9)
 const names = new Map<number, string>([
@@ -48,9 +71,9 @@ describe('BeatPlanTest', () => {
     expect(scene.text.startsWith(ClaudeText.SHARE_PROMPT + '\n\n' + ClaudeText.EP133_LINE + '\n\n```\nARC BEAT 1\nname S01\ntempo 92\nswing 50\n# tidied')).toBe(true)
     expect(scene.text.endsWith('\n```\n')).toBe(true)
     // The EP-40 kit is named before the card; the EP-133's adds nothing.
-    const riddim = beatShare(seq, null, 92.0, 50, nameOf, FactoryKit.EP40)!
+    const riddim = beatShare(seq, null, 92.0, 50, nameOf, { kit: FactoryKit.EP40 })!
     expect(riddim.text.startsWith(ClaudeText.SHARE_PROMPT + '\n\nMy EP-133 plays the EP-40 Riddim factory kit.\n\n```\nARC BEAT 1\n')).toBe(true)
-    expect(beatShare(seq, null, 92.0, 50, nameOf, FactoryKit.EP133)!.text).toBe(scene.text)
+    expect(beatShare(seq, null, 92.0, 50, nameOf, { kit: FactoryKit.EP133 })!.text).toBe(scene.text)
     // The blank groups (B, D) are left out; the pad's name is on its row.
     const c = BeatCards.read(scene.text).card!
     expect(c.sections.map((s) => s.group)).toEqual([0, 2])
@@ -229,4 +252,162 @@ describe('BeatPlanTest', () => {
     expect(applied.placed.length).toBe(0)
     expect(recorder.canUndo).toBe(false)
   })
+
+  it('a chain is shared as a card of its scenes in the order they first play, with the passes', () => {
+    let seq = withP(ProjectSeq.DEFAULT, 0, 1, pat([hit(0)]))
+    seq = SceneOps.newScene(seq)
+    seq = withP(seq, 0, 2, pat([hit(0), hit(96)]))
+    seq = ProjectSeq.withChain(seq, chain([chainStep(1, 2), chainStep(0), chainStep(1, 2)], true))
+    const share = beatShareChain(seq, 120.0, 50, nameOf)!
+    expect(share.subject).toBe('Arc beat Chain')
+    expect(share.text.startsWith(ClaudeText.SHARE_CHAIN_PROMPT + '\n\n' + ClaudeText.EP133_LINE + '\n\n```\nARC BEAT 1\nname Chain\ntempo 120')).toBe(true)
+    const c = BeatCards.read(share.text).card!
+    expect(c.scenes.length).toBe(2)
+    // Scene 2 (S02) plays first, so it is the card's scene 1.
+    expect(c.chain).toEqual([[1, 2], [2, 1], [1, 2]])
+    // The kit is named in the chain's share too.
+    expect(
+      beatShareChain(seq, 120.0, 50, nameOf, { kit: FactoryKit.EP40 })!.text.startsWith(ClaudeText.SHARE_CHAIN_PROMPT + '\n\nMy EP-133 plays the EP-40 Riddim factory kit.\n\n```\n'),
+    ).toBe(true)
+    // No chain, nothing to share.
+    expect(beatShareChain(ProjectSeq.DEFAULT, 120.0, 50, nameOf)).toBeNull()
+  })
+
+  it('a chain of more scenes than a card holds is cut before the scene that would not fit', () => {
+    const steps = [...Array.from({ length: 20 }, (_, i) => chainStep(i)), chainStep(0)]
+    const cut = chainForCard(steps)
+    expect(cut.length).toBe(BeatCards.MAX_SCENES)
+    expect(chainSceneCount(steps)).toBe(BeatCards.MAX_SCENES)
+    // A scene already in the card can come again after the cut would have been.
+    const again = chainForCard([...Array.from({ length: 16 }, (_, i) => chainStep(i)), chainStep(3), chainStep(17)])
+    expect(again.length).toBe(17)
+    expect(chainSceneCount([chainStep(0), chainStep(2), chainStep(0), chainStep(5)])).toBe(3)
+  })
+
+  // ---- sounds ----
+
+  it('a share has a sound line for each pad it uses, and the sound list after the closing fence when asked', () => {
+    const seq = withP(ProjectSeq.DEFAULT, 0, 1, pat([hit(0), hit(96, 11)]))
+    const sounds = (pad: PhysicalPad): CardSound | null => {
+      const p = pads.get(padKey(pad))
+      return p === undefined ? null : cardSound(p[0], p[1])
+    }
+    const plain = beatShare(seq, 0, 120.0, 50, nameOf, { sounds })!
+    const c = BeatCards.read(plain.text).card!
+    expect(c.sections[0]!.sounds).toEqual(new Map([[9, cardSound(12, 'Kick dusty')], [11, cardSound(300, 'Rim')]]))
+    expect(plain.text.endsWith('\n```\n')).toBe(true)
+    // With the list: a blank line after the fence, the header, and the sounds in slot order; the card reads the same.
+    const list = soundSet(ClaudeText.SOUNDS_FROM_LAST_READ, new Map([[300, 'Rim'], [12, 'Kick dusty']]))
+    const full = beatShare(seq, 0, 120.0, 50, nameOf, { sounds, list })!
+    expect(full.text).toBe(plain.text + '\n' + ClaudeText.soundListHeader(ClaudeText.SOUNDS_FROM_LAST_READ) + '\n12 Kick dusty\n300 Rim\n')
+    expect(BeatCards.read(full.text).card).toEqual(c)
+    // A pad with no known sound gets no line.
+    expect(BeatCards.read(beatShare(seq, 0, 120.0, 50, nameOf)!.text).card!.sections[0]!.sounds).toEqual(new Map())
+  })
+
+  it("the sounds Arc knows are the EP-133's while connected, and the view's list offline", () => {
+    expect(soundSetOf(null, [])).toBeNull()
+    expect(soundSetOf(mirror(), [])).toBeNull()
+    const connected = soundSetOf(mirror(), entries([1, 'Kick'], [2, 'Snare']))!
+    expect(connected.source).toBe(ClaudeText.SOUNDS_FROM_DEVICE)
+    expect(connected.names).toEqual(new Map([[1, 'Kick'], [2, 'Snare']]))
+    expect(connected.size).toBe(2)
+    const device = entries([5, 'Kick'])
+    const factory = entries([1, 'Pack kick'], [2, 'Pack snare'], [3, 'Pack hat'])
+    const offline = (base: SoundSource, d: SoundEntry[] | null = device, f: SoundEntry[] | null = factory) =>
+      soundSetOf(mirror({ offline: 'Last seen', offlineSounds: { base, device: d, factory: f, unavailable: new Set() } }), [])
+    const last = offline(SoundSource.DEVICE)!
+    expect([last.source, last.names]).toEqual([ClaudeText.SOUNDS_FROM_LAST_READ, new Map([[5, 'Kick']])])
+    expect(offline(SoundSource.FACTORY)!.source).toBe(ClaudeText.SOUNDS_FROM_FACTORY)
+    expect(offline(SoundSource.FACTORY)!.size).toBe(3)
+    expect(offline(SoundSource.FACTORY, device, null)).toBeNull()
+    expect(soundSetOf(mirror({ offline: 'Factory sounds' }), [])).toBeNull()
+  })
+
+  it('the factory pack names the sounds the EP-133 lists unnamed, in the sound set and the sheet', () => {
+    const pack = new Map([[12, 'KICK DEEP'], [200, 'HH CLOSED'], [201, '201.pcm']])
+    const connected = entries([12, '012.pcm'], [200, '200.pcm'], [201, '201.pcm'], [5, 'Mine'])
+    expect(soundSetOf(mirror(), connected, pack)!.names).toEqual(new Map([[12, 'KICK DEEP'], [200, 'HH CLOSED'], [201, '201.pcm'], [5, 'Mine']]))
+    expect(soundSetOf(mirror(), connected)!.names).toEqual(new Map([[12, '012.pcm'], [200, '200.pcm'], [201, '201.pcm'], [5, 'Mine']]))
+    const offline = mirror({ offline: 'Last seen', offlineSounds: { base: SoundSource.DEVICE, device: entries([200, '200.pcm']), factory: entries([200, 'HH CLOSED']), unavailable: new Set() } })
+    const set = soundSetOf(offline, [], pack)!
+    expect([set.source, set.names]).toEqual([ClaudeText.SOUNDS_FROM_LAST_READ, new Map([[200, 'HH CLOSED']])])
+    // The sheet's rows (soundsUi) come with the SOUNDS block.
+  })
+
+  // ---- silent pads ----
+
+  it('a share names the pads it uses that have no sound, once the pads are known, in one comment after the header', () => {
+    const held = new Map([[padKey(micro), 12]])
+    const heldOf = (pad: PhysicalPad): number | null => held.get(padKey(pad)) ?? null
+    const sounds = (pad: PhysicalPad): CardSound | null => {
+      const slot = heldOf(pad)
+      return slot === null ? null : cardSound(slot, 'Kick dusty')
+    }
+    const shared = beatShare(melody(), null, 120.0, 50, nameOf, { sounds, held: heldOf, padsKnown: true })!
+    const lines = shared.text.split('\n')
+    expect(lines[lines.indexOf('swing 50') + 1]).toBe('# no sound on: C7 D7')
+    // The card reads the same with it.
+    const c = BeatCards.read(shared.text)
+    expect(c.problems).toEqual([])
+    expect(BeatCards.silentPads(c.card!, heldOf, true)).toEqual([c7, d7])
+    // Pads not read yet: nothing is said. A pad with a sound line isn't named.
+    expect(beatShare(melody(), null, 120.0, 50, nameOf, { sounds, held: heldOf, padsKnown: false })!.text).not.toContain('no sound on')
+    const all = beatShare(melody(), null, 120.0, 50, nameOf, { held: () => 1, padsKnown: true })!
+    expect(all.text).not.toContain('no sound on')
+    // A group's share names only its own pads.
+    expect(beatShare(melody(), 3, 120.0, 50, nameOf, { held: () => null, padsKnown: true })!.text).toContain('# no sound on: D7\n')
+  })
+
+  // ---- FX and pad shaping ----
+
+  it("a share carries the project's FX and each used pad's settings, and nothing when they are the defaults", () => {
+    const seq = withP(ProjectSeq.DEFAULT, 0, 1, pat([hit(0), hit(96, 11)]))
+    const plain = beatShare(seq, 0, 120.0, 50, nameOf, { fx: FxSettings.DEFAULT, pads: () => PadSettings.DEFAULT })!.text
+    expect(plain.includes('\nfx ') || plain.includes('\npad ')).toBe(false)
+    const fx = FxSettings.of({ type: FxType.DISTORTION, x: 0.55, y: 0.5, sends: [0.45, 0.3, 0, 0], comp: comp({ on: true, x: 0.6, y: 0.15 }) })
+    const shaped = new Map([
+      [padKey(kick), { ...PadSettings.DEFAULT, pitch: -2.0, level: 80 }],
+      [padKey(physicalPad(0, 11)), { ...PadSettings.withMode(PadSettings.DEFAULT, PlayMode.KEY), release: 20 }],
+    ])
+    const text = beatShare(seq, 0, 120.0, 50, nameOf, { fx, pads: (p) => shaped.get(padKey(p)) ?? null })!.text
+    const c = BeatCards.read(text).card!
+    expect(c.fx!.type).toBe(FxType.DISTORTION)
+    expect(c.fx!.sends).toEqual(new Map([[0, Math.fround(0.45)], [1, Math.fround(0.3)]]))
+    expect(c.fx!.comp!.on).toBe(true)
+    const padLines = c.sections[0]!.pads
+    expect(padLines.get(9)).toEqual(cardPad({ pitch: -2.0, level: 80 }))
+    expect(padLines.get(11)).toEqual(cardPad({ release: 20, mode: PlayMode.KEY }))
+    // The share's FX come before the first section, as the spec has them.
+    const at = text.indexOf('\nfx distortion')
+    expect(at >= 1 && at < text.indexOf('[A')).toBe(true)
+  })
 })
+
+// ---- sounds ----
+
+function entries(...e: [number, string][]): SoundEntry[] {
+  return e.map(([slot, name]) => ({ slot, name, size: 0 }))
+}
+
+const mirror = (o: Partial<MirrorUi> = {}): MirrorUi => ({ state: emptyMirrorState(), loading: false, error: null, offline: null, ...o })
+
+const micro = physicalPad(0, 9)
+const pads = new Map<number, [number, string]>([
+  [padKey(micro), [12, 'Kick dusty']],
+  [padKey(physicalPad(0, 11)), [300, 'Rim']],
+])
+
+// ---- silent pads ----
+
+const d7 = physicalPad(3, 9)
+const c7 = physicalPad(2, 9)
+
+/** A kit on A7, a bass on C7 (three KEYS notes) and a melody on D7 (two). */
+function melody(): ProjectSeq {
+  let seq = ProjectSeq.DEFAULT
+  seq = withP(seq, 0, 1, pat([hit(0), hit(96)]))
+  seq = withP(seq, 2, 1, pat([patternNote(0, 9, 24, 0, 127), patternNote(96, 9, 24, 3, 127), patternNote(192, 9, 24, 7, 127)]))
+  seq = withP(seq, 3, 1, pat([patternNote(0, 9, 24, 12, 127), patternNote(48, 9, 24, 15, 127)]))
+  return seq
+}

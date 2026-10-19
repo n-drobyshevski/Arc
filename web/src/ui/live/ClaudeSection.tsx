@@ -2,9 +2,11 @@
 //
 // Live tools' CLAUDE (an addition): the header with its info key (what a beat
 // card is, and how to give Claude the arc-beats skill), a card with SHARE
-// SCENE, SHARE for the group shown and PASTE BEAT (the shares dimmed, and still
-// announced, when there is nothing to share), and two links under it: the
-// skill's zip, and a starter prompt to learn the EP-133 with Claude.
+// SCENE, SHARE for the group shown (the shares dimmed, and still announced,
+// when there is nothing to share), SHARE CHAIN · N SCENES when the project's
+// chain has steps, the tick box "With my sound list" under them (when Arc
+// knows sounds) and PASTE BEAT, and two links under it: the skill's zip, and a
+// starter prompt to learn the EP-133 with Claude.
 //
 // Web deltas:
 // - The state is read from [ClaudeContext] by the section itself.
@@ -13,12 +15,14 @@
 //   Android sends it to the Claude app).
 // - PASTE BEAT where the page may not read the clipboard opens a box a paste
 //   goes into ([ClaudeActions.pasting]); a paste anywhere on Live works too.
+// - The tick box is a native checkbox (ChoiceRow), the row its label.
 import { createContext, type JSX } from 'preact'
 import { useContext, useId, useState } from 'preact/hooks'
 import { ClaudeText } from '../../core/text/claudeText'
 import { CoachText } from '../../core/text/coachText'
 import { WebText } from '../../core/text/webText'
 import { Caption } from '../components/Caption'
+import { ChoiceRow } from '../components/ChoiceRow'
 import { Key } from '../components/Key'
 import { InfoKey, RowCard } from '../components/SettingRow'
 import './ClaudeSection.css'
@@ -31,7 +35,15 @@ export interface ClaudeActions {
   readonly numbers: readonly number[]
   /** Whether each group's playing pattern has notes. */
   readonly hasNotes: readonly boolean[]
+  /** How many sounds Arc knows (0 hides "With my sound list"), and whether that tick box is on. */
+  readonly sounds: number
+  readonly withSounds: boolean
+  /** The project's chain: its steps, over its scenes (no steps hides SHARE CHAIN). */
+  readonly chainSteps: number
+  readonly chainScenes: number
+  onWithSounds(on: boolean): void
   onShareScene(): void
+  onShareChain(): void
   onSharePattern(group: number): void
   onPaste(): void
   /** The link under PASTE BEAT: a .txt or .md file with Claude's card in it. */
@@ -94,6 +106,24 @@ export function ClaudeSection(props: { group: number }): JSX.Element | null {
           aria-label={ClaudeText.sharePatternName(g, number, patternEmpty)}
           onClick={() => claude.onSharePattern(g)}
         />
+        {claude.chainSteps > 0 && (
+          <Key
+            text={ClaudeText.shareChainKey(claude.chainScenes)}
+            size="small"
+            block
+            aria-label={ClaudeText.shareChainName(claude.chainSteps)}
+            onClick={claude.onShareChain}
+          />
+        )}
+        {claude.sounds > 0 && (
+          <ChoiceRow
+            class="claude__tick"
+            text={ClaudeText.withSoundList(claude.sounds)}
+            selected={claude.withSounds}
+            radio={false}
+            onClick={() => claude.onWithSounds(!claude.withSounds)}
+          />
+        )}
         <Key text={ClaudeText.PASTE_BEAT} size="small" block variant="signal" aria-label={ClaudeText.PASTE_BEAT_NAME} onClick={claude.onPaste} />
         <Key text={ClaudeText.OPEN_CARD_FILE} size="small" block variant="quiet" onClick={claude.onOpenFile} />
       </div>

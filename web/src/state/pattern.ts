@@ -25,7 +25,7 @@
 //   the count-in is the sequencer's own (PatternScheduler).
 // - Times are performance.now() milliseconds where Kotlin's are System.nanoTime.
 
-import type { FactoryKit } from '../core/features/factorySounds'
+import { Chain } from '../core/features/chain'
 import { signal, type ReadonlySignal, type Signal } from '@preact/signals'
 import { physicalPad, type PhysicalPad } from '../core/features/padNotes'
 import { Pattern, Patterns, ProjectPatterns, ProjectSeq, Seq, TimingSettings, type Timing } from '../core/features/pattern'
@@ -65,7 +65,7 @@ import {
   type PatternUiState,
 } from './patternPlan'
 import { ARP_PRESSURE_MS, ARP_UI, ArpDesk, type ArpUi } from './arpPlan'
-import { applyBeat, beatImportUi, beatImported, beatShare, type BeatApplied, type BeatImportUi, type BeatShare } from './beatPlan'
+import { applyBeat, beatImportUi, beatImported, beatShare, beatShareChain, type BeatApplied, type BeatImportUi, type BeatShare, type ShareParts } from './beatPlan'
 import { ClipMode, PadStage, SCENE_UI, SceneDesk, type SceneUi } from './scenePlan'
 import { CORRECT_SHOWN_MS, STEP_UI, StepDesk, arpTakesPress, auditionMs, stepOpens, stepWord, type StepNote, type StepUi } from './stepPlan'
 import type { Store } from './store'
@@ -1560,13 +1560,20 @@ export class PatternDesk {
   /**
    * What SHARE sends: [group]'s playing pattern, or (null) the scene playing,
    * as an ARC BEAT card at the tempo Live plays at and the TIMING swing, with
-   * the pads' names; null when there are no notes in it. The patterns are the
-   * project's as they stand, a pattern still recording included. The [kit]
-   * Live plays is named before the card when it isn't the EP-133's.
+   * the pads' names and the [parts] the controller knows (the sound lines, the
+   * sound list, FX, pad settings, silent pads, the kit; beatShare); null when
+   * there are no notes in it. The patterns are the project's as they stand, a
+   * pattern still recording included.
    */
-  beatShare(group: number | null, kit?: FactoryKit): BeatShare | null {
+  beatShare(group: number | null, parts: ShareParts = {}): BeatShare | null {
     if (group !== null && (group < 0 || group > 3)) return null
-    return beatShare(this.seq, group, this.bpm(), this.settings.timing.swing, (pad) => this.padName(pad), kit)
+    return beatShare(this.seq, group, this.bpm(), this.settings.timing.swing, (pad) => this.padName(pad), parts)
+  }
+
+  /** What SHARE CHAIN sends: the project's chain as a card of scenes, as [beatShare] has the rest (beatShareChain); null when it has no steps. */
+  beatShareChain(parts: ShareParts = {}): BeatShare | null {
+    if (Chain.isBlank(this.seq.chain)) return null
+    return beatShareChain(this.seq, this.bpm(), this.settings.timing.swing, (pad) => this.padName(pad), parts)
   }
 
   /**

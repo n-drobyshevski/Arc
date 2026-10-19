@@ -71,6 +71,8 @@ export interface AppSettings {
   readonly haptics: boolean
   /** Make up for Bluetooth delay: the playhead, a press's place and the click on the EP-133's clock follow what is heard. */
   readonly makeUpDelay: boolean
+  /** CLAUDE's "With my sound list": a shared beat card is followed by the sounds Arc knows, for Claude to choose from. */
+  readonly shareSounds: boolean
   /** SAMPLE's input (an addition): its source and whether it records in stereo. */
   readonly sampleSource: SampleSource
   readonly sampleStereo: boolean
@@ -162,6 +164,7 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   pianoWhites: null,
   haptics: true,
   makeUpDelay: true,
+  shareSounds: true,
   sampleSource: 'mic',
   sampleStereo: false,
   sampleGainMic: SAMPLE_GAIN_MIC,
@@ -197,6 +200,7 @@ export const SETTING_KEYS = Object.freeze([
   'pianoWhites',
   'haptics',
   'makeUpDelay',
+  'shareSounds',
   'sampleSource',
   'sampleStereo',
   'sampleGainMic',
@@ -381,6 +385,7 @@ export function readSettings(raw: string | null): AppSettings {
     pianoWhites: pianoChoiceOf(int('pianoWhites', 0)),
     haptics: bool('haptics', true),
     makeUpDelay: bool('makeUpDelay', true),
+    shareSounds: bool('shareSounds', true),
     sampleSource: (typeof o.sampleSource === 'string' ? SampleSource.of(o.sampleSource) : null) ?? 'mic',
     sampleStereo: bool('sampleStereo', false),
     sampleGainMic: sampleGainOf(o.sampleGainMic as number) ?? SAMPLE_GAIN_MIC,
@@ -440,6 +445,7 @@ export function settingValues(s: AppSettings): Record<SettingKey, string> {
     pianoWhites: String(s.pianoWhites ?? 0),
     haptics: String(s.haptics),
     makeUpDelay: String(s.makeUpDelay),
+    shareSounds: String(s.shareSounds),
     sampleSource: s.sampleSource,
     sampleStereo: String(s.sampleStereo),
     sampleGainMic: ktFloat(s.sampleGainMic),
@@ -514,6 +520,7 @@ export function settingsFromIndex(map: Readonly<Record<string, string>>, cur: Ap
     pianoWhites: whites === null ? cur.pianoWhites : whites === 0 ? null : (pianoChoiceOf(whites) ?? cur.pianoWhites),
     haptics: b('app.haptics') ?? cur.haptics,
     makeUpDelay: b('app.makeUpDelay') ?? cur.makeUpDelay,
+    shareSounds: b('app.shareSounds') ?? cur.shareSounds,
     sampleSource: SampleSource.of(get(map, 'app.sampleSource') ?? '') ?? cur.sampleSource,
     sampleStereo: b('app.sampleStereo') ?? cur.sampleStereo,
     sampleGainMic: sampleGainOf(floatOf('app.sampleGainMic')) ?? cur.sampleGainMic,

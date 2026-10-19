@@ -20,6 +20,7 @@ import {
   memoryStorage,
   parseLearned,
   readSettings,
+  settingValues,
   settingsFromIndex,
   type AppSettings,
 } from '../../../src/platform/storage/settings'
@@ -67,6 +68,7 @@ describe('SettingsStore', () => {
       pianoWhites: null,
       haptics: true,
       makeUpDelay: true,
+      shareSounds: true,
       sampleSource: 'mic',
       sampleStereo: false,
       sampleGainMic: 12,
@@ -160,6 +162,7 @@ describe('SettingsStore', () => {
       'app.pianoWhites',
       'app.haptics',
       'app.makeUpDelay',
+      'app.shareSounds',
       'app.sampleSource',
       'app.sampleStereo',
       'app.sampleGainMic',
@@ -187,6 +190,23 @@ describe('SettingsStore', () => {
     expect(readSettings(JSON.stringify({ haptics: 'no' })).haptics).toBe(true)
     expect(settingsFromIndex({ 'app.haptics': 'true' }, s.settings).haptics).toBe(true)
     expect(settingsFromIndex({ 'app.haptics': 'off' }, s.settings).haptics).toBe(false)
+  })
+
+  it('sharing the sound list is on by default, stored like the other switches and read back from library json', () => {
+    const storage = memoryStorage()
+    const s = new SettingsStore(storage)
+    expect(s.settings.shareSounds).toBe(true)
+    expect(settingValues(DEFAULT_SETTINGS).shareSounds).toBe('true')
+    expect(settingValues({ ...DEFAULT_SETTINGS, shareSounds: false }).shareSounds).toBe('false')
+    s.update((c) => ({ ...c, shareSounds: false }))
+    expect(JSON.parse(storage.getItem(SETTINGS_KEY)!)).toEqual({ shareSounds: false })
+    expect(s.toIndex()).toEqual({ 'app.shareSounds': 'false' })
+    expect(new SettingsStore(storage).settings.shareSounds).toBe(false)
+    expect(settingsFromIndex({ 'app.shareSounds': 'false' }, DEFAULT_SETTINGS).shareSounds).toBe(false)
+    expect(settingsFromIndex({ 'app.shareSounds': 'true' }, { ...DEFAULT_SETTINGS, shareSounds: false }).shareSounds).toBe(true)
+    // Missing or unreadable: left as it is.
+    expect(settingsFromIndex({}, { ...DEFAULT_SETTINGS, shareSounds: false }).shareSounds).toBe(false)
+    expect(settingsFromIndex({ 'app.shareSounds': 'maybe' }, DEFAULT_SETTINGS).shareSounds).toBe(true)
   })
 
   it('keeps the factory kit by its id, an unknown one read as the EP-133\'s', () => {

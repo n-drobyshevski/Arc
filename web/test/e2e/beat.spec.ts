@@ -1,12 +1,14 @@
 // BEAT CARDS end to end, on the simulated EP-133 of ?demo: Live tools' CLAUDE section
 // (its shares dimmed with no notes, PASTE BEAT), a beat card pasted on Live opening its
 // sheet (the grid, where it goes, the tempo chip), IMPORT placing it with a toast, and
-// PASTE BEAT reading the clipboard.
+// PASTE BEAT reading the clipboard. A card of scenes imported sets a chain: SHARE CHAIN
+// shares it, followed by the sound list while "With my sound list" is ticked.
 import { expect, test } from './fixtures'
 
 test.use({ viewport: { width: 412, height: 915 } })
 
 const CARD = ['ARC BEAT 1', 'name Four on the floor', 'tempo 124', '[A]', 'A7 | X... X... X... X... |'].join('\n')
+const SCENES = ['ARC BEAT 1', 'name Two', 'chain 1x2 2', '', 'scene One', '[A]', 'A7 | X... .... X... .... |', '', 'scene Two', '[A]', 'A7 | X.X. X.X. X.X. X.X. |'].join('\n')
 
 test('BEAT CARDS: the CLAUDE section, a pasted card, IMPORT', async ({ page }) => {
   await page.goto('/?demo#/live')
@@ -51,4 +53,49 @@ test('BEAT CARDS: the CLAUDE section, a pasted card, IMPORT', async ({ page }) =
   await expect(sheet).toContainText('A · 03')
   await sheet.getByRole('button', { name: 'Cancel' }).click()
   await expect(sheet).toBeHidden()
+})
+
+test('SHARE CHAIN: a card of scenes sets the chain, shared with the sound list or without it', async ({ page }) => {
+  await page.addInitScript(() => {
+    const sent: string[] = []
+    ;(window as unknown as { sent: string[] }).sent = sent
+    Object.defineProperty(navigator, 'share', { configurable: true, value: async (d: { text?: string }) => void sent.push(d.text ?? '') })
+  })
+  await page.goto('/?demo#/live')
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
+  await page.getByRole('button', { name: 'Live tools' }).click()
+  const tools = page.getByRole('dialog', { name: 'Live tools' })
+  const claude = tools.getByRole('region', { name: 'Claude' })
+  // No chain yet: no SHARE CHAIN. The demo EP-133's sounds are known: the tick box is on.
+  await expect(claude.getByRole('button', { name: /^Share the chain with Claude/ })).toHaveCount(0)
+  const tick = claude.getByRole('checkbox', { name: /^With my sound list · \d+ sounds$/ })
+  await expect(tick).toBeChecked()
+
+  await page.keyboard.press('Escape')
+  await page.evaluate((text) => {
+    const data = new DataTransfer()
+    data.setData('text/plain', text)
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }))
+  }, SCENES)
+  const sheet = page.getByRole('dialog', { name: 'Two' })
+  await sheet.getByRole('button', { name: 'Import' }).click()
+  await expect(sheet).toBeHidden()
+
+  await page.getByRole('button', { name: 'Live tools' }).click()
+  const share = claude.getByRole('button', { name: 'Share the chain with Claude, 2 steps' })
+  await expect(share).toHaveText(/share chain · 2 scenes/i)
+  await share.click()
+  const sent = (): Promise<string[]> => page.evaluate(() => (window as unknown as { sent: string[] }).sent)
+  await expect.poll(async () => (await sent()).length).toBe(1)
+  const [withList] = await sent()
+  expect(withList).toContain('name Chain\n')
+  expect(withList).toContain("\n```\n\nMy EP-133's sounds (slot name), from the EP-133:\n")
+  // Unticked: the card alone.
+  await tick.click()
+  await expect(tick).not.toBeChecked()
+  await share.click()
+  await expect.poll(async () => (await sent()).length).toBe(2)
+  const plain = (await sent())[1]!
+  expect(plain).not.toContain("My EP-133's sounds")
+  expect(plain.endsWith('\n```\n')).toBe(true)
 })

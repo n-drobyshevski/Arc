@@ -7,7 +7,10 @@
 // - Kotlin's enums are string unions with const objects (ClipMode, PadStage).
 // - SwitchTime.cycled() is [cycledSwitch]; SceneUi's groups are an array.
 // - Weight (BeatPlan.kt) is beatPlan.ts's string union, Weight.of its weightOf.
+// - SceneUi.chain is the project chain's steps alone (Kotlin's ChainUi.chain.steps),
+//   which SHARE CHAIN names; the CHAIN row itself is not on the web yet.
 
+import type { ChainStep } from '../core/features/chain'
 import type { PhysicalPad } from '../core/features/padNotes'
 import { Pattern, ProjectPatterns, ProjectSeq, Seq, pattern } from '../core/features/pattern'
 import type { PatternRecorder } from '../core/features/patternRecorder'
@@ -79,8 +82,9 @@ export function stepLights(p: Pattern): (Weight | null)[] {
  * 1), whether the CLR hold key is DEL ([canDelete]), the setting for when a
  * pick takes over ([switchTime]), the clipboard ([clip]) and the CLIP row
  * ([clipMode], [bar], [padStage]), the 1–99 grid open for a group
- * ([gridGroup]), the status line ([status]; null shows the scene), and what
- * a screen reader says of the last change ([said]).
+ * ([gridGroup]), the status line ([status]; null shows the scene), what
+ * a screen reader says of the last change ([said]), and the project chain's
+ * steps ([chain]).
  */
 export interface SceneUi {
   readonly open: boolean
@@ -99,6 +103,7 @@ export interface SceneUi {
   readonly gridGroup: number | null
   readonly status: string | null
   readonly said: string | null
+  readonly chain: readonly ChainStep[]
 }
 
 export const SCENE_UI: SceneUi = Object.freeze({
@@ -118,6 +123,7 @@ export const SCENE_UI: SceneUi = Object.freeze({
   gridGroup: null,
   status: null,
   said: null,
+  chain: [],
 })
 
 /** A pattern change waiting: its group goes to pattern [to] at global tick [at] ([time], the setting it was made at). */
@@ -568,6 +574,7 @@ export class SceneDesk {
       gridGroup: this._gridGroup,
       status: this._status ?? this.stageStatus() ?? (this._gridGroup !== null ? MirrorText.gridStatus(this._gridGroup) : null) ?? this.queueStatus(),
       said: this._said,
+      chain: seq.chain.steps,
     }
   }
 

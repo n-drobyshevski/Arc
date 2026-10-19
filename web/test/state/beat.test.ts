@@ -2,6 +2,8 @@
 // controller.ts): SHARE sends the card through the share sheet (or copies it where there is
 // none), PASTE BEAT reads the clipboard (or waits for a paste where the page can't read it),
 // a card opens its sheet, IMPORT places it as one UNDO step, and COPY PROBLEMS copies them.
+// A share carries the pads' sound lines and, with "With my sound list" on, the sounds Arc knows;
+// SHARE CHAIN shares the project's chain.
 import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BeatCards } from '../../src/core/features/beatCard'
@@ -45,6 +47,7 @@ function mutable(h: LiveHarness): { -readonly [K in keyof Deps]: Deps[K] } {
 }
 
 const CARD = ['ARC BEAT 1', 'name Four on the floor', 'tempo 124', '[A]', 'A7 | X... X... X... X... |'].join('\n')
+const SCENES = ['ARC BEAT 1', 'name Two', 'chain 1x2 2', '', 'scene One', '[A]', 'A7 | X... .... X... .... |', '', 'scene Two', '[A]', 'A7 | X.X. X.X. X.X. X.X. |'].join('\n')
 const BAD = ['ARC BEAT 1', '[A]', 'A9 | X... .... .... ... |'].join('\n')
 
 async function recordOne(h: LiveHarness): Promise<void> {
@@ -59,9 +62,9 @@ async function recordOne(h: LiveHarness): Promise<void> {
 describe('BEAT CARDS', () => {
   it('SHARE: nothing with no notes; a card through the share sheet, or copied where there is none', async () => {
     const h = await liveOn()
-    expect(h.c.pattern.beatShare(0)).toBeNull()
+    expect(h.c.beatShare(0)).toBeNull()
     await recordOne(h)
-    const share = h.c.pattern.beatShare(0)
+    const share = h.c.beatShare(0)
     expect(share?.text).toContain('ARC BEAT 1')
     const shared: string[] = []
     mutable(h).share = { ...h.deps.share, shareText: async (_t, text) => (shared.push(text), 'shared') }
@@ -90,6 +93,44 @@ describe('BEAT CARDS', () => {
     await h.c.shareBeat(0)
     expect(shared[0]).toContain(ClaudeText.SHARE_PROMPT + '\n\n' + ClaudeText.EP133_LINE + '\n\n```\nARC BEAT 1\n')
     expect(shared[0]).not.toContain(ClaudeText.kitLine(FactoryKit.EP40)!)
+  })
+
+  it('SHARE has a sound line for each pad it uses, and the sound list after the card while "With my sound list" is on', async () => {
+    const h = await liveOn()
+    await recordOne(h)
+    await vi.waitFor(() => expect(h.c.shareSoundCount.value).toBeGreaterThan(0))
+    expect(h.c.shareSoundCount.value).toBe(h.mock.sounds.size)
+    const header = ClaudeText.soundListHeader(ClaudeText.SOUNDS_FROM_DEVICE)
+    const share = h.c.beatShare(0)!
+    // The pad's line names the slot Live shows on it, one of the EP-133's.
+    const line = BeatCards.read(share.text).card!.sections[0]!.sounds.get(A0.offset)!
+    expect(h.mock.sounds.has(line.slot)).toBe(true)
+    expect(share.text).toContain('\n```\n\n' + header + '\n')
+    // Off: the card alone, its sound lines kept; kept as a setting.
+    h.c.setShareSounds(false)
+    expect(h.c.settings.value.shareSounds).toBe(false)
+    const plain = h.c.beatShare(0)!
+    expect(plain.text).not.toContain(header)
+    expect(plain.text.endsWith('\n```\n')).toBe(true)
+    expect(BeatCards.read(plain.text).card).toEqual(BeatCards.read(share.text).card)
+    expect(JSON.parse(h.storage.getItem('arc.settings')!).shareSounds).toBe(false)
+  })
+
+  it('SHARE CHAIN: nothing without a chain; a card of scenes imported sets one, and its share is the chain as a card', async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    expect(h.c.beatShareChain()).toBeNull()
+    expect(p.scene.value.chain).toEqual([])
+    await h.c.receiveBeat(SCENES)
+    p.importBeat(false)
+    expect(p.scene.value.chain.length).toBe(2)
+    const shared: string[] = []
+    mutable(h).share = { ...h.deps.share, shareText: async (_t, text) => (shared.push(text), 'shared') }
+    await h.c.shareChain()
+    expect(shared[0]!.startsWith(ClaudeText.SHARE_CHAIN_PROMPT + '\n\n' + ClaudeText.EP133_LINE + '\n\n```\nARC BEAT 1\nname Chain\n')).toBe(true)
+    const card = BeatCards.read(shared[0]!).card!
+    expect(card.scenes.length).toBe(2)
+    expect(card.chain).toEqual([[1, 2], [2, 1]])
   })
 
   it('PASTE BEAT: a card opens its sheet, IMPORT places it as one UNDO step', async () => {

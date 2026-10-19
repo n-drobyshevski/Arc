@@ -6,11 +6,16 @@
 //
 // Web deltas: [placed] pairs are [group, n] tuples; Weight is a string union
 // ordered by [WEIGHT_RANK]; names give null rather than Kotlin's null String?.
-// deviceKitOf takes the connected device's sound list as [sounds] (Live keeps
-// it, LiveDesk.deviceSoundList, where the Kotlin has MirrorUi.sounds).
+// deviceKitOf and soundSetOf take the connected device's sound list as
+// [sounds] (Live keeps it, LiveDesk.deviceSoundList, where the Kotlin has
+// MirrorUi.sounds). beatShare and beatShareChain take what Kotlin passes as
+// named arguments in one [ShareParts] object.
 
 import { FactoryKit, FactorySounds } from '../core/features/factorySounds'
 import { BeatCards, cardSection, type BeatCard, type CardProblem, type CardRead, type CardSection, type CardSound } from '../core/features/beatCard'
+import type { ChainStep } from '../core/features/chain'
+import type { FxSettings } from '../core/features/fxSettings'
+import type { PadSettings } from '../core/features/padSettings'
 import { SoundSource } from '../core/features/offlinePads'
 import { PadSoundCache } from '../core/features/padSoundCache'
 import type { SoundEntry } from '../core/protocol/device'
@@ -90,20 +95,130 @@ export function foreignTo(packs: ReadonlyMap<FactoryKit, ReadonlyMap<number, str
 }
 
 /**
+ * The sounds Arc can name to Claude and look cards up in: [names] by slot, and
+ * the [source] they came from as the sound list words it
+ * (ClaudeText.SOUNDS_FROM_DEVICE, SOUNDS_FROM_LAST_READ or
+ * SOUNDS_FROM_FACTORY). [size]: how many.
+ */
+export interface SoundSet {
+  readonly source: string
+  readonly names: ReadonlyMap<number, string>
+  readonly size: number
+}
+
+export function soundSet(source: string, names: ReadonlyMap<number, string>): SoundSet {
+  return { source, names, size: names.size }
+}
+
+/**
+ * The sounds [m] (Live's mirror) can choose from: the EP-133's, read
+ * ([sounds]), while connected; offline the list the view shows, the last
+ * read's or the factory pack's (OfflineSounds.base). Null when none is known
+ * (nothing read, or no pack). A sound the EP-133 lists unnamed ("200.pcm") has
+ * the name [factory] (the pack's, by slot; null without the pack) gives it
+ * (BeatCards.soundNames).
+ */
+export function soundSetOf(m: MirrorUi | null, sounds: readonly SoundEntry[], factory: ReadonlyMap<number, string> | null = null): SoundSet | null {
+  if (m === null) return null
+  const named = (list: readonly SoundEntry[]): Map<number, string> => BeatCards.soundNames(new Map(list.map((e) => [e.slot, e.name])), factory)
+  if (m.offline == null) return sounds.length > 0 ? soundSet(ClaudeText.SOUNDS_FROM_DEVICE, named(sounds)) : null
+  const o = m.offlineSounds
+  if (o == null) return null
+  const fromPack = o.base === SoundSource.FACTORY
+  const list = fromPack ? o.factory : o.device
+  if (list === null || list.length === 0) return null
+  return soundSet(fromPack ? ClaudeText.SOUNDS_FROM_FACTORY : ClaudeText.SOUNDS_FROM_LAST_READ, named(list))
+}
+
+/**
+ * What a share carries besides the notes (Kotlin's named arguments): each
+ * pad's sound line ([sounds]: the slot and name known for it), the sound
+ * list after the card ([list]), the project's [fx] and each used pad's
+ * settings ([pads]; null when not known), the slot a pad holds ([held], null
+ * for none) once the pads are [padsKnown], the [kit] and the [prompt].
+ */
+export interface ShareParts {
+  readonly sounds?: (pad: PhysicalPad) => CardSound | null
+  readonly list?: SoundSet | null
+  readonly fx?: FxSettings | null
+  readonly pads?: (pad: PhysicalPad) => PadSettings | null
+  readonly held?: (pad: PhysicalPad) => number | null
+  readonly padsKnown?: boolean
+  readonly kit?: FactoryKit
+  readonly prompt?: string
+}
+
+/**
  * The text [group]'s playing pattern in [seq] shares (null [group]: the scene
  * playing, its four patterns, the blank ones left out), as an ARC BEAT card
  * tidied and written with the pads' [names], at [tempo] and the TIMING [swing]
  * (BeatCards.fromPatterns keeps the swing only where every hit sits on it).
- * The [kit] is named before the card (ClaudeText.kitLine).
- * Null when there is nothing to share: no notes in it.
+ * Each pad the notes use gets a sound line with the slot and name [o.sounds]
+ * knows for it. The project's [o.fx] and each used pad's settings ([o.pads];
+ * null when not known) are written as the card's effect and `pad` lines
+ * (BeatCards.fromPatterns leaves out what is at the defaults). With a
+ * [o.list], the sounds Arc knows follow the card's closing fence
+ * (BeatCards.soundList), for Claude to choose from. When the pads are
+ * [o.padsKnown], the pads the notes use that have no sound ([o.held] gives a
+ * pad's slot, null for none; BeatCards.silentPads) are named in a comment
+ * after the header (ClaudeText.noSoundOn). The [o.kit] is named before the
+ * card (ClaudeText.kitLine); the [o.prompt] goes first. Null when there is
+ * nothing to share: no notes in it.
  */
-export function beatShare(seq: ProjectSeq, group: number | null, tempo: number, swing: number, names: PadNames, kit: FactoryKit = FactoryKit.EP133): BeatShare | null {
+export function beatShare(seq: ProjectSeq, group: number | null, tempo: number, swing: number, names: PadNames, o: ShareParts = {}): BeatShare | null {
   const groups = group === null ? [0, 1, 2, 3] : [group]
   const sections = groups.map((g) => cardSection(g, ProjectSeq.selected(seq, g), ProjectSeq.pattern(seq, g, ProjectSeq.selected(seq, g))))
   if (sections.every((s) => Pattern.isEmpty(s.pattern))) return null
   const name = group === null ? ClaudeText.sceneCardName(seq.scene) : ClaudeText.patternCardName(ProjectSeq.selected(seq, group), seq.scene)
-  const card = BeatCards.fromPatterns(name, tempo, swing, sections)
-  return { subject: ClaudeText.shareSubject(name), text: ClaudeText.shareText(ClaudeText.SHARE_PROMPT, BeatCards.write(card, names, true), kit) }
+  const card = BeatCards.fromPatterns(name, tempo, swing, sections, o.sounds, o.fx ?? null, o.pads)
+  return shareOf(name, card, names, o, ClaudeText.SHARE_PROMPT)
+}
+
+// [card] as a share named [name]: the prompt, the kit, the card with its silent pads, then the list.
+function shareOf(name: string, card: BeatCard, names: PadNames, o: ShareParts, prompt: string): BeatShare {
+  const silent = BeatCards.silentPads(card, o.held ?? (() => null), o.padsKnown ?? false)
+  const text = ClaudeText.shareText(o.prompt ?? prompt, BeatCards.write(card, names, true, silent), o.kit ?? FactoryKit.EP133)
+  // The list follows the closing fence after a blank line (the card's text ends in a newline); readers stop at the fence.
+  const list = o.list ?? null
+  return { subject: ClaudeText.shareSubject(name), text: list === null ? text : text + '\n' + BeatCards.soundList(list.source, list.names) }
+}
+
+/**
+ * The steps of [steps] a card holds: from the first, up to the step that
+ * would bring in more distinct scenes than a card has (BeatCards.MAX_SCENES)
+ * (a card with more is one Arc itself would refuse to read).
+ */
+export function chainForCard(steps: readonly ChainStep[]): ChainStep[] {
+  const seen = new Set<number>()
+  const out: ChainStep[] = []
+  for (const step of steps) {
+    if (!seen.has(step.scene) && seen.size === BeatCards.MAX_SCENES) break
+    seen.add(step.scene)
+    out.push(step)
+  }
+  return out
+}
+
+/** The distinct scenes chainForCard shares: the card's scenes ("SHARE CHAIN · 3 SCENES"). */
+export function chainSceneCount(steps: readonly ChainStep[]): number {
+  return new Set(chainForCard(steps).map((s) => s.scene)).size
+}
+
+/**
+ * The text the project's chain shares: as beatShare, a card
+ * (BeatCards.fromScenes: the chain's scenes in the order they first play, each
+ * with its patterns, and the `chain` line with the passes) with the prompt for
+ * an arrangement (ClaudeText.SHARE_CHAIN_PROMPT unless [o.prompt]), at
+ * [tempo] and the TIMING [swing], the pads' [names], the sounds, FX and pad
+ * settings the other shares carry, the sound list after it, and the pads with
+ * no sound named in a comment. Null when the chain has no step (or none naming
+ * a scene of [seq]).
+ */
+export function beatShareChain(seq: ProjectSeq, tempo: number, swing: number, names: PadNames, o: ShareParts = {}): BeatShare | null {
+  const name = ClaudeText.CHAIN_CARD_NAME
+  const card = BeatCards.fromScenes(name, tempo, swing, seq, chainForCard(seq.chain.steps), o.sounds, o.fx ?? null, o.pads)
+  if (card === null) return null
+  return shareOf(name, card, names, o, ClaudeText.SHARE_CHAIN_PROMPT)
 }
 
 /** How strong a hit is drawn on the sheet's grid: the ghost, normal and accent tints (the card's x, o and X, as TIDY rounds them). */
