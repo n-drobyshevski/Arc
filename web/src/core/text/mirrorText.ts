@@ -659,8 +659,11 @@ export const MirrorText = {
   TO_DEVICE: 'To EP-133',
   DELETE_TAKE: 'Delete this take?',
 
+  // The Takes page as the device's display: numbered takes on the glass, and one strip of keys for the lit one.
   /** "T03": a take's number on the glass, the oldest T01. */
   takeNumber: (n: number): string => 'T' + String(n).padStart(2, '0'),
+  /** "Takes · 3" (upper-cased where shown), the glass's head. */
+  takesCount: (count: number): string => `${MirrorText.TAKES} \u00B7 ${count}`,
   /** "T03, 0:12, Oct 5, 2:23 PM", and ", playing": a take on the glass, for screen readers. */
   takeRow(n: number, seconds: number, made: string, playing: boolean, trimmed: boolean = false): string {
     return (
@@ -670,6 +673,12 @@ export const MirrorText = {
       (playing ? ', playing' : '')
     )
   },
+  TAKES_LIT_HINT: 'Tap a take to light it; the keys act on it.',
+  /** The keys' words, upper-cased where shown. */
+  TAKE_SHARE: 'Share',
+  TAKE_SAVE: 'Save',
+  TAKE_SEND: 'EP',
+  TAKE_DEL: 'Del',
   TAKE_TRIM: 'Trim',
   TAKE_DUP: 'Dup',
   DUPLICATE: 'Duplicate',
@@ -710,6 +719,10 @@ export const MirrorText = {
   TRIM_END_EARLIER: 'End earlier',
   /** The START and END keys, for screen readers. */
   trimMark: (edge: string, playing: boolean): string => (playing ? `${edge} here` : `${edge} (while it plays)`),
+  /** "Share WAV, T03": a key for the lit take, for screen readers. */
+  litTake: (action: string, n: number): string => `${action}, ${MirrorText.takeNumber(n)}`,
+  /** "Delete T03? Press DEL again", on the glass after one press of DEL. */
+  deleteTakeAgain: (n: number): string => `Delete ${MirrorText.takeNumber(n)}? Press DEL again`,
 
   NO_OUTPUT: 'There is no sound output to record from.',
   SHARE_TAKE_FAILED: 'Sharing failed. Use Save WAV instead.',

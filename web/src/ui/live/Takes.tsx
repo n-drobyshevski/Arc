@@ -1,30 +1,41 @@
-// Port of MirrorScreen.kt's TakesSection and PatternLine.kt's TakeBadge
-// (app/src/main/kotlin/dev/arc/ep133/ui/screens/)
+// Port of TakesDeck.kt (TakesDeck, TakesGlass), LiveTools.kt's TakesPage and
+// PatternLine.kt's TakeBadge (app/src/main/kotlin/dev/arc/ep133/ui/screens/)
 //
-// TAKE (REC before RECORD was the pattern's) in Live tools: its key, then the
-// takes. While a take is armed or recorded, a badge on the display shows it
-// and stops it.
+// The Takes page as the device's display (an addition): the takes numbered on
+// the glass, T01 the oldest, and under it one strip of keys (DeckKeys.tsx). A
+// tap on a take lights it; PLAY, SHARE, SAVE, EP and DEL act on the lit one,
+// and DEL asks again on the glass. TAKE starts and stops a take, its time on
+// the glass while it records. How recording works is folded at the foot.
+// While a take is armed or recorded, a badge on the display shows it and
+// stops it.
 //
 // Web deltas:
-// - The armed dot's blink is a CSS animation; it stands still under
+// - The blinking dots are CSS animations; they stand still under
 //   prefers-reduced-motion, or when [still] (screenshots).
-// - A take's row is a disclosure button (aria-expanded) over its actions,
-//   where Kotlin's Plate is clickable as a whole.
-// - Share is left out where the browser can't share a file ([TakesUi.canShare]);
-//   Save WAV is then the way out, and the note says so.
-// - CaptionInfo's two notes (TAKES_HINT, TAKES_NOTE) show under the list:
-//   the hint while there are no takes, the note once there are.
+// - The glass's takes are a radio group: one tab stop, the arrow keys light
+//   the next take (handleRovingKey).
+// - Live tools are one page here, not pages: the section keeps its TAKES
+//   caption over the glass.
+// - SHARE is left out where the browser can't share a file ([TakesUi.canShare]);
+//   SAVE is then the way out, and the note says so. VOICE (web) shares the
+//   voice message, which Android's SHARE gives Telegram itself.
+// - The lit take follows the one playing through a computed, so only a change
+//   of which take that is renders the section again.
+// - TRIM and DUP come with the takes' trim (TakeTrimDeck.kt).
 import type { JSX } from 'preact'
-import { useState } from 'preact/hooks'
-import type { ReadonlySignal } from '@preact/signals'
+import { useMemo, useRef, useState } from 'preact/hooks'
+import { computed, type ReadonlySignal } from '@preact/signals'
 import type { RecState } from '../../core/features/takeRecorder'
 import { FeatureText } from '../../core/text/featureText'
+import { bytes } from '../../core/text/format'
 import { MirrorText } from '../../core/text/mirrorText'
 import { Strings } from '../../core/text/strings'
 import { WebText } from '../../core/text/webText'
 import type { TakeInfo } from '../../platform/storage/takeStore'
 import { Caption } from '../components/Caption'
-import { Key } from '../components/Key'
+import { handleRovingKey } from '../components/Segmented'
+import { Disclosure } from '../components/SettingRow'
+import { DeckKey, DeckStrip, Glyph } from './DeckKeys'
 import { useIs } from './memo'
 import './Takes.css'
 
@@ -41,7 +52,7 @@ export interface TakesUi {
   readonly playing: ReadonlySignal<string | null>
   readonly keyOf: (t: TakeInfo) => string
   readonly fmtWhen: (ms: number) => string
-  /** To EP-133 is offered only while connected. */
+  /** EP (To EP-133) works only while connected. */
   readonly connected: boolean
   /** Whether Share is offered (the browser can share a file). */
   readonly canShare: boolean
@@ -80,106 +91,243 @@ export function TakeBadge(props: { take: TakeUi | null | undefined; still?: bool
   )
 }
 
-/** Live tools' TAKE key and takes: each plays, and unfolds to share, save, send to the EP-133 or delete. */
-export function TakesSection(props: { takes: TakesUi; take: TakeUi }): JSX.Element {
+/**
+ * Live tools' takes: the glass and the strip under it. The lit take is the one
+ * tapped while it is still there, else the one playing, else the newest.
+ */
+export function TakesSection(props: { takes: TakesUi; take: TakeUi; still?: boolean }): JSX.Element {
   const t = props.takes
-  const s = props.take.state
-  const [open, setOpen] = useState<string | null>(null)
+  const take = props.take
+  const list = t.list
+  const [litName, setLitName] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<string | null>(null)
+  const litKey = useMemo(
+    () =>
+      computed(() => {
+        if (litName !== null && list.some((x) => x.name === litName)) return litName
+        const p = t.playing.value
+        const playing = p === null ? undefined : list.find((x) => t.keyOf(x) === p)
+        return (playing ?? list[0])?.name ?? null
+      }),
+    [t.playing, t.keyOf, list, litName],
+  ).value
+  const lit = list.find((x) => x.name === litKey) ?? null
+  const number = (info: TakeInfo): number => list.length - list.indexOf(info)
+  const confirming = lit !== null && confirm === lit.name
+  const n = lit !== null ? number(lit) : 0
+  const s = take.state
+  const recording = s.kind === 'recording' ? s : null
+  // Any key but DEL calls off a delete asked for.
+  const act = (f: (info: TakeInfo) => void) => () => {
+    if (lit === null) return
+    setConfirm(null)
+    f(lit)
+  }
+  const del = (): void => {
+    if (lit === null) return
+    t.onDelete(lit)
+    setConfirm(null)
+    setLitName(null)
+  }
+  const keys: JSX.Element[] = [
+    <DeckKey
+      key="take"
+      glyph={recording !== null ? 'stop' : 'dot'}
+      label={recording !== null ? MirrorText.takeLength(recording.seconds) : MirrorText.TAKE}
+      description={MirrorText.takeDescription(s)}
+      onClick={() => {
+        setConfirm(null)
+        take.onTake()
+      }}
+      style={s.kind !== 'idle' ? 'signal' : 'normal'}
+      glyphColor={s.kind === 'idle' ? 'var(--signal)' : undefined}
+    />,
+    <PlayKey key="play" t={t} lit={lit} n={n} onKey={() => setConfirm(null)} />,
+  ]
+  if (t.canShare) {
+    keys.push(
+      <DeckKey key="share" glyph="share" label={MirrorText.TAKE_SHARE} description={MirrorText.litTake(FeatureText.SHARE_WAV, n)} onClick={act(t.onShare)} enabled={lit !== null} />,
+    )
+  }
+  const onVoice = t.onVoice
+  if (t.canVoice === true && onVoice !== undefined) {
+    keys.push(
+      <DeckKey key="voice" glyph="voice" label={WebText.TAKE_VOICE} description={MirrorText.litTake(WebText.VOICE_MESSAGE, n)} onClick={act(onVoice)} enabled={lit !== null} />,
+    )
+  }
+  keys.push(
+    <DeckKey key="save" glyph="save" label={MirrorText.TAKE_SAVE} description={MirrorText.litTake(FeatureText.SAVE_WAV, n)} onClick={act(t.onSave)} enabled={lit !== null} />,
+    <DeckKey
+      key="send"
+      glyph="send"
+      label={MirrorText.TAKE_SEND}
+      description={MirrorText.litTake(MirrorText.TO_DEVICE, n)}
+      onClick={act(t.onToDevice)}
+      enabled={lit !== null && t.connected}
+    />,
+    <DeckKey
+      key="del"
+      glyph="delete"
+      label={MirrorText.TAKE_DEL}
+      description={confirming ? MirrorText.deleteTakeAgain(n) : MirrorText.litTake(Strings.DELETE, n)}
+      onClick={() => {
+        if (lit === null) return
+        if (confirming) del()
+        else setConfirm(lit.name)
+      }}
+      style={confirming ? 'navy' : 'normal'}
+      enabled={lit !== null}
+    />,
+  )
   return (
     <section class="takes" aria-label={MirrorText.TAKES}>
       <Caption text={MirrorText.TAKES} align="start" as="h3" />
-      <Key
-        class="takes__key"
-        text={'● ' + (s.kind === 'recording' ? MirrorText.takeBadge(s.seconds) : MirrorText.TAKE)}
-        size="small"
-        block
-        variant={s.kind !== 'idle' ? 'signal' : 'normal'}
-        aria-label={MirrorText.takeDescription(s)}
-        aria-pressed={s.kind !== 'idle'}
-        onClick={props.take.onTake}
+      <TakesGlass
+        t={t}
+        take={take}
+        lit={lit}
+        number={number}
+        confirming={confirming}
+        still={props.still === true}
+        onLight={(info) => {
+          setLitName(info.name)
+          setConfirm(null)
+        }}
+        onConfirm={del}
       />
-      {t.list.length > 0 && (
-        <ul class="takes__list">
-          {t.list.map((take) => {
-            const unfolded = open === take.name
-            const moreId = `take-more-${take.name}`
-            return (
-              <li key={take.name} class={`take${unfolded ? ' is-open' : ''}`}>
-                <div class="take__row">
-                  <button
-                    type="button"
-                    class="take__fold"
-                    aria-expanded={unfolded}
-                    aria-controls={moreId}
-                    onClick={() => {
-                      setOpen(unfolded ? null : take.name)
-                      setConfirm(null)
-                    }}
-                  >
-                    <span class="take__when">{t.fmtWhen(take.createdAt)}</span>
-                    <span class="t-small take__length">{MirrorText.takeLength(take.seconds)}</span>
-                  </button>
-                  <TakePlay t={t} take={take} />
-                </div>
-                {unfolded && (
-                  <div id={moreId} class="take__more">
-                    {confirm === take.name ? (
-                      <>
-                        <p class="t-small take__ask">{MirrorText.DELETE_TAKE}</p>
-                        <div class="take__keys">
-                          <Key
-                            text={Strings.DELETE}
-                            size="small"
-                            variant="signal"
-                            onClick={() => {
-                              setConfirm(null)
-                              setOpen(null)
-                              t.onDelete(take)
-                            }}
-                          />
-                          <Key text={Strings.CANCEL} size="small" onClick={() => setConfirm(null)} />
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div class="take__keys">
-                          {t.canShare && <Key text={FeatureText.SHARE_WAV} size="small" onClick={() => t.onShare(take)} />}
-                          {t.canVoice && t.onVoice && (
-                            <Key text={WebText.VOICE_MESSAGE} size="small" onClick={() => t.onVoice?.(take)} />
-                          )}
-                          <Key text={FeatureText.SAVE_WAV} size="small" onClick={() => t.onSave(take)} />
-                        </div>
-                        <div class="take__keys">
-                          {t.connected && <Key text={MirrorText.TO_DEVICE} size="small" onClick={() => t.onToDevice(take)} />}
-                          <Key text={Strings.DELETE} size="small" onClick={() => setConfirm(take.name)} />
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-              </li>
-            )
-          })}
-        </ul>
-      )}
-      <p class="t-small takes__note">
-        {t.list.length === 0 ? MirrorText.TAKES_HINT : t.canShare ? WebText.TAKES_NOTE : WebText.TAKES_NOTE_SAVE_ONLY}
-      </p>
+      {list.length > 0 && <p class="t-tiny takes__hint">{MirrorText.TAKES_LIT_HINT}</p>}
+      <DeckStrip keys={keys} />
+      <Disclosure title={MirrorText.ABOUT_TAKES}>
+        <p>{MirrorText.TAKES_HINT}</p>
+        <p>{t.canShare ? WebText.TAKES_NOTE : WebText.TAKES_NOTE_SAVE_ONLY}</p>
+      </Disclosure>
     </section>
   )
 }
 
-/** A take's Play / Stop key (web addition, out of the list): it alone follows whether its take plays. */
-function TakePlay(props: { t: TakesUi; take: TakeInfo }): JSX.Element {
-  const { t, take } = props
-  const playing = useIs(t.playing, t.keyOf(take))
+/** PLAY / STOP for the lit take (a key of its own, so that it alone follows whether that take plays). */
+function PlayKey(props: { t: TakesUi; lit: TakeInfo | null; n: number; onKey: () => void }): JSX.Element {
+  const { t, lit, n } = props
+  const playing = useIs(t.playing, lit !== null ? t.keyOf(lit) : '') && lit !== null
+  const word = playing ? FeatureText.STOP : FeatureText.PLAY
   return (
-    <Key
-      text={playing ? FeatureText.STOP : FeatureText.PLAY}
-      size="small"
-      aria-label={`${playing ? FeatureText.STOP : FeatureText.PLAY} ${t.fmtWhen(take.createdAt)}`}
-      onClick={() => (playing ? t.onStop() : t.onPlay(take))}
+    <DeckKey
+      glyph={playing ? 'stop' : 'play'}
+      label={word}
+      description={MirrorText.litTake(word, n)}
+      onClick={() => {
+        if (lit === null) return
+        props.onKey()
+        if (playing) t.onStop()
+        else t.onPlay(lit)
+      }}
+      enabled={lit !== null}
     />
+  )
+}
+
+/**
+ * The glass: its head (how many takes and their size; while a take records,
+ * REC with a blinking dot, its number and the time large; armed, that it waits
+ * for the first sound), then a line per take, newest first. The lit take is
+ * in signal orange, ▶ on the one playing; under the takes, a delete asked for.
+ */
+function TakesGlass(props: {
+  t: TakesUi
+  take: TakeUi
+  lit: TakeInfo | null
+  number: (info: TakeInfo) => number
+  confirming: boolean
+  still: boolean
+  onLight: (info: TakeInfo) => void
+  onConfirm: () => void
+}): JSX.Element {
+  const { t, lit, number } = props
+  const s = props.take.state
+  const recording = s.kind === 'recording' ? s : null
+  const group = useRef<HTMLDivElement>(null)
+  const litAt = lit !== null ? t.list.indexOf(lit) : -1
+  let total = 0
+  for (const info of t.list) total += info.bytes
+  return (
+    <div class="takes-glass">
+      <div class="takes-glass__head">
+        {s.kind === 'idle' ? (
+          <>
+            <span class="takes-glass__sub takes-glass__grow">{MirrorText.takesCount(t.list.length)}</span>
+            {t.list.length > 0 && <span class="takes-glass__sub">{bytes(total)}</span>}
+          </>
+        ) : (
+          <>
+            <span class={`takes-glass__dot${recording !== null && !props.still ? ' is-blinking' : ''}`} aria-hidden="true" />
+            <span class="takes-glass__sub takes-glass__grow is-signal">
+              {recording !== null ? `${MirrorText.REC} ${MirrorText.takeNumber(t.list.length + 1)}` : MirrorText.TAKE}
+            </span>
+            {/* The time is for the eye: the TAKE key says it for screen readers. */}
+            {recording !== null && (
+              <span class="takes-glass__time" aria-hidden="true">
+                {MirrorText.takeLength(recording.seconds)}
+              </span>
+            )}
+          </>
+        )}
+      </div>
+      {s.kind === 'armed' && <p class="t-display-hint takes-glass__armed">{MirrorText.TAKE_ARMED}</p>}
+      {t.list.length === 0 ? (
+        <p class="takes-glass__sub takes-glass__empty">{MirrorText.NO_TAKES}</p>
+      ) : (
+        <div
+          ref={group}
+          class="takes-glass__list"
+          role="radiogroup"
+          aria-label={MirrorText.TAKES}
+          onKeyDown={(e) => handleRovingKey(e, litAt, t.list.length, group.current, (i) => {
+            const info = t.list[i]
+            if (info !== undefined) props.onLight(info)
+          })}
+        >
+          {t.list.map((info) => (
+            <TakeLine key={info.name} t={t} info={info} n={number(info)} on={info === lit} onLight={props.onLight} />
+          ))}
+        </div>
+      )}
+      {props.confirming && lit !== null && (
+        <button type="button" class="takes-glass__sub takes-glass__confirm" onClick={props.onConfirm}>
+          {MirrorText.deleteTakeAgain(number(lit))}
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** A take on the glass: its number, length and date, ▶ while it plays (read per line). */
+function TakeLine(props: { t: TakesUi; info: TakeInfo; n: number; on: boolean; onLight: (info: TakeInfo) => void }): JSX.Element {
+  const { t, info, n, on } = props
+  const playing = useIs(t.playing, t.keyOf(info))
+  const made = t.fmtWhen(info.createdAt)
+  return (
+    <button
+      type="button"
+      class={`take-line${on ? ' is-lit' : ''}`}
+      role="radio"
+      aria-checked={on}
+      aria-label={MirrorText.takeRow(n, info.seconds, made, playing)}
+      tabIndex={on ? 0 : -1}
+      data-roving=""
+      onClick={() => props.onLight(info)}
+    >
+      <span class="take-line__row take-line__number" aria-hidden="true">
+        {MirrorText.takeNumber(n)}
+      </span>
+      <span class="take-line__row" aria-hidden="true">
+        {MirrorText.takeLength(info.seconds)}
+      </span>
+      <span class="takes-glass__sub take-line__when" aria-hidden="true">
+        {made.replace(/,/g, '')}
+      </span>
+      <span class="take-line__mark" aria-hidden="true">
+        {playing && <Glyph glyph="play" size={14} />}
+      </span>
+    </button>
   )
 }

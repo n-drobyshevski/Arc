@@ -763,7 +763,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     </RowCard>
   )
   const take = props.take ?? null
-  const takesSection = take && props.takes ? <TakesSection takes={props.takes} take={take} /> : null
+  const takesSection = take && props.takes ? <TakesSection takes={props.takes} take={take} still={fixedNow !== null} /> : null
   // CLAUDE: beat cards to and from Claude, for the group shown (KEYS: the KEYS sound's), before TAKES.
   const claudeSection = <ClaudeSection group={stepGroup ?? group} />
   const tools = keys.on ? (

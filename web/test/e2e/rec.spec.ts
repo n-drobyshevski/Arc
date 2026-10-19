@@ -1,6 +1,7 @@
 // TAKE and takes end to end, on the simulated EP-133 of ?demo: TAKE in Live
 // tools arms a take, a pad played starts it, the display's badge stops it, the
-// take is listed with its actions, and the device's PLAY starts an armed take.
+// take is numbered on the glass and the keys under it act on it, and the
+// device's PLAY starts an armed take.
 import type { Page } from '@playwright/test'
 import { demo, expect, test } from './fixtures'
 
@@ -62,16 +63,24 @@ test('TAKE records a pad into a take that Live tools lists', async ({ page }) =>
 
   tools = await openTools(page)
   const takes = tools.getByRole('region', { name: 'Takes' })
-  await expect(takes.getByRole('listitem')).toHaveCount(1)
-  await takes.locator('.take__fold').click()
-  await expect(takes.getByRole('button', { name: 'Save WAV' })).toBeVisible()
-  // A desktop browser can't share a file: no Share, and the note says Save WAV.
-  await expect(takes.getByRole('button', { name: 'Share WAV' })).toHaveCount(0)
-  await expect(takes.getByRole('button', { name: 'To EP-133' })).toBeVisible()
-  await takes.getByRole('button', { name: 'Delete' }).click()
-  await expect(takes.getByText('Delete this take?')).toBeVisible()
-  await takes.getByRole('button', { name: 'Delete' }).click()
-  await expect(takes.getByRole('listitem')).toHaveCount(0)
+  // The glass: the takes numbered, T01 the oldest, the newest lit; the keys act on it.
+  const glass = takes.getByRole('radiogroup', { name: 'Takes' })
+  await expect(glass.getByRole('radio')).toHaveCount(1)
+  await expect(glass.getByRole('radio', { name: /^T01, \d+:\d\d, / })).toHaveAttribute('aria-checked', 'true')
+  await expect(takes).toContainText('Takes · 1')
+  await expect(takes.getByRole('button', { name: 'Save WAV, T01' })).toBeEnabled()
+  // A desktop browser can't share a file: no SHARE, and the note says Save WAV.
+  await expect(takes.getByRole('button', { name: 'Share WAV, T01' })).toHaveCount(0)
+  await expect(takes.getByRole('button', { name: 'To EP-133, T01' })).toBeEnabled()
+  await expect(takes.getByRole('button', { name: 'Play, T01' })).toBeEnabled()
+  // DEL asks again on the glass; DEL again deletes.
+  await takes.getByRole('button', { name: 'Delete, T01' }).click()
+  await expect(takes.getByRole('button', { name: 'Delete T01? Press DEL again' })).toHaveCount(2)
+  await takes.locator('.deck-key').filter({ hasText: 'DEL' }).click()
+  await expect(glass).toHaveCount(0)
+  await expect(takes).toContainText('No takes yet')
+  // Nothing to light: the keys but TAKE are dimmed.
+  await expect(takes.locator('.deck-key').filter({ hasText: 'DEL' })).toBeDisabled()
 })
 
 test("an armed take starts with the EP-133's PLAY and ends with its STOP", async ({ page }) => {
