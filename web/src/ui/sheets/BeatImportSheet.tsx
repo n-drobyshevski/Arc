@@ -44,8 +44,10 @@
 //   PICK SOUND / CHANGE key again, as the upload sheet's trim view does.
 // - The sheet's switches (SET, PUT ON PADS, APPLY FX, SET CHAIN, REPLACE) are a
 //   role="switch" button on theme/cap.css's cap, pressed by :active. The rows
-//   of a pack's sound to upload, the synth rows and the suggested sounds come
-//   with their ports.
+//   of a pack's sound to upload and the synth rows come with their ports.
+// - The sounds Arc suggests for silent pads are the picks while nothing is
+//   chosen yet ([choices] null), so they follow the card planned again until
+//   then; Kotlin keeps the first plan's.
 // - A pad shaping row is a checkbox button like a sound row; the FX and pad
 //   rows' screen reader names are on the row (Kotlin's merged semantics).
 // - The no room line is a warning's amber bar with
@@ -131,18 +133,26 @@ interface Choices {
 // The card's chain: set as the project's unless switched off.
 const NO_CHOICES: Choices = { setTempo: false, putOnPads: true, unticked: new Set(), picked: new Map(), picking: null, applyFx: true, shapeOff: new Set(), setChain: true }
 
+// The choices a card starts with: the sounds Arc suggests for its silent pads (BeatCards.suggestSound) picked.
+function firstChoices(ui: BeatImportUi | null): Choices {
+  const suggested = ui?.silent?.suggested
+  return suggested === undefined || suggested.size === 0 ? NO_CHOICES : { ...NO_CHOICES, picked: suggested }
+}
+
 export function BeatImportSheet(props: BeatImportSheetProps): JSX.Element {
   const { ui } = props
   // Chosen on this sheet only: a card's tempo never replaces Arc's unasked. The sounds: all put on pads, bar the rows unticked.
-  const [choices, setChoices] = useState(NO_CHOICES)
+  // Null until something is chosen: the card's first choices.
+  const [chosen, setChoices] = useState<Choices | null>(null)
+  const choices = chosen ?? firstChoices(ui)
   useEffect(() => {
-    if (!props.open) setChoices(NO_CHOICES)
+    if (!props.open) setChoices(null)
   }, [props.open])
   const silent = ui?.silent ?? null
   const pickRow = choices.picking === null ? undefined : silent?.rows.find((r) => padKey(r.pad) === choices.picking)
   // The pad's silent row gone (the card planned again): the picker closes, and stays closed if the row comes back.
   useEffect(() => {
-    if (choices.picking !== null && pickRow === undefined) setChoices((now) => ({ ...now, picking: null }))
+    if (choices.picking !== null && pickRow === undefined) setChoices({ ...choices, picking: null })
   }, [choices.picking, pickRow === undefined])
   // The picker replaces the card, so the key that opened it (or the picker itself) is gone: focus
   // moves to the picker's title, and back to the pad's PICK SOUND / CHANGE key, instead of <body>.
@@ -332,6 +342,11 @@ function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; choices: Cho
             return ClaudeText.soundName(slot, silent.choices?.names.get(slot) ?? null)
           }}
           onPick={(pad) => props.onChoices({ ...choices, picking: padKey(pad) })}
+          // A pick still the one Arc suggested says so.
+          suggestedOf={(pad) => {
+            const slot = picked.get(padKey(pad))
+            return slot !== undefined && silent.suggested.get(padKey(pad)) === slot
+          }}
         />
       )}
       {sounds !== null && (
@@ -391,9 +406,10 @@ function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; choices: Cho
  * The SILENT PADS block (amber): its header and a row for each pad the card
  * plays that has no sound ([SilentRow]), and under them what a pick does.
  * [soundOf] gives the sound picked for a pad ("512 PIANO") while its SOUNDS
- * row is ticked, else null.
+ * row is ticked, else null; [suggestedOf] whether the pad's pick is the one
+ * Arc suggested.
  */
-function SilentBlock(props: { silent: SilentUi; soundOf(pad: PhysicalPad): string | null; onPick(pad: PhysicalPad): void }): JSX.Element {
+function SilentBlock(props: { silent: SilentUi; soundOf(pad: PhysicalPad): string | null; onPick(pad: PhysicalPad): void; suggestedOf(pad: PhysicalPad): boolean }): JSX.Element {
   const { silent } = props
   return (
     <>
@@ -402,14 +418,17 @@ function SilentBlock(props: { silent: SilentUi; soundOf(pad: PhysicalPad): strin
           <span class="beat-block__bar is-warn" aria-hidden="true" />
           <span class="t-caps beat-sheet__dim">{ClaudeText.SILENT_PADS}</span>
         </div>
-        {silent.rows.map((row) => (
-          <div key={padKey(row.pad)}>
-            <PlateLine />
-            <SilentRow row={row} sound={props.soundOf(row.pad)} canPick={silent.choices !== null} onPick={() => props.onPick(row.pad)} />
-          </div>
-        ))}
+        {silent.rows.map((row) => {
+          const sound = props.soundOf(row.pad)
+          return (
+            <div key={padKey(row.pad)}>
+              <PlateLine />
+              <SilentRow row={row} sound={sound} canPick={silent.choices !== null} suggested={sound !== null && props.suggestedOf(row.pad)} onPick={() => props.onPick(row.pad)} />
+            </div>
+          )
+        })}
       </GridPlate>
-      <p class="t-small beat-sheet__dim">{ClaudeText.SILENT_NOTE}</p>
+      <p class="t-small beat-sheet__dim">{silent.rows.some((r) => props.suggestedOf(r.pad)) ? ClaudeText.SUGGESTED_NOTE : ClaudeText.SILENT_NOTE}</p>
     </>
   )
 }
@@ -418,19 +437,23 @@ function SilentBlock(props: { silent: SilentUi; soundOf(pad: PhysicalPad): strin
  * One silent pad: an amber bar, "D7 · 12 notes, no sound: they will be
  * silent" and its PICK SOUND key (no key when Arc knows no sounds to pick
  * from). Once a sound is picked ([sound], "512 PIANO") the bar is navy, the
- * row says "→ 512 PIANO" and the key is CHANGE.
+ * row says "→ 512 PIANO" and the key is CHANGE; a pick Arc suggested
+ * ([suggested]) is marked SUGGESTED.
  */
-function SilentRow(props: { row: SilentRowUi; sound: string | null; canPick: boolean; onPick(): void }): JSX.Element {
+function SilentRow(props: { row: SilentRowUi; sound: string | null; canPick: boolean; suggested: boolean; onPick(): void }): JSX.Element {
   const { row, sound } = props
   return (
     <div class="beat-silent">
       <span class={`beat-silent__bar${sound === null ? '' : ' is-picked'}`} aria-hidden="true" />
-      <div class="beat-silent__text" role="note" aria-label={sound === null ? ClaudeText.silentRowName(row.pad, row.notes) : ClaudeText.pickedRowName(row.pad, sound)}>
+      <div class="beat-silent__text" role="note" aria-label={sound === null ? ClaudeText.silentRowName(row.pad, row.notes) : ClaudeText.pickedRowName(row.pad, sound, props.suggested)}>
         {sound === null ? (
           <span class="t-small beat-sheet__ink" aria-hidden="true">{ClaudeText.silentRow(row.pad, row.notes)}</span>
         ) : (
           <>
-            <span class="t-small beat-sheet__dim" aria-hidden="true">{ClaudeText.padLabel(row.pad) + ' \u00B7 ' + plural(row.notes, 'note')}</span>
+            <span class="beat-silent__line" aria-hidden="true">
+              <span class="t-small beat-sheet__dim">{ClaudeText.padLabel(row.pad) + ' \u00B7 ' + plural(row.notes, 'note')}</span>
+              {props.suggested && <span class="t-caps beat-silent__suggested">{ClaudeText.SUGGESTED}</span>}
+            </span>
             <span class="t-small beat-sheet__strong beat-sheet__clamp" aria-hidden="true">{'\u2192 ' + sound}</span>
           </>
         )}

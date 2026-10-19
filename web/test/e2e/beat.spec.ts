@@ -7,7 +7,8 @@
 // on the Scenes row puts a card's scenes in the project's place from S01, and is kept for
 // the next card. A card's
 // SOUNDS and SILENT PADS: its sound ticked, a sound picked for a silent pad with PICK
-// SOUND, both put on the pads by IMPORT. A card's FX and PAD SHAPING: APPLY FX switched,
+// SOUND, both put on the pads by IMPORT; a silent pad with a name starts with a sound Arc
+// suggests, until CHANGE picks another. A card's FX and PAD SHAPING: APPLY FX switched,
 // a pad line ticked, and IMPORT applying the FX.
 import { expect, test } from './fixtures'
 
@@ -220,6 +221,42 @@ test('SOUNDS and SILENT PADS: a card\'s sound and one picked for a silent pad go
   await sheet.getByRole('button', { name: 'Import' }).click()
   await expect(sheet).toBeHidden()
   await expect(page.getByRole('status').filter({ hasText: /^Imported to scene S02 and 2 sounds\./ })).toBeVisible()
+})
+
+test('SILENT PADS suggests a sound by the row\'s name, marked SUGGESTED until another is picked', async ({ page }) => {
+  const card = ['ARC BEAT 1', 'name Kick in', '[D]', 'D9 kick | X... .... X... .... |'].join('\n')
+  await page.goto('/?demo#/live')
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
+  await page.evaluate((text) => {
+    const data = new DataTransfer()
+    data.setData('text/plain', text)
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }))
+  }, card)
+  const sheet = page.getByRole('dialog', { name: 'Kick in' })
+  await expect(sheet).toBeVisible()
+  const silent = sheet.getByRole('group', { name: 'Silent pads' })
+  // Picked to begin with, said so, and a ticked SOUNDS row like any pick.
+  const suggested = silent.getByRole('note', { name: /^D9: will get .*, suggested$/ })
+  await expect(suggested).toBeVisible()
+  await expect(silent).toContainText('Suggested')
+  await expect(sheet).toContainText("Arc suggested a sound for these pads from your library, by the card's names for them.")
+  const sounds = sheet.getByRole('group', { name: 'Sounds' })
+  await expect(sounds.getByRole('checkbox', { name: /^D9: No sound becomes / })).toHaveAttribute('aria-checked', 'true')
+  // Unticked under SOUNDS, the pad is silent again; ticked, suggested again.
+  await sounds.getByRole('checkbox', { name: /^D9: No sound becomes / }).click()
+  await expect(silent.getByRole('note', { name: 'D9: 2 notes, no sound, they will be silent' })).toBeVisible()
+  await sounds.getByRole('checkbox', { name: /^D9: No sound becomes / }).click()
+  await expect(suggested).toBeVisible()
+  // CHANGE picks another: no longer the suggestion.
+  await silent.getByRole('button', { name: /^Pick another sound for D9, now / }).click()
+  const picker = page.getByRole('dialog', { name: 'Sound for D9' })
+  await picker.getByRole('button', { name: /^003/ }).click()
+  await expect(silent.getByRole('note', { name: /^D9: will get 003 [^,]*$/ })).toBeVisible()
+  await expect(silent).not.toContainText('Suggested')
+  await expect(sheet).toContainText('A pad with no sound plays nothing.')
+
+  await sheet.getByRole('button', { name: 'Import' }).click()
+  await expect(sheet).toBeHidden()
 })
 
 test("FX and PAD SHAPING: the card's FX old to new with APPLY FX, its pad line ticked, applied by IMPORT", async ({ page }) => {

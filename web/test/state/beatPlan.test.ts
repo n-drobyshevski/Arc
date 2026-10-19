@@ -7,6 +7,8 @@
 // ShareParts object, beatImportUi's blocks its BeatBlocks; soundSetOf and soundChoicesOf take the connected list as an
 // argument (Kotlin's MirrorUi.sounds); the picks for silent pads are keyed by padKey.
 // BeatFxUi's `same` is ClaudeText.isSame; padShapes takes pad keys.
+// Web addition: "each silent pad starts with a sound Arc suggests" (suggestedSounds, which Kotlin tests only through
+// BeatCardTest's suggestSound), on that test's card and library.
 // Left for the steps that port them: the prompt share (PromptText), REPLACE (the projectScenes and replace asserts of
 // "the sheet names where each section goes"), and the synth rows (the four synth tests and "the sheet and IMPORT plan the same sounds", which needs a synth line).
 import { describe, expect, it } from 'vitest'
@@ -43,6 +45,7 @@ import {
   pickedSounds,
   silentUi,
   soundChoicesOf,
+  suggestedSounds,
   soundSet,
   soundSetOf,
   soundsUi,
@@ -535,6 +538,41 @@ B8 bass | X... .... .... .... | .... .... .... .... |
     // The sheet carries it, and a card that isn't readable has none.
     expect(beatImportUi(read(c), ProjectSeq.DEFAULT, 120.0, nameOf, { silent: (it) => silentUi(it, held, true, choices, false, 3) }).silent!.rows.length).toBe(2)
     expect(beatImportUi(read(c), ProjectSeq.DEFAULT, 120.0, nameOf).silent).toBeNull()
+  })
+
+  it('each silent pad starts with a sound Arc suggests, a different one each, from the sounds it can play', () => {
+    const library = new Map([
+      [9, 'KICK 909'], [12, 'Kick 808'], [101, 'SNARE TIGHT'], [202, 'HH CLOSED'], [203, 'HH OPEN'], [312, 'SHAKER'], [340, 'COWBELL'],
+      [401, 'BASS SUB'], [512, 'PIANO'], [513, 'LEAD SAW'], [600, '601.pcm'], [615, 'horn skank amin'], [830, 'jammy bass a 85'],
+    ])
+    const r = BeatCards.read(
+      'ARC BEAT 1\n[A]\nA3 shaker | .o.o .o.o .o.o .o.o |\nA5 open hat | .... .... .... ..x. |\nA6 | x... .... .... .... |\n' +
+        '[B]\nnotes\nB7 at 1.1.1 note F1\n[C]\nC7 chords | x... .... .... .... |\n[D]\nnotes\nD7 at 1.1.1 note C5\n',
+    )
+    const c = r.card!
+    const choices = (unavailable: number[] = []): SoundChoices => ({
+      source: SoundSource.DEVICE,
+      entries: [...library].map(([slot, name]) => ({ slot, name, size: 0 })),
+      unavailable: new Set(unavailable),
+      names: library,
+    })
+    const silent = (ch: SoundChoices | null) => silentUi(c, () => null, true, ch, false, 1)!
+    const at = (g: number, o: number) => padKey(physicalPad(g, o))
+    // By the row's name, its kind, or its notes; A6 has nothing to go by.
+    expect(suggestedSounds(silent(choices()), c, r.names!, FactoryKit.EP133)).toEqual(
+      new Map([[at(0, 7), 203], [at(0, 5), 312], [at(1, 9), 401], [at(2, 9), 615], [at(3, 9), 512]]),
+    )
+    // A sound not available to play is passed over, and one taken by an earlier row goes to the next.
+    const without = suggestedSounds(silent(choices([615])), c, r.names!, FactoryKit.EP133)
+    expect([without.get(at(2, 9)), without.get(at(3, 9))]).toEqual([512, 513])
+    // With the EP-40 kit, chords look among its chord stabs.
+    expect(suggestedSounds(silent(choices([615])), c, r.names!, FactoryKit.EP40).get(at(2, 9))).toBe(600)
+    // No sound list known: nothing to suggest.
+    expect(suggestedSounds(silent(null), c, r.names!, FactoryKit.EP133).size).toBe(0)
+    // The sheet suggests them by the card's row names, with the kit it is given.
+    const sheet = beatImportUi(r, ProjectSeq.DEFAULT, 120.0, nameOf, { silent: () => silentUi(c, () => null, true, choices([615]), false, 1), kit: FactoryKit.EP40 })
+    expect(sheet.silent!.suggested.get(at(2, 9))).toBe(600)
+    expect(beatImportUi(r, ProjectSeq.DEFAULT, 120.0, nameOf, { silent: () => silent(choices()) }).silent!.suggested.get(at(0, 5))).toBe(312)
   })
 
   it('the sounds to pick from are the ones the sound rows choose from, named as the sound set names them', () => {

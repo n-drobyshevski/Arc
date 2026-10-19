@@ -14,8 +14,9 @@
 // blocks in one [BeatBlocks]. SoundRowUi's and SoundsUi's getters are fields,
 // set by soundRowUi and soundsUiOf, BeatFxUi's [changes] is a field set by
 // beatFxUi. The picks for silent pads and the pads padShapes takes are keyed
-// by padKey. Not yet here: the synth rows (SynthVoice), the suggested sounds
-// and REPLACE (BeatReplaceUi, projectScenes).
+// by padKey, as are SilentUi's [suggested] and the row names suggestedSounds
+// takes; beatImportUi's [kit] is in BeatBlocks. Not yet here: the synth rows
+// (SynthVoice).
 
 import { FactoryKit, FactorySounds } from '../core/features/factorySounds'
 import { BeatCards, SoundStatus, allSections, cardPadIsEmpty, isMultiScene, cardSection, cardSound, type BeatCard, type CardImport, type CardPad, type CardProblem, type CardRead, type CardSection, type CardSound, type SoundPick } from '../core/features/beatCard'
@@ -479,6 +480,29 @@ export interface SilentUi {
   readonly choices: SoundChoices | null
   readonly offline: boolean
   readonly project: number | null
+  /** A sound Arc suggests for each pad it could find one for (suggestedSounds; pad key to slot): the sheet starts with them picked. */
+  readonly suggested: ReadonlyMap<number, number>
+}
+
+/**
+ * A sound for each of [silent]'s pads from the sounds PICK SOUND lists
+ * (BeatCards.suggestSound: by the pad's row name in [names], its kind, or its
+ * notes), each a different one, in the rows' order; the ones not available to
+ * play are passed over. Keyed by padKey.
+ */
+export function suggestedSounds(silent: SilentUi, card: BeatCard, names: ReadonlyMap<number, string>, kit: FactoryKit): Map<number, number> {
+  const out = new Map<number, number>()
+  const choices = silent.choices
+  if (choices === null) return out
+  const list = new Map([...choices.names].filter(([slot]) => !choices.unavailable.has(slot)))
+  const taken = new Set<number>()
+  for (const row of silent.rows) {
+    const slot = BeatCards.suggestSound(card, row.pad, names.get(padKey(row.pad)) ?? null, list, taken, kit)
+    if (slot === null) continue
+    out.set(padKey(row.pad), slot)
+    taken.add(slot)
+  }
+  return out
 }
 
 /**
@@ -503,7 +527,7 @@ export function silentUi(
       counts.set(k, (counts.get(k) ?? 0) + n)
     }
   }
-  return { rows: pads.map((pad) => ({ pad, notes: counts.get(padKey(pad)) ?? 0 })), choices, offline, project }
+  return { rows: pads.map((pad) => ({ pad, notes: counts.get(padKey(pad)) ?? 0 })), choices, offline, project, suggested: new Map() }
 }
 
 /**
@@ -715,13 +739,16 @@ export interface BeatReplaceUi {
 /**
  * The sheet's blocks as the pads are now (Kotlin's named arguments of
  * beatImportUi): the card's [sounds] (soundsUi), its [fx] (beatFxUi), its
- * pad lines' [shaping] (padShapingUi) and its [silent] pads (silentUi).
+ * pad lines' [shaping] (padShapingUi) and its [silent] pads (silentUi), and
+ * the factory [kit] Arc plays: the EP-40's chord stabs are where its
+ * suggestions look for chords (EP-133 when not given).
  */
 export interface BeatBlocks {
   readonly sounds?: (card: BeatCard) => SoundsUi | null
   readonly fx?: (card: BeatCard) => BeatFxUi | null
   readonly shaping?: (card: BeatCard) => PadShapingUi | null
   readonly silent?: (card: BeatCard) => SilentUi | null
+  readonly kit?: FactoryKit
 }
 
 /** The card the sheet holds, or null. */
@@ -749,7 +776,7 @@ const KEYPAD: readonly number[] = ROWS.flat()
  * The tempo is offered as a whole number, which is what Arc keeps. The
  * [blocks] give the card's sound lines matched (soundsUi), its FX against the
  * project's (beatFxUi), its pad lines (padShapingUi) and its pads with no
- * sound (silentUi).
+ * sound (silentUi), with a sound suggested for each (suggestedSounds).
  */
 export function beatImportUi(read: CardRead, seq: ProjectSeq, now: number, names: PadNames, blocks: BeatBlocks = {}): BeatImportUi {
   const card = read.card
@@ -767,6 +794,7 @@ export function beatImportUi(read: CardRead, seq: ProjectSeq, now: number, names
   // The same card with REPLACE on: the patterns go where they go either way, the scenes from S01.
   const r = BeatCards.plan(seq, card, true, true)
   const replaced = r.newScene && r.fullGroup === null ? r : null
+  const silent = blocks.silent?.(card) ?? null
   return {
     read,
     title: card.name ?? ClaudeText.CARD,
@@ -781,7 +809,7 @@ export function beatImportUi(read: CardRead, seq: ProjectSeq, now: number, names
     sounds: blocks.sounds?.(card) ?? null,
     fx: blocks.fx?.(card) ?? null,
     shaping: blocks.shaping?.(card) ?? null,
-    silent: blocks.silent?.(card) ?? null,
+    silent: silent === null ? null : { ...silent, suggested: suggestedSounds(silent, card, read.names ?? new Map(), blocks.kit ?? FactoryKit.EP133) },
     scenes: isMultiScene(card) ? sceneRows(card, grids, plan) : [],
     chain: plan.chain !== null && plan.newScene ? { steps: plan.chain } : null,
     noRoom: isMultiScene(card) && plan.fullGroup === null && !plan.newScene,

@@ -123,6 +123,9 @@
 .beat-silent__bar { flex: none; width: 4px; height: 32px; border-radius: 2px; background: var(--warn); }
 .beat-silent__bar.is-picked { background: var(--navy); }
 .beat-silent__text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.beat-silent__line { display: flex; align-items: center; gap: 8px; }
+/* A pick Arc suggested: SUGGESTED in orange beside the pad. */
+.beat-silent__suggested { font-size: 10px; color: var(--signal); white-space: nowrap; }
 
 /* PICK SOUND's head: the pad's cap, its title and what it plays. */
 .beat-pick__head { display: flex; align-items: center; gap: 14px; }

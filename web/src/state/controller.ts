@@ -3085,6 +3085,7 @@ export class ArcController {
           offline,
         ),
       silent: (card) => silentUi(card, (pad) => m?.soundSlot(pad) ?? null, m?.padsKnown() === true, soundChoicesOf(st.mirror, sounds, dk.names), offline, project),
+      kit: this.live.factoryKit(),
     }
   }
 

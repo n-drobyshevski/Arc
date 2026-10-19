@@ -406,13 +406,17 @@ export const ClaudeText = {
 
   /** Under the block: what a sound picked here does. */
   SILENT_NOTE: "A pad with no sound plays nothing. Pick a sound for it: it goes on the pad with IMPORT, with the card's other sounds.",
+  /** A pick Arc made by the card's row name (BeatCards.suggestSound), until the user changes it. */
+  SUGGESTED: 'Suggested',
+  SUGGESTED_NOTE:
+    "Arc suggested a sound for these pads from your library, by the card's names for them. IMPORT puts them on the pads with the card's other sounds; CHANGE picks another, or untick one under SOUNDS.",
 
   /** A silent row for screen readers: "D7: 12 notes, no sound, they will be silent", and once picked "D7: will get 512 PIANO". */
   silentRowName(pad: PhysicalPad, notes: number): string {
     return `${padLabel(pad)}: ${plural(notes, 'note')}, no sound, ${notes === 1 ? 'it' : 'they'} will be silent`
   },
-  pickedRowName(pad: PhysicalPad, sound: string): string {
-    return `${padLabel(pad)}: will get ${sound}`
+  pickedRowName(pad: PhysicalPad, sound: string, suggested = false): string {
+    return `${padLabel(pad)}: will get ${sound}` + (suggested ? ', suggested' : '')
   },
   pickSoundName(pad: PhysicalPad): string {
     return `Pick a sound for ${padLabel(pad)}`
