@@ -10,6 +10,7 @@ ui/
   AppContext.tsx    useController(), useNav()
   nav.ts            the navigation stack (one history entry per layer)
   coachPlace.ts     pure coach-tag placement (tested)
+  lazy.ts           a screen or sheet as a chunk of its own, preloaded when idle
   theme/            tokens.css, cap.css, base.css, theme.ts (applyTheme), fonts.ts
   components/       primitives + the shell (one .tsx + .css each)
   screens/          one file per Kotlin screen (+ its .css)
@@ -22,7 +23,8 @@ ui/
                     window.ts (landscape / short, the display line in the top bar),
                     SoundPicker.tsx (EDIT's device sounds: the pad sheet, the desk's
                     Sounds tab; offline a Device / Factory switch and dimmed rows; its
-                    RangeKey is the Device tab's too, as Kotlin's in PadSheet.kt); the
+                    RangeKey is the Device tab's too, as Kotlin's in PadSheet.kt), memo.ts
+                    (memo, useHas, useIs: what the memoized caps share); the
                     .ts ones are tested
 ```
 
@@ -43,6 +45,31 @@ All screens are ported (no stubs left). Tab sheets mount in `App` under
 `DevicePadsSheet` / `DeviceUploadSheet` (pads, upload, trim); `FontLicenceSheet`
 mounts over Settings and `ProgressSheet` (modal) over any tab. Pure logic the
 screens factored out is tested under `test/ui/`.
+
+## What re-renders (web addition)
+
+The EP-133 publishes its mirror many times a second, and a pad played changes
+KEYS's pad, so the shell reads neither:
+
+- Root and the non-Live tabs read `c.stateShell.value`: the same object while
+  only `mirror` or `keysPad` changes. Its `mirror` and `keysPad` may be old;
+  read them from `c.state` (or `c.state.peek()` in a callback). Settings reads
+  `c.state.value` in its own branch only.
+- `LiveTab` alone follows the mirror, through `c.liveMirror` (the mirror, its
+  last read offline, or one kept note to connect). KEYS's pad and its name come
+  from `c.keysSound`, read only where they show; the device's tempo alone is
+  `c.deviceBpm`.
+- `c.playing` goes down as the signal itself; each row reads its own answer
+  with `useIs` (`live/memo.ts`). Live's pads, KEYS keys, the piano's keys and
+  the drawn device's parts are `memo` components fed values, reading their
+  voice with `useHas`; `playingNotes` stays the same set while its notes do.
+  Give a memoized part kept callbacks (a latest ref), not new arrows.
+- Settings, Debug, Compare, Contents, Search and the beat import, keyboard keys
+  and font licence sheets are `lazy` (`lazy.ts`): chunks of their own, fetched
+  once the app is idle.
+
+The `?demo` render counter (`dev/perf.ts`, `window.__arcPerf`) and
+`test/e2e/perf.spec.ts` (`PERF=1`) show what a change does to these.
 
 ## Navigation (`nav.ts`)
 
