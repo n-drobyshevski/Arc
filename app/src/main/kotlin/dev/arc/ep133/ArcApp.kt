@@ -21,6 +21,7 @@ class ArcApp : Application() {
         super.onCreate()
         CrashReport.install(this)
         val trafficLog = TrafficLog()
+        StallWatch.start(trafficLog)
         val library = Library(ArcDatabase.open(this), PakStore(filesDir), ExternalLibrary(this))
         controller = ArcController(
             context = this,
@@ -31,5 +32,6 @@ class ArcApp : Application() {
         )
         // Why arc stopped last time, if it crashed: first in the debug log.
         CrashReport.report(this, trafficLog)
+        StallWatch.since(trafficLog, "app ready")
     }
 }

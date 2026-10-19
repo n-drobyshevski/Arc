@@ -211,6 +211,10 @@ class MainActivity : ComponentActivity() {
         pendingSave = savedInstanceState?.getString(KEY_PENDING_SAVE)
         pendingMic = savedInstanceState?.getString(KEY_PENDING_MIC)
         if (savedInstanceState == null) handleIntent(intent)
+        // The first frame drawn: how long a start takes, in the debug log.
+        if (savedInstanceState == null) android.view.Choreographer.getInstance().postFrameCallback {
+            StallWatch.since(controller.trafficLog, "first frame")
+        }
         setContent {
             val settings by controller.settings.collectAsStateWithLifecycle()
             val dark = when (settings.theme) {
