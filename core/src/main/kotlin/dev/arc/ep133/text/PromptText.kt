@@ -2,6 +2,7 @@ package dev.arc.ep133.text
 
 import dev.arc.ep133.features.ClaudePrompt
 import dev.arc.ep133.features.FactoryKit
+import dev.arc.ep133.features.Feel
 import dev.arc.ep133.features.Genre
 import dev.arc.ep133.features.GenreFamily
 import dev.arc.ep133.features.Genres
@@ -38,6 +39,7 @@ object PromptText {
     /** A slot's name: over its answers, and for screen readers. */
     fun slot(s: PromptSlot) = when (s) {
         PromptSlot.BARS -> "Length"
+        PromptSlot.FEEL -> "Feel"
         PromptSlot.GENRE -> "Genre"
         PromptSlot.TEMPO -> "Tempo"
         PromptSlot.KIT -> "Kit"
@@ -53,6 +55,9 @@ object PromptText {
     }
 
     fun family(f: GenreFamily) = when (f) {
+        GenreFamily.HOUSE -> "House"
+        GenreFamily.BASS -> "Bass"
+        GenreFamily.CHILL -> "Chill"
         GenreFamily.CLUB -> "Club"
         GenreFamily.TECHNO -> "Techno"
         GenreFamily.HIP_HOP -> "Hip-hop"
@@ -61,6 +66,41 @@ object PromptText {
     }
 
     // ---------- The sentence's words ----------
+    fun feel(f: Feel) = when (f) {
+        Feel.DREAMY -> "dreamy"
+        Feel.DARK -> "dark"
+        Feel.UPLIFTING -> "uplifting"
+        Feel.LAID_BACK -> "laid-back"
+        Feel.DRIVING -> "driving"
+        Feel.AGGRESSIVE -> "aggressive"
+        Feel.DUSTY -> "dusty"
+        Feel.GRITTY -> "gritty"
+        Feel.SPACIOUS -> "spacious"
+        Feel.MINIMAL -> "minimal"
+        Feel.BOUNCY -> "bouncy"
+        Feel.HYPNOTIC -> "hypnotic"
+    }
+
+    /** What a feel word does to the recipe, in a line under the answers (the skill's genres.md has it all). */
+    fun feelHint(f: Feel) = when (f) {
+        Feel.DREAMY -> "Dreamy: long chords, softer hits, an echo on the chords."
+        Feel.DARK -> "Dark: minor or Phrygian, a low bass, a sparse top."
+        Feel.UPLIFTING -> "Uplifting: major chords, a rising lead, open hats."
+        Feel.LAID_BACK -> "Laid-back: slower, more swing, the snare a little late."
+        Feel.DRIVING -> "Driving: faster, straight hats, the bass pumping with the kick."
+        Feel.AGGRESSIVE -> "Aggressive: accents, rolls, distortion and compression."
+        Feel.DUSTY -> "Dusty: swing, uneven hits, a low-pass on everything."
+        Feel.GRITTY -> "Gritty: hard accents, crushed sounds, distorted drums."
+        Feel.SPACIOUS -> "Spacious: few hits, long notes, a dotted delay."
+        Feel.MINIMAL -> "Minimal: three or four pads, small changes."
+        Feel.BOUNCY -> "Bouncy: a syncopated kick, swing, an octave-jumping bass."
+        Feel.HYPNOTIC -> "Hypnotic: a repeating one-bar motif, three against four."
+    }
+
+    const val PLAIN = "plain"
+    const val HINT_FEEL = "Up to two words. Each changes the recipe: tempo in its range, swing, how busy, the chords, the FX."
+    fun feels(list: List<Feel>) = if (list.isEmpty()) PLAIN else list.joinToString(", ") { feel(it) }
+
     fun bars(n: Int) = "$n-bar"
     fun barsKey(n: Int) = Format.plural(n, "bar")
     const val ANY_STYLE = "any style"
@@ -160,6 +200,7 @@ object PromptText {
         val g = Genres.of(p.genre)
         return when (s) {
             PromptSlot.BARS -> bars(p.bars)
+            PromptSlot.FEEL -> feels(p.feels)
             PromptSlot.GENRE -> if (p.task == PromptTask.IMPROVE) g?.let(::toward) ?: OWN_STYLE else g?.words ?: ANY_STYLE
             PromptSlot.TEMPO -> p.tempo?.let(::tempo) ?: ANY_TEMPO
             PromptSlot.KIT -> kit(kit)
@@ -183,9 +224,9 @@ object PromptText {
         fun s(slot: PromptSlot) = PromptPiece(value(p, slot, kit), slot)
         fun w(text: String) = PromptPiece(text)
         return when (p.task) {
-            PromptTask.BEAT -> listOf(w("Write a"), s(PromptSlot.BARS), w("beat in"), s(PromptSlot.GENRE), w("at"), s(PromptSlot.TEMPO), w("for the"), s(PromptSlot.KIT), w("kit with"), s(PromptSlot.PARTS))
+            PromptTask.BEAT -> listOf(w("Write a"), s(PromptSlot.BARS), w("beat in"), s(PromptSlot.FEEL), s(PromptSlot.GENRE), w("at"), s(PromptSlot.TEMPO), w("for the"), s(PromptSlot.KIT), w("kit with"), s(PromptSlot.PARTS))
             PromptTask.IMPROVE -> listOf(w("Improve it:"), s(PromptSlot.GOAL), s(PromptSlot.GENRE), w("in"), s(PromptSlot.EDITS), w("on the"), s(PromptSlot.KIT), w("kit"))
-            PromptTask.TRACK -> listOf(w("Write a"), s(PromptSlot.LENGTH), w("track in"), s(PromptSlot.GENRE), w("at"), s(PromptSlot.TEMPO), w("for the"), s(PromptSlot.KIT), w("kit"), s(PromptSlot.START))
+            PromptTask.TRACK -> listOf(w("Write a"), s(PromptSlot.LENGTH), w("track in"), s(PromptSlot.FEEL), s(PromptSlot.GENRE), w("at"), s(PromptSlot.TEMPO), w("for the"), s(PromptSlot.KIT), w("kit"), s(PromptSlot.START))
             PromptTask.PLAY -> listOf(w("Teach me to play it"), s(PromptSlot.WAY), w("as"), s(PromptSlot.LEVEL), w("starting at"), s(PromptSlot.SPEED))
             PromptTask.LEARN -> listOf(w("Teach me"), s(PromptSlot.LESSON), w("one step at a time"))
         }
@@ -222,11 +263,14 @@ object PromptText {
         val chain = pick == SharePick.CHAIN
         val style = "- Style: " + (g?.let { "${it.words} (start from the skill's recipe)" } ?: "any style you like")
         val tempo = p.tempo?.let { "- Tempo: $it BPM" }
+        // The feel words: the skill's genres.md turns each into changes to the recipe.
+        val feel = p.feels.takeIf { it.isNotEmpty() }?.let { f -> "- Feel: ${list(f.map(::feel))} (the skill's feel words: change the recipe the way they say)" }
         val choose = if (sounds) FROM_LIST else null
         return when (p.task) {
             PromptTask.BEAT -> lines(
                 "Use the arc-beats skill to write a new beat for my EP-133. I'll paste your card into the Arc app and play it, so give one complete ARC BEAT card that passes the skill's check.",
                 style,
+                feel,
                 tempo,
                 "- Length: ${p.bars} ${if (p.bars == 1) "bar" else "bars"}",
                 "- Parts: " + (if (p.parts.isEmpty()) "drums only" else "drums, " + list(PromptPart.entries.filter { it in p.parts }.map(::partWords))),
@@ -251,6 +295,7 @@ object PromptText {
                     lines(
                         "Use the arc-beats skill to continue this EP-133 $what from Arc into a track idea: a card of scenes with a chain line that I'll paste into Arc and play.",
                         style,
+                        feel,
                         tempo,
                         length,
                         "- Start: this $what as its first ${if (chain) "scenes" else "scene"}, then change one or two things from scene to scene",
@@ -260,6 +305,7 @@ object PromptText {
                     lines(
                         "Use the arc-beats skill to write a track idea for my EP-133: a card of scenes with a chain line that I'll paste into Arc and play.",
                         style,
+                        feel,
                         tempo,
                         length,
                         "- Shape: an intro, a drop, a breakdown and a second drop, changing one or two things from scene to scene",
@@ -363,7 +409,7 @@ object PromptText {
     fun name(p: ClaudePrompt): String {
         val g = Genres.of(p.genre)
         val base = when (p.task) {
-            PromptTask.BEAT -> listOfNotNull(g?.name ?: task(p.task), p.tempo?.toString()).joinToString(" ")
+            PromptTask.BEAT -> (feelsWord(p) + listOfNotNull(g?.name?.let { if (p.feels.isEmpty()) it else it.lowercase() } ?: task(p.task), p.tempo?.toString()).joinToString(" "))
             PromptTask.IMPROVE -> "${task(p.task)} · " + (g?.name ?: goalKey(p.goal))
             PromptTask.TRACK -> "${task(p.task)} · " + listOfNotNull(g?.name, p.tempo?.toString()).joinToString(" ").ifEmpty { barsKey(p.length) }
             PromptTask.PLAY -> "${task(p.task)} \u00B7 ${wayKey(p.way)} ${p.speed}%"
@@ -371,6 +417,9 @@ object PromptText {
         }
         return if (p.text != null) "$base ✎" else base
     }
+
+    // "Dreamy " before a saved prompt's genre.
+    private fun feelsWord(p: ClaudePrompt) = p.feels.firstOrNull()?.let { feel(it).replaceFirstChar(Char::uppercase) + " " } ?: ""
 
     /** [name], with " 2", " 3"... when [taken] has it already. */
     fun uniqueName(name: String, taken: Collection<String>): String {

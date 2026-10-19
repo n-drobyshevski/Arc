@@ -1,7 +1,7 @@
 package dev.arc.ep133.features
 
 /** The families the prompt builder's genres are grouped in, in the order its keys show them. */
-enum class GenreFamily { CLUB, TECHNO, HIP_HOP, BREAKS, RIDDIM }
+enum class GenreFamily { HOUSE, TECHNO, HIP_HOP, BREAKS, BASS, CLUB, CHILL, RIDDIM }
 
 /**
  * A recipe of the arc-beats skill's genres.md the prompt builder offers: its heading there ([name]; the EP-40's
@@ -23,14 +23,13 @@ class Genre(
 
 object Genres {
     val ALL: List<Genre> = listOf(
-        Genre("house", "House", GenreFamily.CLUB, 120..128, 124),
-        Genre("hip-house", "Hip-house", GenreFamily.CLUB, 112..124, 118),
-        Genre("uk-garage", "UK garage", GenreFamily.CLUB, 130..136, 132, "Garage", "UK garage"),
-        Genre("jersey-club", "Jersey club", GenreFamily.CLUB, 130..140, 135, "Jersey", "Jersey club"),
-        Genre("footwork", "Footwork", GenreFamily.CLUB, 155..165, 160),
-        Genre("dembow", "Reggaeton and dembow", GenreFamily.CLUB, 88..98, 94, "Dembow", "reggaeton or dembow"),
-        Genre("afrobeats", "Afrobeats", GenreFamily.CLUB, 98..112, 104, words = "Afrobeats"),
-        Genre("pop-rock", "Pop and rock backbeat", GenreFamily.CLUB, 90..130, 100, "Pop/rock", "pop or rock backbeat"),
+        Genre("house", "House", GenreFamily.HOUSE, 120..128, 124),
+        Genre("deep-house", "Deep house", GenreFamily.HOUSE, 118..124, 122, "Deep"),
+        Genre("tech-house", "Tech house", GenreFamily.HOUSE, 124..128, 126, "Tech"),
+        Genre("hip-house", "Hip-house", GenreFamily.HOUSE, 112..124, 118),
+        Genre("disco", "Disco and nu-disco", GenreFamily.HOUSE, 112..122, 118, "Disco", "disco"),
+        Genre("afro-house", "Afro house", GenreFamily.HOUSE, 118..124, 122, "Afro", "Afro house"),
+        Genre("amapiano", "Amapiano", GenreFamily.HOUSE, 108..115, 112),
         Genre("techno", "Techno", GenreFamily.TECHNO, 126..138, 132),
         Genre("detroit", "Detroit techno", GenreFamily.TECHNO, 125..132, 128, "Detroit", "Detroit techno"),
         Genre("minimal", "Minimal techno", GenreFamily.TECHNO, 124..130, 127, "Minimal"),
@@ -47,10 +46,31 @@ object Genres {
         Genre("lo-fi", "Lo-fi", GenreFamily.HIP_HOP, 70..86, 76),
         Genre("trap", "Trap", GenreFamily.HIP_HOP, 130..150, 140),
         Genre("drill", "Drill", GenreFamily.HIP_HOP, 138..146, 142),
+        Genre("phonk", "Phonk", GenreFamily.HIP_HOP, 130..150, 140),
+        Genre("g-funk", "G-funk", GenreFamily.HIP_HOP, 88..100, 94, words = "G-funk"),
         Genre("dnb", "Drum and bass", GenreFamily.BREAKS, 170..176, 174, "DnB"),
+        Genre("liquid", "Liquid drum and bass", GenreFamily.BREAKS, 170..176, 174, "Liquid"),
         Genre("jungle", "Jungle", GenreFamily.BREAKS, 160..170, 166),
         Genre("breakcore", "Breakcore", GenreFamily.BREAKS, 160..200, 180),
         Genre("breakbeat", "Breakbeat", GenreFamily.BREAKS, 120..135, 126),
+        Genre("electro", "Electro", GenreFamily.BREAKS, 125..135, 128),
+        Genre("uk-garage", "UK garage", GenreFamily.BASS, 130..136, 132, "Garage", "UK garage"),
+        Genre("bassline", "Bassline", GenreFamily.BASS, 135..140, 137),
+        Genre("uk-funky", "UK funky", GenreFamily.BASS, 128..132, 130, words = "UK funky"),
+        Genre("grime", "Grime", GenreFamily.BASS, 138..142, 140),
+        Genre("dubstep", "Dubstep", GenreFamily.BASS, 138..142, 140),
+        Genre("halftime", "Halftime", GenreFamily.BASS, 80..88, 85),
+        Genre("jersey-club", "Jersey club", GenreFamily.CLUB, 130..140, 135, "Jersey", "Jersey club"),
+        Genre("footwork", "Footwork", GenreFamily.CLUB, 155..165, 160),
+        Genre("dembow", "Reggaeton and dembow", GenreFamily.CLUB, 88..98, 94, "Dembow", "reggaeton or dembow"),
+        Genre("moombahton", "Moombahton", GenreFamily.CLUB, 108..112, 110, "Moombah"),
+        Genre("baile-funk", "Baile funk", GenreFamily.CLUB, 125..135, 130, "Baile"),
+        Genre("afrobeats", "Afrobeats", GenreFamily.CLUB, 98..112, 104, words = "Afrobeats"),
+        Genre("pop-rock", "Pop and rock backbeat", GenreFamily.CLUB, 90..130, 100, "Pop/rock", "pop or rock backbeat"),
+        Genre("trip-hop", "Trip-hop", GenreFamily.CHILL, 84..96, 90),
+        Genre("downtempo", "Downtempo", GenreFamily.CHILL, 95..110, 100),
+        Genre("neo-soul", "Neo-soul", GenreFamily.CHILL, 80..95, 88),
+        Genre("synthwave", "Synthwave", GenreFamily.CHILL, 100..118, 110),
         Genre("one-drop", "One drop", GenreFamily.RIDDIM, 70..80, 76),
         Genre("rockers", "Rockers", GenreFamily.RIDDIM, 75..85, 80),
         Genre("steppers", "Steppers", GenreFamily.RIDDIM, 72..84, 78),
@@ -69,7 +89,13 @@ object Genres {
 enum class PromptTask { BEAT, IMPROVE, TRACK, PLAY, LEARN }
 
 /** A word of the prompt's sentence that can be changed (tapped on the glass). */
-enum class PromptSlot { BARS, GENRE, TEMPO, KIT, PARTS, GOAL, EDITS, LENGTH, START, LESSON, WAY, LEVEL, SPEED }
+enum class PromptSlot { BARS, FEEL, GENRE, TEMPO, KIT, PARTS, GOAL, EDITS, LENGTH, START, LESSON, WAY, LEVEL, SPEED }
+
+/**
+ * A feel word before the genre ("dreamy lo-fi"): the skill's genres.md turns each into changes to the recipe (tempo
+ * within its range, swing, density, harmony, FX); a prompt takes up to [ClaudePrompt.MAX_FEELS].
+ */
+enum class Feel { DREAMY, DARK, UPLIFTING, LAID_BACK, DRIVING, AGGRESSIVE, DUSTY, GRITTY, SPACIOUS, MINIMAL, BOUNCY, HYPNOTIC }
 
 /** How a PLAY prompt wants the card taught: finger drumming, step entry, performing it, or its KEYS parts. */
 enum class PlayWay { FINGERS, STEPS, PERFORM, KEYS }
@@ -94,6 +120,8 @@ enum class SharePick { SCENE, PATTERN, CHAIN }
 data class ClaudePrompt(
     val task: PromptTask = PromptTask.IMPROVE,
     val bars: Int = 4,
+    /** The feel words before the genre, in the order picked (the first leads). */
+    val feels: List<Feel> = emptyList(),
     val genre: String? = null,
     val tempo: Int? = null,
     val kit: FactoryKit? = null,
@@ -115,15 +143,18 @@ data class ClaudePrompt(
     /** The words its sentence shows, in order (the glass's). */
     val slots: List<PromptSlot>
         get() = when (task) {
-            PromptTask.BEAT -> listOf(PromptSlot.BARS, PromptSlot.GENRE, PromptSlot.TEMPO, PromptSlot.KIT, PromptSlot.PARTS)
+            PromptTask.BEAT -> listOf(PromptSlot.BARS, PromptSlot.FEEL, PromptSlot.GENRE, PromptSlot.TEMPO, PromptSlot.KIT, PromptSlot.PARTS)
             PromptTask.IMPROVE -> listOf(PromptSlot.GOAL, PromptSlot.GENRE, PromptSlot.EDITS, PromptSlot.KIT)
-            PromptTask.TRACK -> listOf(PromptSlot.LENGTH, PromptSlot.GENRE, PromptSlot.TEMPO, PromptSlot.KIT, PromptSlot.START)
+            PromptTask.TRACK -> listOf(PromptSlot.LENGTH, PromptSlot.FEEL, PromptSlot.GENRE, PromptSlot.TEMPO, PromptSlot.KIT, PromptSlot.START)
             PromptTask.PLAY -> listOf(PromptSlot.WAY, PromptSlot.LEVEL, PromptSlot.SPEED)
             PromptTask.LEARN -> listOf(PromptSlot.LESSON)
         }
 
     /** Another task, its own words again (a hand-edited text is for the task it was written for). */
     fun withTask(t: PromptTask): ClaudePrompt = if (t == task) this else copy(task = t, text = null)
+
+    /** [f] in or out of the feel words; a third one in lets the first go. */
+    fun withFeel(f: Feel): ClaudePrompt = copy(feels = if (f in feels) feels - f else (feels + f).takeLast(MAX_FEELS))
 
     /** A genre picked: the tempo follows its recipe's; none (any style) leaves the tempo as it is. */
     fun withGenre(g: Genre?): ClaudePrompt = copy(genre = g?.id, tempo = g?.bpm ?: tempo)
@@ -132,6 +163,7 @@ data class ClaudePrompt(
     fun encode(): String = listOfNotNull(
         "task=${task.name}",
         "bars=$bars",
+        feels.takeIf { it.isNotEmpty() }?.let { f -> "feels=${f.joinToString(",") { it.name }}" },
         genre?.let { "genre=$it" },
         tempo?.let { "tempo=$it" },
         kit?.let { "kit=${it.id}" },
@@ -152,6 +184,7 @@ data class ClaudePrompt(
         val EDITS = listOf(1, 3, 5)
         val LENGTHS = listOf(16, 32, 64)
         val SPEEDS = listOf(50, 75, 100)
+        const val MAX_FEELS = 2
 
         /** The lessons of the skill's lessons.md, in order: lesson n is [LESSONS] [n - 1]. */
         val LESSONS = listOf(
@@ -170,6 +203,7 @@ data class ClaudePrompt(
             return ClaudePrompt(
                 task = PromptTask.entries.firstOrNull { it.name == map["task"] } ?: d.task,
                 bars = map["bars"]?.toIntOrNull()?.takeIf { it in BARS } ?: d.bars,
+                feels = map["feels"]?.split(",")?.mapNotNull { n -> Feel.entries.firstOrNull { it.name == n } }?.distinct()?.take(MAX_FEELS) ?: d.feels,
                 genre = map["genre"]?.takeIf { Genres.of(it) != null },
                 tempo = map["tempo"]?.toIntOrNull()?.takeIf { it in TEMPOS },
                 kit = FactoryKit.ofId(map["kit"]),

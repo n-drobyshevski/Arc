@@ -36,6 +36,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -123,7 +124,16 @@ internal fun RowScope.WordKey(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
     ) {
-        Text(label.uppercase(), style = ArcType.capsKeySmall.copy(fontSize = 11.sp, lineHeight = 13.sp), color = ink, maxLines = 2, textAlign = TextAlign.Center)
+        // One word shrinks to fit rather than break; two or more may take two lines.
+        Text(
+            label.uppercase(),
+            style = ArcType.capsKeySmall.copy(fontSize = 11.sp, lineHeight = 13.sp),
+            color = ink,
+            maxLines = if (' ' in label.trim()) 2 else 1,
+            softWrap = ' ' in label.trim(),
+            textAlign = TextAlign.Center,
+            autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = 11.sp, stepSize = 0.5.sp),
+        )
         sub?.let { Text(it, style = ArcType.capsKeySmall.copy(fontSize = 9.sp, lineHeight = 11.sp), color = if (on) c.onNavy.copy(alpha = 0.75f) else c.signal, maxLines = 3, textAlign = TextAlign.Center) }
     }
 }

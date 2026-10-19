@@ -2453,6 +2453,19 @@ fun LiveToolsClaudeGenrePreview() = Live(
     claude = ClaudeUi(sounds = 212, prompt = dubBeat, saved = savedPrompts, picking = dev.arc.ep133.features.PromptSlot.GENRE),
 )
 
+// The feel word tapped: dreamy and dark lit, the twelve words as keys, what the last one does under the glass.
+@PreviewTest
+@Preview(name = "Live tools claude feel", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeFeelPreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(
+        sounds = 212,
+        prompt = dubBeat.copy(feels = listOf(dev.arc.ep133.features.Feel.DREAMY, dev.arc.ep133.features.Feel.DARK)),
+        picking = dev.arc.ep133.features.PromptSlot.FEEL,
+    ),
+)
+
 // IMPROVE, asking for more drive toward dub techno, the scene on the glass; the dark theme.
 @PreviewTest
 @Preview(name = "Live tools claude improve dark", widthDp = 412, heightDp = 960, showBackground = true)

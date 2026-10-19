@@ -47,6 +47,7 @@ import dev.arc.ep133.controller.NO_LIGHTS
 import dev.arc.ep133.controller.Weight
 import dev.arc.ep133.features.ClaudePrompt
 import dev.arc.ep133.features.FactoryKit
+import dev.arc.ep133.features.Feel
 import dev.arc.ep133.features.GenreFamily
 import dev.arc.ep133.features.Genres
 import dev.arc.ep133.features.PlayLevel
@@ -245,6 +246,7 @@ internal fun ClaudeDeck(claude: ClaudeUi, group: Int) {
 
 private fun slotHint(slot: PromptSlot, p: ClaudePrompt): String = when (slot) {
     PromptSlot.GENRE -> PromptText.hintGenre(Genres.of(p.genre))
+    PromptSlot.FEEL -> p.feels.lastOrNull()?.let(PromptText::feelHint) ?: PromptText.HINT_FEEL
     PromptSlot.TEMPO -> PromptText.hintTempo(Genres.of(p.genre))
     PromptSlot.PARTS -> PromptText.HINT_PARTS
     PromptSlot.KIT -> PromptText.HINT_KIT
@@ -267,7 +269,6 @@ private fun Answers(slot: PromptSlot, p: ClaudePrompt, kit: FactoryKit, claude: 
         PromptSlot.GENRE -> {
             KeyGrid(
                 GenreFamily.entries.map { f -> { WordKey(PromptText.family(f), PromptText.family(f), { family = f }, selected = f == family) } },
-                columns = GenreFamily.entries.size,
             )
             KeyGrid(
                 Genres.inFamily(family).map { x ->
@@ -285,6 +286,11 @@ private fun Answers(slot: PromptSlot, p: ClaudePrompt, kit: FactoryKit, claude: 
             )
             extras += { WordKey(PromptText.KEY_LIVE, PromptText.liveTempoName(claude.liveTempo), { set(p.copy(tempo = claude.liveTempo)) }, sub = "${claude.liveTempo}", selected = p.tempo == claude.liveTempo) }
             extras += { WordKey(PromptText.KEY_ANY, PromptText.ANY_TEMPO_NAME, { set(p.copy(tempo = null)) }, selected = p.tempo == null) }
+        }
+        // Up to two feel words, in the order tapped; ANY takes them all off.
+        PromptSlot.FEEL -> {
+            KeyGrid(Feel.entries.map { f -> { WordKey(PromptText.feel(f), PromptText.feel(f), { set(p.withFeel(f)) }, checked = f in p.feels) } })
+            extras += { WordKey(PromptText.KEY_ANY, PromptText.PLAIN, { set(p.copy(feels = emptyList())) }, selected = p.feels.isEmpty()) }
         }
         PromptSlot.BARS -> KeyGrid(ClaudePrompt.BARS.map { n -> { WordKey(PromptText.barsKey(n), PromptText.barsKey(n), { set(p.copy(bars = n)) }, selected = p.bars == n) } })
         PromptSlot.LENGTH -> KeyGrid(ClaudePrompt.LENGTHS.map { n -> { WordKey(PromptText.barsKey(n), PromptText.barsKey(n), { set(p.copy(length = n)) }, selected = p.length == n) } }, columns = 3)

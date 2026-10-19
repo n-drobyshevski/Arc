@@ -29,7 +29,8 @@ class ClaudePromptTest {
         assertEquals(setOf("One drop", "Rockers", "Steppers", "Dub", "Digital riddim", "Dancehall", "UK dub"), Genres.ALL.filter { it.ep40 }.map { it.name }.toSet())
         assertTrue(Regex("^## (.+) \\(EP-40\\)$", RegexOption.MULTILINE).findAll(text).all { m -> Genres.ALL.first { it.name == m.groupValues[1] }.ep40 })
         assertEquals(Genres.ALL.size, Genres.ALL.map { it.id }.toSet().size)
-        // Each family fits the answer keys: three rows of four at most.
+        // Every family has its genres; each fits the answer keys, three rows of four at most.
+        assertEquals(GenreFamily.entries.toSet(), Genres.ALL.map { it.family }.toSet())
         for (f in GenreFamily.entries) assertTrue(Genres.inFamily(f).size in 1..12, f.name)
     }
 
@@ -131,6 +132,31 @@ class ClaudePromptTest {
     }
 
     @Test
+    fun `up to two feel words go before the genre, the first leading, and into the prompt as a list`() {
+        var p = ClaudePrompt(PromptTask.BEAT).withGenre(Genres.of("lo-fi"))
+        p = p.withFeel(Feel.DREAMY)
+        assertEquals("Write a 4-bar beat in dreamy lo-fi at 76 BPM for the EP-133 kit with bass", PromptText.sentence(p, FactoryKit.EP133).joinToString(" ") { it.text })
+        p = p.withFeel(Feel.DARK).withFeel(Feel.HYPNOTIC)
+        assertEquals(listOf(Feel.DARK, Feel.HYPNOTIC), p.feels)
+        assertEquals(p, ClaudePrompt.decode(p.encode()))
+        assertEquals(listOf(Feel.HYPNOTIC), p.withFeel(Feel.DARK).feels)
+        assertTrue(PromptText.prompt(p, SharePick.SCENE, false).contains("\n- Style: lo-fi (start from the skill's recipe)\n- Feel: dark and hypnotic (the skill's feel words: change the recipe the way they say)\n- Tempo: 76 BPM\n"))
+        assertFalse(PromptText.prompt(p.copy(feels = emptyList()), SharePick.SCENE, false).contains("Feel"))
+        assertEquals("Dark lo-fi 76", PromptText.name(p))
+        assertEquals(listOf(Feel.DREAMY), ClaudePrompt.decode("feels=DREAMY,DREAMY,NOPE").feels)
+        // A track has them too; an improve doesn't.
+        assertTrue(PromptSlot.FEEL in ClaudePrompt(PromptTask.TRACK).slots)
+        assertFalse(PromptSlot.FEEL in ClaudePrompt(PromptTask.IMPROVE).slots)
+    }
+
+    @Test
+    fun `the skill's genres md describes every feel word`() {
+        val text = references.resolve("genres.md").readText()
+        val table = text.substring(text.indexOf("## Feel words"), text.indexOf("## House"))
+        for (f in Feel.entries) assertTrue(table.contains("| " + PromptText.feel(f).replaceFirstChar(Char::uppercase) + " |"), f.name)
+    }
+
+    @Test
     fun `a play asks to be taught the card, the way, the level and the start as a list`() {
         val p = ClaudePrompt(PromptTask.PLAY, way = PlayWay.STEPS, level = PlayLevel.SOME, speed = 75)
         assertTrue(p.withCard)
@@ -153,7 +179,7 @@ class ClaudePromptTest {
     fun `the glass's sentence has a slot for each choice`() {
         val p = ClaudePrompt(PromptTask.BEAT, genre = "uk-garage", tempo = 132, parts = setOf(PromptPart.LEAD, PromptPart.BASS))
         val s = PromptText.sentence(p, FactoryKit.EP40)
-        assertEquals("Write a 4-bar beat in UK garage at 132 BPM for the EP-40 kit with bass · lead", s.joinToString(" ") { it.text })
+        assertEquals("Write a 4-bar beat in plain UK garage at 132 BPM for the EP-40 kit with bass · lead", s.joinToString(" ") { it.text })
         for (t in PromptTask.entries) {
             val q = p.copy(task = t)
             assertEquals(q.slots, PromptText.sentence(q, FactoryKit.EP133).mapNotNull(PromptPiece::slot))
