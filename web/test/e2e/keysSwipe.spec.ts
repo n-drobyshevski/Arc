@@ -23,6 +23,9 @@ test.describe('upright', () => {
     await expect(page.locator('[data-pad]')).toHaveCount(12)
     await page.getByRole('button', { name: 'Pads. Tap for keys.' }).click()
     await expect(page.locator('.live-kgrid')).toBeVisible()
+    // The offline toast at the window's foot would take the drag from the words under it.
+    await expect(page.locator('.toast')).toContainText('ready to work offline')
+    await expect(page.locator('.toast')).toHaveCount(0)
 
     const octave = page.getByRole('button', { name: /^Octave \d/ })
     await expect(octave).toHaveAttribute('aria-description', 'Next: right arrow. Previous: left arrow')
