@@ -1,6 +1,8 @@
 // BEAT CARDS end to end, on the simulated EP-133 of ?demo: Live tools' Claude page as the
-// device's display (its picks and SHARE off with no notes, the glass saying so, PASTE held
-// opening a card file), a beat card pasted on Live opening its
+// device's display (its picks and SHARE off with no notes, the glass saying so, PASTE CARD held
+// opening a card file), the prompt builder (NEW: a genre and its tempo picked on the sentence's
+// words, NEXT and DONE, SHARE alone and the glass waiting, EDIT's own words with COPY, SAVE and a
+// saved prompt brought back and deleted, the prompt kept as Live tools close), a beat card pasted on Live opening its
 // sheet (the grid, where it goes, the tempo's SET key), IMPORT placing it with a toast, and
 // PASTE reading the clipboard. A card of scenes imported sets a chain: CHAIN picked, SHARE
 // shares it, followed by the sound list while SOUNDS is on, and the glass waits for Claude's
@@ -31,18 +33,21 @@ test('BEAT CARDS: the CLAUDE section, a pasted card, IMPORT', async ({ page }) =
   const tools = page.getByRole('dialog', { name: 'Live tools' })
   const claude = tools.getByRole('region', { name: 'Claude' })
   await expect(claude).toBeVisible()
-  // Nothing recorded yet: the picks and SHARE are off, and say so; the glass too.
+  // The prompt as it starts: IMPROVE, of the card picked. Nothing recorded yet: the picks and SHARE are off, and say so; the glass too.
+  await expect(claude.getByRole('tab', { name: 'Task: Improve' })).toHaveAttribute('aria-selected', 'true')
   await expect(claude.getByRole('radio', { name: 'Scene S01, no notes yet' })).toBeDisabled()
   await expect(claude.getByRole('radio', { name: 'A \u00B7 01, no notes yet' })).toBeDisabled()
   await expect(claude.getByRole('radio', { name: 'Add scenes to the chain to share it' })).toBeDisabled()
   await expect(claude.getByRole('button', { name: 'Share scene S01 with Claude, no notes yet' })).toBeDisabled()
-  await expect(claude).toContainText('Claude \u00B7 ready')
+  await expect(claude.getByRole('button', { name: 'Copy the prompt, to paste into Claude' })).toBeDisabled()
   await expect(claude).toContainText('No notes in this scene yet')
-  const paste = claude.getByRole('button', { name: 'Paste a beat card from the clipboard' })
+  const paste = claude.getByRole('button', { name: "Paste Claude's card from the clipboard" })
   await expect(paste).toBeEnabled()
-  await expect(paste).toHaveAccessibleDescription(/Hold PASTE to open a card file\.$/)
+  await expect(paste).toHaveAccessibleDescription('Hold PASTE CARD to open a card file.')
   await expect(claude.getByRole('link', { name: 'Get the arc-beats skill' })).toHaveAttribute('href', '/arc-beats-skill.zip')
-  // PASTE held for a second opens a card file, as it is let go of.
+  // PASTE CARD held for a second opens a card file, as it is let go of.
+  // Held mid-sheet: a toast at the foot of the window would take the pointer from a key under it.
+  await paste.evaluate((e) => e.scrollIntoView({ block: 'center' }))
   const chooser = page.waitForEvent('filechooser')
   await paste.hover()
   await page.mouse.down()
@@ -86,11 +91,105 @@ test('BEAT CARDS: the CLAUDE section, a pasted card, IMPORT', async ({ page }) =
     Object.defineProperty(navigator.clipboard, 'readText', { configurable: true, value: async () => text })
   }, CARD)
   await page.getByRole('button', { name: 'Live tools' }).click()
-  await tools.getByRole('button', { name: 'Paste a beat card from the clipboard' }).click()
+  await tools.getByRole('button', { name: "Paste Claude's card from the clipboard" }).click()
   await expect(sheet).toBeVisible()
   await expect(sheet).toContainText('A · 03')
   await sheet.getByRole('button', { name: 'Cancel' }).click()
   await expect(sheet).toBeHidden()
+})
+
+test('the prompt builder: NEW with a genre and its tempo, SHARE alone, EDIT and COPY, SAVE, kept as Live tools close', async ({ page }) => {
+  await page.addInitScript(() => {
+    const sent: string[] = []
+    const copied: string[] = []
+    ;(window as unknown as { sent: string[]; copied: string[] }).sent = sent
+    ;(window as unknown as { sent: string[]; copied: string[] }).copied = copied
+    Object.defineProperty(navigator, 'share', { configurable: true, value: async (d: { text?: string }) => void sent.push(d.text ?? '') })
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (t: string) => void copied.push(t) } })
+  })
+  await page.goto('/?demo#/live')
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
+  await page.getByRole('button', { name: 'Live tools' }).click()
+  const tools = page.getByRole('dialog', { name: 'Live tools' })
+  const claude = tools.getByRole('region', { name: 'Claude' })
+  const sent = (): Promise<string[]> => page.evaluate(() => (window as unknown as { sent: string[] }).sent)
+  const copied = (): Promise<string[]> => page.evaluate(() => (window as unknown as { copied: string[] }).copied)
+
+  // NEW: a beat from nothing, no card to pick; the arrow keys move along the tabs.
+  const improve = claude.getByRole('tab', { name: 'Task: Improve' })
+  await improve.focus()
+  await page.keyboard.press('ArrowLeft')
+  const fresh = claude.getByRole('tab', { name: 'Task: New beat' })
+  await expect(fresh).toHaveAttribute('aria-selected', 'true')
+  await expect(fresh).toBeFocused()
+  await expect(claude.getByRole('radio', { name: /^Scene S01/ })).toHaveCount(0)
+  await expect(claude).toContainText('Tap an orange word to change it.')
+  // The genre's word turns the keys into its answers: a genre picked brings its tempo.
+  const genre = claude.getByRole('button', { name: 'Genre: any style' })
+  await genre.click()
+  await expect(genre).toHaveAttribute('aria-expanded', 'true')
+  const genres = claude.getByRole('group', { name: 'Genre' })
+  await genres.getByRole('radio', { name: 'Dub techno' }).click()
+  await expect(genres.getByRole('radio', { name: 'Dub techno' })).toHaveAttribute('aria-checked', 'true')
+  await expect(claude.getByRole('button', { name: 'Genre: dub techno' })).toBeVisible()
+  await expect(claude.getByRole('button', { name: 'Tempo: 122 BPM' })).toBeVisible()
+  await expect(claude).toContainText('Dub techno: 118-126 BPM. Picking a genre sets its tempo.')
+  // NEXT: the tempo's answers; DONE gives the focus back to its word.
+  await claude.getByRole('button', { name: 'The next word' }).click()
+  await claude.getByRole('button', { name: 'Faster by 5 BPM' }).click()
+  await claude.getByRole('button', { name: 'Done', exact: true }).click()
+  await expect(claude.getByRole('button', { name: 'Tempo: 127 BPM' })).toBeFocused()
+  await expect(claude.getByRole('group', { name: 'Tempo' })).toHaveCount(0)
+
+  // SHARE: the words alone (the sound list after them), and the glass waits for the new beat.
+  await claude.getByRole('button', { name: 'Share', exact: true }).click()
+  await expect.poll(async () => (await sent()).length).toBe(1)
+  const words = (await sent())[0]!
+  expect(words.startsWith('Use the arc-beats skill to write a new beat for my EP-133.')).toBe(true)
+  expect(words).toContain('- Style: dub techno')
+  expect(words).toContain('- Tempo: 127 BPM')
+  expect(words).not.toContain('ARC BEAT 1')
+  await expect(claude).toContainText('Sent New beat')
+  await claude.getByRole('button', { name: "Stop waiting for Claude's reply" }).click()
+
+  // EDIT: the prompt's own text, the box taking the focus; DONE keeps one's own words, COPY copies them.
+  await claude.getByRole('button', { name: 'Edit the prompt' }).click()
+  const box = claude.getByRole('textbox', { name: 'Your prompt' })
+  await expect(box).toBeFocused()
+  await expect(box).toHaveValue(/^Use the arc-beats skill to write a new beat/)
+  await box.fill('Write me a dub techno beat.')
+  await claude.getByRole('button', { name: 'Done', exact: true }).click()
+  await expect(claude.getByRole('button', { name: 'Edit the prompt' })).toBeFocused()
+  await expect(claude).toContainText('Write me a dub techno beat.')
+  await expect(claude).toContainText('Prompt · Edited')
+  await claude.getByRole('button', { name: 'Copy the prompt, to paste into Claude' }).click()
+  await expect.poll(async () => (await copied()).length).toBe(1)
+  expect((await copied())[0]!.startsWith('Write me a dub techno beat.\n')).toBe(true)
+  await expect(page.getByRole('status').filter({ hasText: 'Prompt copied. Paste it into a chat with Claude.' })).toBeVisible()
+  await claude.getByRole('button', { name: "Stop waiting for Claude's reply" }).click()
+
+  // SAVE keeps it under a name of its own, in use; REBUILD drops the words, and the saved one brings them back.
+  await claude.getByRole('button', { name: 'Save this prompt' }).click()
+  const chip = claude.getByRole('button', { name: 'Saved prompt Dub techno 127 \u270E, in use' })
+  await expect(chip).toBeVisible()
+  await expect(claude.getByRole('button', { name: 'Save this prompt' })).toBeDisabled()
+  await claude.getByRole('button', { name: 'Drop your words and build the prompt again' }).click()
+  await expect(claude).not.toContainText('Write me a dub techno beat.')
+  const kept = claude.getByRole('button', { name: 'Saved prompt Dub techno 127 \u270E' })
+  await kept.click()
+  await expect(chip).toBeVisible()
+  await expect(claude).toContainText('Write me a dub techno beat.')
+
+  // Kept as Live tools close and open again: the tab, the words and the saved prompt; Delete on the chip deletes it.
+  await page.keyboard.press('Escape')
+  await expect(tools).toBeHidden()
+  await page.getByRole('button', { name: 'Live tools' }).click()
+  await expect(claude.getByRole('tab', { name: 'Task: New beat' })).toHaveAttribute('aria-selected', 'true')
+  await expect(claude).toContainText('Write me a dub techno beat.')
+  await chip.focus()
+  await page.keyboard.press('Delete')
+  await expect(page.getByRole('status').filter({ hasText: 'Deleted \u201CDub techno 127 \u270E\u201D' })).toBeVisible()
+  await expect(chip).toHaveCount(0)
 })
 
 test('SHARE CHAIN: a card of scenes sets the chain, shared with the sound list or without it', async ({ page }) => {
@@ -139,8 +238,8 @@ test('SHARE CHAIN: a card of scenes sets the chain, shared with the sound list o
   await expect(claude).toContainText('Sent Chain')
   await expect(claude).toContainText("Copy Claude's reply, then press PASTE")
   await claude.getByRole('button', { name: "Stop waiting for Claude's reply" }).click()
-  await expect(claude).toContainText('Claude \u00B7 ready')
   await expect(claude).not.toContainText('Waiting for Claude')
+  await expect(claude.getByRole('tab', { name: 'Task: Improve' })).toBeVisible()
   // Unticked: the card alone.
   await tick.click()
   await expect(tick).not.toBeChecked()

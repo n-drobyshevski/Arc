@@ -311,6 +311,12 @@ export const WebText = {
   VIEW_DEVICE: 'Device',
   /** A beat card or prompt copied where the browser has no share sheet (Android's chooser). */
   CARD_COPIED: 'Copied. Paste it to Claude.',
+  /** The Claude page's PASTE CARD, for screen readers: its hold (Android's long-click label, ClaudeText.OPEN_CARD_FILE). */
+  HOLD_PASTE_CARD: 'Hold PASTE CARD to open a card file.',
+  /** A saved prompt's chip, for screen readers: its hold (Android's long-click label, PromptText.DELETE), or the Delete key. */
+  HOLD_SAVED_PROMPT: 'Hold it, or press Delete, to delete it.',
+  /** The Claude page's EDIT box, for screen readers. */
+  PROMPT_BOX: 'Your prompt',
   /** PASTE BEAT where the page can't read the clipboard: the box a paste goes into. */
   PASTE_HERE: 'Paste the beat card here',
   PASTE_HERE_NOTE: 'This browser lets a page read the clipboard only from a paste: press Ctrl+V (⌘V), or long-press and Paste.',

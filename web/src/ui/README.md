@@ -64,9 +64,13 @@ KEYS's pad, so the shell reads neither:
   the drawn device's parts are `memo` components fed values, reading their
   voice with `useHas`; `playingNotes` stays the same set while its notes do.
   Give a memoized part kept callbacks (a latest ref), not new arrows.
+- The Claude page's prompt and saved prompts are signals of their own
+  (`c.claudePrompt`, `c.claudePrompts`): a word tapped re-renders that page,
+  and `c.settings` keeps its object while only they change.
 - Settings, Debug, Compare, Contents, Search and the beat import, keyboard keys
   and font licence sheets are `lazy` (`lazy.ts`): chunks of their own, fetched
-  once the app is idle.
+  once the app is idle. So is the Claude page's deck, with the prompt
+  builder's genres and words (`state/promptPlan.ts`).
 
 The `?demo` render counter (`dev/perf.ts`, `window.__arcPerf`) and
 `test/e2e/perf.spec.ts` (`PERF=1`) show what a change does to these.

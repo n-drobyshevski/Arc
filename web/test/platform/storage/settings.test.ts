@@ -24,6 +24,7 @@ import {
   settingsFromIndex,
   type AppSettings,
 } from '../../../src/platform/storage/settings'
+import { ClaudePrompt, PromptTask, SavedPrompt, claudePrompt, savedPrompt } from '../../../src/core/features/claudePrompt'
 
 describe('SAMPLE settings', () => {
   it('store and index as Android: Off and Free as "off" and 0, floats as Float.toString', async () => {
@@ -69,6 +70,8 @@ describe('SettingsStore', () => {
       haptics: true,
       makeUpDelay: true,
       shareSounds: true,
+      claudePrompt: '',
+      claudePrompts: '',
       replaceScenes: false,
       sampleSource: 'mic',
       sampleStereo: false,
@@ -164,6 +167,8 @@ describe('SettingsStore', () => {
       'app.haptics',
       'app.makeUpDelay',
       'app.shareSounds',
+      'app.claudePrompt',
+      'app.claudePrompts',
       'app.replaceScenes',
       'app.sampleSource',
       'app.sampleStereo',
@@ -390,6 +395,23 @@ describe('fromIndex', () => {
     const other = new SettingsStore(memoryStorage())
     other.fromIndex(s.toIndex())
     expect(other.settings).toEqual(s.settings)
+  })
+
+  // AppSettingsTest "every setting round-trips through library json": the Claude page's prompt and saved prompts.
+  it("keeps the Claude page's prompt and saved prompts as they are written, and reads them back from library json", () => {
+    const prompt = ClaudePrompt.encode(claudePrompt({ task: PromptTask.BEAT, genre: 'dub-techno', text: 'a;b' }))
+    const saved = SavedPrompt.encodeAll([savedPrompt('Dub', claudePrompt())])
+    const storage = memoryStorage()
+    const s = new SettingsStore(storage)
+    expect(s.settings.claudePrompt).toBe('')
+    s.update((c) => ({ ...c, claudePrompt: prompt, claudePrompts: saved }))
+    expect(s.toIndex()).toEqual({ 'app.claudePrompt': prompt, 'app.claudePrompts': saved })
+    expect(new SettingsStore(storage).settings).toEqual({ ...DEFAULT_SETTINGS, claudePrompt: prompt, claudePrompts: saved })
+    const other = new SettingsStore(memoryStorage())
+    other.fromIndex(s.toIndex())
+    expect(other.settings).toEqual(s.settings)
+    // Missing: left as it is.
+    expect(settingsFromIndex({}, s.settings).claudePrompt).toBe(prompt)
   })
 
   it('parses ints the way Kotlin toIntOrNull does', () => {

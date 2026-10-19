@@ -9,8 +9,7 @@
 // BeatFxUi's `same` is ClaudeText.isSame; padShapes takes pad keys.
 // Web addition: "each silent pad starts with a sound Arc suggests" (suggestedSounds, which Kotlin tests only through
 // BeatCardTest's suggestSound), on that test's card and library.
-// Left for the steps that port them: the prompt share (PromptText), REPLACE (the projectScenes and replace asserts of
-// "the sheet names where each section goes").
+// promptShare is promptPlan.ts's (kept apart from beatPlan.ts, so the prompt builder's words load as a chunk of their own).
 import { describe, expect, it } from 'vitest'
 import { FactoryKit } from '../../src/core/features/factorySounds'
 import { BeatCards, SoundStatus, beatCard, cardFx, cardPad, cardSection, cardSound, cardSynth, type BeatCard, type CardSection, type CardSound, type CardSynth } from '../../src/core/features/beatCard'
@@ -57,6 +56,9 @@ import {
   type SoundSet,
 } from '../../src/state/beatPlan'
 import { emptyMirrorState, type MirrorUi } from '../../src/state/types'
+import { promptShare } from '../../src/state/promptPlan'
+import { PromptGoal, SharePick, claudePrompt } from '../../src/core/features/claudePrompt'
+import { PromptText } from '../../src/core/text/promptText'
 
 const kick = physicalPad(0, 9)
 const names = new Map<number, string>([
@@ -81,6 +83,20 @@ const read = (c: BeatCard) => BeatCards.read(BeatCards.write(c))
 
 describe('BeatPlanTest', () => {
   // ---- sharing ----
+
+  it("the Claude page's prompt goes before the card, or alone with the kit and the sound list after it", () => {
+    const seq = withP(ProjectSeq.DEFAULT, 0, 1, pat([hit(0)]))
+    const prompt = PromptText.prompt(claudePrompt({ goal: PromptGoal.BUSIER }), SharePick.SCENE, false)
+    const share = beatShare(seq, null, 92.0, 50, nameOf, { kit: FactoryKit.EP40, prompt })!
+    expect(share.text.startsWith(prompt + '\n\nMy EP-133 plays the EP-40 Riddim factory kit.\n\n```\nARC BEAT 1\n')).toBe(true)
+    // Without a card: the words, the kit, then the list after a blank line.
+    const list = soundSet(ClaudeText.SOUNDS_FROM_FACTORY, new Map([[1, 'ep 40 kick']]))
+    const beat = promptShare(PromptText.NEW_BEAT, 'Write a beat.', FactoryKit.EP40, list)
+    expect(beat.subject).toBe('Arc \u00B7 New beat')
+    expect(beat.text).toBe('Write a beat.\n\nMy EP-133 plays the EP-40 Riddim factory kit.\n\n' + ClaudeText.soundListHeader(ClaudeText.SOUNDS_FROM_FACTORY) + '\n1 ep 40 kick\n')
+    expect(promptShare('Learn', 'Teach me.', null).text).toBe('Teach me.\n')
+    expect(promptShare('New beat', 'Write.', FactoryKit.EP133).text).toBe("Write.\n\nMy EP-133 plays the EP-133's own factory sounds.\n")
+  })
 
   it("a share is the scene's patterns or a group's as a tidied card in a fenced block, or nothing without notes", () => {
     expect(beatShare(ProjectSeq.DEFAULT, null, 120.0, 50, nameOf)).toBeNull()

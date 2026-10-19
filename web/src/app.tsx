@@ -119,7 +119,7 @@ import { PunchContext, type PunchUi } from './ui/live/LivePunch'
 import { StepContext, type StepActions } from './ui/live/StepPanel'
 import { SceneContext, type SceneActions } from './ui/live/ScenePanel'
 import { ArpContext, type ArpActions } from './ui/live/ArpWords'
-import { ClaudeContext, learnUrl, type ClaudeActions } from './ui/live/ClaudeSection'
+import { ClaudeContext, preloadClaudeDeck, type ClaudeActions } from './ui/live/ClaudeSection'
 import { SampleContext, type SampleActions } from './ui/live/SamplePanel'
 import { SampleReviewSheet } from './ui/sheets/SampleReviewSheet'
 import { BeatCards } from './core/features/beatCard'
@@ -143,7 +143,7 @@ const SearchScreen = lazy('SearchScreen', () => import('./ui/screens/SearchScree
 const BeatImportSheet = lazy('BeatImportSheet', () => import('./ui/sheets/BeatImportSheet').then((m) => m.BeatImportSheet))
 const KeyboardKeysSheet = lazy('KeyboardKeysSheet', () => import('./ui/sheets/KeyboardKeysSheet').then((m) => m.KeyboardKeysSheet))
 const FontLicenceSheet = lazy('FontLicenceSheet', () => import('./ui/sheets/FontLicenceSheet').then((m) => m.FontLicenceSheet))
-const LAZY = [SettingsScreen, DebugScreen, CompareScreen, ContentsScreen, SearchScreen, BeatImportSheet, KeyboardKeysSheet, FontLicenceSheet]
+const LAZY = [SettingsScreen, DebugScreen, CompareScreen, ContentsScreen, SearchScreen, BeatImportSheet, KeyboardKeysSheet, FontLicenceSheet, { preload: preloadClaudeDeck }]
 
 /** The progress sheet's layer id. */
 const PROGRESS = 'progress'
@@ -1461,17 +1461,31 @@ function claudeUi(c: ArcController): ClaudeActions | null {
     get lights() {
       return p.scene.value.groups.map((g) => g.lights)
     },
+    // The prompt's own signals, not the settings: a word tapped re-renders this page only.
+    get prompt() {
+      return c.claudePrompt.value
+    },
+    get saved() {
+      return c.claudePrompts.value
+    },
+    get kit() {
+      return c.shareKit()
+    },
+    get liveTempo() {
+      return p.metronome.value.bpm
+    },
     get waiting() {
       return c.claudeWaiting.value
     },
     onWithSounds: (on) => c.setShareSounds(on),
-    onShareScene: () => void c.shareBeat(null),
-    onShareChain: () => void c.shareChain(),
-    onSharePattern: (g) => void c.shareBeat(g),
+    onPrompt: (prompt) => void c.setClaudePrompt(prompt),
+    onShare: (pick, g) => void c.shareClaudePrompt(pick, g),
+    onCopy: (pick, g) => void c.shareClaudePrompt(pick, g, true),
+    onSavePrompt: (prompt) => void c.saveClaudePrompt(prompt),
+    onDeletePrompt: (i) => void c.deleteClaudePrompt(i),
     onPaste: () => void c.pasteBeat(),
     onOpenFile: () => void c.openBeatFile(),
     onDismissWaiting: () => c.stopWaitingForClaude(),
-    learnUrl: learnUrl(),
   }
 }
 

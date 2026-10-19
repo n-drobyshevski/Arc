@@ -38,7 +38,7 @@ test('PADS: pad keys hold pads, A–D pick the group, V the view, E EDIT and Esc
   await expect(page.locator('[data-pad]')).toHaveCount(12)
 
   // E: EDIT on; a pad key opens that pad's sound; Esc closes the sheet, then leaves EDIT.
-  const tab = page.getByRole('switch', { name: 'Sound' })
+  const tab = page.getByRole('switch', { name: 'Sound', exact: true })
   await page.keyboard.press('KeyE')
   await expect(tab).toHaveAttribute('aria-checked', 'true')
   await page.keyboard.press('Digit7')

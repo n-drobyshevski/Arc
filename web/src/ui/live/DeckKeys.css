@@ -1,4 +1,4 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/DeckKeys.kt (DeckStrip, DeckKey) */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/DeckKeys.kt (DeckStrip, DeckKey, KeyGrid, WordKey) */
 
 /* The strip: keys 7 apart, its rows 10. */
 .deck-strip {
@@ -71,3 +71,47 @@
 @media (prefers-reduced-motion: reduce) {
   .deck-key__hold { animation: none; transform: none; }
 }
+
+/* KeyGrid's empty places in its last row: each key keeps its width. */
+.deck-strip__gap { flex: 1 1 0; min-width: 0; }
+
+/* WordKey: a cap at least 52 high, its word over the line under it, 2 apart (navy when picked or in). */
+.word-key {
+  container-type: inline-size;
+  min-height: 52px;
+  padding: 6px 3px;
+  gap: 2px;
+}
+/* capsKeySmall at 11 / 13: one word on one line, shrunk a little to fit; two or more on up to two. */
+.word-key__label {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 13px;
+  letter-spacing: var(--track-caps-key);
+  text-align: center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Compose's step-based autoSize, roughly: a single word follows the key's width, from 11 down to 8. */
+.word-key__label:not(.is-words) { font-size: clamp(8px, 13cqi, 11px); }
+.word-key__label.is-words {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+/* The line under it: 9 / 11, signal, or the navy key's ink, faded. */
+.word-key__sub {
+  max-width: 100%;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 11px;
+  letter-spacing: var(--track-caps-key);
+  text-align: center;
+  color: var(--signal);
+  overflow-wrap: anywhere;
+}
+.deck-key--navy .word-key__sub { color: color-mix(in srgb, var(--on-navy) 75%, transparent); }

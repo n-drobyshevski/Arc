@@ -1,4 +1,4 @@
-// Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/DeckKeys.kt (DeckStrip, DeckKey, DeckStyle, DeckGlyph, drawGlyph)
+// Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/DeckKeys.kt (DeckStrip, DeckKey, DeckStyle, DeckGlyph, drawGlyph, KeyGrid, WordKey)
 //
 // The keys under a page's glass (an addition: Live tools' Takes and Claude
 // pages, as the device's display): caps with a drawn glyph over a word, in one
@@ -21,8 +21,11 @@
 //   picker on a touch's release, not mid-press). [DeckKeyProps.describedBy]
 //   points a screen reader at the hint that tells of it (Kotlin's
 //   onLongClickLabel).
-// - KeyGrid and WordKey (the Claude page's prompt words) come with the
-//   prompt builder's port.
+// - [useHold] is exported: the Claude page's saved prompts are held to be
+//   deleted the same way.
+// - KeyGrid takes a [label] for screen readers (a group named after the word
+//   its answers change). A WordKey that is one of a set of choices is a radio
+//   (Kotlin's RadioButton role), one that is in or out a checkbox.
 import type { ButtonHTMLAttributes, JSX, Ref, TargetedKeyboardEvent, TargetedPointerEvent } from 'preact'
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { HOLD_MS } from '../components/IconBlock'
@@ -135,6 +138,79 @@ export function DeckKey(props: DeckKeyProps): JSX.Element {
   )
 }
 
+/**
+ * The answers to a question on the glass (an addition: the Claude page's
+ * prompt words): [keys] in rows of [columns], the last row's gaps left empty
+ * so each key keeps its width.
+ */
+export function KeyGrid(props: { keys: readonly JSX.Element[]; columns?: number; label?: string }): JSX.Element {
+  const columns = props.columns ?? 4
+  const rows: JSX.Element[][] = []
+  for (let i = 0; i < props.keys.length; i += columns) rows.push(props.keys.slice(i, i + columns))
+  return (
+    <div class="deck-strip" role={props.label !== undefined ? 'group' : undefined} aria-label={props.label}>
+      {rows.map((row, i) => (
+        <div key={i} class="deck-strip__row">
+          {row}
+          {Array.from({ length: columns - row.length }, (_, j) => (
+            <span key={`gap${j}`} class="deck-strip__gap" aria-hidden="true" />
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export interface WordKeyProps {
+  /** The word on the key, upper-cased where shown. */
+  label: string
+  /** What a screen reader reads. */
+  description: string
+  onClick: () => void
+  /** The line under the word ("118-126"). */
+  sub?: string
+  /** The one picked of a set (read as such). */
+  selected?: boolean
+  /** A part that is in or out (read as checked or not). */
+  checked?: boolean
+  enabled?: boolean
+}
+
+/**
+ * A key with a word on it instead of a glyph (an answer: "Dub" over
+ * "118-126"): navy when it is the one picked ([selected]) or a part that is in
+ * ([checked]).
+ */
+export function WordKey(props: WordKeyProps): JSX.Element {
+  const { enabled = true } = props
+  const on = props.selected === true || props.checked === true
+  const role = props.checked !== undefined ? 'checkbox' : props.selected !== undefined ? 'radio' : undefined
+  // One word shrinks to fit rather than break; two or more may take two lines.
+  const words = props.label.trim().includes(' ')
+  return (
+    <button
+      type="button"
+      class={`deck-key word-key cap-3d${on ? ' deck-key--navy' : ''}`}
+      role={role}
+      aria-checked={props.checked ?? props.selected}
+      aria-label={props.description}
+      disabled={!enabled}
+      onClick={() => {
+        if (enabled) props.onClick()
+      }}
+    >
+      <span class={`word-key__label${words ? ' is-words' : ''}`} aria-hidden="true">
+        {props.label.toUpperCase()}
+      </span>
+      {props.sub !== undefined && (
+        <span class="word-key__sub" aria-hidden="true">
+          {props.sub}
+        </span>
+      )}
+    </button>
+  )
+}
+
 /** Movement (px) that turns a press into a scroll and drops the hold. */
 const SLOP = 10
 
@@ -144,7 +220,7 @@ const SLOP = 10
  * the click that follows swallowed; let go early, it is a tap ([onTap], Enter's
  * and Space's handled here). Without [onHold] it adds nothing.
  */
-function useHold(
+export function useHold(
   onHold: (() => void) | undefined,
   onTap: () => void,
   enabled: boolean,

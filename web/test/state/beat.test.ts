@@ -1,6 +1,7 @@
 // BEAT CARDS in the controller (ArcController.kt's BEAT CARDS section, state/pattern.ts and
-// controller.ts): SHARE sends the card through the share sheet (or copies it where there is
+// controller.ts): SHARE sends the Claude page's prompt with the card it picks through the share sheet (or copies it where there is
 // none) and the Claude page then waits for the reply until STOP or a card comes in, PASTE BEAT reads the clipboard (or waits for a paste where the page can't read it),
+// a prompt without a card goes alone, COPY puts it on the clipboard, and the prompt and the saved ones are kept as they change,
 // a card opens its sheet, IMPORT places it as one UNDO step, and COPY PROBLEMS copies them.
 // A share carries the pads' sound lines and, with "With my sound list" on, the sounds Arc knows;
 // SHARE CHAIN shares the project's chain; a card of scenes imported sets its chain unless SET CHAIN is off,
@@ -23,6 +24,8 @@ import { FactoryKit } from '../../src/core/features/factorySounds'
 import { padKey, physicalPad } from '../../src/core/features/padNotes'
 import { ProjectPatterns } from '../../src/core/features/pattern'
 import { ClaudeText } from '../../src/core/text/claudeText'
+import { ClaudePrompt, PromptGoal, PromptTask, SavedPrompt, SharePick, claudePrompt } from '../../src/core/features/claudePrompt'
+import { PromptText } from '../../src/core/text/promptText'
 import { MirrorText } from '../../src/core/text/mirrorText'
 import { BackupDevice, type BackupRecord } from '../../src/core/text/libraryRules'
 import { WebText } from '../../src/core/text/webText'
@@ -65,6 +68,8 @@ function mutable(h: LiveHarness): { -readonly [K in keyof Deps]: Deps[K] } {
 
 const CARD = ['ARC BEAT 1', 'name Four on the floor', 'tempo 124', '[A]', 'A7 | X... X... X... X... |'].join('\n')
 const SCENES = ['ARC BEAT 1', 'name Two', 'chain 1x2 2', '', 'scene One', '[A]', 'A7 | X... .... X... .... |', '', 'scene Two', '[A]', 'A7 | X.X. X.X. X.X. X.X. |'].join('\n')
+/** The Claude page's prompt as it starts: an IMPROVE of the card picked, which asks what the plain share always has. */
+const IMPROVE = claudePrompt()
 const BAD = ['ARC BEAT 1', '[A]', 'A9 | X... .... .... ... |'].join('\n')
 
 async function recordOne(h: LiveHarness): Promise<void> {
@@ -85,12 +90,12 @@ describe('BEAT CARDS', () => {
     expect(share?.text).toContain('ARC BEAT 1')
     const shared: string[] = []
     mutable(h).share = { ...h.deps.share, shareText: async (_t, text) => (shared.push(text), 'shared') }
-    await h.c.shareBeat(0)
+    await h.c.sharePrompt(IMPROVE, SharePick.PATTERN, 0)
     expect(shared).toEqual([share!.text])
     const copied: string[] = []
     mutable(h).share = { ...h.deps.share, shareText: async () => 'unsupported' }
     mutable(h).clipboard = { writeText: async (t) => void copied.push(t) }
-    await h.c.shareBeat(null)
+    await h.c.sharePrompt(IMPROVE, SharePick.SCENE, 0)
     expect(copied[0]).toContain('ARC BEAT 1')
     expect(h.toasts.at(-1)?.text).toBe(WebText.CARD_COPIED)
   })
@@ -101,14 +106,14 @@ describe('BEAT CARDS', () => {
     await recordOne(h)
     let result: 'shared' | 'cancelled' = 'cancelled'
     mutable(h).share = { ...h.deps.share, shareText: async () => result }
-    await h.c.shareBeat(0)
+    await h.c.sharePrompt(IMPROVE, SharePick.PATTERN, 0)
     expect(h.c.claudeWaiting.value).toBeNull()
     result = 'shared'
-    await h.c.shareBeat(0)
+    await h.c.sharePrompt(IMPROVE, SharePick.PATTERN, 0)
     expect(h.c.claudeWaiting.value).toBe('A · 01')
     h.c.stopWaitingForClaude()
     expect(h.c.claudeWaiting.value).toBeNull()
-    await h.c.shareBeat(null)
+    await h.c.sharePrompt(IMPROVE, SharePick.SCENE, 0)
     expect(h.c.claudeWaiting.value).toBe(ClaudeText.sharedScene('S01'))
     // No card in the text: still waiting.
     await h.c.receiveBeat('hello')
@@ -118,7 +123,7 @@ describe('BEAT CARDS', () => {
     h.c.waitForClaude(ClaudeText.CHAIN_CARD_NAME)
     h.c.pattern.importBeat(false)
     expect(h.c.claudeWaiting.value).toBeNull()
-    await h.c.shareChain()
+    await h.c.sharePrompt(IMPROVE, SharePick.CHAIN, 0)
     expect(h.c.claudeWaiting.value).toBe('Chain')
   })
 
@@ -134,7 +139,7 @@ describe('BEAT CARDS', () => {
     expect(h.c.shareKit()).toBe(FactoryKit.EP133)
     const shared: string[] = []
     mutable(h).share = { ...h.deps.share, shareText: async (_t, text) => (shared.push(text), 'shared') }
-    await h.c.shareBeat(0)
+    await h.c.sharePrompt(IMPROVE, SharePick.PATTERN, 0)
     expect(shared[0]).toContain(ClaudeText.SHARE_PROMPT + '\n\n' + ClaudeText.EP133_LINE + '\n\n```\nARC BEAT 1\n')
     expect(shared[0]).not.toContain(ClaudeText.kitLine(FactoryKit.EP40)!)
   })
@@ -170,11 +175,78 @@ describe('BEAT CARDS', () => {
     expect(p.scene.value.chain.length).toBe(2)
     const shared: string[] = []
     mutable(h).share = { ...h.deps.share, shareText: async (_t, text) => (shared.push(text), 'shared') }
-    await h.c.shareChain()
+    await h.c.sharePrompt(IMPROVE, SharePick.CHAIN, 0)
     expect(shared[0]!.startsWith(ClaudeText.SHARE_CHAIN_PROMPT + '\n\n' + ClaudeText.EP133_LINE + '\n\n```\nARC BEAT 1\nname Chain\n')).toBe(true)
     const card = BeatCards.read(shared[0]!).card!
     expect(card.scenes.length).toBe(2)
     expect(card.chain).toEqual([[1, 2], [2, 1]])
+  })
+
+  it("the Claude page's prompt: its words before the card, or alone; COPY puts it on the clipboard; a lesson isn't waited for", async () => {
+    const h = await liveOn()
+    await recordOne(h)
+    await vi.waitFor(() => expect(h.c.shareSoundCount.value).toBeGreaterThan(0))
+    const shared: string[] = []
+    mutable(h).share = { ...h.deps.share, shareText: async (_t, text) => (shared.push(text), 'shared') }
+    // An IMPROVE with an ask: its words go before the pattern's card.
+    const busier = claudePrompt({ goal: PromptGoal.BUSIER })
+    await h.c.sharePrompt(busier, SharePick.PATTERN, 0)
+    const words = PromptText.prompt(busier, SharePick.PATTERN, true)
+    expect(shared[0]!.startsWith(words + '\n\n' + ClaudeText.EP133_LINE + '\n\n```\nARC BEAT 1\n')).toBe(true)
+    expect(h.c.claudeWaiting.value).toBe('A \u00B7 01')
+    // A new beat goes without a card, the sound list after it; the glass waits for "New beat".
+    const beat = claudePrompt({ task: PromptTask.BEAT })
+    const share = (await h.c.promptShare(beat, SharePick.SCENE, 0))!
+    expect(share.subject).toBe('Arc \u00B7 New beat')
+    expect(share.text).not.toContain('ARC BEAT 1')
+    expect(share.text).toContain('\n\n' + ClaudeText.soundListHeader(ClaudeText.SOUNDS_FROM_DEVICE) + '\n')
+    await h.c.sharePrompt(beat, SharePick.SCENE, 0)
+    expect(shared[1]).toBe(share.text)
+    expect(h.c.claudeWaiting.value).toBe(PromptText.NEW_BEAT)
+    // A lesson: its words alone, without the sound list, and nothing waited for.
+    h.c.stopWaitingForClaude()
+    const lesson = claudePrompt({ task: PromptTask.LEARN, lesson: 3 })
+    await h.c.sharePrompt(lesson, SharePick.SCENE, 0)
+    expect(shared[2]).toBe(PromptText.prompt(lesson, SharePick.SCENE, false) + '\n')
+    expect(h.c.claudeWaiting.value).toBeNull()
+    // COPY: the same text on the clipboard, said; then the glass waits.
+    const copied: string[] = []
+    mutable(h).clipboard = { writeText: async (t) => void copied.push(t) }
+    await h.c.sharePrompt(busier, SharePick.PATTERN, 0, true)
+    expect(copied).toEqual([shared[0]])
+    expect(h.toasts.at(-1)?.text).toBe(PromptText.COPIED)
+    expect(h.c.claudeWaiting.value).toBe('A \u00B7 01')
+    // A pick with nothing in it (no chain): nothing goes.
+    await h.c.sharePrompt(busier, SharePick.CHAIN, 0, true)
+    expect(copied.length).toBe(1)
+  })
+
+  it('the prompt is kept as it changes, apart from the settings the shell reads; SAVE keeps it under a name of its own, and a saved one is deleted', async () => {
+    const h = await liveOn()
+    const before = h.c.settings.value
+    const dub = claudePrompt({ task: PromptTask.BEAT, genre: 'dub-techno', tempo: 122 })
+    await h.c.setClaudePrompt(dub)
+    expect(ClaudePrompt.equals(ClaudePrompt.decode(h.c.claudePrompt.value), dub)).toBe(true)
+    expect(JSON.parse(h.storage.getItem('arc.settings')!).claudePrompt).toBe(ClaudePrompt.encode(dub))
+    // Web: the shell's settings keep their object, so a word tapped re-renders the Claude page only.
+    expect(h.c.settings.value).toBe(before)
+    await h.c.saveClaudePrompt(dub)
+    const names = (): string[] => SavedPrompt.decodeAll(h.c.claudePrompts.value).map((x) => x.name)
+    expect(names()).toEqual(['Dub techno 122'])
+    expect(h.toasts.at(-1)?.text).toBe(PromptText.saved('Dub techno 122'))
+    // Kept already: not again.
+    await h.c.saveClaudePrompt(dub)
+    expect(names()).toEqual(['Dub techno 122'])
+    await h.c.saveClaudePrompt(IMPROVE)
+    expect(names()).toEqual(['Dub techno 122', PromptText.name(IMPROVE)])
+    await h.c.deleteClaudePrompt(0)
+    expect(names()).toEqual([PromptText.name(IMPROVE)])
+    expect(h.toasts.at(-1)?.text).toBe(PromptText.deleted('Dub techno 122'))
+    await h.c.deleteClaudePrompt(5)
+    expect(names()).toEqual([PromptText.name(IMPROVE)])
+    // Another setting changed: the settings follow, the prompt with them.
+    h.c.setShareSounds(false)
+    expect(h.c.settings.value.claudePrompt).toBe(ClaudePrompt.encode(dub))
   })
 
   it("IMPORT of a card of scenes: its scenes, the chain with SET CHAIN and one UNDO; SET CHAIN off leaves the project's chain", async () => {

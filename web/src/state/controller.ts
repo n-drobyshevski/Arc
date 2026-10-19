@@ -140,6 +140,7 @@ import {
   type PlannedSound,
   type ShareParts,
 } from './beatPlan'
+import type { ClaudePrompt, SharePick } from '../core/features/claudePrompt'
 import { patternBpm } from './patternPlan'
 import { MirrorController } from './mirror'
 import { PreviewCache, type DecodedSound } from './previewCache'
@@ -210,6 +211,18 @@ function sameShell(a: UiState, b: UiState): boolean {
   }
   return true
 }
+
+/** Whether [a] and [b] differ in nothing but the Claude page's prompt and saved prompts (web addition, as [sameShell]). */
+function sameButPrompts(a: AppSettings, b: AppSettings): boolean {
+  for (const k in b) {
+    if (k === 'claudePrompt' || k === 'claudePrompts') continue
+    if (a[k as keyof AppSettings] !== b[k as keyof AppSettings]) return false
+  }
+  return true
+}
+
+/** promptPlan.ts as fetched (the prompt builder's chunk). */
+type PromptPlan = typeof import('./promptPlan')
 
 export function createController(deps: Deps): ArcController {
   return new ArcController(deps)
@@ -386,6 +399,10 @@ export class ArcController {
     })
     this.settingsSignal = signal<AppSettings>(deps.settings.settings)
     this.settings = this.settingsSignal
+    this._claudePrompt = signal(deps.settings.settings.claudePrompt)
+    this.claudePrompt = this._claudePrompt
+    this._claudePrompts = signal(deps.settings.settings.claudePrompts)
+    this.claudePrompts = this._claudePrompts
     this.playing = deps.player.playing
     this.phase = computed(() => connectionPhase(this.state.value))
     this.trafficLog = deps.trafficLog
@@ -694,7 +711,10 @@ export class ArcController {
     this.cleanups.push(lib.subscribe(() => void this.reloadLibrary()))
     this.cleanups.push(
       deps.settings.subscribe((s) => {
-        this.settingsSignal.value = s
+        this._claudePrompt.value = s.claudePrompt
+        this._claudePrompts.value = s.claudePrompts
+        // The Claude page's prompt alone changed: [settings] stays, so the shell doesn't re-render.
+        if (!sameButPrompts(this.settingsSignal.peek(), s)) this.settingsSignal.value = s
         this.syncKeepOn()
       }),
     )
@@ -3105,7 +3125,7 @@ export class ArcController {
     return this.shareBytes(this.logFileName(), TEXT_MIME, Strings.DEBUG_TITLE, new TextEncoder().encode(text), Strings.DEBUG_TITLE)
   }
 
-  // ---------- BEAT CARDS: Live tools' CLAUDE section (MainActivity's shareBeat, clipboardText, copyProblems) ----------
+  // ---------- BEAT CARDS: Live tools' CLAUDE section (MainActivity's clipboardText, copyProblems) ----------
 
   private readonly _beatPasting = signal(false)
   /** PASTE BEAT found the clipboard closed to the page: a box waits for a paste (web delta). */
@@ -3162,26 +3182,154 @@ export class ArcController {
     }
   }
 
+  // ---------- The Claude page's prompt (ArcController's promptShare and setClaudePrompt..., MainActivity's sharePrompt) ----------
+
+  private promptChunk: Promise<PromptPlan> | null = null
+
   /**
-   * SHARE (the scene playing when [group] is null): the card's prompt and text
-   * through the share sheet, or, where the browser has none, copied to the
-   * clipboard with a toast saying so. Nothing when there are no notes. Once it
-   * went, the Claude page waits for the reply ("Scene S02", "A · 01"; MainActivity's
-   * shareBeat).
+   * The prompt builder's genres and words (promptPlan.ts with claudePrompt.ts
+   * and promptText.ts): a chunk of their own, fetched once (web delta). A
+   * failed fetch is tried again next time.
    */
-  async shareBeat(group: number | null): Promise<void> {
-    const share = this.beatShare(group)
-    if (share === null) return
-    const scene = this.pattern.scene.peek()
-    const what = group === null ? ClaudeText.sharedScene(scene.label) : ClaudeText.sharedPattern(group, scene.groups[group]?.number ?? 1)
-    if (await this.sendText(share.subject, share.text)) this.waitForClaude(what)
+  private prompts(): Promise<PromptPlan> {
+    this.promptChunk ??= import('./promptPlan').catch((e: unknown) => {
+      this.promptChunk = null
+      throw e
+    })
+    return this.promptChunk
   }
 
-  /** SHARE CHAIN: the chain's card as SHARE sends a pattern's; nothing when the chain has no steps. Then the page waits for the reply. */
-  async shareChain(): Promise<void> {
-    const share = this.beatShareChain()
+  /**
+   * What the Claude page's SHARE sends for [prompt]: with a card, the [pick]'s
+   * ([beatShare] of [group]'s pattern or the scene, [beatShareChain]) after
+   * the prompt's words (PromptText.prompt), else the words alone (promptShare,
+   * named PromptText.NEW_BEAT or TRACK_IDEA) with the sounds Arc knows when
+   * "With my sound list" is on (a lesson goes without). The prompt's kit, else
+   * the one the EP-133's sounds are ([shareKit]), follows the words. Null when
+   * the card has nothing in it.
+   */
+  async promptShare(prompt: ClaudePrompt, pick: SharePick, group: number): Promise<BeatShare | null> {
+    const P = await this.prompts()
+    const kit = prompt.kit ?? this.shareKit()
+    const set = soundSetOf(this.store.get().mirror, this.live.deviceSoundList(), this.shareDeviceKit().names)
+    const learn = prompt.task === P.PromptTask.LEARN
+    const list = this.settings.peek().shareSounds && !learn ? set : null
+    const words = P.PromptText.prompt(prompt, pick, list !== null)
+    if (P.ClaudePrompt.withCard(prompt)) {
+      switch (pick) {
+        case P.SharePick.SCENE:
+          return this.beatShare(null, words, kit)
+        case P.SharePick.PATTERN:
+          return this.beatShare(group, words, kit)
+        case P.SharePick.CHAIN:
+          return this.beatShareChain(words, kit)
+      }
+    }
+    const what = prompt.task === P.PromptTask.TRACK ? P.PromptText.TRACK_IDEA : P.PromptText.NEW_BEAT
+    return P.promptShare(learn ? P.PromptText.task(prompt.task) : what, words, learn ? null : kit, list)
+  }
+
+  /**
+   * The Claude page's SHARE: [prompt] with the card [pick] names when it goes
+   * with one ([group]'s pattern, the scene playing or the chain), else alone,
+   * through the share sheet (or copied where there is none); COPY ([copy])
+   * puts the same text on the clipboard, to paste into a chat already open.
+   * Once it went, the glass waits for the reply ("Scene S02", "A · 01",
+   * "Chain", "New beat"); not for a lesson. Nothing when the card has nothing
+   * in it (MainActivity's sharePrompt).
+   */
+  async sharePrompt(prompt: ClaudePrompt, pick: SharePick, group: number, copy = false): Promise<void> {
+    let share: BeatShare | null
+    let P: PromptPlan
+    try {
+      P = await this.prompts()
+      share = await this.promptShare(prompt, pick, group)
+    } catch (e) {
+      this.toast(errorText(e), true)
+      return
+    }
     if (share === null) return
-    if (await this.sendText(share.subject, share.text)) this.waitForClaude(ClaudeText.CHAIN_CARD_NAME)
+    const learn = prompt.task === P.PromptTask.LEARN
+    const sent = copy ? await this.copyText(share.text, P.PromptText.COPIED) : await this.sendText(share.subject, share.text)
+    if (!sent || learn) return
+    const scene = this.pattern.scene.peek()
+    this.waitForClaude(
+      !P.ClaudePrompt.withCard(prompt)
+        ? prompt.task === P.PromptTask.TRACK
+          ? P.PromptText.TRACK_IDEA
+          : P.PromptText.NEW_BEAT
+        : pick === P.SharePick.SCENE
+          ? ClaudeText.sharedScene(scene.label)
+          : pick === P.SharePick.PATTERN
+            ? ClaudeText.sharedPattern(group, scene.groups[group]?.number ?? 1)
+            : ClaudeText.CHAIN_CARD_NAME,
+    )
+  }
+
+  /** The Claude page's SHARE, and COPY ([copy]): the prompt as kept ([claudePrompt]), as [sharePrompt] sends it. */
+  async shareClaudePrompt(pick: SharePick, group: number, copy = false): Promise<void> {
+    let prompt: ClaudePrompt
+    try {
+      prompt = (await this.prompts()).ClaudePrompt.decode(this._claudePrompt.peek())
+    } catch (e) {
+      this.toast(errorText(e), true)
+      return
+    }
+    await this.sharePrompt(prompt, pick, group, copy)
+  }
+
+  /** COPY: [text] on the clipboard, [said]; whether it went (MainActivity's copyText). */
+  private async copyText(text: string, said: string): Promise<boolean> {
+    try {
+      const cb = this.deps.clipboard
+      if (!cb) throw new Error(ClaudeText.NO_APP)
+      await cb.writeText(text)
+      this.toast(said)
+      return true
+    } catch (e) {
+      this.toast(errorText(e), true)
+      return false
+    }
+  }
+
+  private readonly _claudePrompt: Signal<string>
+  private readonly _claudePrompts: Signal<string>
+
+  /**
+   * The Claude page's prompt as kept (AppSettings.claudePrompt:
+   * ClaudePrompt.encode; empty as it starts) and its saved prompts
+   * (claudePrompts: SavedPrompt.encodeAll), decoded by the page. Web delta:
+   * signals of their own, so a word tapped re-renders the page, not the shell
+   * ([settings] keeps its object while only these change, so its two fields
+   * may be old: read them here).
+   */
+  readonly claudePrompt: ReadonlySignal<string>
+  readonly claudePrompts: ReadonlySignal<string>
+
+  /** The Claude page's prompt as built, and kept as it changes. */
+  async setClaudePrompt(p: ClaudePrompt): Promise<void> {
+    const P = await this.prompts()
+    this.changeSettings((s) => ({ ...s, claudePrompt: P.ClaudePrompt.encode(p) }))
+  }
+
+  /** SAVE under SAVED: the prompt kept with a name of its own (PromptText.withSaved), and said. */
+  async saveClaudePrompt(p: ClaudePrompt): Promise<void> {
+    const P = await this.prompts()
+    const list = P.SavedPrompt.decodeAll(this.deps.settings.settings.claudePrompts)
+    const next = P.PromptText.withSaved(list, p)
+    if (next.length === list.length) return
+    this.changeSettings((s) => ({ ...s, claudePrompts: P.SavedPrompt.encodeAll(next) }))
+    this.toast(P.PromptText.saved(next.at(-1)!.name))
+  }
+
+  /** A saved prompt held: deleted, and said. */
+  async deleteClaudePrompt(index: number): Promise<void> {
+    const P = await this.prompts()
+    const list = P.SavedPrompt.decodeAll(this.deps.settings.settings.claudePrompts)
+    const gone = list[index]
+    if (gone === undefined) return
+    this.changeSettings((s) => ({ ...s, claudePrompts: P.SavedPrompt.encodeAll(list.filter((x) => x !== gone)) }))
+    this.toast(P.PromptText.deleted(gone.name))
   }
 
   private readonly _claudeWaiting = signal<string | null>(null)
@@ -3811,11 +3959,6 @@ export class ArcController {
       back++
     }
     this.toast(ClaudeText.importUndone(back, empty, restored, fx))
-  }
-
-  /** Learn with Claude where there is no link to follow: the starter prompt, shared or copied. */
-  async learnWithClaude(): Promise<void> {
-    await this.sendText(ClaudeText.LEARN_TITLE, WebText.LEARN_PROMPT)
   }
 
   /** Whether it went: shared (the share sheet not called off), or copied where there is no share sheet. */
