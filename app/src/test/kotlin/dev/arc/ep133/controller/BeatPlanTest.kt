@@ -9,6 +9,8 @@ import dev.arc.ep133.features.CardProblem
 import dev.arc.ep133.features.CardPad
 import dev.arc.ep133.features.CardSection
 import dev.arc.ep133.features.CardSound
+import dev.arc.ep133.features.CardSynth
+import dev.arc.ep133.features.FactoryKit
 import dev.arc.ep133.features.Comp
 import dev.arc.ep133.features.FxSettings
 import dev.arc.ep133.features.FxType
@@ -19,6 +21,9 @@ import dev.arc.ep133.features.PadTarget
 import dev.arc.ep133.features.PlayMode
 import dev.arc.ep133.features.SoundSource
 import dev.arc.ep133.features.SoundStatus
+import dev.arc.ep133.features.SynthType
+import dev.arc.ep133.features.SynthVoice
+import dev.arc.ep133.features.SynthWave
 import dev.arc.ep133.protocol.SoundEntry
 import dev.arc.ep133.features.Pattern
 import dev.arc.ep133.features.PatternNote
@@ -58,6 +63,21 @@ class BeatPlanTest {
     // ---- sharing ----
 
     @Test
+    fun `the Claude page's prompt goes before the card, or alone with the kit and the sound list after it`() {
+        val seq = with(ProjectSeq.DEFAULT, 0, 1, pattern(hit(0)))
+        val prompt = dev.arc.ep133.text.PromptText.prompt(dev.arc.ep133.features.ClaudePrompt(goal = dev.arc.ep133.features.PromptGoal.BUSIER), dev.arc.ep133.features.SharePick.SCENE, false)
+        val share = beatShare(seq, null, 92.0, 50, nameOf, kit = dev.arc.ep133.features.FactoryKit.EP40, prompt = prompt)!!
+        assertTrue(share.text.startsWith(prompt + "\n\nMy EP-133 plays the EP-40 Riddim factory kit.\n\n```\nARC BEAT 1\n"))
+        // Without a card: the words, the kit, then the list after a blank line.
+        val list = SoundSet(ClaudeText.SOUNDS_FROM_FACTORY, mapOf(1 to "ep 40 kick"))
+        val beat = promptShare(dev.arc.ep133.text.PromptText.NEW_BEAT, "Write a beat.", dev.arc.ep133.features.FactoryKit.EP40, list)
+        assertEquals("Arc \u00B7 New beat", beat.subject)
+        assertEquals("Write a beat.\n\nMy EP-133 plays the EP-40 Riddim factory kit.\n\n" + ClaudeText.soundListHeader(ClaudeText.SOUNDS_FROM_FACTORY) + "\n1 ep 40 kick\n", beat.text)
+        assertEquals("Teach me.\n", promptShare("Learn", "Teach me.", null).text)
+        assertEquals("Write.\n\nMy EP-133 plays the EP-133's own factory sounds.\n", promptShare("New beat", "Write.", dev.arc.ep133.features.FactoryKit.EP133).text)
+    }
+
+    @Test
     fun `a share is the scene's patterns or a group's as a tidied card in a fenced block, or nothing without notes`() {
         assertNull(beatShare(ProjectSeq.DEFAULT, null, 120.0, 50, nameOf))
         assertNull(beatShare(ProjectSeq.DEFAULT, 0, 120.0, 50, nameOf))
@@ -65,8 +85,12 @@ class BeatPlanTest {
         seq = with(seq, 2, 1, pattern(hit(0, 11), hit(96, 11), bars = 2))
         val scene = beatShare(seq, null, 92.0, 50, nameOf)!!
         assertEquals("Arc beat S01", scene.subject)
-        assertTrue(scene.text.startsWith(ClaudeText.SHARE_PROMPT + "\n\n```\nARC BEAT 1\nname S01\ntempo 92\nswing 50\n# tidied"))
+        assertTrue(scene.text.startsWith(ClaudeText.SHARE_PROMPT + "\n\n" + ClaudeText.EP133_LINE + "\n\n```\nARC BEAT 1\nname S01\ntempo 92\nswing 50\n# tidied"))
         assertTrue(scene.text.endsWith("\n```\n"))
+        // The EP-40 kit is named before the card; the EP-133's adds nothing.
+        val riddim = beatShare(seq, null, 92.0, 50, nameOf, kit = dev.arc.ep133.features.FactoryKit.EP40)!!
+        assertTrue(riddim.text.startsWith(ClaudeText.SHARE_PROMPT + "\n\nMy EP-133 plays the EP-40 Riddim factory kit.\n\n```\nARC BEAT 1\n"))
+        assertEquals(scene.text, beatShare(seq, null, 92.0, 50, nameOf, kit = dev.arc.ep133.features.FactoryKit.EP133)!!.text)
         // The blank groups (B, D) are left out; the pad's name is on its row.
         val card = BeatCards.read(scene.text).card!!
         assertEquals(listOf(0, 2), card.sections.map { it.group })
@@ -157,6 +181,11 @@ class BeatPlanTest {
         val three = beatImportUi(read(card(section(0, swung), section(1, b), section(3, b), tempo = 120.4, swing = 58)), seq, 120.0, nameOf)
         assertEquals(1, three.scene)
         assertEquals(3, three.placed.size)
+        // REPLACE: the same card's one scene would be the project's only one, S01 (the project has 1 scene now).
+        assertEquals(0, three.replace?.scene)
+        assertEquals(1, three.projectScenes)
+        // A card of one group adds no scene: no REPLACE row.
+        assertNull(beatImportUi(read(card(section(0, a))), seq, 120.0, nameOf).replace)
         assertNull(three.tempo)
         assertEquals(58, three.swing)
         assertEquals("Beat card", three.title)
@@ -365,11 +394,16 @@ B8 bass | X... .... .... .... | .... .... .... .... |
         seq = seq.withChain(Chain(listOf(ChainStep(1, 2), ChainStep(0), ChainStep(1, 2)), on = true))
         val share = beatShareChain(seq, 120.0, 50, nameOf)!!
         assertEquals("Arc beat Chain", share.subject)
-        assertTrue(share.text.startsWith(ClaudeText.SHARE_CHAIN_PROMPT + "\n\n```\nARC BEAT 1\nname Chain\ntempo 120"))
+        assertTrue(share.text.startsWith(ClaudeText.SHARE_CHAIN_PROMPT + "\n\n" + ClaudeText.EP133_LINE + "\n\n```\nARC BEAT 1\nname Chain\ntempo 120"))
         val card = BeatCards.read(share.text).card!!
         assertEquals(2, card.scenes.size)
         // Scene 2 (S02) plays first, so it is the card's scene 1.
         assertEquals(listOf(1 to 2, 2 to 1, 1 to 2), card.chain)
+        // The kit is named in the chain's share too.
+        assertTrue(
+            beatShareChain(seq, 120.0, 50, nameOf, kit = dev.arc.ep133.features.FactoryKit.EP40)!!.text
+                .startsWith(ClaudeText.SHARE_CHAIN_PROMPT + "\n\nMy EP-133 plays the EP-40 Riddim factory kit.\n\n```\n"),
+        )
         // No chain, nothing to share.
         assertNull(beatShareChain(ProjectSeq.DEFAULT, 120.0, 50, nameOf))
     }
@@ -487,6 +521,102 @@ B8 bass | X... .... .... .... | .... .... .... .... |
         assertTrue(soundsUi(card, null, { null }, nameOf, offline = false, project = 1)!!.noneFound)
         // One found is enough to leave it out.
         assertFalse(soundsUi(card, set, { null }, nameOf, offline = false, project = 1)!!.noneFound)
+    }
+
+    // ---- synth lines ----
+
+    private val kickSynth = CardSynth(SynthType.KICK)
+    private val bassSynth = CardSynth(SynthType.BASS, note = 36, name = "acid")
+    private val pack = mapOf(FactoryKit.EP133 to mapOf(5 to "KICK DEEP"))
+
+    private fun synthCard(sounds: Map<Int, CardSound> = emptyMap(), synths: Map<Int, CardSynth>) =
+        card(CardSection(0, null, pattern(hit(0), hit(96, 11)), sounds, synths = synths))
+
+    private fun plan(card: BeatCard, names: Map<Int, String>, current: Map<PhysicalPad, Int> = emptyMap(), connected: Boolean = true) =
+        cardPicks(card, names, { false }, { current[it] }, pack, connected)
+
+    @Test
+    fun `a card with only synth lines has a sound row for each, made by IMPORT and tickable connected or offline`() {
+        val card = synthCard(synths = mapOf(9 to kickSynth, 11 to bassSynth))
+        for (offline in listOf(false, true)) {
+            val ui = soundsUi(card, null, { null }, nameOf, offline = offline, project = null)!!
+            assertEquals(listOf(kick, rim), ui.rows.map { it.pad })
+            assertTrue(ui.rows.all { it.makes && it.changes })
+            assertEquals(listOf(kickSynth, bassSynth), ui.rows.map { it.synth })
+            // The pick names the sound by the name it will have on the device.
+            assertEquals(listOf("kick 08bcfa", SynthVoice.deviceName(bassSynth)), ui.rows.map { it.pick.wanted.name })
+            assertEquals(2, ui.changes.size)
+            assertEquals(offline, ui.offline)
+        }
+    }
+
+    @Test
+    fun `a pad's sound is its sound line first, then its synth on the device, then a pack's upload, then the synth made`() {
+        val kickName = SynthVoice.deviceName(kickSynth)
+        // (1) The sound line is found: the synth line on the same pad is not used.
+        val found = plan(synthCard(mapOf(9 to CardSound(12, "Micro kick")), mapOf(9 to kickSynth)), mapOf(12 to "Micro kick")).single()
+        assertEquals(SoundStatus.CHANGE, found.pick.status)
+        assertNull(found.pick.synth)
+        // (2) The sound line is missing, but the synth is on the device by its device name: found there, above the pack.
+        val line = mapOf(9 to CardSound(5, "KICK DEEP"))
+        val onDevice = plan(synthCard(line, mapOf(9 to kickSynth)), mapOf(77 to kickName)).single()
+        assertEquals(SoundStatus.FOUND_BY_NAME, onDevice.pick.status)
+        assertEquals(77, onDevice.pick.slot)
+        assertEquals(kickSynth, onDevice.pick.synth)
+        assertNull(onDevice.fromPack)
+        // The pad has it already.
+        assertEquals(SoundStatus.SAME, plan(synthCard(line, mapOf(9 to kickSynth)), mapOf(77 to kickName), mapOf(kick to 77)).single().pick.status)
+        // (3) Not on the device, and a saved pack has the sound line's sound: uploaded while connected.
+        val upload = plan(synthCard(line, mapOf(9 to kickSynth)), emptyMap()).single()
+        assertEquals(SoundStatus.MISSING, upload.pick.status)
+        assertNull(upload.pick.synth)
+        assertEquals(5, upload.fromPack!!.slot)
+        assertTrue(upload.uploadable)
+        // (4) Offline the pack can't be uploaded: the synth is made.
+        val made = plan(synthCard(line, mapOf(9 to kickSynth)), emptyMap(), connected = false).single()
+        assertEquals(SoundStatus.MISSING, made.pick.status)
+        assertEquals(kickSynth, made.pick.synth)
+        assertNull(made.fromPack)
+        // (5) No synth line: the missing sound line, as before (its pack noted, but not uploadable offline).
+        val missing = plan(synthCard(line, emptyMap()), emptyMap(), connected = false).single()
+        assertEquals(SoundStatus.MISSING, missing.pick.status)
+        assertNull(missing.pick.synth)
+        assertFalse(missing.uploadable)
+        // The sheet's rows say the same, offline: the make row is ticked, the missing one can't be.
+        val rows = soundsUi(synthCard(line + (11 to CardSound(300, "Rim")), mapOf(9 to kickSynth)), null, { null }, nameOf, offline = true, project = null, packs = pack)!!.rows
+        assertEquals(listOf(true, false), rows.map { it.makes })
+        assertEquals(listOf(true, false), rows.map { it.changes })
+    }
+
+    @Test
+    fun `a pad with a sound line and a synth line has one row, and a synth line that makes no sound has none`() {
+        val card = synthCard(mapOf(9 to CardSound(300, "Rim")), mapOf(9 to kickSynth, 0 to CardSynth(SynthType.LEAD, wave = SynthWave.NONE)))
+        val rows = soundsUi(card, null, { null }, nameOf, offline = false, project = 1)!!.rows
+        assertEquals(listOf(kick), rows.map { it.pad })
+        assertTrue(rows.single().makes)
+        // A card whose only synth line is silent has nothing to show.
+        assertNull(soundsUi(synthCard(synths = mapOf(0 to CardSynth(SynthType.LEAD, wave = SynthWave.NONE))), null, { null }, nameOf, offline = false, project = 1))
+    }
+
+    @Test
+    fun `the hint to share the sound list counts sound lines only, not synth rows`() {
+        assertFalse(soundsUi(synthCard(synths = mapOf(9 to kickSynth)), null, { null }, nameOf, offline = false, project = 1)!!.noneFound)
+        val mixed = synthCard(mapOf(11 to CardSound(300, "Rim")), mapOf(9 to kickSynth))
+        assertTrue(soundsUi(mixed, null, { null }, nameOf, offline = false, project = 1)!!.noneFound)
+    }
+
+    @Test
+    fun `the sheet and IMPORT plan the same sounds from the same state`() {
+        val card = synthCard(mapOf(9 to CardSound(5, "KICK DEEP"), 11 to CardSound(12, "Rim")), mapOf(9 to kickSynth, 0 to bassSynth))
+        val names = mapOf(12 to "Rim", 40 to SynthVoice.deviceName(bassSynth))
+        fun key(p: List<PlannedSound>) = p.map { Triple(it.pick, it.fromPack?.slot, it.uploadable) }
+        for (connected in listOf(true, false)) {
+            val sheet = plan(card, names, connected = connected)
+            assertEquals(key(sheet), key(plan(card, names, connected = connected)))
+            // The order is the card's: its sound lines' pads, then the pads with only a synth line.
+            assertEquals(listOf(kick, rim, PhysicalPad(0, 0)), sheet.map { it.pick.pad })
+            assertEquals(SoundStatus.FOUND_BY_NAME, sheet[2].pick.status)
+        }
     }
 
     // ---- silent pads ----

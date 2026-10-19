@@ -330,6 +330,11 @@ export interface FileDeps {
   pickFolder(): Promise<ExternalTarget | null>
 }
 
+/** An Opus encoder (VoiceNote): mono s16 at 48 kHz in, raw Opus packets and the encoder's config (an OpusHead, if it gives one) out. */
+export interface VoiceDeps {
+  encodeOpus(pcm: Int16Array): Promise<{ packets: Uint8Array[]; config: Uint8Array | null }>
+}
+
 /** Files.share. 'saved' means the browser could not share files and saved instead. */
 export interface ShareDeps {
   share(name: string, data: FileData, mime: string, title: string, text?: string): Promise<ShareResult>
@@ -385,6 +390,8 @@ export interface Deps {
   padSounds: PadSoundStore
   /** Where Live's takes are kept (Android files/takes); without it there is no TAKE. */
   takes?: TakeStore
+  /** The Opus encoder a take's voice message needs (Android VoiceNote's MediaCodec); without it there is no VOICE. */
+  voice?: VoiceDeps
   /** Where SAMPLE's recordings wait until they are on the EP-133 (Android files/samples); without it there is no SAMPLE. */
   samples?: SampleStore
   /** Live's last read, shown while the device is not connected. */

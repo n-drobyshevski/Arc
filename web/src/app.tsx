@@ -61,6 +61,7 @@ import { REVIEW_KEY, type ArcController } from './state/controller'
 import type { TaskUi } from './state/types'
 import { APP_BUILD } from './version'
 import { AppProvider, useController, useNav } from './ui/AppContext'
+import { FactoryKitContext } from './ui/FactoryKitContext'
 import { HapticsContext } from './ui/useHaptic'
 import {
   Nav,
@@ -187,10 +188,15 @@ export function App(props: AppProps): JSX.Element {
       ? () => undefined
       : attachDrop(document.body, { onFiles: (f) => void c.importFiles(f), filter: (f) => isPakName(f.name) })
     const offPreload = preloadWhenIdle(LAZY)
+    // A beat card file (.txt or .md, as Claude may give one) dropped anywhere opens on the card's sheet.
+    const offCardDrop = typeof document === 'undefined'
+      ? () => undefined
+      : attachDrop(document.body, { onFiles: (f) => void c.receiveBeatFile(f[0]!), filter: (f) => BeatCards.isCardFile(f.name) })
     return () => {
       off()
       offDrop()
       offPreload()
+      offCardDrop()
       nav.setBackGuard(() => false)
       if (!props.nav) nav.dispose()
     }
@@ -198,9 +204,11 @@ export function App(props: AppProps): JSX.Element {
 
   return (
     <AppProvider controller={c} nav={nav}>
-      <ErrorBoundary>
-        <Root />
-      </ErrorBoundary>
+      <FactoryKitContext.Provider value={() => c.factoryKit}>
+        <ErrorBoundary>
+          <Root />
+        </ErrorBoundary>
+      </FactoryKitContext.Provider>
     </AppProvider>
   )
 }
@@ -1440,6 +1448,7 @@ function claudeUi(c: ArcController): ClaudeActions | null {
     onShareScene: () => void c.shareBeat(null),
     onSharePattern: (g) => void c.shareBeat(g),
     onPaste: () => void c.pasteBeat(),
+    onOpenFile: () => void c.openBeatFile(),
     learnUrl: learnUrl(),
   }
 }
@@ -1714,9 +1723,11 @@ function LiveTab(props: TabProps): JSX.Element {
         fmtWhen: (ms) => c.fmtDateTime(ms),
         connected: state.device !== null,
         canShare: c.canShareTakes,
+        canVoice: c.canShareVoice,
         onPlay: (t) => void c.playTake(t),
         onStop: () => c.stopPlayback(),
         onShare: (t) => void c.shareTake(t),
+        onVoice: (t) => void c.shareTakeVoice(t),
         onSave: (t) => void c.saveTake(t),
         onToDevice: (t) => {
           void c.takeToDevice(t)

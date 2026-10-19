@@ -45,9 +45,12 @@ export interface TakesUi {
   readonly connected: boolean
   /** Whether Share is offered (the browser can share a file). */
   readonly canShare: boolean
+  /** Whether Voice message is offered (it shares, and an Opus encoder is here). */
+  readonly canVoice?: boolean
   readonly onPlay: (t: TakeInfo) => void
   readonly onStop: () => void
   readonly onShare: (t: TakeInfo) => void
+  readonly onVoice?: (t: TakeInfo) => void
   readonly onSave: (t: TakeInfo) => void
   readonly onToDevice: (t: TakeInfo) => void
   readonly onDelete: (t: TakeInfo) => void
@@ -142,6 +145,9 @@ export function TakesSection(props: { takes: TakesUi; take: TakeUi }): JSX.Eleme
                       <>
                         <div class="take__keys">
                           {t.canShare && <Key text={FeatureText.SHARE_WAV} size="small" onClick={() => t.onShare(take)} />}
+                          {t.canVoice && t.onVoice && (
+                            <Key text={WebText.VOICE_MESSAGE} size="small" onClick={() => t.onVoice?.(take)} />
+                          )}
                           <Key text={FeatureText.SAVE_WAV} size="small" onClick={() => t.onSave(take)} />
                         </div>
                         <div class="take__keys">

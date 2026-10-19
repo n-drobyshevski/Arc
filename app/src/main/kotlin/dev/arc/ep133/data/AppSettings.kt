@@ -65,6 +65,15 @@ data class AppSettings(
     val liveTempo: Int = Tempo.DEFAULT,
     /** CLAUDE's "With my sound list": a shared beat card is followed by the sounds Arc knows, for Claude to choose from. */
     val shareSounds: Boolean = true,
+    /** CLAUDE's prompt as built on its glass ([dev.arc.ep133.features.ClaudePrompt.encode]; empty: as it starts). */
+    val claudePrompt: String = "",
+    /** CLAUDE's saved prompts ([dev.arc.ep133.features.SavedPrompt.encodeAll]). */
+    val claudePrompts: String = "",
+    /**
+     * The beat card sheet's REPLACE (Scenes): a card's scenes take the place of the project's (S01 on), or, off,
+     * follow them. The choice is kept for the next card.
+     */
+    val replaceScenes: Boolean = false,
     /**
      * Which output Live plays through, a debug choice for the latency test
      * (Debug screen): kept on this phone only, never copied into library.json.
@@ -203,6 +212,9 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
         makeUpDelay = prefs.getBoolean("makeUpDelay", true),
         liveTempo = Tempo.clamp(prefs.getInt("liveTempo", Tempo.DEFAULT)),
         shareSounds = prefs.getBoolean("shareSounds", true),
+        claudePrompt = prefs.getString("claudePrompt", null) ?: "",
+        claudePrompts = prefs.getString("claudePrompts", null) ?: "",
+        replaceScenes = prefs.getBoolean("replaceScenes", false),
         liveEngine = liveEngineOf(prefs.getString(LIVE_ENGINE, null)),
         sampleSource = SampleSource.of(prefs.getString("sampleSource", null) ?: "") ?: SampleSource.MIC,
         sampleStereo = prefs.getBoolean("sampleStereo", false),
@@ -250,7 +262,7 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
             for ((k, v) in changed) {
                 when (k) {
                     "theme", "skin", "keysScale", "keysNames", "keysViewWide", "keysViewTall", "sampleSource", "sampleThreshold", "patternTiming",
-                    "timingInterval", "arpOrder", "sceneSwitch", "factoryKit" -> putString(k, v)
+                    "timingInterval", "arpOrder", "sceneSwitch", "factoryKit", "claudePrompt", "claudePrompts" -> putString(k, v)
                     "keepLast", "keysRoot", "keysOctave", "pianoWhites", "liveTempo", "sampleBars",
                     "timingSwing", "arpOctaves", "arpGate" -> putInt(k, v.toInt())
                     "sampleGainMic", "sampleGainRsp", "sampleGainUsb" -> putFloat(k, v.toFloat())
@@ -326,6 +338,9 @@ internal fun AppSettings.values(): Map<String, String> = linkedMapOf(
     "makeUpDelay" to makeUpDelay.toString(),
     "liveTempo" to liveTempo.toString(),
     "shareSounds" to shareSounds.toString(),
+    "claudePrompt" to claudePrompt,
+    "claudePrompts" to claudePrompts,
+    "replaceScenes" to replaceScenes.toString(),
     "sampleSource" to sampleSource.id,
     "sampleStereo" to sampleStereo.toString(),
     "sampleGainMic" to sampleGainMic.toString(),
@@ -384,6 +399,9 @@ internal fun AppSettings.withIndex(map: Map<String, String>): AppSettings = copy
     // A tempo arc doesn't offer leaves the choice as it is.
     liveTempo = map["app.liveTempo"]?.toIntOrNull()?.takeIf { it in Tempo.MIN..Tempo.MAX } ?: liveTempo,
     shareSounds = map["app.shareSounds"]?.toBooleanStrictOrNull() ?: shareSounds,
+    claudePrompt = map["app.claudePrompt"] ?: claudePrompt,
+    claudePrompts = map["app.claudePrompts"] ?: claudePrompts,
+    replaceScenes = map["app.replaceScenes"]?.toBooleanStrictOrNull() ?: replaceScenes,
     sampleSource = map["app.sampleSource"]?.let(SampleSource::of) ?: sampleSource,
     sampleStereo = map["app.sampleStereo"]?.toBooleanStrictOrNull() ?: sampleStereo,
     sampleGainMic = sampleGainOf(map["app.sampleGainMic"]?.toFloatOrNull()) ?: sampleGainMic,

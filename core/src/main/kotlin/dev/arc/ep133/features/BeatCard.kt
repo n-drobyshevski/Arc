@@ -33,6 +33,8 @@ data class BeatCard(
     val fx: CardFx? = null,
     val chain: List<Pair<Int, Int>>? = null,
     val sceneLines: Boolean = false,
+    /** The card's lesson, its `lesson` lines in order ([LessonStep]): what PRACTICE runs a step at a time. */
+    val lesson: List<LessonStep> = emptyList(),
 ) {
     init {
         require(scenes.isNotEmpty()) { "A card has at least one scene." }
@@ -114,8 +116,9 @@ data class CardPad(
 /**
  * One group's pattern on a card: [group] 0..3 (A..D), the pattern [number]
  * 1..99 it was written as (a hint, null when the card gave none), the
- * [pattern] itself, the [sounds] its pads should play and the [pads]' shaping
- * (a `pad` line each), both by pad offset.
+ * [pattern] itself, the [sounds] its pads should play, the [pads]' shaping
+ * (a `pad` line each) and the [synths] Arc makes for them (a `synth` line
+ * each), all by pad offset.
  */
 data class CardSection(
     val group: Int,
@@ -123,6 +126,7 @@ data class CardSection(
     val pattern: Pattern,
     val sounds: Map<Int, CardSound> = emptyMap(),
     val pads: Map<Int, CardPad> = emptyMap(),
+    val synths: Map<Int, CardSynth> = emptyMap(),
 )
 
 /**
@@ -131,6 +135,60 @@ data class CardSection(
  * which lets Arc check that the slot still holds that sound.
  */
 data class CardSound(val slot: Int, val name: String? = null)
+
+/** The sound types of a synth line, in the order of their ordinal (which seeds the noise, [SynthVoice]). */
+enum class SynthType(val id: String) {
+    KICK("kick"), SNARE("snare"), CLAP("clap"), HAT("hat"), OPENHAT("openhat"), TOM("tom"), RIM("rim"), COWBELL("cowbell"), SUB("sub"),
+    BASS("bass"), PLUCK("pluck"), STAB("stab"), BELL("bell"), ZAP("zap"), LEAD("lead"), PAD("pad"), RISER("riser"),
+}
+
+/** A synth line's oscillator: `metal` is six square partials (an 808 hat), `none` is noise only. */
+enum class SynthWave(val id: String) { SINE("sine"), TRI("tri"), SAW("saw"), SQUARE("square"), METAL("metal"), NONE("none") }
+
+/** A synth line's chord: the notes stacked on the root, in semitones. */
+enum class SynthChord(val id: String, val intervals: List<Int>) {
+    ONE("one", listOf(0)),
+    MIN("min", listOf(0, 3, 7)),
+    MAJ("maj", listOf(0, 4, 7)),
+    MIN7("min7", listOf(0, 3, 7, 10)),
+    MAJ7("maj7", listOf(0, 4, 7, 11)),
+    DOM7("dom7", listOf(0, 4, 7, 10)),
+    SUS2("sus2", listOf(0, 2, 7)),
+    SUS4("sus4", listOf(0, 5, 7)),
+    FIFTH("fifth", listOf(0, 7)),
+    OCT("oct", listOf(0, 12)),
+}
+
+/**
+ * A synth line: only what the line gave (null: not written; the renderer fills in its type's default). length is in
+ * hundredths of a second. [note] is MIDI (C4 = 60), the knobs 0..100, [level] 1..100, [seed] 0..999 and [name] one
+ * word of at most [NAME_MAX] characters. [SynthVoice] makes the sound.
+ */
+data class CardSynth(
+    val type: SynthType,
+    val note: Int? = null,
+    val wave: SynthWave? = null,
+    val chord: SynthChord? = null,
+    val attack: Int? = null,
+    val decay: Int? = null,
+    val length: Int? = null,
+    val tone: Int? = null,
+    val reso: Int? = null,
+    val sweep: Int? = null,
+    val bend: Int? = null,
+    val click: Int? = null,
+    val noise: Int? = null,
+    val snap: Int? = null,
+    val drive: Int? = null,
+    val detune: Int? = null,
+    val level: Int? = null,
+    val seed: Int? = null,
+    val name: String? = null,
+) {
+    companion object {
+        const val NAME_MAX = 13
+    }
+}
 
 /** What [BeatCards.resolveSounds] makes of a sound line. */
 enum class SoundStatus {
@@ -154,6 +212,8 @@ enum class SoundStatus {
  * when not known) and the [status]. [unverified] is set when the slot is a
  * factory sound the EP-133 lists without a name ("200.pcm", see
  * [FactorySounds.unnamed]): it is used by its slot, as its name can't be checked.
+ * [synth] is set when the pick is the pad's synth line: [wanted] then names
+ * its device name ([SynthVoice.deviceName]), and MISSING means Arc makes it.
  */
 data class SoundPick(
     val pad: PhysicalPad,
@@ -163,13 +223,32 @@ data class SoundPick(
     val currentSlot: Int?,
     val status: SoundStatus,
     val unverified: Boolean = false,
+    val synth: CardSynth? = null,
 )
+
+/**
+ * A step of a card's lesson (`lesson Kick alone | A7 | 50 | Count out loud`): its [title], the [group] and [pads]
+ * (offsets; null: all the group's) the player plays, at [speed] percent of the tempo, and a [tip]. It is played on the
+ * first scene's pattern of that group.
+ */
+data class LessonStep(val title: String, val group: Int, val pads: Set<Int>?, val speed: Int = 100, val tip: String? = null) {
+    companion object {
+        const val MAX = 12
+        const val MIN_SPEED = 25
+        const val MAX_SPEED = 100
+    }
+}
 
 /** Something wrong with a card, at [line] (counted from 1 in the text read): an [error] stops the card being read, a warning doesn't. */
 data class CardProblem(val line: Int, val message: String, val error: Boolean)
 
 /** A card as read: the [card], or null when any problem is an error, and all the [problems] by line. */
-data class CardRead(val card: BeatCard?, val problems: List<CardProblem>)
+data class CardRead(
+    val card: BeatCard?,
+    val problems: List<CardProblem>,
+    /** Each pad's row name as the card writes it ("A7 kick" gives kick), the first row's for a pad with several: for [BeatCards.suggestSound]. */
+    val names: Map<PhysicalPad, String> = emptyMap(),
+)
 
 /**
  * A card planned into a project's sequencer: the [seq] after it, the
@@ -236,6 +315,17 @@ object BeatCards {
     /** The effect lines: header only. */
     private val FX_KEYS = setOf("fx", "send", "comp", "sidechain")
     private val PAD_KEYS = setOf("pitch", "level", "pan", "attack", "release", "mode")
+
+    /** A synth line's settings, in the order a card writes them. No key is a type, wave, chord or line word. */
+    private val SYNTH_KEYS = listOf(
+        "note", "wave", "chord", "attack", "decay", "length", "tone", "reso", "sweep", "bend", "click", "noise", "snap", "drive", "detune", "level", "seed", "name",
+    )
+
+    /** A synth line's values: ASCII digits only, never \d. */
+    private val SYNTH_INT = Regex("^[0-9]{1,3}$")
+    private val SYNTH_NOTE = Regex("^[A-G]#?[0-9]$")
+    private val SYNTH_LENGTH = Regex("^([0-9])(?:\\.([0-9]{1,2}))?$")
+    private val SYNTH_NAME = Regex("^[A-Za-z0-9][A-Za-z0-9_-]*$")
     private const val FX_WORDS = "none, delay, reverb, distortion, chorus, filter or compressor"
 
     /** A knob value as a card writes it: 0 to 100, whole or with one decimal. */
@@ -267,6 +357,14 @@ object BeatCards {
      */
     fun read(text: String): CardRead = Reader(text.removePrefix("\uFEFF").lines()).run()
 
+    /** Whether a file named [name] may hold a beat card as text, shared to Arc, opened with it or picked under PASTE: .txt, .md or .markdown. */
+    fun isCardFile(name: String): Boolean = CARD_FILE.containsMatchIn(name)
+
+    /** The most of a card file Arc reads: a longer one is no card (the text is checked by [hasCard] all the same). */
+    const val MAX_CARD_FILE = 1 shl 20
+
+    private val CARD_FILE = Regex("\\.(txt|md|markdown)$", RegexOption.IGNORE_CASE)
+
     /** Whether [text] has an ARC BEAT line: what [read] starts from, so a text without one is no card at all (not a card with a mistake). */
     fun hasCard(text: String): Boolean = text.removePrefix("\uFEFF").lines().any { CARD_START.containsMatchIn(trim(it)) }
 
@@ -289,10 +387,15 @@ object BeatCards {
 
         /** The pad lines read (merged when a pad has more than one), by pad offset. */
         val pads = LinkedHashMap<Int, CardPad>()
+
+        /** The synth lines read (the later wins, in the place of the first), by pad offset. */
+        val synths = LinkedHashMap<Int, CardSynth>()
         var inNotes = false
     }
 
     private class Reader(private val lines: List<String>) {
+        // Each pad's first row name, for CardRead.names.
+        private val names = LinkedHashMap<PhysicalPad, String>()
         private val problems = ArrayList<CardProblem>()
         private var name: String? = null
         private var tempo: Double? = null
@@ -336,13 +439,14 @@ object BeatCards {
             scenes += CardScene(if (sceneLines > 0) sceneName else null, sections.toList())
             if (sectionLines == 0) error(start + 1, "The card has no section, such as [A].")
             checkChain()
+            checkLesson()
             return result()
         }
 
         private fun result(): CardRead {
             val sorted = problems.sortedBy { it.line }
-            val card = if (sorted.any { it.error }) null else BeatCard(name, tempo, swing, scenes.toList(), cardFx(), chain, sceneLines > 0)
-            return CardRead(card, sorted)
+            val card = if (sorted.any { it.error }) null else BeatCard(name, tempo, swing, scenes.toList(), cardFx(), chain, sceneLines > 0, lesson.map { it.second })
+            return CardRead(card, sorted, names.toMap())
         }
 
         // The chain names scenes the card has, and the card has scenes at all.
@@ -386,6 +490,11 @@ object BeatCards {
 
         private fun lineAt(no: Int, line: String) {
             val first = tokens(line)[0].lowercase()
+            // A lesson line may come anywhere: it names no section's pads but its own.
+            if (first == "lesson") {
+                lessonLine(no, line)
+                return
+            }
             if (first == "scene") {
                 scene(no, line)
                 return
@@ -408,6 +517,7 @@ object BeatCards {
                 line.equals("notes", ignoreCase = true) -> d.inNotes = true
                 tokens(line)[0].equals("sound", ignoreCase = true) -> sound(d, no, line)
                 tokens(line)[0].equals("pad", ignoreCase = true) -> padLine(d, no, line)
+                tokens(line)[0].equals("synth", ignoreCase = true) -> synthLine(d, no, line)
                 tokens(line)[0].lowercase() in FX_KEYS -> error(no, "'${tokens(line)[0]}' belongs before the first section.")
                 d.inNotes -> note(d, no, line)
                 '|' in line -> row(d, no, line)
@@ -482,6 +592,68 @@ object BeatCards {
             chainAt = no
         }
 
+        // ---- lesson ----
+
+        private val lesson = ArrayList<Pair<Int, LessonStep>>()
+
+        // lesson <title> | <pads> | <speed> | <tip>: a step of the lesson. A line with a fault is left out.
+        private fun lessonLine(no: Int, line: String) {
+            val parts = line.substring(tokens(line)[0].length).split('|').map { trim(it) }
+            var title = parts.getOrNull(0).orEmpty()
+            val padsText = parts.getOrNull(1).orEmpty()
+            if (title.isEmpty() || padsText.isEmpty()) {
+                error(no, "A lesson line needs a title and the pads to play, as in lesson Kick alone | A7 | 50.")
+                return
+            }
+            if (lesson.size == LessonStep.MAX) {
+                error(no, "The lesson has more than ${LessonStep.MAX} steps, the most is ${LessonStep.MAX}.")
+                return
+            }
+            if (title.codePointCount(0, title.length) > MAX_NAME) {
+                warn(no, "Lesson step title is longer than $MAX_NAME characters, shortened.")
+                title = trim(cut(title, MAX_NAME))
+            }
+            var group: Int? = null
+            var pads: MutableSet<Int>? = HashSet()
+            for (tok in tokens(padsText)) {
+                val whole = tok.length == 1 && tok[0] in 'A'..'D'
+                val pad = if (whole) null else parsePad(tok)
+                val g = if (whole) tok[0] - 'A' else pad?.group
+                if (g == null) {
+                    error(no, "'$tok' isn't a pad or a group: write pads such as A7 A9, or A for the whole group.")
+                    return
+                }
+                if (group != null && g != group) {
+                    error(no, "A lesson step's pads are all in one group.")
+                    return
+                }
+                group = g
+                if (whole) pads = null else pads?.add(pad!!.offset)
+            }
+            val speedText = parts.getOrNull(2)?.removeSuffix("%")?.let { trim(it) }.orEmpty()
+            val speed = if (speedText.isEmpty()) LessonStep.MAX_SPEED else speedText.takeIf { it.length <= 3 && it.all { c -> c in '0'..'9' } }?.toInt()
+            if (speed == null || speed !in LessonStep.MIN_SPEED..LessonStep.MAX_SPEED) {
+                error(no, "A lesson step's speed is ${LessonStep.MIN_SPEED} to ${LessonStep.MAX_SPEED} percent of the tempo.")
+                return
+            }
+            val tip = parts.drop(3).joinToString(" | ").let { trim(it) }.takeIf { it.isNotEmpty() }
+            lesson += no to LessonStep(title, group!!, pads, speed, tip)
+        }
+
+        // Each step's pads have pad hits in the first scene's pattern of its group.
+        private fun checkLesson() {
+            val first = scenes.firstOrNull()?.sections.orEmpty()
+            for ((no, step) in lesson) {
+                val notes = first.firstOrNull { it.group == step.group }?.pattern?.playable().orEmpty().filter { it.semitones == null }
+                val played = notes.map { it.offset }.toSet()
+                val missing = step.pads?.filter { it !in played }.orEmpty()
+                when {
+                    notes.isEmpty() -> error(no, "Lesson step '${step.title}': the card's first scene has no pad hits in group ${'A' + step.group}.")
+                    missing.isNotEmpty() -> error(no, "Lesson step '${step.title}': ${missing.joinToString(" ") { padText(step.group, it) }} has no hits in the first scene's [${'A' + step.group}].")
+                }
+            }
+        }
+
         // ---- header ----
 
         private fun header(no: Int, line: String) {
@@ -491,7 +663,7 @@ object BeatCards {
             when {
                 sceneLines > 0 && key in HEADER_KEYS -> warn(no, "'$word' belongs before the first scene, ignored.")
                 sceneLines > 0 && key in FX_KEYS -> error(no, "'$word' belongs before the first scene.")
-                '|' in line || firstIsPad(line) || key == "notes" || key == "sound" || key == "pad" -> error(no, "'$word' needs a section first, such as [A].")
+                '|' in line || firstIsPad(line) || key == "notes" || key == "sound" || key == "pad" || key == "synth" -> error(no, "'$word' needs a section first, such as [A].")
                 key in FX_KEYS -> fxLine(no, word, key, tokens(rest))
                 key == "name" -> when {
                     rest.isEmpty() -> warn(no, "Name is empty, ignored.")
@@ -601,7 +773,7 @@ object BeatCards {
                 }
             }
             if (kept.size > Seq.MAX_NOTES) error(d.line, "Group ${'A' + d.group} has ${kept.size} notes, the most is ${Seq.MAX_NOTES}.")
-            if (!d.dropped) sections += CardSection(d.group, d.number, Pattern(d.bars, kept.sortedWith(NOTE_ORDER)), d.sounds, d.pads)
+            if (!d.dropped) sections += CardSection(d.group, d.number, Pattern(d.bars, kept.sortedWith(NOTE_ORDER)), d.sounds, d.pads, d.synths)
         }
 
         // ---- grid rows ----
@@ -619,6 +791,7 @@ object BeatCards {
                 error(no, "$label is in group ${'A' + pad.group}, but the section is [${'A' + d.group}].")
                 return
             }
+            if (head.size > 1) names.putIfAbsent(PhysicalPad(pad.group, pad.offset), head.drop(1).joinToString(" "))
             val per = Seq.TICKS_PER_BAR / d.step.ticks
             val total = d.bars * per
             val steps = line.substring(bar + 1).filter { !isSpace(it) && it != '|' }
@@ -687,6 +860,108 @@ object BeatCards {
             val name = cleanText(rest.substring(slotToken.length), Int.MAX_VALUE).ifEmpty { null }
             if (pad.offset in d.sounds) warn(no, "$label has two sound lines, kept the later.")
             d.sounds[pad.offset] = CardSound(slot, name)
+        }
+
+        // ---- synth lines ----
+
+        // synth <pad> <type> [<key> <value>]...: a sound Arc makes. A line with an error is left out, and an earlier line for the pad stays.
+        private fun synthLine(d: Draft, no: Int, line: String) {
+            if (d.inNotes) warn(no, "Put synth lines before notes, so older Arc can read the card.")
+            if ('|' in line) {
+                error(no, "A synth line can't hold a |.")
+                return
+            }
+            val t = tokens(line)
+            if (t.size < 3) {
+                error(no, "A synth line needs a pad and a sound type, as in synth A7 kick.")
+                return
+            }
+            val pad = parsePad(t[1])
+            if (pad == null) {
+                error(no, "'${t[1]}' isn't a pad. Use A to D, then . 0 E or 1 to 9.")
+                return
+            }
+            val label = padText(pad.group, pad.offset)
+            if (pad.group != d.group) {
+                error(no, "$label is in group ${'A' + pad.group}, but the section is [${'A' + d.group}].")
+                return
+            }
+            val type = SynthType.entries.firstOrNull { it.id == t[2].lowercase() }
+            if (type == null) {
+                warn(no, "Unknown sound type '${t[2]}' on $label synth, line ignored.")
+                return
+            }
+            var s = CardSynth(type)
+            var i = 3
+            while (i < t.size) {
+                val key = t[i].lowercase()
+                val v = t.getOrNull(i + 1)
+                if (key !in SYNTH_KEYS) {
+                    warn(no, "Unknown setting '${t[i]}' on $label synth, ignored.")
+                    i += if (v != null && v.lowercase() !in SYNTH_KEYS) 2 else 1
+                    continue
+                }
+                if (v == null) {
+                    error(no, "$label synth: $key needs a value.")
+                    return
+                }
+                s = when (key) {
+                    "note" -> {
+                        val n = (if (SYNTH_NOTE.matches(v)) NOTE_NUMBERS[v] else null)?.takeIf { it in SYNTH_NOTE_MIN..SYNTH_NOTE_MAX }
+                            ?: return error(no, "$label synth: note must be C0 to C7, such as C2 or F#1.")
+                        s.copy(note = n)
+                    }
+                    "length" -> {
+                        val m = SYNTH_LENGTH.matchEntire(v)
+                        val cs = m?.let {
+                            val frac = it.groupValues[2]
+                            it.groupValues[1].toInt() * 100 + if (frac.isEmpty()) 0 else if (frac.length == 1) frac.toInt() * 10 else frac.toInt()
+                        }?.takeIf { it in SYNTH_LENGTH_MIN..SYNTH_LENGTH_MAX }
+                            ?: return error(no, "$label synth: length must be 0.05 to 4 seconds, with up to two decimals.")
+                        s.copy(length = cs)
+                    }
+                    "wave" -> SynthWave.entries.firstOrNull { it.id == v.lowercase() }?.let { s.copy(wave = it) } ?: run {
+                        warn(no, "$label synth: unknown wave '$v', ignored.")
+                        s
+                    }
+                    "chord" -> SynthChord.entries.firstOrNull { it.id == v.lowercase() }?.let { s.copy(chord = it) } ?: run {
+                        warn(no, "$label synth: unknown chord '$v', ignored.")
+                        s
+                    }
+                    "name" -> {
+                        if (!SYNTH_NAME.matches(v)) return error(no, "$label synth: name must be one word of letters, digits, _ or -, starting with a letter or digit.")
+                        if (v.length > CardSynth.NAME_MAX) warn(no, "$label synth: name cut to ${CardSynth.NAME_MAX} characters.")
+                        s.copy(name = v.take(CardSynth.NAME_MAX))
+                    }
+                    else -> {
+                        val (lo, hi) = when (key) {
+                            "level" -> 1 to 100
+                            "seed" -> 0 to 999
+                            else -> 0 to 100
+                        }
+                        val n = v.takeIf { SYNTH_INT.matches(it) }?.toInt()?.takeIf { it in lo..hi }
+                            ?: return error(no, "$label synth: $key must be a whole number from $lo to $hi.")
+                        when (key) {
+                            "attack" -> s.copy(attack = n)
+                            "decay" -> s.copy(decay = n)
+                            "tone" -> s.copy(tone = n)
+                            "reso" -> s.copy(reso = n)
+                            "sweep" -> s.copy(sweep = n)
+                            "bend" -> s.copy(bend = n)
+                            "click" -> s.copy(click = n)
+                            "noise" -> s.copy(noise = n)
+                            "snap" -> s.copy(snap = n)
+                            "drive" -> s.copy(drive = n)
+                            "detune" -> s.copy(detune = n)
+                            "level" -> s.copy(level = n)
+                            else -> s.copy(seed = n)
+                        }
+                    }
+                }
+                i += 2
+            }
+            if (pad.offset in d.synths) warn(no, "$label has two synth lines, kept the later.")
+            d.synths[pad.offset] = s
         }
 
         // ---- effect lines (header only) ----
@@ -947,6 +1222,12 @@ object BeatCards {
     }
 
     private val INT = Regex("^\\d{1,9}$")
+
+    /** A synth line's note (C0..C7, MIDI) and length (hundredths of a second, 0.05..4 s). */
+    private const val SYNTH_NOTE_MIN = 12
+    private const val SYNTH_NOTE_MAX = 96
+    private const val SYNTH_LENGTH_MIN = 5
+    private const val SYNTH_LENGTH_MAX = 400
     private val SIGNED = Regex("^[+-]?\\d{1,9}$")
     private val NOTE_ORDER = compareBy<PatternNote>({ it.tick }, { it.offset }, { it.semitones ?: Int.MIN_VALUE })
 
@@ -1017,7 +1298,9 @@ object BeatCards {
      * [card] as text, as the spec's writing rules have it. [names] gives the
      * sound name a row shows after its pad (null for none). A section's
      * sound lines come right after its line, in keypad order, each with its
-     * name when it has one. With [tidy],
+     * name when it has one; then its synth lines ([synthText]), in keypad
+     * order, before its pad lines, rows and notes list, so older Arc reads
+     * the card. With [tidy],
      * velocities are rounded to 127, 100 or 64 (ties up) and gates under a
      * step become a step, for every note, and the card says so in a comment.
      * The [silent] pads ([silentPads]) are listed in a comment of their own
@@ -1027,7 +1310,7 @@ object BeatCards {
      * that name no scene are left out), then each scene as a `scene` line
      * with its name if it has one, followed by its sections in group order. A
      * section that only repeats the previous scene's pattern for its group
-     * (the same pattern, sounds and pad shaping) is left out. The text ends in
+     * (the same pattern, sounds, pad shaping and synth lines) is left out. The text ends in
      * a newline.
      */
     fun write(card: BeatCard, names: (PhysicalPad) -> String? = { null }, tidy: Boolean = false, silent: List<PhysicalPad> = emptyList()): String {
@@ -1039,6 +1322,7 @@ object BeatCards {
         out += "swing $swing"
         card.fx?.let { writeFx(out, it) }
         if (card.multiScene) card.chain?.let { writeChain(out, it, card.scenes.size) }
+        for (step in card.lesson.take(LessonStep.MAX)) out += lessonText(step)
         if (silent.isNotEmpty()) out += ClaudeText.noSoundOn(silent)
         if (tidy) out += TIDY_COMMENT
         if (!card.multiScene) {
@@ -1065,6 +1349,17 @@ object BeatCards {
         return out.joinToString("\n", postfix = "\n")
     }
 
+    /** A lesson step as its line: "lesson Kick alone | A7 | 50 | Count out loud" (the speed left out at 100, A for the whole group). */
+    fun lessonText(step: LessonStep): String {
+        val parts = listOf(cleanText(step.title, MAX_NAME), lessonPads(step)) +
+            listOfNotNull(if (step.speed != LessonStep.MAX_SPEED || step.tip != null) "${step.speed}" else null, step.tip?.let { cleanText(it, Int.MAX_VALUE) })
+        return "lesson " + parts.joinToString(" | ")
+    }
+
+    /** A lesson step's pads as a card writes them, in keypad order ("A7 A9"), or the group's letter for all its pads. */
+    fun lessonPads(step: LessonStep): String =
+        step.pads?.let { set -> PadNotes.ROWS.flatten().filter { it in set }.joinToString(" ") { padText(step.group, it) } } ?: "${'A' + step.group}"
+
     // The chain line: steps as 2 or 2x4; those naming a scene the card hasn't, or passes out of range, are left out, and so is a chain left with none.
     private fun writeChain(out: MutableList<String>, chain: List<Pair<Int, Int>>, sceneCount: Int) {
         val steps = chain.filter { (scene, passes) -> scene in 1..sceneCount && passes in Chain.MIN_PASSES..Chain.MAX_PASSES }.take(Chain.MAX_STEPS)
@@ -1072,9 +1367,9 @@ object BeatCards {
         out += "chain " + steps.joinToString(" ") { (scene, passes) -> if (passes == 1) "$scene" else "${scene}x$passes" }
     }
 
-    // Whether section [s] only repeats [prev], the previous scene's for its group: the same pattern as written (not the notes' ids), sounds and pad shaping.
+    // Whether section [s] only repeats [prev], the previous scene's for its group: the same pattern as written (not the notes' ids), sounds, pad shaping and synth lines.
     private fun repeats(prev: CardSection, s: CardSection): Boolean =
-        s.sounds == prev.sounds && s.pads == prev.pads && samePattern(prev.pattern, s.pattern)
+        s.sounds == prev.sounds && s.pads == prev.pads && s.synths == prev.synths && samePattern(prev.pattern, s.pattern)
 
     // Whether two patterns are written the same: the bars and the notes that play, in order, whatever their ids.
     private fun samePattern(a: Pattern, b: Pattern): Boolean = a.bars == b.bars && keyed(a) == keyed(b)
@@ -1121,6 +1416,41 @@ object BeatCards {
         return sb.toString()
     }
 
+    /**
+     * A synth line as a card writes it: `synth`, the pad and the type, then the settings the line gave, in the order of
+     * [SYNTH_KEYS] ("synth B9 bass note C2 wave square decay 25 name acid"). The note is a name (C2, F#1) and the length
+     * in seconds, as few decimals as needed (4, 0.5, 1.25).
+     */
+    fun synthText(group: Int, offset: Int, s: CardSynth): String {
+        val sb = StringBuilder("synth ${padText(group, offset)} ${s.type.id}")
+        fun put(key: String, value: Any?) {
+            if (value != null) sb.append(' ').append(key).append(' ').append(value)
+        }
+        put("note", s.note?.let { PadNotes.noteName(it) })
+        put("wave", s.wave?.id)
+        put("chord", s.chord?.id)
+        put("attack", s.attack)
+        put("decay", s.decay)
+        put("length", s.length?.let { lengthText(it) })
+        put("tone", s.tone)
+        put("reso", s.reso)
+        put("sweep", s.sweep)
+        put("bend", s.bend)
+        put("click", s.click)
+        put("noise", s.noise)
+        put("snap", s.snap)
+        put("drive", s.drive)
+        put("detune", s.detune)
+        put("level", s.level)
+        put("seed", s.seed)
+        put("name", s.name)
+        return sb.toString()
+    }
+
+    // Hundredths of a second as seconds, as few decimals as needed: 400 is 4, 50 is 0.5, 5 is 0.05, 125 is 1.25.
+    private fun lengthText(cs: Int): String =
+        "${cs / 100}" + (if (cs % 100 == 0) "" else "." + (cs % 100).toString().padStart(2, '0').trimEnd('0'))
+
     // Semitones to two decimals, as few as needed: 7, -7.5, 0.25.
     private fun pitchText(v: Double): String {
         val h = Math.round(v.coerceIn(-PadSettings.PITCH_MAX, PadSettings.PITCH_MAX) * 100).toInt()
@@ -1144,6 +1474,7 @@ object BeatCards {
             val name = sound.name?.let { cleanText(it, Int.MAX_VALUE) }.orEmpty()
             out += "sound ${padText(g, offset)} ${sound.slot}" + if (name.isEmpty()) "" else " $name"
         }
+        for (offset in KEYPAD) s.synths[offset]?.let { out += synthText(g, offset, it) }
         for (offset in KEYPAD) {
             val pad = s.pads[offset]?.takeUnless { it.isEmpty } ?: continue
             out += padLineText(g, offset, pad)
@@ -1437,16 +1768,75 @@ object BeatCards {
     // ---- Sounds ----
 
     /**
+     * A sound to suggest for a silent [pad] of [card] (an addition): one of [names] (slot to name, the sounds Arc knows) by
+     * the pad's row name in the card ([label], "shaker"). First a sound whose name has one of the label's words ("shaker"),
+     * then one whose name is of the label's kind (a hat for "closed hat", a bass for "sub"), then the first sound in the
+     * factory block of that kind (kicks 1-99 ... melodic 500-599; with the EP-40 kit, chords 600-699). A pad the card plays
+     * only in KEYS, with no telling name, takes a melodic sound, or a bass when its notes sit below C3. The EP-40's loops
+     * ("jammy bass a 85") are never suggested, nor a slot in [taken] (picked for another pad). Null when nothing fits.
+     */
+    fun suggestSound(
+        card: BeatCard,
+        pad: PhysicalPad,
+        label: String?,
+        names: Map<Int, String>,
+        taken: Set<Int> = emptySet(),
+        kit: FactoryKit = FactoryKit.EP133,
+    ): Int? {
+        val low = label.orEmpty().lowercase(Locale.ROOT)
+        val keys = card.allSections.filter { it.group == pad.group }.flatMap { s -> s.pattern.notes.filter { it.offset == pad.offset } }
+        val kind = SOUND_KINDS.firstOrNull { it.label.containsMatchIn(low) }
+            ?: if (keys.isNotEmpty() && keys.all { it.semitones != null }) SOUND_KINDS.first { it.name == if (keys.map { it.semitones!! }.average() < -12) "bass" else "melodic" } else null
+        val open = names.filter { (slot, name) -> slot in SLOT_MIN..SLOT_MAX && slot !in taken && !LOOP_NAME.containsMatchIn(name) }.toSortedMap()
+        val block = kind?.let { if (it.name == "chord" && kit == FactoryKit.EP40) 600..699 else it.block }
+        fun first(ok: (Int, String) -> Boolean): Int? {
+            val all = open.filter { (slot, name) -> ok(slot, name.lowercase(Locale.ROOT)) }.keys
+            return all.firstOrNull { block == null || it in block } ?: all.firstOrNull()
+        }
+        val words = WORD.findAll(low).map { it.value }.filter { it.length >= 3 && it !in STOP_WORDS }.toList()
+        if (words.isNotEmpty()) first { _, name -> words.any { w -> Regex("\\b${Regex.escape(w)}").containsMatchIn(name) } }?.let { return it }
+        if (kind == null) return null
+        return first { _, name -> kind.sound.containsMatchIn(name) } ?: open.keys.firstOrNull { it in block!! }
+    }
+
+    // A kind of sound: what a row's name says ([label]), what a sound's name says ([sound]) and its factory [block].
+    private class SoundKind(val name: String, val label: Regex, val sound: Regex, val block: IntRange)
+
+    // In the order they are tried: "open hat" before "hat", "bass drum" (a kick) before "bass".
+    private val SOUND_KINDS = listOf(
+        SoundKind("kick", Regex("\\b(kick|kik|bd|bass ?drum)\\b"), Regex("\\b(kick|kik|bd)"), 1..99),
+        SoundKind("snare", Regex("\\b(snare|sd|rim ?shot)\\b"), Regex("\\b(snare|sn|sd)\\b"), 100..199),
+        SoundKind("clap", Regex("\\b(clap|snap)\\b"), Regex("\\b(clap|snap)"), 100..199),
+        SoundKind("rim", Regex("\\b(rim|stick|clave)\\b"), Regex("\\b(rim|stick|clave)"), 100..199),
+        SoundKind("open hat", Regex("\\b(open ?(hat|hh|hi.?hat)|oh)\\b"), Regex("\\b(oh|open)\\b"), 200..299),
+        SoundKind("hat", Regex("\\b(hi.?hats?|hh|hats?|ch)\\b"), Regex("\\b(hh|hats?|hihat|ch)\\b"), 200..299),
+        SoundKind("cymbal", Regex("\\b(crash|ride|cymbal|splash)\\b"), Regex("\\b(crash|ride|cym)"), 200..299),
+        SoundKind("tom", Regex("\\btoms?\\b"), Regex("\\btom"), 300..399),
+        SoundKind("perc", Regex("\\b(shaker|shak\\w*|tamb\\w*|conga|bongo|cowbell|cow|perc\\w*|triangle)\\b"), Regex("\\b(shak|tamb|perc|conga|bongo|cow|tri)"), 300..399),
+        SoundKind("bass", Regex("\\b(bass|sub|808|reese)\\b"), Regex("\\b(bass|sub|808|synbaz|baz)"), 400..499),
+        SoundKind("chord", Regex("\\b(chords?|stabs?)\\b"), Regex("\\b(chrd|chord|stab|skank)"), 500..599),
+        SoundKind("melodic", Regex("\\b(lead|keys?|piano|pads?|pluck|synth|organ|mel\\w*|bell|strings?|arp)\\b"), Regex("\\b(lead|piano|pad|pluc?k|pluk|synth|organ|keys|bell|string|mel)"), 500..599),
+    )
+
+    // Words of a row's name too general to look for in a sound's name.
+    private val STOP_WORDS = setOf("closed", "open", "loop", "sound", "the", "and", "new", "drum", "hit", "low", "high", "main")
+    private val WORD = Regex("[a-z0-9]+")
+    // An EP-40 loop's name ("jammy bass a 85"): tempo-locked, never a one-shot to suggest.
+    private val LOOP_NAME = Regex("\\b(drms|fill|bass|mel|melo)\\s+[a-d]\\s+[0-9]{2,3}\\s*$", RegexOption.IGNORE_CASE)
+
+    /**
      * The pads [card]'s notes use (pad hits and KEYS notes alike; a note past its pattern's end doesn't play) that would
-     * be silent: [slotOf] gives no sound for them now (null) and no sound line of the card (in any scene) puts one on them.
+     * be silent: [slotOf] gives no sound for them now (null) and no sound or synth line of the card (in any scene) puts one on them.
      * In keypad order for each group, scene by scene. Empty when the pads are not [known] (nothing read yet): then a pad with no slot is not
      * known to be empty.
      */
     fun silentPads(card: BeatCard, slotOf: (PhysicalPad) -> Int?, known: Boolean): List<PhysicalPad> {
         if (!known) return emptyList()
         val out = ArrayList<PhysicalPad>()
-        // A sound line in any scene puts a sound on its pad: the sounds are the project's.
-        val given = card.allSections.flatMap { s -> s.sounds.filterValues { it.slot in SLOT_MIN..SLOT_MAX }.keys.map { PhysicalPad(s.group, it) } }.toSet()
+        // A sound or synth line in any scene puts a sound on its pad: the sounds are the project's.
+        val given = card.allSections.flatMap { s ->
+            (s.sounds.filterValues { it.slot in SLOT_MIN..SLOT_MAX }.keys + s.synths.keys).map { PhysicalPad(s.group, it) }
+        }.toSet()
         for (scene in card.scenes) {
             for (s in scene.sections.sortedBy { it.group }) {
                 val used = usedOffsets(s)
@@ -1497,9 +1887,15 @@ object BeatCards {
      * whose slot is already on the pad is [SoundStatus.SAME], found by name
      * or not. The sounds are the project's, not a scene's: the lines of all
      * the card's scenes are matched, and a pad given a line in more than one
-     * scene takes the last (one pick, in the place of its first).
+     * scene takes the last (one pick, in the place of its first). A line that is [foreign] (another kit's sound, by its
+     * slot and name) is never used by an unnamed slot: that slot holds another sound.
      */
-    fun resolveSounds(card: BeatCard, available: Map<Int, String>, current: (PhysicalPad) -> Int?): List<SoundPick> {
+    fun resolveSounds(
+        card: BeatCard,
+        available: Map<Int, String>,
+        foreign: (CardSound) -> Boolean = { false },
+        current: (PhysicalPad) -> Int?,
+    ): List<SoundPick> {
         val picks = LinkedHashMap<PhysicalPad, SoundPick>()
         for (s in card.allSections) {
             for (offset in KEYPAD) {
@@ -1510,7 +1906,7 @@ object BeatCards {
                 val name = wanted.name?.takeIf { it.isNotBlank() && !FactorySounds.unnamed(wanted.slot, it) }
                 val direct = wanted.slot.takeIf { it in available && (name == null || holds(available[it], name)) }
                 val byName = if (direct == null && name != null) lookUp(available, name, now) else null
-                val slot = direct ?: byName ?: wanted.slot.takeIf { unnamedIn(available, it) }
+                val slot = direct ?: byName ?: wanted.slot.takeIf { unnamedIn(available, it) && !foreign(wanted) }
                 val unverified = slot != null && unnamedIn(available, slot)
                 picks[pad] = when {
                     slot == null -> SoundPick(pad, wanted, null, null, now, SoundStatus.MISSING)
@@ -1521,6 +1917,21 @@ object BeatCards {
         }
         return picks.values.toList()
     }
+
+    /**
+     * The card's synth lines by pad, in the card's order (sections as given, pads in keypad order). The sounds are the
+     * project's: a pad given a synth line in more than one scene takes the last, in the place of its first.
+     */
+    fun synthsByPad(card: BeatCard): Map<PhysicalPad, CardSynth> {
+        val out = LinkedHashMap<PhysicalPad, CardSynth>()
+        for (s in card.allSections) {
+            for (offset in KEYPAD) s.synths[offset]?.let { out[PhysicalPad(s.group, offset)] = it }
+        }
+        return out
+    }
+
+    /** The slot of [available] (slot to name) that holds a sound called [name], as [resolveSounds] looks one up: the pad's own ([now]) when it does, else the lowest; null when none. */
+    fun slotNamed(available: Map<Int, String>, name: String, now: Int?): Int? = lookUp(available, name, now)
 
     // Whether [slot] is in [available] under the name the EP-133 gives a sound nobody named ("200.pcm").
     private fun unnamedIn(available: Map<Int, String>, slot: Int): Boolean = available[slot]?.let { FactorySounds.unnamed(slot, it) } == true
@@ -1570,8 +1981,8 @@ object BeatCards {
      * A card of scenes ([BeatCard.multiScene], from `scene` lines) is planned
      * by [planScenes] instead, which also takes [setChain].
      */
-    fun plan(seq: ProjectSeq, card: BeatCard, setChain: Boolean = true): CardImport {
-        if (card.multiScene) return planScenes(seq, card, setChain)
+    fun plan(seq: ProjectSeq, card: BeatCard, setChain: Boolean = true, replace: Boolean = false): CardImport {
+        if (card.multiScene) return planScenes(seq, card, setChain, replace)
         var out = seq
         val placed = ArrayList<Pair<Int, Int>>()
         for (s in card.sections) {
@@ -1583,9 +1994,11 @@ object BeatCards {
             placed += s.group to n
         }
         if (placed.size < 2) return CardImport(out, placed, false)
+        val numbers = List(4) { g -> placed.lastOrNull { it.first == g }?.second ?: seq.selected(g) }
+        // Replacing, the new scene is the project's only one, and a chain of the old scenes goes with them.
+        if (replace) return CardImport(out.withScenes(listOf(Scene(numbers)), 0, Chain()), placed, true, scenes = listOf(0))
         val withScene = SceneOps.newScene(out)
         if (withScene.scenes.size == out.scenes.size) return CardImport(out, placed, false)
-        val numbers = List(4) { g -> placed.lastOrNull { it.first == g }?.second ?: seq.selected(g) }
         val scenes = withScene.scenes.dropLast(1) + Scene(numbers)
         return CardImport(withScene.withScenes(scenes, withScene.scene), placed, true, scenes = listOf(withScene.scenes.lastIndex))
     }
@@ -1605,13 +2018,20 @@ object BeatCards {
      * [CardImport.seq] has it as the project's chain, replacing the one there
      * and turned on; with it off the project's chain is left alone.
      *
+     * With [replace] the new scenes take the place of the project's: the card's
+     * scenes become S01 on, the first selected, and the project's chain is
+     * cleared unless the card's is set (its steps then name the new scenes
+     * from 0). The project's patterns are kept in the banks; only the scenes
+     * that named them go. [plan] does the same for a card of several groups
+     * and no scenes: its one new scene is the project's only one.
+     *
      * Limits, as for the card without scenes: when a group has no free
      * pattern for a section, nothing is placed ([CardImport.fullGroup], [seq]
      * as it was). When the new scenes don't all fit in 99, none is added
      * ([CardImport.newScene] false, no scenes, no chain), and the patterns are
      * still placed.
      */
-    fun planScenes(seq: ProjectSeq, card: BeatCard, setChain: Boolean = true): CardImport {
+    fun planScenes(seq: ProjectSeq, card: BeatCard, setChain: Boolean = true, replace: Boolean = false): CardImport {
         var out = seq
         val placed = ArrayList<Pair<Int, Int>>()
         val taken = HashSet<Pair<Int, Int>>()
@@ -1631,13 +2051,15 @@ object BeatCards {
             numbers = now
             made += Scene(now)
         }
-        if (seq.scenes.size + made.size > Seq.MAX_SCENES) return CardImport(out, placed, false)
-        val first = seq.scenes.size
+        if (!replace && seq.scenes.size + made.size > Seq.MAX_SCENES) return CardImport(out, placed, false)
+        // Replacing, the card's scenes are the project's from S01 (its patterns stay in the banks), else they follow its scenes.
+        val first = if (replace) 0 else seq.scenes.size
         val indices = made.indices.map { first + it }
         val steps = card.chain?.filter { it.first in 1..card.scenes.size }?.take(Chain.MAX_STEPS)
             ?.map { (scene, passes) -> ChainStep(first + scene - 1, passes.coerceIn(Chain.MIN_PASSES, Chain.MAX_PASSES)) }?.ifEmpty { null }
-        val chain = if (setChain && steps != null) Chain(steps, true) else seq.chain
-        return CardImport(out.withScenes(seq.scenes + made, first, chain), placed, true, scenes = indices, chain = steps)
+        // A chain of the old scenes would name the new ones: replacing, it goes unless the card's takes its place.
+        val chain = if (setChain && steps != null) Chain(steps, true) else if (replace) Chain() else seq.chain
+        return CardImport(out.withScenes(if (replace) made else seq.scenes + made, first, chain), placed, true, scenes = indices, chain = steps)
     }
 
     // The first pattern of [group] after the one selected that has no notes and isn't in [taken], round 1..99; null when there is none.

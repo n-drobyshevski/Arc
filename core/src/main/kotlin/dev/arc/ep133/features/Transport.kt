@@ -76,6 +76,10 @@ class Transport {
         }
     }
 
+    /** PRACTICE's PLAY (an addition): from stopped, a bar counted in, then playing, nothing recorded. */
+    fun practise(): TransportAction =
+        if (state.phase == TransportPhase.STOPPED || state.phase == TransportPhase.ARMED) start(TransportAction.Start(1, false)) else TransportAction.None
+
     /** A pad (or a KEYS note) goes down at [at]: armed, recording starts right there, bar 1 on the press. */
     fun padDown(at: Long): TransportAction {
         if (state.phase != TransportPhase.ARMED) return TransportAction.None

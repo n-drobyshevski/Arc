@@ -51,6 +51,8 @@ import dev.arc.ep133.protocol.Storage
 import dev.arc.ep133.protocol.TrafficLog
 import dev.arc.ep133.service.TransferService
 import dev.arc.ep133.text.BackupDevice
+import dev.arc.ep133.text.ClaudeText
+import dev.arc.ep133.text.PromptText
 import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.LibraryRules
 import dev.arc.ep133.text.BackupRecord
@@ -207,6 +209,8 @@ data class UiState(
      * slot the EP-133 lists unnamed ("200.pcm") is called in the sound list a share carries and in a card's sound lines.
      */
     val factoryNames: Map<Int, String>? = null,
+    /** Each saved factory pack's sound names by slot, by its kit: what tells a card's sound from another kit's, and where IMPORT can upload one from. */
+    val kitNames: Map<FactoryKit, Map<Int, String>> = emptyMap(),
     val freshId: String? = null,
     val task: TaskUi? = null,
     val spaceLeft: Long? = null,
@@ -311,6 +315,9 @@ private const val PREVIEW_MEMORY_BYTES = 16L * 1024 * 1024
 /** The previews' keys for the pad sheet's offline sounds ("pad:<source>:<slot>:<name>"); backups are "backup:<id>:<slot>". */
 private const val PAD_PREVIEW = "pad:"
 
+/** How many synth sounds the beat card sheet's play key keeps made, for a quick replay. */
+private const val SYNTH_PREVIEWS = 8
+
 /** A Live press let go of while its sound loaded for longer than this sounds only if no press came after it. */
 private const val LATE_LOAD_NS = 120_000_000L
 
@@ -322,6 +329,15 @@ private const val BEAT_WAIT_MS = 2_000L
 
 /** PATTERN's count-in starts this much later still: time for the click to open its own output. */
 private const val COUNT_IN_LEAD_NS = 150_000_000L
+
+/** PRACTICE from Claude's page starts at this percent of the tempo. */
+private const val PRACTICE_START_SPEED = 75
+
+/** WAIT's lane shows this many steps ahead. */
+private const val PRACTICE_WAIT_AHEAD = 6
+
+/** A lesson's step opens the next after this many clean passes in a row. */
+internal const val LESSON_CLEAN_PASSES = 4
 
 /** The patterns started for SAMPLE's PTN take start this much later still: time to ask for the take before bar 1. */
 private const val PATTERN_TAKE_LEAD_NS = 100_000_000L
@@ -1483,6 +1499,24 @@ class ArcController(
         }
     }
 
+    // The last synth sounds the sheet's play key made, by their canonical text ([SynthVoice.canonical]), the oldest first.
+    private val synthPreviews = object : LinkedHashMap<String, ShortArray>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ShortArray>?) = size > SYNTH_PREVIEWS
+    }
+
+    /**
+     * The beat card sheet's play key on a synth row: [s] made on the phone ([SynthVoice.render]) and played, before IMPORT
+     * makes it. The last few made are kept, so a second press plays at once.
+     */
+    fun playSynth(s: dev.arc.ep133.features.CardSynth): Job = scope.launch {
+        val token = ++playToken
+        val text = dev.arc.ep133.features.SynthVoice.canonical(s)
+        val pcm = synthPreviews[text] ?: withContext(Dispatchers.Default) { dev.arc.ep133.features.SynthVoice.render(s) }.also { synthPreviews[text] = it }
+        if (token == playToken) {
+            startSound("synth:" + dev.arc.ep133.features.SynthVoice.tag(s), dev.arc.ep133.features.SynthVoice.pcmBytes(pcm), 1, dev.arc.ep133.features.SynthVoice.RATE)
+        }
+    }
+
     /**
      * Plays on the phone and says so when nothing will be heard: a sound that
      * can't play, or media volume at zero. Where the sound went is noted in the
@@ -1808,9 +1842,33 @@ class ArcController(
     private fun refreshFactoryNames() {
         scope.launch {
             val names = factorySnapshots().values.firstOrNull()?.names?.takeIf { it.isNotEmpty() }
-            _state.update { if (it.factoryNames == names) it else it.copy(factoryNames = names) }
+            val kits = LinkedHashMap<FactoryKit, Map<Int, String>>()
+            for (kit in savedKits(_state.value.backups)) {
+                val b = FactorySounds.inLibrary(_state.value.backups, kit) ?: continue
+                val n = packNames[b.id] ?: try {
+                    withContext(Dispatchers.Default) { pakOf(b.id).sounds.mapValues { it.value.name } }.also { packNames[b.id] = it }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    continue
+                }
+                kits[kit] = n
+            }
+            _state.update { if (it.factoryNames == names && it.kitNames == kits) it else it.copy(factoryNames = names, kitNames = kits) }
         }
     }
+
+    /** Each pack's sound names, read once per library entry ([UiState.kitNames]). */
+    private val packNames = HashMap<String, Map<Int, String>>()
+
+    /**
+     * The kit the EP-133's own sounds are, and the names its unnamed ones ("200.pcm") go by: Live playing a pack offline,
+     * that pack's; else the kit whose pack its slots match ([deviceKitOf]: connected, or as last read), or the connected
+     * device's own, else the EP-133's with no names. What a share tells Claude, not the kit Live plays offline.
+     */
+    private fun deviceKit(): DeviceKit = deviceKitOf(_state.value.mirror, _state.value.backups, _state.value.kitNames, session?.info?.sku, activeKit())
+
+    /** The kit a share names ([deviceKit]): the Claude page's glass says it too. */
+    fun shareKit(): FactoryKit = deviceKit().kit
 
     /**
      * Live without a device follows the library: it shows the factory sounds
@@ -2189,6 +2247,7 @@ class ArcController(
         }
         lastPressAt = pressedAt
         if (ready != null) startHeld(key, hold, ready, 0, pressedAt, measured = true, shapeFor(pad))
+        if (record) practicePress(pad, pressedAt)
         // The pad tapped is also the sound KEYS plays; it is loaded right here, so no preload for it.
         setKeysPad(pad)
         if (record) recordPress(pad, null, key, pressedAt, hold, first = patternPadDown(pressedAt))
@@ -2381,28 +2440,89 @@ class ArcController(
     /** The player's key for a take, to show Stop on its row. */
     fun takeKey(t: dev.arc.ep133.data.TakeInfo) = "take:" + t.name
 
-    /** Plays a take on the phone (a list's single sound: it stops the one before). */
-    fun playTake(t: dev.arc.ep133.data.TakeInfo): Job = scope.launch {
-        val token = ++playToken
+    /** The player's key for a take's part played while trimming. */
+    fun takeTrimKey(t: dev.arc.ep133.data.TakeInfo) = "take-trim:" + t.name
+
+    /** A take's whole sound, decoded (kept for playing again); null with a toast when it can't be read. */
+    suspend fun takeSound(t: dev.arc.ep133.data.TakeInfo): PcmSound? {
         val key = takeKey(t)
-        val sound = previews[key] ?: try {
+        return previews[key] ?: try {
             withContext(Dispatchers.IO) { PcmSound.ofWav(takeFile(t).readBytes()) }.also { previews.put(key, it) }
         } catch (e: Exception) {
             toast(e.message ?: e.toString(), error = true)
-            return@launch
+            null
         }
-        if (token != playToken) return@launch
-        startSound(key, sound)
     }
 
+    /** Plays frames [from] to [to] of [sound] under [key] (a list's single sound: it stops the one before). */
+    private suspend fun playPart(key: String, sound: PcmSound, from: Long, to: Long, token: Long) {
+        val ch = sound.channels
+        val part = if (from == 0L && to * ch >= sound.pcm.size) {
+            sound
+        } else {
+            withContext(Dispatchers.Default) {
+                val pcm = sound.pcm.copyOfRange((from * ch).toInt().coerceIn(0, sound.pcm.size), (to * ch).toInt().coerceIn(0, sound.pcm.size))
+                PcmSound(pcm, ch, sound.sampleRate, sound.silent)
+            }
+        }
+        if (token != playToken) return
+        startSound(key, part)
+    }
+
+    /** Plays a take on the phone, its trimmed part if it has one (a list's single sound: it stops the one before). */
+    fun playTake(t: dev.arc.ep133.data.TakeInfo): Job = scope.launch {
+        val token = ++playToken
+        val sound = takeSound(t) ?: return@launch
+        if (token != playToken) return@launch
+        playPart(takeKey(t), sound, t.trim?.start ?: 0L, t.trim?.end ?: t.frames, token)
+    }
+
+    /** TRIM's PLAY: frames [from] to [to] of the take, under [takeTrimKey]. */
+    fun playTakeTrim(t: dev.arc.ep133.data.TakeInfo, from: Long, to: Long): Job = scope.launch {
+        val token = ++playToken
+        val sound = takeSound(t) ?: return@launch
+        if (token != playToken) return@launch
+        playPart(takeTrimKey(t), sound, from, to, token)
+    }
+
+    /** TRIM's DONE: keeps [trim] with the take (null: the whole take again). */
+    fun setTakeTrim(t: dev.arc.ep133.data.TakeInfo, trim: dev.arc.ep133.features.TakeTrim?): Job = scope.launch {
+        try {
+            withContext(Dispatchers.IO) { takeStore.setTrim(t.name, trim) }
+        } catch (e: java.io.IOException) {
+            toast(e.message ?: e.toString(), error = true)
+        }
+        loadTakes()
+    }
+
+    /** DUP: a copy of the take, its trim with it, made the newest (so it is lit). */
+    fun duplicateTake(t: dev.arc.ep133.data.TakeInfo): Job = scope.launch {
+        val of = _takes.value.let { it.size - it.indexOf(t) }
+        try {
+            withContext(Dispatchers.IO) { takeStore.duplicate(t.name, System.currentTimeMillis()) }
+        } catch (e: java.io.IOException) {
+            toast(e.message ?: e.toString(), error = true)
+            return@launch
+        }
+        loadTakes()
+        toast(dev.arc.ep133.text.MirrorText.takeDuplicated(_takes.value.size, of))
+    }
+
+    /** The WAV SHARE, SAVE and EP send: the take's trimmed part, else all of it. */
+    suspend fun takeWav(t: dev.arc.ep133.data.TakeInfo): ByteArray = withContext(Dispatchers.IO) { takeStore.keptWav(t) }
+
+    /** A take as a voice message (Ogg Opus, mono), its trimmed part if it has one: what SHARE gives Telegram. Throws IOException when it can't be made. */
+    suspend fun takeVoice(t: dev.arc.ep133.data.TakeInfo): ByteArray =
+        withContext(Dispatchers.Default) { dev.arc.ep133.audio.VoiceNote.encode(takeWav(t)) }
+
     fun deleteTake(t: dev.arc.ep133.data.TakeInfo): Job = scope.launch {
-        if (player.playing.value == takeKey(t)) stopPlayback()
+        if (player.playing.value == takeKey(t) || player.playing.value == takeTrimKey(t)) stopPlayback()
         previews.remove(takeKey(t))
         withContext(Dispatchers.IO) { takeStore.delete(t.name) }
         loadTakes()
     }
 
-    /** Proposes a take for upload to a free slot (the Device tab's upload sheet, with its trim). */
+    /** Proposes a take for upload to a free slot (the Device tab's upload sheet, the take's trim set as its trim). */
     fun takeToDevice(t: dev.arc.ep133.data.TakeInfo): Job = scope.launch {
         val bytes = try {
             withContext(Dispatchers.IO) { takeFile(t).readBytes() }
@@ -2413,7 +2533,7 @@ class ArcController(
         // The Device tab reads the device as it opens; the free slot is picked once that is in.
         val contents = _state.value.browser.contents
             ?: kotlinx.coroutines.withTimeoutOrNull(10_000) { _state.first { it.browser.contents != null }.browser.contents }
-        val item = draftItem(t.name, bytes, contents?.occupiedSlots ?: emptySet(), HashSet())
+        val item = draftItem(t.name, bytes, contents?.occupiedSlots ?: emptySet(), HashSet()).let { d -> t.trim?.let { d.copy(trim = it.range()) } ?: d }
         _state.update { it.copy(browser = it.browser.copy(draft = listOf(item))) }
     }
 
@@ -2807,6 +2927,9 @@ class ArcController(
         scope.launch {
             val referenced = loadOfflinePads().list.mapNotNullTo(HashSet()) { it.file }
             val moved = withContext(Dispatchers.IO) {
+                // Synth sounds no pad change names any more: thrown away, as the card can make them again.
+                // And any half-written one Arc was closed on.
+                runCatching { (sampleFiles.synthStrays(referenced, started) + sampleFiles.synthLeftovers(started)).forEach { sampleFiles.delete(it) } }
                 runCatching { sampleFiles.strays(referenced, started).count { sampleFiles.moveToTakes(it, takeStore) } }.getOrDefault(0)
             }
             if (moved > 0) {
@@ -3611,6 +3734,23 @@ class ArcController(
             recordingsToTakes(listOf(p))
             return null
         }
+        // A synth sound made offline that the EP-133 has already (by its device name): put on the pad, not uploaded again.
+        if (dev.arc.ep133.data.SampleFiles.isSynth(name)) {
+            val have = deviceSounds.values.filter { dev.arc.ep133.features.PadSoundCache.sameName(it.name, p.name) }.minOfOrNull { it.slot }
+            if (have != null) {
+                val w = writePadQuiet(t, have)
+                if (!w.ok) {
+                    if (session === s) samplesFailed += name
+                    w.error?.let { toast(dev.arc.ep133.text.MirrorText.assignFailed(it), error = true) }
+                    return null
+                }
+                samplesFailed -= name
+                saveOfflinePads(OfflinePads(loadOfflinePads().list.filterNot { it.file == name }))
+                padMemory.remove(recordedKey(name))
+                withContext(Dispatchers.IO) { sampleFiles.delete(name) }
+                return have
+            }
+        }
         val wav = try {
             withContext(Dispatchers.IO) { sampleFiles.file(name).readBytes() }
         } catch (e: java.io.IOException) {
@@ -3640,11 +3780,17 @@ class ArcController(
         return into
     }
 
-    /** Recordings among [entries] moved into Takes (their pad changes dropped elsewhere); how many were. */
+    /**
+     * Recordings among [entries] moved into Takes (their pad changes dropped elsewhere); how many were. Synth sounds made
+     * offline are deleted instead (the card can make them again): never Takes, and never counted.
+     */
     private suspend fun recordingsToTakes(entries: List<OfflinePad>): Int {
-        val files = entries.filter { it.source == SoundSource.RECORDED }.mapNotNull { it.file }
+        val all = entries.filter { it.source == SoundSource.RECORDED }.mapNotNull { it.file }
+        if (all.isEmpty()) return 0
+        all.forEach { padMemory.remove(recordedKey(it)) }
+        val (synths, files) = all.partition { dev.arc.ep133.data.SampleFiles.isSynth(it) }
+        if (synths.isNotEmpty()) withContext(Dispatchers.IO) { synths.forEach { sampleFiles.delete(it) } }
         if (files.isEmpty()) return 0
-        files.forEach { padMemory.remove(recordedKey(it)) }
         val moved = withContext(Dispatchers.IO) { files.count { sampleFiles.moveToTakes(it, takeStore) } }
         loadTakes()
         return moved
@@ -4027,16 +4173,19 @@ class ArcController(
      * from arc's copies or a backup ([loadPatternPad]); the line counts them.
      */
     private fun refreshPatternPlan() {
-        val p = projectPatterns
+        // A practice plays the scene with the player's hits taken out, at its own speed.
+        val practising = practiceRun
+        val p = practising?.patterns ?: projectPatterns
         val m = mirror
         // Where each pattern started, for the recording's ticks as for the sequencer's.
         val phase = sceneDesk.phase
         patternRecorder.phase = phase
         // The picks waiting, as the patterns that take over: read from the sequencer as it stands, so a note recorded meanwhile is in them.
         val queued = sceneDesk.targets(projectSeq).mapValues { (g, q) -> dev.arc.ep133.audio.QueuedSwitch(projectSeq.pattern(g, q.to), q.at) }
-        val pads = queued.entries.fold(p.usedPads()) { all, (g, q) -> all + q.pattern.playable().map { dev.arc.ep133.features.PhysicalPad(g, it.offset) } }
+        val pads = queued.entries.fold(p.usedPads()) { all, (g, q) -> all + q.pattern.playable().map { dev.arc.ep133.features.PhysicalPad(g, it.offset) } } +
+            (practising?.targets?.map { dev.arc.ep133.features.PhysicalPad(practising.spec.group, it.offset) } ?: emptyList())
         val (voices, missing) = patternVoices(pads, ::padInMemory, { pad, keys -> shapeFor(pad, keys) }) { pad -> m?.sampleOf(pad) != null }
-        val bpm = patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)
+        val bpm = practising?.bpm ?: patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)
         val old = patternScheduler.plan
         if (old.patterns !== p || old.skip !== patternSkip || old.bpm != bpm || old.queued != queued || old.phase != phase || !sameVoices(old.voices, voices)) {
             patternScheduler.plan = dev.arc.ep133.audio.SeqPlan(p, voices, patternSkip, bpm, queued, phase)
@@ -4107,7 +4256,11 @@ class ArcController(
     private fun patternRunning() = transport.state.phase.let { it == TransportPhase.COUNT_IN || it == TransportPhase.PLAYING }
 
     /** RECORD goes down at [at] (the touch's time): armed or disarmed; running, recording on or off. */
-    fun patternRecordDown(at: Long) = patternAct { transport.recordDown(at) }
+    fun patternRecordDown(at: Long) {
+        // RECORD ends a practice: what is recorded goes into the scene as it is.
+        endPractice()
+        patternAct { transport.recordDown(at) }
+    }
 
     /** RECORD comes up at [at]: held a while after it punched in, recording stops with it. */
     fun patternRecordUp(at: Long) = patternAct { transport.recordUp(at) }
@@ -5269,19 +5422,282 @@ class ArcController(
         if (patternLoop?.isActive == true) followPattern()
     }
 
+    // ---------- PRACTICE: play along with a pattern, Live's pads lit ahead of each hit (an addition) ----------
+
+    /** A practice going on: its [spec], the patterns the sequencer plays meanwhile, the hits to play and how they score. */
+    private class PracticeRun(
+        val spec: dev.arc.ep133.features.PracticeSpec,
+        val place: String,
+        val patterns: dev.arc.ep133.features.ProjectPatterns,
+        val targets: List<dev.arc.ep133.features.PracticeTarget>,
+        val length: Int,
+        val bpm: Double,
+        val names: Map<Int, String>,
+        var score: dev.arc.ep133.features.PracticeScore,
+        var wait: dev.arc.ep133.features.PracticeWait?,
+    )
+
+    private var practiceRun: PracticeRun? = null
+    private val _practice = MutableStateFlow<PracticeUi?>(null)
+
+    /** PRACTICE as Live's panel shows it; null when no practice is on. */
+    val practice: StateFlow<PracticeUi?> = _practice
+
+    /** The tempo practice plays at: Live's, at [speed] percent. */
+    private fun practiceBpm(speed: Int) = patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo) * speed / 100.0
+
+    /**
+     * PRACTICE on [group]'s pattern in the scene showing ([spec]'s pads, bars and speed): Live shows that group's pads
+     * (one group, PADS), STEP's and SCENE's panels close, the transport stops, and the pattern plays from a bar counted in
+     * with the player's hits taken out, the rest of the scene underneath ([dev.arc.ep133.features.Practice.patterns]).
+     * Nothing is recorded. A toast, and no practice, when the group has no pad hits there. A lesson going on ends.
+     */
+    fun practise(spec: dev.arc.ep133.features.PracticeSpec) {
+        lessonRun = null
+        startPractice(spec)
+    }
+
+    /** [practise], a lesson going on kept (its step's spec, or the step's settings changed). */
+    private fun startPractice(spec: dev.arc.ep133.features.PracticeSpec) {
+        val g = spec.group.coerceIn(0, 3)
+        val pattern = projectPatterns.group(g)
+        val targets = dev.arc.ep133.features.Practice.targets(pattern, spec)
+        if (targets.isEmpty()) {
+            toast(dev.arc.ep133.text.PracticeText.nothingToPlay(ClaudeText.place(g, projectSeq.selected(g))), error = true)
+            return
+        }
+        if (patternRunning()) patternStop()
+        if (stepDesk.open) closeStep()
+        if (sceneDesk.open) closeScene()
+        if (!settings.value.liveOneGroup || settings.value.liveKeys) changeSettings { it.copy(liveOneGroup = true, liveKeys = false) }
+        val bpm = practiceBpm(spec.speed)
+        val length = dev.arc.ep133.features.Practice.length(pattern, spec)
+        val names = targets.map { it.offset }.toSet().associateWith { o -> mirrorName(dev.arc.ep133.features.PhysicalPad(g, o)) ?: dev.arc.ep133.features.PadNotes.LABELS[o] }
+        practiceRun = PracticeRun(
+            spec, ClaudeText.place(g, projectSeq.selected(g)), dev.arc.ep133.features.Practice.patterns(projectPatterns, spec), targets, length, bpm, names,
+            dev.arc.ep133.features.PracticeScore(targets, length, bpm),
+            if (spec.wait) dev.arc.ep133.features.PracticeWait(targets) else null,
+        )
+        refreshPatternPlan()
+        showPractice()
+        if (!spec.wait) practicePlay()
+    }
+
+    /** Practice from Claude's page: [pick]'s group ([group] for a pattern; for the scene or the chain, the scene's first group with pad hits). */
+    fun practisePick(pick: dev.arc.ep133.features.SharePick, group: Int) {
+        val g = if (pick == dev.arc.ep133.features.SharePick.PATTERN) group else practiceGroup(projectPatterns, group)
+        practise(dev.arc.ep133.features.PracticeSpec(g, speed = PRACTICE_START_SPEED))
+    }
+
+    /** The settings of the practice on changed by [change] (speed, bars, WAIT, the backing): it starts over with them. */
+    fun changePractice(change: (dev.arc.ep133.features.PracticeSpec) -> dev.arc.ep133.features.PracticeSpec) {
+        val run = practiceRun ?: return
+        val next = change(run.spec)
+        if (next == run.spec) return
+        keepLessonRecord()
+        startPractice(next)
+    }
+
+    /** PRACTICE's ▶: from the top again, the counts cleared (in WAIT, the first step). */
+    fun practicePlay() {
+        val run = practiceRun ?: return
+        keepLessonRecord()
+        lessonRun?.moving = false
+        run.score = dev.arc.ep133.features.PracticeScore(run.targets, run.length, run.bpm)
+        run.wait = if (run.spec.wait) dev.arc.ep133.features.PracticeWait(run.targets) else null
+        if (!run.spec.wait) {
+            if (patternRunning()) patternStop()
+            patternAct { transport.practise() }
+        }
+        showPractice()
+    }
+
+    /** PRACTICE's ■: the transport stops and the counts stay, with the pad most often off. */
+    fun practiceStop() {
+        if (practiceRun == null) return
+        if (patternRunning()) patternStop()
+        showPractice()
+    }
+
+    /** PRACTICE's ✕: it ends, the sequencer plays the scene as it is again. */
+    fun endPractice() {
+        if (practiceRun == null) return
+        if (patternRunning()) patternStop()
+        practiceRun = null
+        lessonRun = null
+        _practice.value = null
+        refreshPatternPlan()
+    }
+
+    /** [pad] pressed at [at] while practising: scored by its time heard, or in WAIT by whether the step waits for it. */
+    private fun practicePress(pad: dev.arc.ep133.features.PhysicalPad, at: Long) {
+        val run = practiceRun ?: return
+        if (pad.group != run.spec.group) return
+        val w = run.wait
+        if (w != null) {
+            w.press(pad.offset)
+        } else {
+            val tick = practiceTick(run, at) ?: return
+            run.score.advance(tick)
+            run.score.press(pad.offset, tick)
+        }
+        showPractice()
+    }
+
+    /** Where the practised group's loop is heard at [at], from its first start (negative counting in); null stopped. */
+    private fun practiceTick(run: PracticeRun, at: Long): Double? =
+        patternHeardTickAt(at)?.let { it - sceneDesk.phase.of(run.spec.group) }
+
+    /**
+     * The practice running at [now], for the pads and the lane: the tick heard, each pad's next hits (WAIT: the step's
+     * pads, now), the counts; the hits passed by are let go of. Null when no practice is on.
+     */
+    fun practiceFrame(now: Long): PracticeFrame? {
+        val run = practiceRun ?: return null
+        val w = run.wait
+        if (w != null) {
+            val upcoming = w.steps.drop(w.step).take(PRACTICE_WAIT_AHEAD).flatMap { s -> s.map { t -> t to (t.tick - w.tick).toDouble() } }
+                .filter { (t, d) -> d > 0 || t.offset in w.waiting }
+            return PracticeFrame(w.tick.toDouble(), upcoming, w.counts)
+        }
+        val tick = practiceTick(run, now) ?: return PracticeFrame(0.0, emptyList(), run.score.counts)
+        val passes = run.score.counts.passes
+        run.score.advance(tick)
+        if (run.score.counts.passes != passes) {
+            showPractice()
+            lessonPassed(run)
+        }
+        return PracticeFrame(tick, run.score.upcoming(tick), run.score.counts)
+    }
+
+    /**
+     * A lesson going on: the card's [name], its [tempo] and [steps], the step on ([at], from 0), each step's record so far,
+     * whether every step is [done], and [moving] while the next step is on its way (so a pass closing meanwhile counts once).
+     */
+    private class LessonRun(val name: String?, val steps: List<dev.arc.ep133.features.LessonStep>) {
+        var at = 0
+        val records = arrayOfNulls<LessonRecord>(steps.size)
+        var done = false
+        var moving = false
+    }
+
+    private var lessonRun: LessonRun? = null
+
+    /** The card the last IMPORT read, for its lesson (IMPORT AND PRACTISE). */
+    private var lastImportCard: dev.arc.ep133.features.BeatCard? = null
+
+    /** A lesson's step [i] (from 0, kept in range): practice on its group's pattern in the scene showing, its pads, at its speed. */
+    private fun startLessonStep(i: Int) {
+        val l = lessonRun ?: return
+        l.at = i.coerceIn(0, l.steps.lastIndex)
+        l.moving = false
+        val s = l.steps[l.at]
+        startPractice(dev.arc.ep133.features.PracticeSpec(s.group, s.pads, speed = s.speed))
+    }
+
+    /** PRACTICE's ‹ and ›: the lesson's step before or after, its record of how it went kept. */
+    fun lessonStep(delta: Int) {
+        val l = lessonRun ?: return
+        val next = (l.at + delta).coerceIn(0, l.steps.lastIndex)
+        if (next == l.at) return
+        keepLessonRecord()
+        startLessonStep(next)
+    }
+
+    /** How the lesson's step on went, kept as its record once it has hits ([done]: its clean passes were played). */
+    private fun keepLessonRecord(done: Boolean = false) {
+        val l = lessonRun ?: return
+        val run = practiceRun ?: return
+        val counts = run.wait?.counts ?: run.score.counts
+        if (counts.hits == 0 && !done) return
+        val old = l.records[l.at]
+        val worst = run.score.worst()?.let { (pad, mark) -> (run.names[pad] ?: dev.arc.ep133.features.PadNotes.LABELS[pad]) to mark }
+        l.records[l.at] = LessonRecord(counts.percent, counts.passes, done || old?.done == true, worst)
+    }
+
+    /** A pass closed in a lesson's step: enough clean ones in a row open the next ([LessonPlace.passesToGo]); after the last, the lesson is done. */
+    private fun lessonPassed(run: PracticeRun) {
+        val l = lessonRun ?: return
+        if (l.moving || run.score.counts.cleanRun < LESSON_CLEAN_PASSES) return
+        l.moving = true
+        keepLessonRecord(done = true)
+        val step = l.at
+        if (step < l.steps.lastIndex) {
+            toast(dev.arc.ep133.text.PracticeText.stepDone(step + 1, l.steps[step + 1].title))
+            scope.launch { if (lessonRun === l && l.at == step) startLessonStep(step + 1) }
+        } else {
+            l.done = true
+            toast(dev.arc.ep133.text.PracticeText.LESSON_DONE)
+            scope.launch { if (lessonRun === l) practiceStop() }
+        }
+    }
+
+    /**
+     * COPY HOW IT WENT: a short report of the practice on, for Claude: with a lesson, each step with its share in time,
+     * passes and the pad most often off; else the counts. Null when no practice is on.
+     */
+    fun practiceReport(): String? {
+        val run = practiceRun ?: return null
+        val t = dev.arc.ep133.text.PracticeText
+        val l = lessonRun
+        fun worstText(w: Pair<String, dev.arc.ep133.features.HitMark>?) = w?.let { (name, mark) -> t.worst(name, mark) }
+        if (l == null) {
+            val n = run.wait?.counts ?: run.score.counts
+            val worst = run.score.worst()?.let { (pad, mark) -> (run.names[pad] ?: dev.arc.ep133.features.PadNotes.LABELS[pad]) to mark }
+            return listOf(
+                t.reportHead(run.place, Math.round(run.bpm).toInt(), run.spec.speed),
+                t.reportPlain(t.counts(n.hits, n.onTime, n.early, n.late, n.missed, n.extra), n.passes, worstText(worst)),
+                t.REPORT_ASK,
+            ).joinToString("\n")
+        }
+        keepLessonRecord()
+        val tempo = patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)
+        val lines = ArrayList<String>()
+        lines += t.reportLessonHead(l.name, Math.round(tempo).toInt())
+        for ((i, s) in l.steps.withIndex()) {
+            val r = l.records[i]
+            val result = r?.let { t.reportResult(it.percent, it.passes, it.done, worstText(it.worst)) } ?: t.REPORT_NOT_PLAYED
+            lines += t.reportStep(i + 1, s.title, dev.arc.ep133.features.BeatCards.lessonPads(s), s.speed, result)
+        }
+        lines += t.REPORT_ASK
+        return lines.joinToString("\n")
+    }
+
+    private fun showPractice() {
+        val run = practiceRun ?: return
+        val w = run.wait
+        val counts = w?.counts ?: run.score.counts
+        _practice.value = PracticeUi(
+            run.spec, run.place, keypadOrder(run.names.keys), run.names, Math.round(run.bpm).toInt(), run.length / dev.arc.ep133.features.Seq.TICKS_PER_BAR,
+            running = w == null && patternRunning(),
+            counts = counts,
+            worst = run.score.worst(),
+            waiting = w?.waiting ?: emptySet(),
+            waitStep = w?.step ?: 0,
+            waitSteps = w?.steps?.size ?: 0,
+            lesson = lessonRun?.let { l ->
+                val s = l.steps[l.at]
+                LessonPlace(
+                    l.at + 1, l.steps.size, s.title, s.tip, (LESSON_CLEAN_PASSES - counts.cleanRun).coerceAtLeast(0),
+                    l.records.toList(), l.done,
+                )
+            },
+        )
+    }
+
     // ---------- BEAT CARDS: share a pattern or scene to Claude, paste Claude's card back (an addition) ----------
 
     /**
      * What SHARE sends: [group]'s playing pattern, or (null) the scene playing, as an ARC BEAT card at the tempo Live
      * plays at and the TIMING swing, with the pads' names and a sound line for each pad it uses (the slot and name Live
      * shows on it); null when there are no notes in it. The project's FX and the settings of the pads it uses are written
-     * as the card's effect and `pad` lines, and the used pads with no sound as a comment. With "With my sound list" on, the sounds Arc knows follow the card ([soundSetOf]). The patterns are the project's as they stand, a pattern still recording included.
+     * as the card's effect and `pad` lines, the used pads with no sound as a comment, and the kit Live plays before the card when it isn't the EP-133's ([activeKit], [ClaudeText.kitLine]). With "With my sound list" on, the sounds Arc knows follow the card ([soundSetOf]). The patterns are the project's as they stand, a pattern still recording included.
      */
-    fun beatShare(group: Int?): BeatShare? {
+    fun beatShare(group: Int?, prompt: String = ClaudeText.SHARE_PROMPT, kit: FactoryKit = shareKit()): BeatShare? {
         if (group != null && group !in 0..3) return null
         val bpm = patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)
         val m = mirror
-        val set = soundSetOf(_state.value.mirror, _state.value.factoryNames)
+        val set = soundSetOf(_state.value.mirror, deviceKit().names)
         // The pad's sound as the list names it, the factory pack's name standing in for an unnamed "200.pcm".
         val sounds = { pad: dev.arc.ep133.features.PhysicalPad ->
             m?.slotOf(pad)?.let { slot -> dev.arc.ep133.features.CardSound(slot, set?.names?.get(slot) ?: m.nameOf(pad)) }
@@ -5291,7 +5707,7 @@ class ArcController(
         val shaping = { pad: dev.arc.ep133.features.PhysicalPad -> m?.target(pad)?.let { padSettings[padKey(it)] } }
         // The pads the notes use that have no sound are named in a comment, once the pads are read (the share's "# no sound on:").
         val held = { pad: dev.arc.ep133.features.PhysicalPad -> m?.soundSlot(pad) }
-        return beatShare(projectSeq, group, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true)
+        return beatShare(projectSeq, group, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true, kit, prompt)
     }
 
     /**
@@ -5300,18 +5716,62 @@ class ArcController(
      * pads with no sound in a comment and, with "With my sound list" on, the sounds Arc knows, as [beatShare] has them. Null when the
      * chain has no steps.
      */
-    fun beatShareChain(): BeatShare? {
+    fun beatShareChain(prompt: String = ClaudeText.SHARE_CHAIN_PROMPT, kit: FactoryKit = shareKit()): BeatShare? {
         if (projectSeq.chain.isBlank) return null
         val bpm = patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)
         val m = mirror
-        val set = soundSetOf(_state.value.mirror, _state.value.factoryNames)
+        val set = soundSetOf(_state.value.mirror, deviceKit().names)
         val sounds = { pad: dev.arc.ep133.features.PhysicalPad ->
             m?.slotOf(pad)?.let { slot -> dev.arc.ep133.features.CardSound(slot, set?.names?.get(slot) ?: m.nameOf(pad)) }
         }
         val list = if (settings.value.shareSounds) set else null
         val shaping = { pad: dev.arc.ep133.features.PhysicalPad -> m?.target(pad)?.let { padSettings[padKey(it)] } }
         val held = { pad: dev.arc.ep133.features.PhysicalPad -> m?.soundSlot(pad) }
-        return beatShareChain(projectSeq, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true)
+        return beatShareChain(projectSeq, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true, kit, prompt)
+    }
+
+    /**
+     * What the Claude page's SHARE sends for [prompt]: with a card, the [pick]'s ([beatShare] of [group]'s pattern or
+     * the scene, [beatShareChain]) after the prompt's words ([PromptText.prompt]), else the words alone ([promptShare],
+     * named [PromptText.NEW_BEAT] or [PromptText.TRACK_IDEA]) with the sounds Arc knows when "With my sound list" is on
+     * (a lesson goes without). The prompt's kit, else the one Live plays, follows the words. Null when the card has
+     * nothing in it.
+     */
+    fun promptShare(prompt: dev.arc.ep133.features.ClaudePrompt, pick: dev.arc.ep133.features.SharePick, group: Int): BeatShare? {
+        val kit = prompt.kit ?: shareKit()
+        val set = soundSetOf(_state.value.mirror, deviceKit().names)
+        val learn = prompt.task == dev.arc.ep133.features.PromptTask.LEARN
+        val list = if (settings.value.shareSounds && !learn) set else null
+        val words = PromptText.prompt(prompt, pick, list != null)
+        if (prompt.withCard) {
+            return when (pick) {
+                dev.arc.ep133.features.SharePick.SCENE -> beatShare(null, words, kit)
+                dev.arc.ep133.features.SharePick.PATTERN -> beatShare(group, words, kit)
+                dev.arc.ep133.features.SharePick.CHAIN -> beatShareChain(words, kit)
+            }
+        }
+        val what = if (prompt.task == dev.arc.ep133.features.PromptTask.TRACK) PromptText.TRACK_IDEA else PromptText.NEW_BEAT
+        return promptShare(if (learn) PromptText.task(prompt.task) else what, words, if (learn) null else kit, list)
+    }
+
+    /** The Claude page's prompt as built ([AppSettings.claudePrompt]), and kept as it changes. */
+    fun setClaudePrompt(p: dev.arc.ep133.features.ClaudePrompt) = changeSettings { it.copy(claudePrompt = p.encode()) }
+
+    /** SAVE under SAVED: the prompt kept with a name of its own ([PromptText.withSaved]), and said. */
+    fun saveClaudePrompt(p: dev.arc.ep133.features.ClaudePrompt) {
+        val list = dev.arc.ep133.features.SavedPrompt.decodeAll(settings.value.claudePrompts)
+        val next = PromptText.withSaved(list, p)
+        if (next.size == list.size) return
+        changeSettings { it.copy(claudePrompts = dev.arc.ep133.features.SavedPrompt.encodeAll(next)) }
+        toast(PromptText.saved(next.last().name))
+    }
+
+    /** A saved prompt held: deleted, and said. */
+    fun deleteClaudePrompt(index: Int) {
+        val list = dev.arc.ep133.features.SavedPrompt.decodeAll(settings.value.claudePrompts)
+        val gone = list.getOrNull(index) ?: return
+        changeSettings { it.copy(claudePrompts = dev.arc.ep133.features.SavedPrompt.encodeAll(list - gone)) }
+        toast(PromptText.deleted(gone.name))
     }
 
     private val _claudeWaiting = MutableStateFlow<String?>(null)
@@ -5335,12 +5795,28 @@ class ArcController(
     /** "With my sound list" on or off (kept like the other Live preferences). */
     fun setShareSounds(on: Boolean) = changeSettings { it.copy(shareSounds = on) }
 
+    /** The beat card sheet's REPLACE: a card's scenes take the place of the project's, or follow them; kept for the next card. */
+    fun setReplaceScenes(on: Boolean) = changeSettings { it.copy(replaceScenes = on) }
+
     /**
      * A text from PASTE BEAT (the clipboard) or shared to arc: with an ARC BEAT line in it, the card is read and planned
      * into the project's patterns as they stand ([BeatCards.plan]) and its sheet opens ([beatImport]); with none the
      * toast says so. Nothing changes until [importBeat]. Works offline and while stopped or playing: the plan reads
      * the patterns once they are loaded, so a card never lands on a project's notes before they are read.
      */
+    /**
+     * A .txt or .md file with a beat card in it (shared to arc, opened with it, or picked with PASTE held): its text, as
+     * [receiveBeat] takes it. A file that can't be read, or is longer than a card ([BeatCards.MAX_CARD_FILE]), has none.
+     */
+    fun receiveBeatFile(uri: android.net.Uri): Job = scope.launch {
+        val text = withContext(Dispatchers.IO) {
+            runCatching { dev.arc.ep133.files.Files.read(context, uri) }.getOrNull()
+                ?.takeIf { it.size <= dev.arc.ep133.features.BeatCards.MAX_CARD_FILE }
+                ?.toString(Charsets.UTF_8)
+        }
+        receiveBeat(text)
+    }
+
     fun receiveBeat(text: String?) {
         if (text == null || !dev.arc.ep133.features.BeatCards.hasCard(text)) {
             toast(dev.arc.ep133.text.ClaudeText.NO_CARD)
@@ -5357,12 +5833,12 @@ class ArcController(
     // The sheet for [read], planned into the project's patterns as they are now.
     private fun showBeat(read: dev.arc.ep133.features.CardRead) {
         val m = mirror
-        val set = soundSetOf(_state.value.mirror, _state.value.factoryNames)
+        val set = soundSetOf(_state.value.mirror, deviceKit().names)
         val offline = _state.value.device == null
         val project = m?.snapshot(System.nanoTime())?.activeProject
         _beatImport.value = beatImportUi(
             read, projectSeq, patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo), ::mirrorName,
-            sounds = { card -> soundsUi(card, set, { pad -> m?.slotOf(pad) }, ::mirrorName, offline, project) },
+            sounds = { card -> soundsUi(card, set, { pad -> m?.slotOf(pad) }, ::mirrorName, offline, project, _state.value.kitNames, deviceKit().kit) },
             fx = { card -> beatFxUi(card, fxDesk.fx.value) },
             shaping = { card ->
                 padShapingUi(
@@ -5375,8 +5851,9 @@ class ArcController(
             },
             // The pads the card plays that have no sound (once the pads are read): PICK SOUND chooses among the sounds the SOUNDS block uses.
             silent = { card ->
-                silentUi(card, { pad -> m?.soundSlot(pad) }, m?.padsKnown() == true, soundChoicesOf(_state.value.mirror, _state.value.factoryNames), offline, project)
+                silentUi(card, { pad -> m?.soundSlot(pad) }, m?.padsKnown() == true, soundChoicesOf(_state.value.mirror, deviceKit().names), offline, project)
             },
+            kit = activeKit(),
         )
     }
 
@@ -5393,8 +5870,9 @@ class ArcController(
      * new patterns from its next tick, the picks waiting go. Where a group has no free pattern now the sheet stays,
      * with the reason.
      *
-     * [soundPads] are the pads whose sound lines the sheet had ticked: after the patterns each is matched again to the
-     * sounds as they are now ([BeatCards.resolveSounds]) and put on its pad ([putSounds]), in the same UNDO step. The sounds
+     * [soundPads] are the pads whose sound (or synth) lines the sheet had ticked: after the patterns each is matched again
+     * to the sounds as they are now ([cardPicks]) and put on its pad ([putSounds]), uploaded from a pack ([uploadFromPacks])
+     * or made ([makeSynths]; offline into Arc's files), in the same UNDO step. The sounds
      * the user [pickedSounds] for the pads the card leaves silent (pad to slot; they are in [soundPads] too, being ticked)
      * go on their pads the same way, as extra picks of the same step.
      *
@@ -5405,6 +5883,7 @@ class ArcController(
      *
      * A card of scenes adds a scene for each of its own, and with [setChain] (the sheet's SET CHAIN) its chain replaces the project's,
      * on the new scenes, and is turned on: part of the same one UNDO step, the sequencer's (the transport playing, the chain joins at once).
+     * With [replaceScenes] (the sheet's REPLACE) the card's scenes take the place of the project's, from S01, in that same step.
      */
     fun importBeat(
         setTempo: Boolean,
@@ -5413,14 +5892,17 @@ class ArcController(
         shapePads: Set<dev.arc.ep133.features.PhysicalPad> = emptySet(),
         pickedSounds: Map<dev.arc.ep133.features.PhysicalPad, Int> = emptyMap(),
         setChain: Boolean = true,
+        replaceScenes: Boolean = false,
     ) {
         val ui = _beatImport.value ?: return
         val card = ui.card ?: return
+        lastImport = null
+        lastImportCard = null
         var applied: BeatApplied? = null
         // The sequencer as it was: UNDO is that one, once the sounds are back with it.
         val before = projectSeq
         sceneEdit {
-            val a = applyBeat(projectSeq, card, patternRecorder, setChain)
+            val a = applyBeat(projectSeq, card, patternRecorder, setChain, replaceScenes)
             applied = a
             if (a.seq !== projectSeq) sceneDesk.cancel()
             a.seq
@@ -5431,6 +5913,8 @@ class ArcController(
             toast(dev.arc.ep133.text.ClaudeText.groupFull(a.fullGroup), error = true)
             return
         }
+        lastImport = a
+        lastImportCard = card
         _beatImport.value = null
         _claudeWaiting.value = null
         if (setTempo) card.tempo?.let { setTempo(dev.arc.ep133.features.Tempo.round(it)) }
@@ -5451,14 +5935,130 @@ class ArcController(
             }
         }
         val fxApplied = entry.fxBefore != null
-        val picks = importPicks(card, soundPads, pickedSounds)
+        // The ticked pads planned again as the sounds are now, as the sheet plans them ([cardPicks]): the slots to put on,
+        // the packs' sounds to upload (connected only) and the synth lines to make.
+        val dk = deviceKit()
+        val m = mirror
+        val kitNames = _state.value.kitNames
+        val plan = cardPicks(card, soundSetOf(_state.value.mirror, dk.names)?.names.orEmpty(), foreignTo(kitNames, dk.kit), { pad -> m?.slotOf(pad) }, kitNames, connected = session != null)
+            .filter { it.pick.pad in soundPads }
+        val picks = importPicks(plan, soundPads, pickedSounds)
+        val uploads = plan.filter { it.fromPack != null && it.uploadable }.map { it.pick.pad to it.fromPack!! }
+        val makes = plan.filter { it.pick.synth != null && it.pick.status == dev.arc.ep133.features.SoundStatus.MISSING }.map { it.pick.pad to it.pick.synth!! }
         val shapes = padShapes(card, shapePads)
-        entry.writing = picks.isNotEmpty() || shapes.isNotEmpty()
+        entry.writing = picks.isNotEmpty() || uploads.isNotEmpty() || makes.isNotEmpty() || shapes.isNotEmpty()
         if (!entry.writing) {
             toast(beatImported(a, fx = fxApplied), action = dev.arc.ep133.text.MirrorText.UNDO, onAction = { undoImport(entry) })
             return
         }
-        scope.launch { putTail(a, entry, picks, shapes) }
+        scope.launch { putTail(a, entry, picks, shapes, uploads, makes) }
+    }
+
+    /**
+     * [uploads] put on: each pack's sound read from its library entry and uploaded into a free slot of the EP-133, then
+     * onto its pad ([uploadBytesToPad]); the pads done kept for UNDO, as [putSounds] keeps its. Stops at the first failure.
+     */
+    private suspend fun uploadFromPacks(entry: BeatUndo, uploads: List<Pair<dev.arc.ep133.features.PhysicalPad, PackSound>>): SoundsPut {
+        val s = session ?: return SoundsPut(emptyList(), uploads.size, 0, null)
+        val done = ArrayList<PadBack>()
+        var skipped = 0
+        var moved = 0
+        for ((pad, ps) in uploads) {
+            if (entry.undone) break
+            val t = (padTargetOrWhy(pad) as? PadTargetOrWhy.Found)?.target
+            val b = FactorySounds.inLibrary(_state.value.backups, ps.kit)
+            val wav = b?.let { runCatching { pakOf(it.id).sounds[ps.slot]?.wav }.getOrNull() }
+            if (t == null || wav == null) {
+                skipped++
+                continue
+            }
+            moved += recordingsOverwritten(t)
+            uploadBytesToPad(s, ps.name, wav, t) ?: return SoundsPut(done, skipped, moved, dev.arc.ep133.text.ClaudeText.UPLOAD_STOPPED)
+            done += PadBack(pad, t)
+            entry.pads = entry.pads + PadBack(pad, t)
+        }
+        return SoundsPut(done, skipped, moved, null)
+    }
+
+    /**
+     * The card's synth lines [makes] made while connected ([SynthVoice.render]), each uploaded into a free slot under its
+     * device name ([SynthVoice.deviceName]) and put on its pad, all under one progress sheet; a synth made for two pads in
+     * the same import is uploaded once. A pad with no target is skipped and counted. Then the mirror's names follow, and
+     * Arc keeps each made sound as the pad's copy. The pads done are kept for UNDO, as [putSounds] keeps its; a failure
+     * (no free slot, no room, a cancel) is said by the task's own error, and stops it.
+     */
+    private suspend fun makeSynths(entry: BeatUndo, makes: List<Pair<dev.arc.ep133.features.PhysicalPad, dev.arc.ep133.features.CardSynth>>): SoundsPut {
+        val s = session ?: return SoundsPut(emptyList(), makes.size, 0, null)
+        var skipped = 0
+        val list = makes.mapNotNull { (pad, synth) ->
+            val t = (padTargetOrWhy(pad) as? PadTargetOrWhy.Found)?.target
+            if (t == null) skipped++
+            t?.let { Triple(pad, synth, it) }
+        }
+        if (list.isEmpty()) return SoundsPut(emptyList(), skipped, 0, null)
+        val done = ArrayList<PadBack>()
+        var moved = 0
+        // Device name to slot, for the sounds uploaded by this import.
+        val byName = HashMap<String, Int>()
+        // Each pad made: its target, its slot and the sound when it was uploaded for it (null: another pad's upload).
+        class Made(val target: dev.arc.ep133.features.PadTarget, val slot: Int, val pcm: ShortArray?)
+        val made = ArrayList<Made>()
+        val ok = runTask(dev.arc.ep133.text.ClaudeText.MAKING_SOUNDS, wait = true) { progress, signal ->
+            for ((i, item) in list.withIndex()) {
+                val (pad, synth, t) = item
+                if (entry.undone) break
+                val name = dev.arc.ep133.features.SynthVoice.deviceName(synth)
+                moved += recordingsOverwritten(t)
+                var pcm: ShortArray? = null
+                val slot = byName[name]?.also { Device.assignPad(s, t.project, t.group, t.pad, it) } ?: run {
+                    val sound = withContext(Dispatchers.Default) { dev.arc.ep133.features.SynthVoice.render(synth) }
+                    pcm = sound
+                    val wav = SampleEdit.toWavBytes(sound, 1, dev.arc.ep133.features.SynthVoice.RATE)
+                    val label = dev.arc.ep133.text.ClaudeText.make(dev.arc.ep133.features.SynthVoice.shownName(synth))
+                    SampleUpload.uploadToPad(
+                        s, name, wav, deviceSounds.keys, t,
+                        onProgress = { p -> progress(Progress((i + p.fraction) / list.size, label)) },
+                        signal = signal,
+                    ).also { byName[name] = it }
+                }
+                made += Made(t, slot, pcm)
+                done += PadBack(pad, t)
+                entry.pads = entry.pads + PadBack(pad, t)
+            }
+            true
+        }
+        // The new sounds' names and sizes, for the pads and their copies, and the space left (as [uploadBytesToPad]).
+        mirror?.let { m ->
+            exclusive("mirror", quiet = true, wait = true) { ss -> DeviceBrowser.contents(ss) }?.let { c ->
+                if (mirror === m) setLiveSounds(m, c.sounds)
+                _state.update { st -> st.device?.let { d -> st.copy(device = d.copy(storage = c.storage, sounds = c.sounds.size)) } ?: st }
+            }
+        }
+        for (x in made) {
+            val pcm = x.pcm ?: continue
+            deviceSounds[x.slot]?.let { e -> keepPadSound(x.slot, e.name, e.size, dev.arc.ep133.features.SynthVoice.pcmBytes(pcm), 1.0, dev.arc.ep133.features.SynthVoice.RATE.toDouble()) }
+        }
+        for (x in made) mirror?.let { padWritten(it, x.target, x.slot) }
+        return SoundsPut(done, skipped, moved, if (ok == null) dev.arc.ep133.text.ClaudeText.UPLOAD_STOPPED else null)
+    }
+
+    /** Where the last IMPORT put the card (for IMPORT AND PRACTISE). */
+    private var lastImport: BeatApplied? = null
+
+    /**
+     * IMPORT AND PRACTISE: practice on what the last import placed, in the scene it selected: a card with a lesson runs
+     * its steps from the first ([LessonRun]), else the first of its groups with pad hits ([practiceGroup]).
+     */
+    fun practiseImport() {
+        val a = lastImport ?: return
+        val card = lastImportCard
+        if (card != null && card.lesson.isNotEmpty()) {
+            lessonRun = LessonRun(card.name, card.lesson.take(dev.arc.ep133.features.LessonStep.MAX))
+            startLessonStep(0)
+            return
+        }
+        val first = a.placed.firstOrNull()?.first ?: 0
+        practise(dev.arc.ep133.features.PracticeSpec(practiceGroup(projectPatterns, first), speed = PRACTICE_START_SPEED))
     }
 
     /** The sounds an IMPORT put on pads, or would: one UNDO step with the patterns ([BeatUndo]). */
@@ -5508,21 +6108,22 @@ class ArcController(
     }
 
     /**
-     * The sound lines the sheet had ticked ([ticked]) that still change their pad: the card matched to the sounds as they are
-     * now, and after them the sounds [picked] for silent pads (ticked too), each a change unless its pad has the sound now.
+     * The ticked pads of [plan] (the card matched to the sounds as they are now, [cardPicks]) that still change their pad
+     * to a slot the EP-133 has (a synth found there by its name too), and after them the sounds [picked] for silent pads
+     * (ticked too), each a change unless its pad has the sound now. A picked pad is one the card has no line for.
      */
     private fun importPicks(
-        card: dev.arc.ep133.features.BeatCard,
+        plan: List<PlannedSound>,
         ticked: Set<dev.arc.ep133.features.PhysicalPad>,
         picked: Map<dev.arc.ep133.features.PhysicalPad, Int> = emptyMap(),
     ): List<dev.arc.ep133.features.SoundPick> {
         if (ticked.isEmpty()) return emptyList()
-        val set = soundSetOf(_state.value.mirror, _state.value.factoryNames) ?: return emptyList()
-        val m = mirror
-        val lines = dev.arc.ep133.features.BeatCards.resolveSounds(card, set.names) { pad -> m?.slotOf(pad) }
+        val lines = plan.map { it.pick }
             .filter { it.pad in ticked && it.slot != null && (it.status == dev.arc.ep133.features.SoundStatus.CHANGE || it.status == dev.arc.ep133.features.SoundStatus.FOUND_BY_NAME) }
-        // A picked pad is one the card has no sound line for; were it to have one, the card's line is the one that goes on.
-        val own = lines.mapTo(HashSet()) { it.pad }
+        // Were a picked pad to have a line of the card's, the card's line is the one that goes on.
+        val own = plan.mapTo(HashSet()) { it.pick.pad }
+        val set = soundSetOf(_state.value.mirror, deviceKit().names) ?: return lines
+        val m = mirror
         return lines + pickedSounds(picked.filterKeys { it in ticked && it !in own }, set.names) { pad -> m?.slotOf(pad) }
     }
 
@@ -5541,10 +6142,11 @@ class ArcController(
     private class ShapingPut(val done: List<ShapeBack>, val skipped: Int, val failure: String?)
 
     /**
-     * IMPORT's second half, after the patterns (and the FX) went in ([applied]): the sounds ([putSounds]), then the pad
-     * settings ([shapePads]) of the pads whose sound, if it was to change, went on (settings written before a new sound
-     * would be reset by it, and written to the old sound if it didn't go on). No toast until all is done: it says what
-     * was done, or what stopped it. UNDO during the writes ([BeatUndo.undone]) stops them and puts back what they did.
+     * IMPORT's second half, after the patterns (and the FX) went in ([applied]): the sounds (the packs' [uploads], the
+     * synth lines' [makes] while connected ([makeSynths]), then the [picks] and, offline, the makes ([putSounds])), then
+     * the pad settings ([shapePads]) of the pads whose sound, if it was to change, went on (settings written before a new
+     * sound would be reset by it, and written to the old sound if it didn't go on). No toast until all is done: it says
+     * what was done, or what stopped it. UNDO during the writes ([BeatUndo.undone]) stops them and puts back what they did.
      * [entry] keeps what UNDO needs.
      */
     private suspend fun putTail(
@@ -5552,9 +6154,22 @@ class ArcController(
         entry: BeatUndo,
         picks: List<dev.arc.ep133.features.SoundPick>,
         shapes: List<Pair<dev.arc.ep133.features.PhysicalPad, dev.arc.ep133.features.CardPad>>,
+        uploads: List<Pair<dev.arc.ep133.features.PhysicalPad, PackSound>> = emptyList(),
+        makes: List<Pair<dev.arc.ep133.features.PhysicalPad, dev.arc.ep133.features.CardSynth>> = emptyList(),
     ) {
-        val s = if (picks.isEmpty()) SoundsPut(emptyList(), 0, 0, null) else putSounds(entry, picks)
-        val missed = picks.mapTo(HashSet()) { it.pad } - s.done.mapTo(HashSet()) { it.pad }
+        val none = SoundsPut(emptyList(), 0, 0, null)
+        val connected = _state.value.device != null
+        // The packs' sounds first, uploaded into free slots; then the synth sounds made and uploaded; then the slots the EP-133 has.
+        val up = if (uploads.isEmpty()) none else uploadFromPacks(entry, uploads)
+        val made = if (makes.isEmpty() || up.failure != null || !connected) none else makeSynths(entry, makes)
+        // Offline, the synth sounds are made into Arc's own files with the other offline changes.
+        val offlineMakes = if (connected) emptyList() else makes
+        val put = if ((picks.isEmpty() && offlineMakes.isEmpty()) || up.failure != null || made.failure != null) none else putSounds(entry, picks, offlineMakes)
+        // putSounds kept only its own pads.
+        if (up.done.isNotEmpty() || made.done.isNotEmpty()) entry.pads = up.done + made.done + put.done
+        val s = SoundsPut(up.done + made.done + put.done, up.skipped + made.skipped + put.skipped, up.moved + made.moved + put.moved, up.failure ?: made.failure ?: put.failure)
+        // A pad whose sound didn't go on (a failed or skipped pick, upload or make) isn't shaped.
+        val missed = (picks.map { it.pad } + uploads.map { it.first } + makes.map { it.first }).toHashSet() - s.done.mapTo(HashSet()) { it.pad }
         val toShape = shapes.filter { it.first !in missed }
         val sh = if (s.failure == null && !entry.undone && toShape.isNotEmpty()) shapePads(entry, toShape) else ShapingPut(emptyList(), 0, null)
         entry.writing = false
@@ -5580,21 +6195,27 @@ class ArcController(
     /**
      * Each of [picks] put on its pad, one after the other, with no toast of its own. Connected, each pad is looked up as EDIT
      * does ([padTargetOrWhy]) and written ([writePadQuiet]); offline they become offline pad changes in one go
-     * ([putSoundsOffline]). A pad with no target (its number not known yet, a project not read, PROJECT switching) or,
-     * offline, a sound Arc can't play is skipped and counted. A write that fails stops it: [SoundsPut.failure] says why,
-     * the pads done stay. [entry] keeps what UNDO needs.
+     * ([putSoundsOffline]), with the synth lines [makes] made into Arc's files. A pad with no target (its number not known
+     * yet, a project not read, PROJECT switching) or, offline, a sound Arc can't play is skipped and counted. A write that
+     * fails stops it: [SoundsPut.failure] says why, the pads done stay. [entry] keeps what UNDO needs.
      */
-    private suspend fun putSounds(entry: BeatUndo, picks: List<dev.arc.ep133.features.SoundPick>): SoundsPut {
+    private suspend fun putSounds(
+        entry: BeatUndo,
+        picks: List<dev.arc.ep133.features.SoundPick>,
+        makes: List<Pair<dev.arc.ep133.features.PhysicalPad, dev.arc.ep133.features.CardSynth>> = emptyList(),
+    ): SoundsPut {
         var skipped = 0
         var moved = 0
         var failure: String? = null
         val done = ArrayList<PadBack>()
         if (_state.value.device == null) {
-            val r = putSoundsOffline(entry, picks)
+            val r = putSoundsOffline(entry, picks, makes)
             done += r.done
             skipped = r.skipped
             moved = r.moved
         } else {
+            // Connected since IMPORT began: the synth sounds kept for offline are not made now.
+            skipped += makes.size
             for (p in picks) {
                 val slot = p.slot ?: continue
                 val t = (padTargetOrWhy(p.pad) as? PadTargetOrWhy.Found)?.target
@@ -5700,12 +6321,19 @@ class ArcController(
     /**
      * Offline, [picks] become offline pad changes in arc only ([offlineAssign], as [assignOffline] makes one): only a
      * sound arc can play is taken ([OfflineSounds.pick]), each pad's own settings go with its old sound, and a
-     * recording on a pad goes to Takes. The changes and settings as they were are kept in [entry] for UNDO.
+     * recording on a pad goes to Takes. The synth lines [makes] are made into Arc's own files ([SampleFiles.writeSynth])
+     * and put on their pads as recorded changes ([SoundSource.RECORDED]), played from Arc and uploaded at the next
+     * connection. The changes and settings as they were are kept in [entry] for UNDO.
      */
-    private suspend fun putSoundsOffline(entry: BeatUndo, picks: List<dev.arc.ep133.features.SoundPick>): OfflinePut {
+    private suspend fun putSoundsOffline(
+        entry: BeatUndo,
+        picks: List<dev.arc.ep133.features.SoundPick>,
+        makes: List<Pair<dev.arc.ep133.features.PhysicalPad, dev.arc.ep133.features.CardSynth>> = emptyList(),
+    ): OfflinePut {
         val m = mirror?.takeIf { mirrorSession == null }
         val sounds = _state.value.mirror?.offlineSounds
-        if (m == null || sounds == null) return OfflinePut(emptyList(), picks.size, 0)
+        // The picks need the offline list of sounds; the makes need only the offline mirror.
+        if (m == null) return OfflinePut(emptyList(), picks.size + makes.size, 0)
         val before = loadOfflinePads()
         val settingsBefore = loadOfflinePadSettings()
         var pads = before
@@ -5714,6 +6342,10 @@ class ArcController(
         val done = ArrayList<PadBack>()
         for (p in picks) {
             val slot = p.slot ?: continue
+            if (sounds == null) {
+                skipped++
+                continue
+            }
             val t = (padTargetOrWhy(p.pad) as? PadTargetOrWhy.Found)?.target
             val entryAt = t?.let { sounds.pick(slot, sounds.base, m.slotAt(it.group, it.pad)) }
             if (t == null || entryAt == null) {
@@ -5725,7 +6357,31 @@ class ArcController(
             settings = settings.drop(t.project, t.group, t.pad)
             done += PadBack(p.pad, t)
         }
+        // The synth sounds: one file for each pad, named for the sound and the pad, played from memory at once.
+        val made = ArrayList<Pair<String, PcmSound>>()
+        for ((pad, synth) in makes) {
+            val t = m.target(pad)
+            if (t == null) {
+                skipped++
+                continue
+            }
+            val pcm = withContext(Dispatchers.Default) { dev.arc.ep133.features.SynthVoice.render(synth) }
+            val wav = SampleEdit.toWavBytes(pcm, 1, dev.arc.ep133.features.SynthVoice.RATE)
+            val file = dev.arc.ep133.features.SynthVoice.fileName(synth, t.project, t.group, t.pad)
+            try {
+                withContext(Dispatchers.IO) { sampleFiles.writeSynth(file, wav) }
+            } catch (e: java.io.IOException) {
+                trafficLog.note("synth $file not saved: ${e.message}")
+                skipped++
+                continue
+            }
+            pads = pads.put(OfflinePad(t.project, t.group, t.pad, 0, dev.arc.ep133.features.SynthVoice.deviceName(synth), SoundSource.RECORDED, file))
+            settings = settings.drop(t.project, t.group, t.pad)
+            made += file to pcmSoundOf(pcm, 1, dev.arc.ep133.features.SynthVoice.RATE)
+            done += PadBack(pad, t)
+        }
         if (done.isEmpty() || mirror !== m || entry.undone) return OfflinePut(emptyList(), skipped + done.size, 0)
+        for ((file, sound) in made) padMemory.put(recordedKey(file), sound)
         saveOfflinePads(pads)
         val moved = recordingsToTakes(recordingsLetGo(before, pads, samplesGoingUp))
         saveOfflinePadSettings(settings)
@@ -5734,6 +6390,7 @@ class ArcController(
         entry.offline = true
         entry.padsBefore = before
         entry.settingsBefore = settingsBefore
+        prepareLive(made.map { it.second })
         return OfflinePut(done, skipped, moved)
     }
 
@@ -5773,7 +6430,13 @@ class ArcController(
                 }
             }
             if (mirror !== m) return
-            if (e.offline) saveOfflinePads(pads)
+            if (e.offline) {
+                saveOfflinePads(pads)
+                // The synth sounds the import made that no pad change names now: gone, from memory too.
+                val referenced = pads.list.mapNotNullTo(HashSet()) { it.file }
+                val gone = withContext(Dispatchers.IO) { runCatching { sampleFiles.synthStrays(referenced, Long.MAX_VALUE).filter { sampleFiles.delete(it) } }.getOrDefault(emptyList()) }
+                gone.forEach { padMemory.remove(recordedKey(it)) }
+            }
             saveOfflinePadSettings(settings)
             if (e.offline) {
                 padSettings = settings.byPad()
@@ -7102,6 +7765,8 @@ class ArcController(
     /** Import a document by URI. Runs in the app scope, so activity recreation cannot cut it short. */
     fun importUri(uri: android.net.Uri): Job = scope.launch {
         val (name, modified) = withContext(Dispatchers.IO) { dev.arc.ep133.files.Files.describe(context, uri) }
+        // A beat card file opened with arc, whatever type its provider reported.
+        if (dev.arc.ep133.features.BeatCards.isCardFile(name)) return@launch receiveBeatFile(uri).join()
         import(name, modified) { dev.arc.ep133.files.Files.read(context, uri) }.join()
     }
 

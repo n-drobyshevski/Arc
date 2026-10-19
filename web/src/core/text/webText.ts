@@ -115,7 +115,9 @@ export const WebText = {
     'Sound plays late here (often 0.2 s or more), as it does over Bluetooth. A wired output or the built-in speakers are much quicker.',
   /** Replaces MirrorText.TAKES_NOTE "A take holds the pads and keys played on the phone, …". */
   TAKES_NOTE:
-    "A take holds the pads and keys played in this browser, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out.",
+    "A take holds the pads and keys played in this browser, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out, and Voice message shares one as a voice message (Telegram sends it as one).",
+  /** A take's key (web only): Android's SHARE gives Telegram the voice message itself, which the Web Share API can't. */
+  VOICE_MESSAGE: 'Share as a voice message',
   /** Takes' "Save or Share" where the browser can't share files: Save WAV is the only way out. */
   TAKES_NOTE_SAVE_ONLY:
     "A take holds the pads and keys played in this browser, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save WAV copies one out.",

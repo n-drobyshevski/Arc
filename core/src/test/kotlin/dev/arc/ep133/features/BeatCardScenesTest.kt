@@ -345,6 +345,48 @@ class BeatCardScenesTest {
     }
 
     @Test
+    fun `with replace the card's scenes take the place of the project's, from S01`() {
+        val card = BeatCards.read(track).card!!
+        val old = Chain(listOf(ChainStep(0, 3)), true)
+        val seq = project().withChain(old)
+        val replaced = BeatCards.plan(seq, card, replace = true)
+        assertTrue(replaced.newScene)
+        // The patterns go where they go either way; the scenes are the card's alone, the first selected.
+        assertEquals(BeatCards.plan(seq, card).placed, replaced.placed)
+        assertEquals(listOf(0, 1, 2), replaced.scenes)
+        assertEquals(listOf(Scene(listOf(4, 6, 1, 7)), Scene(listOf(5, 6, 1, 7)), Scene(listOf(5, 7, 1, 7))), replaced.seq.scenes)
+        assertEquals(0, replaced.seq.scene)
+        // The card's chain names the new scenes from 0, and is on.
+        val mapped = listOf(ChainStep(0, 2), ChainStep(1, 1), ChainStep(2, 4), ChainStep(1, 1))
+        assertEquals(mapped, replaced.chain)
+        assertEquals(Chain(mapped, true), replaced.seq.chain)
+        // SET CHAIN off: the old chain named the old scenes, so it goes.
+        assertEquals(Chain(), BeatCards.plan(seq, card, setChain = false, replace = true).seq.chain)
+        // The project's patterns stay in the banks.
+        assertEquals(kick, replaced.seq.pattern(0, 2))
+        assertEquals(kick, replaced.seq.pattern(3, 7))
+        // No room to add 3 scenes after 97, but room to replace them.
+        val crowded = BeatCards.plan(ProjectSeq(scenes = List(97) { Scene() }), card, replace = true)
+        assertTrue(crowded.newScene)
+        assertEquals(3, crowded.seq.scenes.size)
+    }
+
+    @Test
+    fun `with replace a card of several groups and no scene line is the project's one scene`() {
+        val card = read("ARC BEAT 1", "[A]", bar, "[B]", "B7 | X... .... .... .... |").card!!
+        val seq = project().withScenes(listOf(Scene(listOf(1, 5, 1, 7)), Scene(listOf(2, 5, 1, 7))), 1, Chain(listOf(ChainStep(1, 2)), true))
+        val replaced = BeatCards.plan(seq, card, replace = true)
+        assertTrue(replaced.newScene)
+        assertEquals(listOf(0), replaced.scenes)
+        assertEquals(listOf(Scene(listOf(4, 6, 1, 7))), replaced.seq.scenes)
+        assertEquals(Chain(), replaced.seq.chain)
+        // A card of one group adds no scene, so there is nothing to replace.
+        val one = BeatCards.plan(seq, read("ARC BEAT 1", "[A]", bar).card!!, replace = true)
+        assertFalse(one.newScene)
+        assertEquals(seq.scenes, one.seq.scenes)
+    }
+
+    @Test
     fun `a group a scene leaves out takes the number of the scene before, the first scene the playing one's`() {
         val card = read("ARC BEAT 1", "scene", "[C]", "C7 | X... .... .... .... |", "scene", "[A]", bar, "scene").card!!
         val plan = BeatCards.plan(project(), card)

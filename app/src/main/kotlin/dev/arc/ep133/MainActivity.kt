@@ -109,6 +109,11 @@ class MainActivity : ComponentActivity() {
         if (uri != null) withNotifications { controller.uploadToPad(uri, pad, target) }
     }
 
+    // PASTE held on the Claude page: a .txt or .md file with a beat card in it.
+    private val cardFileLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { controller.receiveBeatFile(it) }
+    }
+
     private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) controller.importUri(uri)
     }
@@ -228,7 +233,8 @@ class MainActivity : ComponentActivity() {
 
     /**
      * A .pak opened from Files (or another app) lands here, and so does text shared to arc (Claude's reply, a beat
-     * card: its sheet opens over Live, or the toast says there is none in it).
+     * card: its sheet opens over Live, or the toast says there is none in it), and a .txt or .md card file shared to
+     * arc or opened with it.
      */
     private fun handleIntent(intent: Intent?) {
         val view = intent?.action == Intent.ACTION_VIEW
@@ -237,9 +243,13 @@ class MainActivity : ComponentActivity() {
         // Reopening the task from Recents replays the original intent: don't import twice.
         if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0) {
             if (view) {
-                intent.data?.let { controller.importUri(it) }
+                // A .pak, or a card file (by its type here, by its name in importUri).
+                intent.data?.let { if (intent.type?.startsWith("text/") == true) controller.receiveBeatFile(it) else controller.importUri(it) }
             } else {
-                controller.receiveBeat(intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString())
+                // Text, or a .txt or .md file shared as such.
+                val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+                val file = androidx.core.content.IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, android.net.Uri::class.java)
+                if (text == null && file != null) controller.receiveBeatFile(file) else controller.receiveBeat(text)
             }
         }
         setIntent(Intent(this, MainActivity::class.java))
@@ -252,24 +262,40 @@ class MainActivity : ComponentActivity() {
         null
     }
 
-    /** SHARE (scene when [group] is null) through the system chooser: the card's prompt and text, as plain text. */
-    /** SHARE CHAIN: the project's chain as a card of scenes, to Claude. */
-    private fun shareChain() {
-        val share = controller.beatShareChain() ?: return
-        if (sendText(share.subject, share.text, dev.arc.ep133.text.ClaudeText.SHARE_CHAIN_TITLE)) {
-            controller.waitForClaude(dev.arc.ep133.text.ClaudeText.CHAIN_CARD_NAME)
+    /**
+     * The Claude page's SHARE through the system chooser, as plain text: [prompt] with the card [pick] names when it goes
+     * with one ([group]'s pattern, the scene [sceneLabel] or the chain), else alone. Then the display waits for the reply
+     * ("Scene S02", "A \u00B7 01", "Chain", "New beat"); not for a lesson.
+     */
+    private fun sharePrompt(prompt: dev.arc.ep133.features.ClaudePrompt, pick: dev.arc.ep133.features.SharePick, group: Int, sceneLabel: String, number: Int, copy: Boolean = false) {
+        val share = controller.promptShare(prompt, pick, group) ?: return
+        val learn = prompt.task == dev.arc.ep133.features.PromptTask.LEARN
+        val title = when {
+            learn -> dev.arc.ep133.text.ClaudeText.LEARN_TITLE
+            prompt.withCard && pick == dev.arc.ep133.features.SharePick.CHAIN -> dev.arc.ep133.text.ClaudeText.SHARE_CHAIN_TITLE
+            else -> dev.arc.ep133.text.ClaudeText.SHARE_TITLE
         }
+        // COPY: the same text on the clipboard, to paste into a chat already open.
+        val sent = if (copy) copyText(share.subject, share.text) else sendText(share.subject, share.text, title)
+        if (!sent || learn) return
+        controller.waitForClaude(
+            when {
+                !prompt.withCard -> if (prompt.task == dev.arc.ep133.features.PromptTask.TRACK) dev.arc.ep133.text.PromptText.TRACK_IDEA else dev.arc.ep133.text.PromptText.NEW_BEAT
+                pick == dev.arc.ep133.features.SharePick.SCENE -> dev.arc.ep133.text.ClaudeText.sharedScene(sceneLabel)
+                pick == dev.arc.ep133.features.SharePick.PATTERN -> dev.arc.ep133.text.ClaudeText.sharedPattern(group, number)
+                else -> dev.arc.ep133.text.ClaudeText.CHAIN_CARD_NAME
+            },
+        )
     }
 
-    /** [what] is named on the display while Claude's reply is awaited ("Scene S02", "A \u00B7 01"). */
-    private fun shareBeat(group: Int?, what: String) {
-        val share = controller.beatShare(group) ?: return
-        if (sendText(share.subject, share.text, dev.arc.ep133.text.ClaudeText.SHARE_TITLE)) controller.waitForClaude(what)
-    }
-
-    /** Learn with Claude: a starter prompt to send to the Claude app. */
-    private fun learnWithClaude() {
-        sendText(dev.arc.ep133.text.ClaudeText.LEARN, dev.arc.ep133.text.ClaudeText.LEARN_PROMPT, dev.arc.ep133.text.ClaudeText.LEARN_TITLE)
+    /** COPY: [text] on the clipboard, said; whether it went. */
+    private fun copyText(subject: String, text: String): Boolean = try {
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(subject, text))
+        controller.toast(dev.arc.ep133.text.PromptText.COPIED)
+        true
+    } catch (e: RuntimeException) {
+        controller.toast(e.message ?: e.toString(), error = true)
+        false
     }
 
     /** Whether the system chooser opened. */
@@ -306,11 +332,16 @@ class MainActivity : ComponentActivity() {
         if (uri == null) return
         lifecycleScope.launch {
             try {
-                // A take is copied straight from its file: it can be long.
+                // A take is copied straight from its file (it can be long), or its trimmed part written.
                 if (what != null && what.startsWith("take:")) {
-                    val f = controller.takes.value.firstOrNull { it.name == what.removePrefix("take:") }?.let(controller::takeFile)
+                    val t = controller.takes.value.firstOrNull { it.name == what.removePrefix("take:") }
                         ?: throw java.io.IOException(Strings.FILE_MISSING)
-                    withContext(Dispatchers.IO) { Files.copyTo(this@MainActivity, uri, f) }
+                    if (t.trim == null) {
+                        withContext(Dispatchers.IO) { Files.copyTo(this@MainActivity, uri, controller.takeFile(t)) }
+                    } else {
+                        val wav = controller.takeWav(t)
+                        withContext(Dispatchers.IO) { Files.writeTo(this@MainActivity, uri, wav) }
+                    }
                     return@launch
                 }
                 val bytes = when {
@@ -462,13 +493,13 @@ class MainActivity : ComponentActivity() {
     private fun sharePak(b: BackupRecord) =
         shareBytes(LibraryRules.fileNameFor(b.title), "application/zip", b.title) { controller.pakBytes(b) }
 
-    /** Shares [read]'s bytes as a file named [name] through the system share sheet. */
-    private fun shareBytes(name: String, mime: String, title: String, read: suspend () -> ByteArray) {
+    /** Shares [read]'s bytes as a file named [name] through the system share sheet ([text] with it, unless null). */
+    private fun shareBytes(name: String, mime: String, title: String, text: String? = Strings.SHARE_TITLE_PREFIX + title, read: suspend () -> ByteArray) {
         lifecycleScope.launch {
             try {
                 val bytes = read()
                 val uri = withContext(Dispatchers.IO) { Files.shareableUri(this@MainActivity, name, bytes) }
-                Files.share(this@MainActivity, uri, mime, title, Strings.SHARE_TITLE_PREFIX + title)
+                Files.share(this@MainActivity, uri, mime, title, text)
             } catch (e: java.io.IOException) {
                 controller.toast(if (e.message == "no app to share with") Strings.SHARE_FAILED else e.message ?: Strings.SHARE_FAILED, error = true)
             } catch (e: SecurityException) {
@@ -482,14 +513,44 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * SHARE: the take's WAV (its trimmed part, if it has one), except to
+     * Telegram's apps when there are any here: they get its voice message
+     * (made first), which they send as one. A voice message that can't be
+     * made leaves them the WAV too.
+     */
     private fun shareTake(t: dev.arc.ep133.data.TakeInfo) {
-        try {
-            val uri = androidx.core.content.FileProvider.getUriForFile(this, Files.AUTHORITY, controller.takeFile(t))
-            Files.share(this, uri, "audio/wav", t.name, t.name)
-        } catch (e: java.io.IOException) {
-            controller.toast(dev.arc.ep133.text.MirrorText.SHARE_TAKE_FAILED, error = true)
-        } catch (e: IllegalArgumentException) {
-            controller.toast(dev.arc.ep133.text.MirrorText.SHARE_TAKE_FAILED, error = true)
+        lifecycleScope.launch {
+            try {
+                val uri = if (t.trim == null) {
+                    androidx.core.content.FileProvider.getUriForFile(this@MainActivity, Files.AUTHORITY, controller.takeFile(t))
+                } else {
+                    val wav = controller.takeWav(t)
+                    withContext(Dispatchers.IO) { Files.shareableUri(this@MainActivity, t.name, wav) }
+                }
+                val telegram = dev.arc.ep133.files.Telegram.installed(this@MainActivity)
+                val voice = if (telegram.isEmpty()) {
+                    null
+                } else {
+                    try {
+                        val bytes = controller.takeVoice(t)
+                        val name = dev.arc.ep133.text.MirrorText.voiceFileName(t.name)
+                        withContext(Dispatchers.IO) { Files.shareableUri(this@MainActivity, name, bytes, keep = true) }
+                    } catch (e: java.io.IOException) {
+                        null
+                    }
+                }
+                Files.share(
+                    this@MainActivity, uri, "audio/wav", t.name, t.name,
+                    replacing = voice?.let { dev.arc.ep133.files.Telegram.replacing(this@MainActivity, telegram, it) },
+                )
+            } catch (e: java.io.IOException) {
+                controller.toast(dev.arc.ep133.text.MirrorText.SHARE_TAKE_FAILED, error = true)
+            } catch (e: IllegalArgumentException) {
+                controller.toast(dev.arc.ep133.text.MirrorText.SHARE_TAKE_FAILED, error = true)
+            } catch (e: SecurityException) {
+                controller.toast(dev.arc.ep133.text.MirrorText.SHARE_TAKE_FAILED, error = true)
+            }
         }
     }
 
@@ -562,7 +623,14 @@ class MainActivity : ComponentActivity() {
     private fun Root() {
         // The delay Live makes up for while its sound goes to Bluetooth, for the Bluetooth key's words: the flow, which
         // only the key reads (it is told every second).
-        CompositionLocalProvider(dev.arc.ep133.ui.components.LocalDelayMadeUp provides controller.delayMadeUpFor) { RootContent() }
+        // The kit picked (its pack saved), for the names of the hundreds of slots in the sound lists and the Device tab.
+        val state = controller.state.collectAsStateWithLifecycle()
+        val settings = controller.settings.collectAsStateWithLifecycle()
+        val kit by remember { androidx.compose.runtime.derivedStateOf { dev.arc.ep133.controller.activeKitOf(settings.value.factoryKit, state.value.backups) } }
+        CompositionLocalProvider(
+            dev.arc.ep133.ui.components.LocalDelayMadeUp provides controller.delayMadeUpFor,
+            dev.arc.ep133.ui.screens.LocalFactoryKit provides kit,
+        ) { RootContent() }
     }
 
     @Composable
@@ -626,6 +694,9 @@ class MainActivity : ComponentActivity() {
         // The mirror listens only while its tab is in front (not under the debug, settings or guide screen).
         val live = tab == Tab.LIVE && !debug && !settingsOpen && !guideOpen
         val appSettings by controller.settings.collectAsStateWithLifecycle()
+        // CLAUDE's prompt and saved prompts, read from the settings once each time they change.
+        val claudePrompt = remember(appSettings.claudePrompt) { dev.arc.ep133.features.ClaudePrompt.decode(appSettings.claudePrompt) }
+        val savedPrompts = remember(appSettings.claudePrompts) { dev.arc.ep133.features.SavedPrompt.decodeAll(appSettings.claudePrompts) }
 
         fun selectTab(t: Tab) {
             if (t == tab) return
@@ -891,6 +962,23 @@ class MainActivity : ComponentActivity() {
         // SCENES: the S01 chip beside STEP's (the scene's readout while the pattern plays) unrolls the panel over the function
         // keys, where the groups' patterns and the scenes are picked (a pick waits for its bar or pattern end while it plays),
         // COMMIT, CLR / DEL held, CHANGE, and COPY and PASTE of a pattern, a bar or a pad's notes. The panel stays open while it plays.
+        // PRACTICE: its panel on Live while one is on (from Claude's page, or the beat card sheet's IMPORT AND PRACTISE).
+        val practiceState by controller.practice.collectAsStateWithLifecycle()
+        val livePractice = practiceState?.let { pu ->
+            remember(pu, pattern.phase) {
+                dev.arc.ep133.ui.screens.LivePractice(
+                    ui = pu,
+                    frame = controller::practiceFrame,
+                    running = pattern.phase == dev.arc.ep133.features.TransportPhase.PLAYING || pattern.phase == dev.arc.ep133.features.TransportPhase.COUNT_IN,
+                    onPlay = controller::practicePlay,
+                    onStop = controller::practiceStop,
+                    onClose = controller::endPractice,
+                    onChange = controller::changePractice,
+                    onStep = controller::lessonStep,
+                    onCopy = { controller.practiceReport()?.let { copyText(dev.arc.ep133.text.PracticeText.REPORT_SUBJECT, it) } },
+                )
+            }
+        }
         val liveScene = remember(scene, pattern.phase) {
             dev.arc.ep133.ui.screens.LiveScene(
                 ui = scene,
@@ -1201,6 +1289,11 @@ class MainActivity : ComponentActivity() {
                                 onPlay = { controller.playTake(it) },
                                 onStop = controller::stopPlayback,
                                 onShare = ::shareTake,
+                                onDuplicate = { controller.duplicateTake(it) },
+                                trimKeyOf = controller::takeTrimKey,
+                                onTrimPlay = { t, from, to -> controller.playTakeTrim(t, from, to) },
+                                onSetTrim = { t, trim -> controller.setTakeTrim(t, trim) },
+                                loadSound = controller::takeSound,
                                 onSave = ::saveTake,
                                 onToDevice = {
                                     controller.takeToDevice(it)
@@ -1241,6 +1334,7 @@ class MainActivity : ComponentActivity() {
                             arp = liveArp,
                             step = liveStep,
                             scene = liveScene,
+                            practice = livePractice,
                             onSettings = { settingsOpen = true },
                             // CLAUDE in Live tools: the scene and the patterns of its groups, which the share keys name.
                             claude = dev.arc.ep133.ui.screens.ClaudeUi(
@@ -1252,14 +1346,22 @@ class MainActivity : ComponentActivity() {
                                 onWithSounds = controller::setShareSounds,
                                 chainSteps = scene.chain.chain.steps.size,
                                 chainScenes = dev.arc.ep133.controller.chainSceneCount(scene.chain.chain.steps),
-                                onShareScene = { shareBeat(null, dev.arc.ep133.text.ClaudeText.sharedScene(scene.label)) },
-                                onShareChain = ::shareChain,
-                                onSharePattern = { g -> shareBeat(g, dev.arc.ep133.text.ClaudeText.sharedPattern(g, scene.groups.getOrNull(g)?.number ?: 1)) },
+                                lights = scene.groups.map { it.lights },
+                                prompt = claudePrompt,
+                                kit = controller.shareKit(),
+                                liveTempo = appSettings.liveTempo,
+                                saved = savedPrompts,
+                                onPrompt = controller::setClaudePrompt,
+                                onShare = { pick, g -> sharePrompt(claudePrompt, pick, g, scene.label, scene.groups.getOrNull(g)?.number ?: 1) },
+                                onCopy = { pick, g -> sharePrompt(claudePrompt, pick, g, scene.label, scene.groups.getOrNull(g)?.number ?: 1, copy = true) },
+                                onPractice = controller::practisePick,
+                                onSavePrompt = controller::saveClaudePrompt,
+                                onDeletePrompt = controller::deleteClaudePrompt,
                                 onPaste = { controller.receiveBeat(clipboardText()) },
+                                onOpenFile = { cardFileLauncher.launch(arrayOf("text/plain", "text/markdown", "text/x-markdown", "application/octet-stream")) },
                                 waiting = claudeWaiting,
                                 onDismissWaiting = controller::stopWaitingForClaude,
                                 onGetSkill = ::openSkill,
-                                onLearn = ::learnWithClaude,
                             ),
                         )
                         Tab.DEVICE -> DeviceScreen(
@@ -1403,9 +1505,14 @@ class MainActivity : ComponentActivity() {
                                 onCancel = { closeBeatSheet() },
                                 onImport = { tempo, soundPads, fx, shapePads, picked, setChain ->
                                     if (playing?.startsWith("device:") == true || playing?.startsWith("factory:") == true) controller.stopPlayback()
-                                    controller.importBeat(tempo, soundPads, fx, shapePads, picked, setChain)
+                                    controller.importBeat(tempo, soundPads, fx, shapePads, picked, setChain, appSettings.replaceScenes && b.replace != null)
                                 },
+                                replaceScenes = appSettings.replaceScenes,
+                                onReplaceScenes = controller::setReplaceScenes,
                                 onCopyProblems = ::copyProblems,
+                                onPractise = controller::practiseImport,
+                                // A synth row's play key: the sound made on the phone, before IMPORT makes it.
+                                onPlaySynth = controller::playSynth,
                                 // PICK SOUND lists the sounds the card's sound lines choose from, played as the pad sheet plays them.
                                 player = dev.arc.ep133.ui.screens.PickPlayerUi(
                                     playing = playing,

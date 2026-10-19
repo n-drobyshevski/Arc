@@ -110,6 +110,19 @@ describe('BEAT CARDS', () => {
     expect(h.c.pattern.beat.value?.title).toBe('Four on the floor')
   })
 
+  it('a card file picked or dropped opens on the sheet; one too long to be a card says there is none', async () => {
+    const h = await liveOn()
+    await h.c.receiveBeatFile({ size: CARD.length, text: async () => CARD })
+    expect(h.c.pattern.beat.value?.title).toBe('Four on the floor')
+    const h2 = await liveOn()
+    await h2.c.receiveBeatFile({ size: BeatCards.MAX_CARD_FILE + 1, text: async () => CARD })
+    expect(h2.toasts.at(-1)?.text).toBe(ClaudeText.NO_CARD)
+    expect(h2.c.pattern.beat.value).toBeNull()
+    expect(BeatCards.isCardFile('Night bus.arcbeat.txt')).toBe(true)
+    expect(BeatCards.isCardFile('beat.MD')).toBe(true)
+    expect(BeatCards.isCardFile('backup.pak')).toBe(false)
+  })
+
   it('a card that cannot be read is blocked; COPY PROBLEMS copies its problems', async () => {
     const h = await liveOn()
     await h.c.receiveBeat(BAD)

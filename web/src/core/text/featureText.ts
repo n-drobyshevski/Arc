@@ -16,6 +16,7 @@
 
 import type { DiffResult, ProjectState, SoundDiff } from '../features/backupDiff'
 import type { PadChange, SoundChange } from '../features/pakCompare'
+import { FactoryKit } from '../features/factorySounds'
 import type { JsonValue } from '../protocol/fs'
 import { Format, plural } from './format'
 import { Strings } from './strings'
@@ -50,6 +51,8 @@ function roundHalfEven(x: number): number {
 }
 
 const FACTORY_KINDS = ['Kicks', 'Snares', 'Hats', 'Perc', 'Bass', 'Melodic']
+// The EP-40 Riddim pack's kinds past the guide's blocks (FeatureText.EP40_BLOCKS).
+const EP40_KINDS = ['Chords', 'Vox · FX', 'Loops']
 
 function slot(n: number): string {
   return String(n).padStart(3, '0')
@@ -120,13 +123,25 @@ export const FeatureText = {
    * The factory layout's kind of sound for the range of slots starting at
    * [first] (from the official guide's note on SOUND mode: kicks 1-99,
    * snares 100-199, hi-hats 200-299, percussion 300-399, bass 400-499,
-   * melodic 500-599; FACTORY_BLOCKS), or null from 600 up, which the
-   * guide leaves free.
+   * melodic 500-599; FACTORY_BLOCKS). From 600 up the guide leaves the
+   * slots free, so null, except with the EP-40 Riddim's kit, whose pack
+   * fills them (EP40_BLOCKS): chord stabs, shouts and dub FX, loops.
    */
-  factoryCategory(first: number): string | null {
+  factoryCategory(first: number, kit: FactoryKit = FactoryKit.EP133): string | null {
     const i = FeatureText.FACTORY_BLOCKS.findIndex(([from, to]) => first >= from && first <= to)
-    return i < 0 ? null : FACTORY_KINDS[i]!
+    if (i >= 0) return FACTORY_KINDS[i]!
+    if (kit !== FactoryKit.EP40) return null
+    const j = FeatureText.EP40_BLOCKS.findIndex(([from, to]) => first >= from && first <= to)
+    return j < 0 ? null : EP40_KINDS[j]!
   },
+
+  /** The EP-40 Riddim pack's blocks past the guide's: chord stabs 600-628, vocal shouts and dub FX 700-754, loops 800-898. */
+  EP40_BLOCKS: [
+    [600, 699],
+    [700, 799],
+    [800, 899],
+  ] as const,
+
 
   /** "12 · 2.1 MB", the sounds binder's bar after "Sounds". */
   soundsTotal(n: number, bytes: number): string {

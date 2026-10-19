@@ -29,6 +29,13 @@
 //   The card's chain is a list of [card scene number, passes] tuples; the
 //   import's `chain` is a list of ChainSteps; BeatCards.fromScenes takes the
 //   chain as ChainSteps, the seq's by default (pass `undefined`).
+// - A section's `synths` (its synth lines, a ReadonlyMap from pad offset to
+//   CardSynth) is optional and present only when it has any, so sections built
+//   without them compare equal as before. A CardSynth, built by `cardSynth()`,
+//   leaves out the fields its line didn't give (Kotlin has nulls), and its
+//   enums are string unions of their words. BeatCards.synthsByPad is keyed by
+//   padKey where the Kotlin has PhysicalPads. The web reads, writes and keeps
+//   synth lines; it makes no sounds.
 
 import { clamp01 } from '../formats/fx/fxMath'
 import { Chain, chainStep, type ChainStep } from './chain'
@@ -38,7 +45,7 @@ import { LABELS, ROWS, noteName, padKey, physicalPad, type PhysicalPad } from '.
 import { Pattern, ProjectSeq, Seq, Timing, TimingSettings, pattern, patternNote, scene, timingTicks, type PatternNote, type Scene } from './pattern'
 import { PadSettings, PlayMode } from './padSettings'
 import { PadSoundCache } from './padSoundCache'
-import { unnamed } from './factorySounds'
+import { FactoryKit, unnamed } from './factorySounds'
 import { SceneOps } from './scenes'
 import { Steps } from './steps'
 import { BEATS_PER_BAR } from './tempo'
@@ -70,7 +77,26 @@ export interface BeatCard {
   readonly fx: CardFx | null
   readonly chain: readonly (readonly [number, number])[] | null
   readonly sceneLines: boolean
+  /** The card's lesson, its `lesson` lines in order (LessonStep); none when left out. */
+  readonly lesson?: readonly LessonStep[]
 }
+
+/**
+ * A step of a card's lesson (`lesson Kick alone | A7 | 50 | Count out loud`): its [title], the [group] and [pads]
+ * (offsets; null: all the group's) the player plays, at [speed] percent of the tempo, and a [tip]. Arc on Android
+ * runs it in PRACTICE; the web reads and writes it.
+ */
+export interface LessonStep {
+  readonly title: string
+  readonly group: number
+  readonly pads: readonly number[] | null
+  readonly speed: number
+  readonly tip: string | null
+}
+
+export const LESSON_MAX = 12
+export const LESSON_MIN_SPEED = 25
+export const LESSON_MAX_SPEED = 100
 
 /** A single-scene card of [sections] (what `BeatCard(...)` is in Kotlin). */
 export function beatCard(
@@ -92,9 +118,10 @@ export function beatCardOfScenes(
   fx: CardFx | null = null,
   chain: readonly (readonly [number, number])[] | null = null,
   sceneLines = false,
+  lesson: readonly LessonStep[] = [],
 ): BeatCard {
   const all = scenes.length === 0 ? [cardScene(null, [])] : scenes
-  return { name, tempo, swing, scenes: all, sections: all[0]!.sections, fx, chain, sceneLines }
+  return { name, tempo, swing, scenes: all, sections: all[0]!.sections, fx, chain, sceneLines, ...(lesson.length > 0 ? { lesson } : {}) }
 }
 
 /** The same card with [sections] as its first scene's. */
@@ -190,7 +217,8 @@ export function mergedCardPad(p: CardPad, later: CardPad): CardPad {
  * One group's pattern on a card: [group] 0..3 (A..D), the pattern [number]
  * 1..99 it was written as (a hint, null when the card gave none), the
  * [pattern] itself, the [sounds] its pads should play and the [pads]' shaping
- * (a `pad` line each), both by pad offset.
+ * (a `pad` line each), both by pad offset. [synths] are its `synth` lines by
+ * pad offset, present only when it has any.
  */
 export interface CardSection {
   readonly group: number
@@ -198,6 +226,7 @@ export interface CardSection {
   readonly pattern: Pattern
   readonly sounds: ReadonlyMap<number, CardSound>
   readonly pads: ReadonlyMap<number, CardPad>
+  readonly synths?: ReadonlyMap<number, CardSynth>
 }
 
 export function cardSection(
@@ -206,8 +235,78 @@ export function cardSection(
   pat: Pattern,
   sounds: ReadonlyMap<number, CardSound> = new Map(),
   pads: ReadonlyMap<number, CardPad> = new Map(),
+  synths: ReadonlyMap<number, CardSynth> = new Map(),
 ): CardSection {
-  return { group, number, pattern: pat, sounds, pads }
+  return { group, number, pattern: pat, sounds, pads, ...(synths.size > 0 ? { synths } : {}) }
+}
+
+/** The sound types of a synth line, in order (the order is the type's ordinal). */
+export type SynthType = 'kick' | 'snare' | 'clap' | 'hat' | 'openhat' | 'tom' | 'rim' | 'cowbell' | 'sub' | 'bass' | 'pluck' | 'stab' | 'bell' | 'zap' | 'lead' | 'pad' | 'riser'
+export const SYNTH_TYPES: readonly SynthType[] = ['kick', 'snare', 'clap', 'hat', 'openhat', 'tom', 'rim', 'cowbell', 'sub', 'bass', 'pluck', 'stab', 'bell', 'zap', 'lead', 'pad', 'riser']
+
+/** A synth line's oscillator: `metal` is six square waves, `none` noise only. */
+export type SynthWave = 'sine' | 'tri' | 'saw' | 'square' | 'metal' | 'none'
+export const SYNTH_WAVES: readonly SynthWave[] = ['sine', 'tri', 'saw', 'square', 'metal', 'none']
+
+/** The notes a synth line stacks on its root. */
+export type SynthChord = 'one' | 'min' | 'maj' | 'min7' | 'maj7' | 'dom7' | 'sus2' | 'sus4' | 'fifth' | 'oct'
+export const SYNTH_CHORDS: readonly SynthChord[] = ['one', 'min', 'maj', 'min7', 'maj7', 'dom7', 'sus2', 'sus4', 'fifth', 'oct']
+
+/**
+ * A synth line: only what the line gave. A field the line left out is absent (Arc on Android fills in its type's
+ * default when it makes the sound). [note] is a MIDI note, [length] is in hundredths of a second, the knobs are 0..100.
+ */
+export interface CardSynth {
+  readonly type: SynthType
+  readonly note?: number
+  readonly wave?: SynthWave
+  readonly chord?: SynthChord
+  readonly attack?: number
+  readonly decay?: number
+  readonly length?: number
+  readonly tone?: number
+  readonly reso?: number
+  readonly sweep?: number
+  readonly bend?: number
+  readonly click?: number
+  readonly noise?: number
+  readonly snap?: number
+  readonly drive?: number
+  readonly detune?: number
+  readonly level?: number
+  readonly seed?: number
+  readonly name?: string
+}
+
+/** The most characters a synth line's name keeps. */
+export const SYNTH_NAME_MAX = 13
+
+type SynthFields = { -readonly [K in Exclude<keyof CardSynth, 'type'>]?: CardSynth[K] }
+
+/** A synth line of [type] with [fields]; one left out or undefined is absent, never an undefined value. */
+export function cardSynth(type: SynthType, fields: SynthFields = {}): CardSynth {
+  const f = fields
+  return {
+    type,
+    ...(f.note !== undefined ? { note: f.note } : {}),
+    ...(f.wave !== undefined ? { wave: f.wave } : {}),
+    ...(f.chord !== undefined ? { chord: f.chord } : {}),
+    ...(f.attack !== undefined ? { attack: f.attack } : {}),
+    ...(f.decay !== undefined ? { decay: f.decay } : {}),
+    ...(f.length !== undefined ? { length: f.length } : {}),
+    ...(f.tone !== undefined ? { tone: f.tone } : {}),
+    ...(f.reso !== undefined ? { reso: f.reso } : {}),
+    ...(f.sweep !== undefined ? { sweep: f.sweep } : {}),
+    ...(f.bend !== undefined ? { bend: f.bend } : {}),
+    ...(f.click !== undefined ? { click: f.click } : {}),
+    ...(f.noise !== undefined ? { noise: f.noise } : {}),
+    ...(f.snap !== undefined ? { snap: f.snap } : {}),
+    ...(f.drive !== undefined ? { drive: f.drive } : {}),
+    ...(f.detune !== undefined ? { detune: f.detune } : {}),
+    ...(f.level !== undefined ? { level: f.level } : {}),
+    ...(f.seed !== undefined ? { seed: f.seed } : {}),
+    ...(f.name !== undefined ? { name: f.name } : {}),
+  }
 }
 
 /**
@@ -266,6 +365,8 @@ export interface CardProblem {
 export interface CardRead {
   readonly card: BeatCard | null
   readonly problems: readonly CardProblem[]
+  /** Each pad's row name as the card writes it ("A7 kick" gives kick), by padKey, the first row's for a pad with several: for suggestSound. */
+  readonly names?: ReadonlyMap<number, string>
 }
 
 /**
@@ -334,6 +435,23 @@ const HEADER_KEYS = new Set(['name', 'tempo', 'swing'])
 const FX_KEYS = new Set(['fx', 'send', 'comp', 'sidechain'])
 const PAD_KEYS = new Set(['pitch', 'level', 'pan', 'attack', 'release', 'mode'])
 const FX_WORDS = 'none, delay, reverb, distortion, chorus, filter or compressor'
+
+/** A synth line's settings, in the order a card writes them. No key is a type, wave or chord word, or a line's first word. */
+const SYNTH_KEYS = ['note', 'wave', 'chord', 'attack', 'decay', 'length', 'tone', 'reso', 'sweep', 'bend', 'click', 'noise', 'snap', 'drive', 'detune', 'level', 'seed', 'name'] as const
+type SynthKey = (typeof SYNTH_KEYS)[number]
+const SYNTH_KEY_SET: ReadonlySet<string> = new Set(SYNTH_KEYS)
+/** The synth knobs, 0 to 100; level is 1 to 100 and seed 0 to 999. */
+const SYNTH_KNOBS = new Set(['attack', 'decay', 'tone', 'reso', 'sweep', 'bend', 'click', 'noise', 'snap', 'drive', 'detune'])
+const SYNTH_INT = /^[0-9]{1,3}$/
+const SYNTH_NOTE = /^[A-G]#?[0-9]$/
+const SYNTH_LENGTH = /^([0-9])(?:\.([0-9]{1,2}))?$/
+const SYNTH_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
+/** A synth note: C0 to C7, as MIDI. */
+const SYNTH_NOTE_MIN = 12
+const SYNTH_NOTE_MAX = 96
+/** A synth length: 0.05 to 4 seconds, in hundredths. */
+const SYNTH_LENGTH_MIN = 5
+const SYNTH_LENGTH_MAX = 400
 
 /** A knob value as a card writes it: 0 to 100, whole or with one decimal. */
 const PERCENT = /^\d{1,3}(\.\d)?$/
@@ -469,11 +587,13 @@ interface Draft {
   readonly sounds: Map<number, CardSound>
   /** The pad lines read (merged when a pad has more than one), by pad offset. */
   readonly pads: Map<number, CardPad>
+  /** The synth lines read, by pad offset: a later line for a pad replaces the first, in its place. */
+  readonly synths: Map<number, CardSynth>
   inNotes: boolean
 }
 
 function newDraft(line: number, group: number, number: number | null, bars: number, step: Timing, skip: boolean, dropped: boolean): Draft {
-  return { line, group, number, bars, step, skip, dropped, hits: [], sounds: new Map(), pads: new Map(), inNotes: false }
+  return { line, group, number, bars, step, skip, dropped, hits: [], sounds: new Map(), pads: new Map(), synths: new Map(), inNotes: false }
 }
 
 /** Whether [text] has an ARC BEAT line: what [read] starts from, so a text without one is no card at all (not a card with a mistake). */
@@ -516,6 +636,8 @@ function read(text: string): CardRead {
   let chain: [number, number][] | null = null
   let chainAt = 0
 
+  // Each pad's first row name, for CardRead.names.
+  const names = new Map<number, string>()
   const error = (line: number, message: string): void => {
     problems.push({ line, message, error: true })
   }
@@ -525,8 +647,53 @@ function read(text: string): CardRead {
   const result = (): CardRead => {
     // Array.prototype.sort is stable, as Kotlin's sortedBy.
     const sorted = [...problems].sort((a, b) => a.line - b.line)
-    const card = sorted.some((p) => p.error) ? null : beatCardOfScenes(name, tempo, swing, [...scenes], readFx(), chain, sceneLines > 0)
-    return { card, problems: sorted }
+    const card = sorted.some((p) => p.error) ? null : beatCardOfScenes(name, tempo, swing, [...scenes], readFx(), chain, sceneLines > 0, lesson.map((l) => l[1]))
+    return { card, problems: sorted, names }
+  }
+  // ---- lesson ----
+  const lesson: [number, LessonStep][] = []
+  // lesson <title> | <pads> | <speed> | <tip>: a step of the lesson. A line with a fault is left out.
+  const lessonLine = (no: number, line: string): void => {
+    const parts = line.slice(tokens(line)[0]!.length).split('|').map((p) => trim(p))
+    let title = parts[0] ?? ''
+    const padsText = parts[1] ?? ''
+    if (title === '' || padsText === '') return error(no, 'A lesson line needs a title and the pads to play, as in lesson Kick alone | A7 | 50.')
+    if (lesson.length === LESSON_MAX) return error(no, `The lesson has more than ${LESSON_MAX} steps, the most is ${LESSON_MAX}.`)
+    if (Array.from(title).length > MAX_NAME) {
+      warn(no, `Lesson step title is longer than ${MAX_NAME} characters, shortened.`)
+      title = trim(cut(title, MAX_NAME))
+    }
+    let group: number | null = null
+    let pads: Set<number> | null = new Set()
+    for (const tok of tokens(padsText)) {
+      const whole = tok.length === 1 && tok >= 'A' && tok <= 'D'
+      const pad = whole ? null : parsePad(tok)
+      const g = whole ? tok.charCodeAt(0) - 65 : (pad?.group ?? null)
+      if (g === null) return error(no, `'${tok}' isn't a pad or a group: write pads such as A7 A9, or A for the whole group.`)
+      if (group !== null && g !== group) return error(no, "A lesson step's pads are all in one group.")
+      group = g
+      if (whole) pads = null
+      else pads?.add(pad!.offset)
+    }
+    const speedText = trim((parts[2] ?? '').replace(/%$/, ''))
+    const speed = speedText === '' ? LESSON_MAX_SPEED : /^\d{1,3}$/.test(speedText) ? Number(speedText) : null
+    if (speed === null || speed < LESSON_MIN_SPEED || speed > LESSON_MAX_SPEED) {
+      return error(no, `A lesson step's speed is ${LESSON_MIN_SPEED} to ${LESSON_MAX_SPEED} percent of the tempo.`)
+    }
+    const tip = trim(parts.slice(3).join(' | '))
+    lesson.push([no, { title, group: group!, pads: pads === null ? null : [...pads].sort((a, b) => a - b), speed, tip: tip === '' ? null : tip }])
+  }
+  // Each step's pads have pad hits in the first scene's pattern of its group.
+  const checkLesson = (): void => {
+    const first = scenes[0]?.sections ?? []
+    for (const [no, step] of lesson) {
+      const section = first.find((s) => s.group === step.group)
+      const notes = section === undefined ? [] : Pattern.playable(section.pattern).filter((n) => n.semitones === null)
+      const played = new Set(notes.map((n) => n.offset))
+      const missing = (step.pads ?? []).filter((o) => !played.has(o))
+      if (notes.length === 0) error(no, `Lesson step '${step.title}': the card's first scene has no pad hits in group ${letter(step.group)}.`)
+      else if (missing.length > 0) error(no, `Lesson step '${step.title}': ${missing.map((o) => padText(step.group, o)).join(' ')} has no hits in the first scene's [${letter(step.group)}].`)
+    }
   }
   // The chain names scenes the card has, and the card has scenes at all.
   const checkChain = (): void => {
@@ -579,7 +746,9 @@ function read(text: string): CardRead {
       }
     }
     if (kept.length > Seq.MAX_NOTES) error(d.line, `Group ${letter(d.group)} has ${kept.length} notes, the most is ${Seq.MAX_NOTES}.`)
-    if (!d.dropped) sections.push({ group: d.group, number: d.number, pattern: pattern(d.bars, kept.sort(noteOrder)), sounds: d.sounds, pads: d.pads })
+    if (!d.dropped) {
+      sections.push({ group: d.group, number: d.number, pattern: pattern(d.bars, kept.sort(noteOrder)), sounds: d.sounds, pads: d.pads, ...(d.synths.size > 0 ? { synths: d.synths } : {}) })
+    }
   }
 
   // A section line that can't be used: its body is skipped.
@@ -709,7 +878,7 @@ function read(text: string): CardRead {
       warn(no, `'${word}' belongs before the first scene, ignored.`)
     } else if (sceneLines > 0 && FX_KEYS.has(key)) {
       error(no, `'${word}' belongs before the first scene.`)
-    } else if (line.includes('|') || firstIsPad(line) || key === 'notes' || key === 'sound' || key === 'pad') {
+    } else if (line.includes('|') || firstIsPad(line) || key === 'notes' || key === 'sound' || key === 'pad' || key === 'synth') {
       error(no, `'${word}' needs a section first, such as [A].`)
     } else if (FX_KEYS.has(key)) {
       fxLine(no, word, key, tokens(rest))
@@ -747,6 +916,7 @@ function read(text: string): CardRead {
       error(no, `${label} is in group ${letter(pad.group)}, but the section is [${letter(d.group)}].`)
       return
     }
+    if (head.length > 1 && !names.has(padKey(pad))) names.set(padKey(pad), head.slice(1).join(' '))
     const ticks = timingTicks(d.step)
     const per = Seq.TICKS_PER_BAR / ticks
     const total = d.bars * per
@@ -1089,8 +1259,76 @@ function read(text: string): CardRead {
     d.pads.set(pad.offset, before === undefined ? shaping : mergedCardPad(before, shaping))
   }
 
+  // ---- synth lines ----
+
+  // synth <pad> <type> [key value]...: a sound for Arc to make. A line with a fault is left out; an earlier line for the pad stays.
+  const synthLine = (d: Draft, no: number, line: string): void => {
+    // Older Arc reads a line after notes as a note, and so refuses the card.
+    if (d.inNotes) warn(no, 'Put synth lines before notes, so older Arc can read the card.')
+    if (line.includes('|')) return error(no, "A synth line can't hold a |.")
+    const t = tokens(line)
+    if (t.length < 3) return error(no, 'A synth line needs a pad and a sound type, as in synth A7 kick.')
+    const pad = parsePad(t[1]!)
+    if (pad === null) return error(no, `'${t[1]}' isn't a pad. Use A to D, then . 0 E or 1 to 9.`)
+    const label = padText(pad.group, pad.offset)
+    if (pad.group !== d.group) return error(no, `${label} is in group ${letter(pad.group)}, but the section is [${letter(d.group)}].`)
+    const type = SYNTH_TYPES.find((x) => x === t[2]!.toLowerCase())
+    if (type === undefined) return warn(no, `Unknown sound type '${t[2]}' on ${label} synth, line ignored.`)
+    const s: SynthFields = {}
+    let i = 3
+    while (i < t.length) {
+      const key = t[i]!.toLowerCase()
+      const v = t[i + 1]
+      if (!SYNTH_KEY_SET.has(key)) {
+        warn(no, `Unknown setting '${t[i]}' on ${label} synth, ignored.`)
+        i += v !== undefined && !SYNTH_KEY_SET.has(v.toLowerCase()) ? 2 : 1
+        continue
+      }
+      if (v === undefined) return error(no, `${label} synth: ${key} needs a value.`)
+      const k = key as SynthKey
+      if (SYNTH_KNOBS.has(k) || k === 'level' || k === 'seed') {
+        const lo = k === 'level' ? 1 : 0
+        const hi = k === 'seed' ? 999 : 100
+        const n = SYNTH_INT.test(v) ? Number(v) : -1
+        if (n < lo || n > hi) return error(no, `${label} synth: ${k} must be a whole number from ${lo} to ${hi}.`)
+        Object.assign(s, { [k]: n })
+      } else if (k === 'note') {
+        const midi = SYNTH_NOTE.test(v) ? noteNumber(v) : undefined
+        if (midi === undefined || midi < SYNTH_NOTE_MIN || midi > SYNTH_NOTE_MAX) return error(no, `${label} synth: note must be C0 to C7, such as C2 or F#1.`)
+        s.note = midi
+      } else if (k === 'length') {
+        // Read as whole hundredths, never as a float: 1.25 is 125, 2.5 is 250.
+        const m = SYNTH_LENGTH.exec(v)
+        const frac = m?.[2]
+        const cs = m === null ? -1 : Number(m[1]) * 100 + (frac === undefined ? 0 : frac.length === 1 ? Number(frac) * 10 : Number(frac))
+        if (cs < SYNTH_LENGTH_MIN || cs > SYNTH_LENGTH_MAX) return error(no, `${label} synth: length must be 0.05 to 4 seconds, with up to two decimals.`)
+        s.length = cs
+      } else if (k === 'wave') {
+        const w = SYNTH_WAVES.find((x) => x === v.toLowerCase())
+        if (w === undefined) warn(no, `${label} synth: unknown wave '${v}', ignored.`)
+        else s.wave = w
+      } else if (k === 'chord') {
+        const c = SYNTH_CHORDS.find((x) => x === v.toLowerCase())
+        if (c === undefined) warn(no, `${label} synth: unknown chord '${v}', ignored.`)
+        else s.chord = c
+      } else {
+        if (!SYNTH_NAME.test(v)) return error(no, `${label} synth: name must be one word of letters, digits, _ or -, starting with a letter or digit.`)
+        if (v.length > SYNTH_NAME_MAX) warn(no, `${label} synth: name cut to ${SYNTH_NAME_MAX} characters.`)
+        s.name = v.slice(0, SYNTH_NAME_MAX)
+      }
+      i += 2
+    }
+    if (d.synths.has(pad.offset)) warn(no, `${label} has two synth lines, kept the later.`)
+    d.synths.set(pad.offset, cardSynth(type, s))
+  }
+
   const lineAt = (no: number, line: string): void => {
     const first = tokens(line)[0]!.toLowerCase()
+    // A lesson line may come anywhere: it names no section's pads but its own.
+    if (first === 'lesson') {
+      lessonLine(no, line)
+      return
+    }
     if (first === 'scene') {
       sceneLine(no, line)
       return
@@ -1112,6 +1350,7 @@ function read(text: string): CardRead {
     if (line.toLowerCase() === 'notes') d.inNotes = true
     else if (tokens(line)[0]!.toLowerCase() === 'sound') sound(d, no, line)
     else if (tokens(line)[0]!.toLowerCase() === 'pad') padLine(d, no, line)
+    else if (tokens(line)[0]!.toLowerCase() === 'synth') synthLine(d, no, line)
     else if (FX_KEYS.has(tokens(line)[0]!.toLowerCase())) error(no, `'${tokens(line)[0]}' belongs before the first section.`)
     else if (d.inNotes) note(d, no, line)
     else if (line.includes('|')) row(d, no, line)
@@ -1139,6 +1378,7 @@ function read(text: string): CardRead {
   scenes.push(cardScene(sceneLines > 0 ? sceneName : null, [...sections]))
   if (sectionLines === 0) error(start + 1, 'The card has no section, such as [A].')
   checkChain()
+  checkLesson()
   return result()
 }
 
@@ -1148,7 +1388,8 @@ function read(text: string): CardRead {
  * [card] as text, as the spec's writing rules have it. [names] gives the
  * sound name a row shows after its pad (null for none). A section's sound
  * lines come right after its line, in keypad order, each with its name when it
- * has one. With [tidy], velocities are rounded to 127, 100 or 64 (ties up) and gates under a step
+ * has one; its synth lines follow them, in keypad order, with the settings they
+ * give in a fixed order (synthText), before its pad lines. With [tidy], velocities are rounded to 127, 100 or 64 (ties up) and gates under a step
  * become a step, for every note, and the card says so in a comment. The [silent]
  * pads (silentPads) are listed in a comment of their own right after the header
  * (ClaudeText.noSoundOn); readers ignore it. A card of scenes (isMultiScene) is
@@ -1156,7 +1397,7 @@ function read(text: string): CardRead {
  * lines (steps that name no scene are left out), then each scene as a `scene`
  * line with its name if it has one, followed by its sections in group order. A
  * section that only repeats the previous scene's pattern for its group (the
- * same pattern, sounds and pad shaping) is left out. The text ends in a newline.
+ * same pattern, sounds, synths and pad shaping) is left out. The text ends in a newline.
  */
 function write(card: BeatCard, names: (pad: PhysicalPad) => string | null = () => null, tidy = false, silent: readonly PhysicalPad[] = []): string {
   const swing = TimingSettings.clampSwing(card.swing)
@@ -1168,6 +1409,7 @@ function write(card: BeatCard, names: (pad: PhysicalPad) => string | null = () =
   out.push(`swing ${swing}`)
   if (card.fx !== null) writeFx(out, card.fx)
   if (isMultiScene(card) && card.chain !== null) writeChain(out, card.chain, card.scenes.length)
+  for (const step of (card.lesson ?? []).slice(0, LESSON_MAX)) out.push(lessonText(step))
   if (silent.length > 0) out.push(ClaudeText.noSoundOn(silent))
   if (tidy) out.push(TIDY_COMMENT)
   if (!isMultiScene(card)) {
@@ -1196,15 +1438,35 @@ function write(card: BeatCard, names: (pad: PhysicalPad) => string | null = () =
 }
 
 // The chain line: steps as 2 or 2x4; those naming a scene the card hasn't, or passes out of range, are left out, and so is a chain left with none.
+/** A lesson step as its line: "lesson Kick alone | A7 | 50 | Count out loud" (the speed left out at 100, A for the whole group). */
+export function lessonText(step: LessonStep): string {
+  const pads = step.pads === null ? letter(step.group) : ROWS.flat().filter((o) => step.pads!.includes(o)).map((o) => padText(step.group, o)).join(' ')
+  const parts = [cleanText(step.title, MAX_NAME), pads]
+  if (step.speed !== LESSON_MAX_SPEED || step.tip !== null) parts.push(`${step.speed}`)
+  if (step.tip !== null) parts.push(cleanText(step.tip, Number.MAX_SAFE_INTEGER))
+  return 'lesson ' + parts.join(' | ')
+}
+
 function writeChain(out: string[], chain: readonly (readonly [number, number])[], sceneCount: number): void {
   const steps = chain.filter(([sc, passes]) => sc >= 1 && sc <= sceneCount && passes >= Chain.MIN_PASSES && passes <= Chain.MAX_PASSES).slice(0, Chain.MAX_STEPS)
   if (steps.length === 0) return
   out.push('chain ' + steps.map(([sc, passes]) => (passes === 1 ? `${sc}` : `${sc}x${passes}`)).join(' '))
 }
 
-// Whether section [s] only repeats [prev], the previous scene's for its group: the same pattern as written (not the notes' ids), sounds and pad shaping.
+const NO_SYNTHS: ReadonlyMap<number, CardSynth> = new Map()
+
+// Whether section [s] only repeats [prev], the previous scene's for its group: the same pattern as written (not the notes' ids), sounds, synths and pad shaping.
 function repeats(prev: CardSection, s: CardSection): boolean {
-  return sameMap(s.sounds, prev.sounds, (a, b) => a.slot === b.slot && a.name === b.name) && sameMap(s.pads, prev.pads, sameCardPad) && sameWritten(prev.pattern, s.pattern)
+  return (
+    sameMap(s.sounds, prev.sounds, (a, b) => a.slot === b.slot && a.name === b.name) &&
+    sameMap(s.synths ?? NO_SYNTHS, prev.synths ?? NO_SYNTHS, sameSynth) &&
+    sameMap(s.pads, prev.pads, sameCardPad) &&
+    sameWritten(prev.pattern, s.pattern)
+  )
+}
+
+function sameSynth(a: CardSynth, b: CardSynth): boolean {
+  return a.type === b.type && SYNTH_KEYS.every((k) => a[k] === b[k])
 }
 
 function sameCardPad(a: CardPad, b: CardPad): boolean {
@@ -1276,6 +1538,22 @@ function padLineText(group: number, offset: number, p: CardPad): string {
   return s
 }
 
+/** A synth line: the settings given, in SYNTH_KEYS order ("synth A7 kick decay 40 name 808_kick"). */
+export function synthText(group: number, offset: number, s: CardSynth): string {
+  let out = `synth ${padText(group, offset)} ${s.type}`
+  for (const key of SYNTH_KEYS) {
+    const v = s[key]
+    if (v === undefined) continue
+    out += ` ${key} ` + (key === 'note' ? noteName(v as number) : key === 'length' ? lengthText(v as number) : String(v))
+  }
+  return out
+}
+
+// A synth length in hundredths as seconds, as few decimals as needed: 400 is 4, 50 is 0.5, 5 is 0.05, 125 is 1.25.
+function lengthText(cs: number): string {
+  return `${Math.trunc(cs / 100)}` + (cs % 100 === 0 ? '' : '.' + String(cs % 100).padStart(2, '0').replace(/0+$/, ''))
+}
+
 // Semitones to two decimals, as few as needed: 7, -7.5, 0.25.
 function pitchText(v: number): string {
   const h = Math.round(coerceIn(v, -PadSettings.PITCH_MAX, PadSettings.PITCH_MAX) * 100)
@@ -1302,6 +1580,10 @@ function writeSection(out: string[], s: CardSection, swing: number, names: (pad:
     if (snd === undefined || snd.slot < SLOT_MIN || snd.slot > SLOT_MAX) continue
     const name = snd.name === null ? '' : cleanText(snd.name, Infinity)
     out.push(`sound ${padText(g, offset)} ${snd.slot}` + (name === '' ? '' : ` ${name}`))
+  }
+  for (const offset of KEYPAD) {
+    const synth = s.synths?.get(offset)
+    if (synth !== undefined) out.push(synthText(g, offset, synth))
   }
   for (const offset of KEYPAD) {
     const pad = s.pads.get(offset)
@@ -1660,16 +1942,19 @@ function notesByPad(s: CardSection): Map<number, number> {
 
 /**
  * The pads [card]'s notes use (pad hits and KEYS notes alike; a note past its pattern's end doesn't play) that would
- * be silent: [slotOf] gives no sound for them now (null) and no sound line of the card (in any scene) puts one on them.
+ * be silent: [slotOf] gives no sound for them now (null) and no sound or synth line of the card (in any scene) puts one on them.
  * In keypad order for each group, scene by scene. Empty when the pads are not [known] (nothing read yet): then a pad with no slot is not
  * known to be empty.
  */
 function silentPads(card: BeatCard, slotOf: (pad: PhysicalPad) => number | null, known: boolean): PhysicalPad[] {
   if (!known) return []
   const out: PhysicalPad[] = []
-  // A sound line in any scene puts a sound on its pad: the sounds are the project's.
+  // A sound or synth line in any scene puts a sound on its pad: the sounds are the project's.
   const given = new Set<number>()
-  for (const s of allSections(card)) for (const [offset, line] of s.sounds) if (line.slot >= SLOT_MIN && line.slot <= SLOT_MAX) given.add(padKey(physicalPad(s.group, offset)))
+  for (const s of allSections(card)) {
+    for (const [offset, line] of s.sounds) if (line.slot >= SLOT_MIN && line.slot <= SLOT_MAX) given.add(padKey(physicalPad(s.group, offset)))
+    for (const offset of s.synths?.keys() ?? []) given.add(padKey(physicalPad(s.group, offset)))
+  }
   for (const scene of card.scenes) {
     for (const s of [...scene.sections].sort((a, b) => a.group - b.group)) {
       const used = notesByPad(s)
@@ -1678,6 +1963,21 @@ function silentPads(card: BeatCard, slotOf: (pad: PhysicalPad) => number | null,
         if (!used.has(offset) || given.has(padKey(pad))) continue
         if (slotOf(pad) === null && !out.some((p) => p.group === pad.group && p.offset === pad.offset)) out.push(pad)
       }
+    }
+  }
+  return out
+}
+
+/**
+ * The card's synth lines by pad (padKey), the project's as the sounds are: the sections of every scene in order, pads in
+ * keypad order. A pad given a line in more than one scene takes the last, in the place of its first.
+ */
+function synthsByPad(card: BeatCard): Map<number, CardSynth> {
+  const out = new Map<number, CardSynth>()
+  for (const s of allSections(card)) {
+    for (const offset of KEYPAD) {
+      const synth = s.synths?.get(offset)
+      if (synth !== undefined) out.set(padKey(physicalPad(s.group, offset)), synth)
     }
   }
   return out
@@ -1793,8 +2093,8 @@ function soundList(source: string, available: ReadonlyMap<number, string>): stri
  * A card of scenes (isMultiScene, from `scene` lines) is planned by planScenes
  * instead, which also takes [setChain].
  */
-function plan(seq: ProjectSeq, card: BeatCard, setChain = true): CardImport {
-  if (isMultiScene(card)) return planScenes(seq, card, setChain)
+function plan(seq: ProjectSeq, card: BeatCard, setChain = true, replace = false): CardImport {
+  if (isMultiScene(card)) return planScenes(seq, card, setChain, replace)
   let out = seq
   const placed: [number, number][] = []
   for (const s of card.sections) {
@@ -1806,9 +2106,13 @@ function plan(seq: ProjectSeq, card: BeatCard, setChain = true): CardImport {
     placed.push([s.group, n])
   }
   if (placed.length < 2) return { seq: out, placed, newScene: false, fullGroup: null, scenes: [], chain: null }
+  const numbers = [0, 1, 2, 3].map((g) => [...placed].reverse().find((x) => x[0] === g)?.[1] ?? ProjectSeq.selected(seq, g))
+  // Replacing, the new scene is the project's only one, and a chain of the old scenes goes with them.
+  if (replace) {
+    return { seq: ProjectSeq.withScenes(out, [scene(numbers)], 0, { steps: [], on: false }), placed, newScene: true, fullGroup: null, scenes: [0], chain: null }
+  }
   const withScene = SceneOps.newScene(out)
   if (withScene.scenes.length === out.scenes.length) return { seq: out, placed, newScene: false, fullGroup: null, scenes: [], chain: null }
-  const numbers = [0, 1, 2, 3].map((g) => [...placed].reverse().find((x) => x[0] === g)?.[1] ?? ProjectSeq.selected(seq, g))
   const scenes = [...withScene.scenes.slice(0, -1), scene(numbers)]
   return {
     seq: ProjectSeq.withScenes(withScene, scenes, withScene.scene),
@@ -1835,12 +2139,19 @@ function plan(seq: ProjectSeq, card: BeatCard, setChain = true): CardImport {
  * it as the project's chain, replacing the one there and turned on; with it off
  * the project's chain is left alone.
  *
+ * With [replace] the new scenes take the place of the project's: the card's
+ * scenes become S01 on, the first selected, and the project's chain is cleared
+ * unless the card's is set (its steps then name the new scenes from 0). The
+ * project's patterns are kept in the banks; only the scenes that named them go.
+ * plan does the same for a card of several groups and no scenes: its one new
+ * scene is the project's only one.
+ *
  * Limits, as for the card without scenes: when a group has no free pattern for
  * a section, nothing is placed (`fullGroup`, [seq] as it was). When the new
  * scenes don't all fit in 99, none is added (`newScene` false, no scenes, no
  * chain), and the patterns are still placed.
  */
-function planScenes(seq: ProjectSeq, card: BeatCard, setChain = true): CardImport {
+function planScenes(seq: ProjectSeq, card: BeatCard, setChain = true, replace = false): CardImport {
   let out = seq
   const placed: [number, number][] = []
   const taken = new Set<number>()
@@ -1861,16 +2172,18 @@ function planScenes(seq: ProjectSeq, card: BeatCard, setChain = true): CardImpor
     numbers = now
     made.push(scene(now))
   }
-  if (seq.scenes.length + made.length > Seq.MAX_SCENES) return { seq: out, placed, newScene: false, fullGroup: null, scenes: [], chain: null }
-  const first = seq.scenes.length
+  if (!replace && seq.scenes.length + made.length > Seq.MAX_SCENES) return { seq: out, placed, newScene: false, fullGroup: null, scenes: [], chain: null }
+  // Replacing, the card's scenes are the project's from S01 (its patterns stay in the banks), else they follow its scenes.
+  const first = replace ? 0 : seq.scenes.length
   const indices = made.map((_, i) => first + i)
   const mapped = (card.chain ?? [])
     .filter(([sc]) => sc >= 1 && sc <= card.scenes.length)
     .slice(0, Chain.MAX_STEPS)
     .map(([sc, passes]) => chainStep(first + sc - 1, Math.min(Math.max(passes, Chain.MIN_PASSES), Chain.MAX_PASSES)))
   const steps = mapped.length > 0 ? mapped : null
-  const chain = setChain && steps !== null ? { steps, on: true } : seq.chain
-  return { seq: ProjectSeq.withScenes(out, [...seq.scenes, ...made], first, chain), placed, newScene: true, fullGroup: null, scenes: indices, chain: steps }
+  // A chain of the old scenes would name the new ones: replacing, it goes unless the card's takes its place.
+  const chain = setChain && steps !== null ? { steps, on: true } : replace ? { steps: [], on: false } : seq.chain
+  return { seq: ProjectSeq.withScenes(out, replace ? made : [...seq.scenes, ...made], first, chain), placed, newScene: true, fullGroup: null, scenes: indices, chain: steps }
 }
 
 // The first pattern of [group] after the one selected that has no notes and isn't in [taken] (group * 100 + number), round 1..99; null when there is none.
@@ -1884,4 +2197,81 @@ function freePattern(seq: ProjectSeq, group: number, taken: ReadonlySet<number>)
 }
 
 /** The Kotlin `BeatCards` object. */
-export const BeatCards = { VERSION, MAX_NAME, MAX_SCENES, TIDY_COMMENT, read, hasCard, write, fromPatterns, fromScenes, fxOf, padOf, applyFx, applyPad, resolveSounds, soundNames, soundList, silentPads, notesByPad, plan, planScenes } as const
+// A kind of sound: what a row's name says (label), what a sound's name says (sound) and its factory block.
+interface SoundKind {
+  readonly name: string
+  readonly label: RegExp
+  readonly sound: RegExp
+  readonly block: readonly [number, number]
+}
+
+// In the order they are tried: "open hat" before "hat", "bass drum" (a kick) before "bass".
+const SOUND_KINDS: readonly SoundKind[] = [
+  { name: 'kick', label: /\b(kick|kik|bd|bass ?drum)\b/, sound: /\b(kick|kik|bd)/, block: [1, 99] },
+  { name: 'snare', label: /\b(snare|sd|rim ?shot)\b/, sound: /\b(snare|sn|sd)\b/, block: [100, 199] },
+  { name: 'clap', label: /\b(clap|snap)\b/, sound: /\b(clap|snap)/, block: [100, 199] },
+  { name: 'rim', label: /\b(rim|stick|clave)\b/, sound: /\b(rim|stick|clave)/, block: [100, 199] },
+  { name: 'open hat', label: /\b(open ?(hat|hh|hi.?hat)|oh)\b/, sound: /\b(oh|open)\b/, block: [200, 299] },
+  { name: 'hat', label: /\b(hi.?hats?|hh|hats?|ch)\b/, sound: /\b(hh|hats?|hihat|ch)\b/, block: [200, 299] },
+  { name: 'cymbal', label: /\b(crash|ride|cymbal|splash)\b/, sound: /\b(crash|ride|cym)/, block: [200, 299] },
+  { name: 'tom', label: /\btoms?\b/, sound: /\btom/, block: [300, 399] },
+  { name: 'perc', label: /\b(shaker|shak\w*|tamb\w*|conga|bongo|cowbell|cow|perc\w*|triangle)\b/, sound: /\b(shak|tamb|perc|conga|bongo|cow|tri)/, block: [300, 399] },
+  { name: 'bass', label: /\b(bass|sub|808|reese)\b/, sound: /\b(bass|sub|808|synbaz|baz)/, block: [400, 499] },
+  { name: 'chord', label: /\b(chords?|stabs?)\b/, sound: /\b(chrd|chord|stab|skank)/, block: [500, 599] },
+  { name: 'melodic', label: /\b(lead|keys?|piano|pads?|pluck|synth|organ|mel\w*|bell|strings?|arp)\b/, sound: /\b(lead|piano|pad|pluc?k|pluk|synth|organ|keys|bell|string|mel)/, block: [500, 599] },
+]
+
+// Words of a row's name too general to look for in a sound's name.
+const STOP_WORDS = new Set(['closed', 'open', 'loop', 'sound', 'the', 'and', 'new', 'drum', 'hit', 'low', 'high', 'main'])
+// An EP-40 loop's name ("jammy bass a 85"): tempo-locked, never a one-shot to suggest.
+const LOOP_NAME = /\b(drms|fill|bass|mel|melo)\s+[a-d]\s+[0-9]{2,3}\s*$/i
+
+/**
+ * A sound to suggest for a silent [pad] of [card]: one of [names] (slot to name, the sounds Arc knows) by the pad's row
+ * name in the card ([label], "shaker"). First a sound whose name has one of the label's words, then one whose name is of
+ * the label's kind (a hat for "closed hat", a bass for "sub"), then the first sound in the factory block of that kind
+ * (kicks 1-99 ... melodic 500-599; with the EP-40 kit, chords 600-699). A pad the card plays only in KEYS, with no
+ * telling name, takes a melodic sound, or a bass when its notes sit below C3. The EP-40's loops are never suggested, nor
+ * a slot in [taken]. Null when nothing fits. The Kotlin `BeatCards.suggestSound`.
+ */
+function suggestSound(
+  card: BeatCard,
+  pad: PhysicalPad,
+  label: string | null,
+  names: ReadonlyMap<number, string>,
+  taken: ReadonlySet<number> = new Set(),
+  kit: FactoryKit = FactoryKit.EP133,
+): number | null {
+  const low = (label ?? '').toLowerCase()
+  const keys = allSections(card).filter((s) => s.group === pad.group).flatMap((s) => s.pattern.notes.filter((n) => n.offset === pad.offset))
+  let kind = SOUND_KINDS.find((k) => k.label.test(low)) ?? null
+  if (kind === null && keys.length > 0 && keys.every((n) => n.semitones !== null)) {
+    const avg = keys.reduce((a, n) => a + n.semitones!, 0) / keys.length
+    kind = SOUND_KINDS.find((k) => k.name === (avg < -12 ? 'bass' : 'melodic'))!
+  }
+  const open = [...names].filter(([slot, name]) => slot >= SLOT_MIN && slot <= SLOT_MAX && !taken.has(slot) && !LOOP_NAME.test(name)).sort((a, b) => a[0] - b[0])
+  const block: readonly [number, number] | null = kind === null ? null : kind.name === 'chord' && kit === FactoryKit.EP40 ? [600, 699] : kind.block
+  const inBlock = (slot: number): boolean => block !== null && slot >= block[0] && slot <= block[1]
+  const first = (ok: (slot: number, name: string) => boolean): number | null => {
+    const all = open.filter(([slot, name]) => ok(slot, name.toLowerCase())).map(([slot]) => slot)
+    return all.find((slot) => block === null || inBlock(slot)) ?? all[0] ?? null
+  }
+  const words = (low.match(/[a-z0-9]+/g) ?? []).filter((w) => w.length >= 3 && !STOP_WORDS.has(w))
+  if (words.length > 0) {
+    const hit = first((_, name) => words.some((w) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).test(name)))
+    if (hit !== null) return hit
+  }
+  if (kind === null) return null
+  const k = kind
+  return first((_, name) => k.sound.test(name)) ?? open.map(([slot]) => slot).find(inBlock) ?? null
+}
+
+/** Whether a file named [name] may hold a beat card as text, picked or dropped on the page: .txt, .md or .markdown. */
+function isCardFile(name: string): boolean {
+  return /\.(txt|md|markdown)$/i.test(name)
+}
+
+/** The most of a card file Arc reads: a longer one is no card. */
+const MAX_CARD_FILE = 1 << 20
+
+export const BeatCards = { VERSION, MAX_NAME, MAX_SCENES, TIDY_COMMENT, read, hasCard, write, fromPatterns, fromScenes, fxOf, padOf, applyFx, applyPad, resolveSounds, soundNames, soundList, silentPads, synthsByPad, notesByPad, suggestSound, isCardFile, MAX_CARD_FILE, plan, planScenes } as const

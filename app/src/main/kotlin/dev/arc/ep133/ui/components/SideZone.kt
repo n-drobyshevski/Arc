@@ -138,7 +138,7 @@ fun SideZone(
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
                     // Its face reaches under a side navigation bar; the close key and controls stay clear of it.
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.End))
-                    .width(min(320.dp, maxWidth * 0.85f))
+                    .width(min(360.dp, maxWidth * 0.9f))
                     .verticalScroll(scroll)
                     .padding(start = 18.dp, end = 16.dp, top = 12.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),

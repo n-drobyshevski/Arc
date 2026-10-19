@@ -67,6 +67,14 @@ tasks.test {
     val beatCardSpec = rootProject.file("skill/arc-beats/references/beat-card.md")
     inputs.file(beatCardSpec)
     systemProperty("arc.beatCardSpec", beatCardSpec.absolutePath)
+    // Synth lines: the reader cases and the golden renders the skill's script shares, and the recipe cards.
+    // -Parc.updateGolden=true writes the golden file afresh instead of comparing.
+    val scripts = rootProject.file("skill/arc-beats/scripts")
+    inputs.files(rootProject.fileTree("skill/arc-beats") { include("references/*.md", "scripts/test_synth_*.txt") })
+    systemProperty("arc.synthCases", scripts.resolve("test_synth_cases.txt").absolutePath)
+    systemProperty("arc.synthGolden", scripts.resolve("test_synth_golden.txt").absolutePath)
+    systemProperty("arc.synthRecipes", rootProject.file("skill/arc-beats/references/synth-sounds.md").absolutePath)
+    systemProperty("arc.updateGolden", providers.gradleProperty("arc.updateGolden").getOrElse("false"))
     systemProperty("arc.referenceDir", ref.absolutePath)
     systemProperty("arc.versionFile", rootProject.file("version.properties").absolutePath)
     systemProperty("junit.jupiter.execution.timeout.default", "60 s")

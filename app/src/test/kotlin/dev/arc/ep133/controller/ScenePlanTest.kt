@@ -919,4 +919,30 @@ class ScenePlanTest {
         assertEquals(setOf(4), filledPatterns(seq, 0))
         assertTrue(filledPatterns(seq, 1).isEmpty())
     }
+
+    @Test
+    fun `a pattern's first bar as sixteen step lights, the hardest hit in each`() {
+        val step = Seq.TICKS_PER_BAR / LIGHTS
+        val p = Pattern(
+            2,
+            listOf(
+                PatternNote(0, 9, 10, velocity = 120),
+                PatternNote(0, 4, 10, velocity = 60),
+                // A little early for step 5: to the nearest.
+                PatternNote(4 * step - 3, 11, 10, velocity = 100),
+                PatternNote(8 * step, 2, 10, velocity = 40),
+                // Late in the bar's last half step: round to the first.
+                PatternNote(Seq.TICKS_PER_BAR - 2, 2, 10, velocity = 127),
+                // The second bar isn't drawn.
+                PatternNote(Seq.TICKS_PER_BAR + step, 2, 10),
+            ),
+        )
+        val lights = stepLights(p)
+        assertEquals(LIGHTS, lights.size)
+        assertEquals(Weight.ACCENT, lights[0])
+        assertEquals(Weight.NORMAL, lights[4])
+        assertEquals(Weight.GHOST, lights[8])
+        assertEquals(3, lights.count { it != null })
+        assertEquals(NO_LIGHTS, stepLights(Pattern()))
+    }
 }

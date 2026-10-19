@@ -37,9 +37,37 @@ data class ClipUi(val mode: ClipMode, val what: String)
  * A group's column in the scene panel: the pattern it plays ([number], 1..99),
  * the one waiting to take over ([queued]; null for none), the numbers with
  * notes ([filled], for the 1–99 grid), the next free one after the number
- * shown ([nextFree]) and the pattern's length ([bars]).
+ * shown ([nextFree]), the pattern's length ([bars]) and its first bar as
+ * [lights] (Live tools' Claude page draws them on its glass).
  */
-data class SceneGroupUi(val number: Int, val queued: Int?, val filled: Set<Int>, val nextFree: Int, val bars: Int)
+data class SceneGroupUi(
+    val number: Int,
+    val queued: Int?,
+    val filled: Set<Int>,
+    val nextFree: Int,
+    val bars: Int,
+    val lights: List<Weight?> = NO_LIGHTS,
+)
+
+/** The steps a bar is drawn in as lights. */
+const val LIGHTS = 16
+val NO_LIGHTS: List<Weight?> = List(LIGHTS) { null }
+
+/**
+ * [p]'s first bar as [LIGHTS] step lights: the hardest hit starting in each
+ * sixteenth (on any pad, to the nearest one, the last half step going round
+ * to the first), null where none does.
+ */
+fun stepLights(p: Pattern): List<Weight?> {
+    val step = Seq.TICKS_PER_BAR / LIGHTS
+    val top = IntArray(LIGHTS) { -1 }
+    for (n in p.notes) {
+        if (n.tick !in 0 until minOf(Seq.TICKS_PER_BAR, p.lengthTicks)) continue
+        val i = (n.tick + step / 2) / step % LIGHTS
+        top[i] = maxOf(top[i], n.velocity)
+    }
+    return top.map { if (it < 0) null else Weight.of(it) }
+}
 
 /**
  * Scenes as Live shows them (an addition: the device's GROUP and MAIN with
@@ -623,6 +651,7 @@ internal class SceneDesk(private val word: (PhysicalPad) -> String) {
                 filled = filledPatterns(seq, g),
                 nextFree = SceneOps.nextFree(SceneOps.selectPattern(seq, g, shown(seq, g)), g),
                 bars = seq.pattern(g, n).bars,
+                lights = stepLights(seq.pattern(g, n)),
             )
         }
         val c = clip

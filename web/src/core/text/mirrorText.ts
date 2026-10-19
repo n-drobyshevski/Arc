@@ -653,11 +653,16 @@ export const MirrorText = {
   REC: 'Rec',
   TAKES: 'Takes',
   TAKES_NOTE:
-    "A take holds the pads and keys played on the phone, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out.",
+    "A take holds the pads and keys played on the phone, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Trim keeps a part of one (nothing is cut) and Dup copies it, to trim a copy another way. Save or Share copies one out, its trimmed part if it has one; Share to Telegram sends it as a voice message.",
   TO_DEVICE: 'To EP-133',
   DELETE_TAKE: 'Delete this take?',
   NO_OUTPUT: 'There is no sound output to record from.',
   SHARE_TAKE_FAILED: 'Sharing failed. Use Save WAV instead.',
+  // A take as a voice message (Ogg Opus, which Telegram sends as one): SHARE gives it to Telegram.
+  NO_VOICE_ENCODER: "There's no Opus encoder here to make a voice message. Use Share instead.",
+  VOICE_FAILED: "The voice message couldn't be made. Use Share instead.",
+  /** "take-20261005-142301.ogg": a take's voice message. */
+  voiceFileName: (take: string): string => (take.endsWith('.wav') ? take.slice(0, -4) : take) + '.ogg',
 
   /** "0:12", "10:00". */
   takeLength(seconds: number): string {

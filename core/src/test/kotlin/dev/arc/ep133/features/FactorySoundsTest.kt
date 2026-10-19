@@ -27,6 +27,25 @@ class FactorySoundsTest {
         """b="/apps/ep-sample-tool/assets/ep-133-factory-content-DRyE_DHC.pak";"""
 
     @Test
+    fun `a device's kit is told by its slots, its own pack, not another kit's that shares some`() {
+        // The two packs' slots as the skill lists them (factory-sounds.md).
+        val text = java.io.File(System.getProperty("arc.beatCardSpec")!!).parentFile.resolve("factory-sounds.md").readText()
+        val at = text.indexOf("## EP-133 factory sounds")
+        val riddim = text.indexOf("## EP-40 Riddim factory sounds")
+        fun slots(t: String) = Regex("^(\\d+) \\S", RegexOption.MULTILINE).findAll(t).map { it.groupValues[1].toInt() }.toSet()
+        val ep133 = slots(text.substring(at, riddim))
+        val ep40 = slots(text.substring(riddim))
+        val both = mapOf(FactoryKit.EP133 to ep133, FactoryKit.EP40 to ep40)
+        assertEquals(FactoryKit.EP133, FactorySounds.kitOf(ep133, both))
+        assertEquals(FactoryKit.EP40, FactorySounds.kitOf(ep40, both))
+        // An EP-133 with its own sounds, a few gone and some of the player's own added: still its kit.
+        assertEquals(FactoryKit.EP133, FactorySounds.kitOf(ep133.drop(30).toSet() + (900..940), both))
+        // Only the EP-40's pack saved: an EP-133's sounds aren't it.
+        assertNull(FactorySounds.kitOf(ep133, mapOf(FactoryKit.EP40 to ep40)))
+        assertNull(FactorySounds.kitOf(emptySet(), both))
+    }
+
+    @Test
     fun `the pack is found through the tool's page and script`() = runTest {
         assertEquals("/apps/ep-sample-tool/assets/index-C1wBjhTa.js", FactorySounds.scriptPath(page))
         assertEquals("/apps/ep-sample-tool/assets/ep-133-factory-content-DRyE_DHC.pak", FactorySounds.pakPath(script))

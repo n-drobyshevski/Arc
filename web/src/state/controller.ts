@@ -79,6 +79,7 @@ import { FxControl } from '../core/formats/fx/fxBus'
 import type { VoiceShape } from '../core/formats/voiceMixer'
 import type { PadSettings } from '../core/features/padSettings'
 import { OfflinePadSettings } from '../core/features/offlinePadSettings'
+import { OGG_MIME, oggOpusFile, preSkipOf, voicePcm } from '../core/formats/oggOpus'
 import { decodeWav } from '../core/formats/wav'
 import { REC_IDLE, type RecState } from '../core/features/takeRecorder'
 import type { RecordedTake } from '../platform/audio/liveAudio'
@@ -98,6 +99,7 @@ import { WebText } from '../core/text/webText'
 import { ktTrim } from '../core/util/kotlinText'
 import { APP_BUILD } from '../version'
 import { describeFile, PAK_ACCEPT, WAV_ACCEPT, type ReadableFile } from '../platform/files/pick'
+import { BeatCards } from '../core/features/beatCard'
 import { logFileName } from '../platform/files/save'
 import type { FileData } from '../platform/files/save'
 import { FileListTarget, type ExternalTarget } from '../platform/storage/external'
@@ -2683,6 +2685,11 @@ export class ArcController {
     return this.deps.share.canShareFiles?.() === true
   }
 
+  /** Whether a take's Voice is offered: it is shared, and needs an Opus encoder. */
+  get canShareVoice(): boolean {
+    return this.canShareTakes && this.deps.voice !== undefined
+  }
+
   private async loadTakes(): Promise<void> {
     const store = this.deps.takes
     if (!store) return
@@ -2772,6 +2779,33 @@ export class ArcController {
       if (r === 'saved') this.toast(WebText.savedInstead(t.name))
     } catch {
       this.toast(MirrorText.SHARE_TAKE_FAILED, true)
+    }
+  }
+
+  /** A take as a voice message (Ogg Opus, mono): the bytes VOICE shares. Rejects when it can't be made. */
+  async takeVoice(t: TakeInfo): Promise<Uint8Array> {
+    const voice = this.deps.voice
+    if (!voice) throw new Error(MirrorText.NO_VOICE_ENCODER)
+    const w = decodeWav(await this.takeBytes(t))
+    const pcm = voicePcm(w.pcm, w.channels, w.sampleRate)
+    let made: { packets: Uint8Array[]; config: Uint8Array | null }
+    try {
+      made = await voice.encodeOpus(new Int16Array(pcm.buffer, pcm.byteOffset, pcm.length >> 1))
+    } catch {
+      throw new Error(MirrorText.VOICE_FAILED)
+    }
+    return oggOpusFile(made.packets, 1, preSkipOf(made.config), w.sampleRate, pcm.length >> 1)
+  }
+
+  /** VOICE: shares a take as Ogg Opus, which Telegram sends as a voice message; no text, which it would add as a caption. Call from a tap. */
+  async shareTakeVoice(t: TakeInfo): Promise<void> {
+    const name = MirrorText.voiceFileName(t.name)
+    try {
+      const r = await this.deps.share.share(name, () => this.takeVoice(t), OGG_MIME, name, '')
+      if (r === 'saved') this.toast(WebText.savedInstead(name))
+    } catch (e) {
+      const m = errorText(e)
+      this.toast(m === MirrorText.NO_VOICE_ENCODER || m === MirrorText.VOICE_FAILED ? m : MirrorText.SHARE_TAKE_FAILED, true)
     }
   }
 
@@ -2884,7 +2918,7 @@ export class ArcController {
    * clipboard with a toast saying so. Nothing when there are no notes.
    */
   async shareBeat(group: number | null): Promise<void> {
-    const share = this.pattern.beatShare(group)
+    const share = this.pattern.beatShare(group, this.live.factoryKit())
     if (share === null) return
     await this.sendText(share.subject, share.text)
   }
@@ -2932,6 +2966,19 @@ export class ArcController {
   async receiveBeat(text: string | null): Promise<void> {
     this._beatPasting.value = false
     await this.pattern.receiveBeat(text)
+  }
+
+  /** Open a card file (the link under PASTE BEAT): a .txt or .md with Claude's card in it, from the file picker. */
+  async openBeatFile(): Promise<void> {
+    const files = await this.deps.files.pick({ accept: '.txt,.md,.markdown,text/plain,text/markdown' })
+    const file = files[0]
+    if (file) await this.receiveBeatFile(file)
+  }
+
+  /** A card file picked or dropped on the page: its text, as receiveBeat takes it; one longer than a card has none. */
+  async receiveBeatFile(file: { readonly size: number; text(): Promise<string> }): Promise<void> {
+    const text = file.size <= BeatCards.MAX_CARD_FILE ? await file.text().catch(() => null) : null
+    await this.receiveBeat(text)
   }
 
   /** PASTE BEAT's box closed without a paste. */

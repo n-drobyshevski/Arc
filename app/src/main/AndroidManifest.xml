@@ -16,6 +16,18 @@
     <!-- Only while SAMPLE mode is open with the mic or USB as its source (InputCapture); asked for then. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- Telegram's apps (files/Telegram.kt): SHARE on a take gives them its voice message. -->
+    <queries>
+        <package android:name="org.telegram.messenger" />
+        <package android:name="org.telegram.messenger.web" />
+        <package android:name="org.telegram.messenger.beta" />
+        <package android:name="org.telegram.plus" />
+        <package android:name="tw.nekomimi.nekogram" />
+        <package android:name="xyz.nextalone.nagram" />
+        <package android:name="uz.unnarsx.cherrygram" />
+        <package android:name="it.octogram.android" />
+    </queries>
+
     <application
         android:name=".ArcApp"
         android:allowBackup="false"
@@ -63,11 +75,34 @@
                 <data android:pathPattern=".*\\..*\\..*\\.pak" />
             </intent-filter>
 
-            <!-- Claude's reply shared to arc: a beat card in text (MainActivity.handleIntent reads it, and says so when there is none). -->
+            <!-- Claude's reply shared to arc: a beat card in text, or a .txt or .md file holding one (MainActivity.handleIntent reads it, and says so when there is none). -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+            </intent-filter>
+
+            <!-- A card file opened with arc from Files or Downloads: .txt or .md, by type or, whatever type is reported, by name. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
                 <data android:mimeType="text/plain" />
+                <data android:mimeType="text/markdown" />
+                <data android:mimeType="text/x-markdown" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:mimeType="*/*" />
+                <data android:pathPattern=".*\\.txt" />
+                <data android:pathPattern=".*\\.md" />
+                <data android:pathPattern=".*\\..*\\.txt" />
+                <data android:pathPattern=".*\\..*\\.md" />
             </intent-filter>
         </activity>
 

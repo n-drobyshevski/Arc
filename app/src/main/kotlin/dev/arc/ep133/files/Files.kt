@@ -19,6 +19,7 @@ class PakFileProvider : FileProvider() {
             path.endsWith(".pak", ignoreCase = true) -> "application/zip"
             path.endsWith(".txt", ignoreCase = true) -> "text/plain"
             path.endsWith(".wav", ignoreCase = true) -> "audio/wav"
+            path.endsWith(".ogg", ignoreCase = true) -> "audio/ogg"
             else -> super.getType(uri)
         }
     }
@@ -30,10 +31,10 @@ object Files {
     private const val MAX_IMPORT = 128L * 1024 * 1024
     const val TOO_LARGE = "This file is too large to be a backup"
 
-    /** A copy of [bytes] under cache/share/, named [name], as a content URI. */
-    fun shareableUri(context: Context, name: String, bytes: ByteArray): Uri {
+    /** A copy of [bytes] under cache/share/, named [name], as a content URI. The share before's copies go, unless [keep]. */
+    fun shareableUri(context: Context, name: String, bytes: ByteArray, keep: Boolean = false): Uri {
         val dir = File(context.cacheDir, "share").apply {
-            deleteRecursively()
+            if (!keep) deleteRecursively()
             mkdirs()
         }
         val f = File(dir, name)
@@ -41,16 +42,21 @@ object Files {
         return FileProvider.getUriForFile(context, AUTHORITY, f)
     }
 
-    /** ACTION_SEND through the system chooser. Throws if nothing can receive it. */
-    fun share(context: Context, uri: Uri, mime: String, subject: String, text: String) {
+    /**
+     * ACTION_SEND through the system chooser. Throws if nothing can receive it.
+     * With no [text] there is no subject or text either: a voice message's
+     * would go with it as a caption. [replacing] gives some apps other extras
+     * (Telegram a take's voice message: [Telegram.replacing]).
+     */
+    fun share(context: Context, uri: Uri, mime: String, subject: String, text: String?, replacing: android.os.Bundle? = null) {
         val send = Intent(Intent.ACTION_SEND)
             .setType(mime)
             .putExtra(Intent.EXTRA_STREAM, uri)
-            .putExtra(Intent.EXTRA_SUBJECT, subject)
-            .putExtra(Intent.EXTRA_TEXT, text)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        if (text != null) send.putExtra(Intent.EXTRA_SUBJECT, subject).putExtra(Intent.EXTRA_TEXT, text)
         send.clipData = ClipData.newRawUri(subject, uri)
         val chooser = Intent.createChooser(send, null).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        if (replacing != null) chooser.putExtra(Intent.EXTRA_REPLACEMENT_EXTRAS, replacing)
         if (context !is android.app.Activity) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
             context.startActivity(chooser)

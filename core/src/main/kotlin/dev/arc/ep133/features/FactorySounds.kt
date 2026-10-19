@@ -179,6 +179,24 @@ object FactorySounds {
      */
     fun unnamed(slot: Int, name: String): Boolean = name.trim().equals(slot.toString().padStart(3, '0') + ".pcm", ignoreCase = true)
 
+    /**
+     * The kit whose factory sounds a device holds, told by its slots ([device]: the slots its list has) against each
+     * pack's ([packs], those saved): the pack sharing the most slots with it, counted over both lists (Jaccard), when that
+     * is at least [KIT_MATCH]; else null. An EP-133 with its own sounds shares about four in ten of its slots with the
+     * EP-40 Riddim's pack, and all of them with its own.
+     */
+    fun kitOf(device: Set<Int>, packs: Map<FactoryKit, Set<Int>>): FactoryKit? {
+        if (device.isEmpty()) return null
+        return packs.mapNotNull { (kit, slots) ->
+            val both = device.count { it in slots }
+            val either = device.size + slots.size - both
+            if (either == 0) null else kit to both.toDouble() / either
+        }.filter { it.second >= KIT_MATCH }.maxByOrNull { it.second }?.first
+    }
+
+    /** How much a device's slots have to be a pack's to hold that kit ([kitOf]). */
+    const val KIT_MATCH = 0.6
+
     /** The library's pack of [kit], if it has one (the newest, should there be two). */
     fun inLibrary(backups: List<BackupRecord>, kit: FactoryKit = FactoryKit.EP133): BackupRecord? =
         backups.filter { it.source == kit.source }.maxByOrNull { it.createdAt }

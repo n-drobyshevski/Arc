@@ -7,6 +7,7 @@
 // Web deltas: [placed] pairs are [group, n] tuples; Weight is a string union
 // ordered by [WEIGHT_RANK]; names give null rather than Kotlin's null String?.
 
+import type { FactoryKit } from '../core/features/factorySounds'
 import { BeatCards, cardSection, type BeatCard, type CardProblem, type CardRead, type CardSection } from '../core/features/beatCard'
 import { ROWS, physicalPad, type PhysicalPad } from '../core/features/padNotes'
 import { Pattern, ProjectSeq, Seq, TimingSettings, timingTicks, type Timing } from '../core/features/pattern'
@@ -31,15 +32,16 @@ export interface BeatShare {
  * playing, its four patterns, the blank ones left out), as an ARC BEAT card
  * tidied and written with the pads' [names], at [tempo] and the TIMING [swing]
  * (BeatCards.fromPatterns keeps the swing only where every hit sits on it).
+ * A [kit] other than the EP-133's is named before the card (ClaudeText.kitLine).
  * Null when there is nothing to share: no notes in it.
  */
-export function beatShare(seq: ProjectSeq, group: number | null, tempo: number, swing: number, names: PadNames): BeatShare | null {
+export function beatShare(seq: ProjectSeq, group: number | null, tempo: number, swing: number, names: PadNames, kit?: FactoryKit): BeatShare | null {
   const groups = group === null ? [0, 1, 2, 3] : [group]
   const sections = groups.map((g) => cardSection(g, ProjectSeq.selected(seq, g), ProjectSeq.pattern(seq, g, ProjectSeq.selected(seq, g))))
   if (sections.every((s) => Pattern.isEmpty(s.pattern))) return null
   const name = group === null ? ClaudeText.sceneCardName(seq.scene) : ClaudeText.patternCardName(ProjectSeq.selected(seq, group), seq.scene)
   const card = BeatCards.fromPatterns(name, tempo, swing, sections)
-  return { subject: ClaudeText.shareSubject(name), text: ClaudeText.shareText(ClaudeText.SHARE_PROMPT, BeatCards.write(card, names, true)) }
+  return { subject: ClaudeText.shareSubject(name), text: ClaudeText.shareText(ClaudeText.SHARE_PROMPT, BeatCards.write(card, names, true), kit) }
 }
 
 /** How strong a hit is drawn on the sheet's grid: the ghost, normal and accent tints (the card's x, o and X, as TIDY rounds them). */

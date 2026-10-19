@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""ARC BEAT cards: check, analyse, midi and grid.
+"""ARC BEAT cards: check, analyse, midi, grid and synth.
 
 Reads the text card format of references/beat-card.md the way Arc does (the
 reading rules there are the spec) and works on it. Python 3.9+, standard
 library only.
 
-    beatcard.py check   [CARD|-] [--json] [--sounds SOUNDS.txt]
-    beatcard.py analyse [CARD|-] [--json] [--recipes genres.md]
+    beatcard.py check   [CARD|-] [--json] [--sounds SOUNDS.txt|factory|factory-ep40] [--kit ep133|ep40]
+    beatcard.py analyse [CARD|-] [--json] [--recipes genres.md] [--kit ep133|ep40]
     beatcard.py midi    [CARD|-] [-o OUT.mid] [--loops N] [--channel 1-16]
     beatcard.py grid    [CARD|-]
+    beatcard.py synth   [CARD|-] [--pad A7] [--json] [-o DIR]
 
 CARD is a file; without it, or with "-", the card is read from standard
 input. Anything before the first line starting with ARC BEAT is ignored, so
@@ -28,6 +29,20 @@ them. SOUNDS.txt is the user's sound list as Arc's share adds it after the card
 optional; so is the note after it about names like 200.pcm, which is skipped).
 With it, check warns about each sound line whose slot or name isn't in the
 list, and notes each one that uses a slot the EP-133 keeps without a name.
+
+The factory kit decides what a slot's block says a sound is: the EP-133's
+(kicks 1-99 ... melodic 500-599) or the EP-40 Riddim's (the same up to 599,
+then chord stabs 600-699, vocals and FX 700-799 and tempo-named loops
+800-899). It is "ep40" when Arc's share says "EP-40 Riddim factory kit", when
+the sound list's names are the EP-40 pack's, or when the card's sound lines
+name its loops; --kit sets it. check also warns about a sound line on a loop
+named with a tempo ("jammy drms a 85") that isn't the card's.
+
+A synth line ("synth A7 kick decay 70 name 808_kick") is a sound that Arc
+makes out of the card. The script makes the same bytes as Arc (render_synth):
+synth lists each one with its device name and length, and -o writes them as
+WAV files. With --sounds, a sound line in no slot on a pad with a synth line is
+a note, not a warning: Arc makes the synth instead.
 """
 
 from __future__ import annotations
@@ -39,6 +54,7 @@ import os
 import re
 import struct
 import sys
+import zlib
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -70,6 +86,8 @@ SWING_STEPS = ("1/8", "1/16")
 #: Pad labels as printed, in order of their note offset 0..11.
 PAD_LABELS = [".", "0", "ENTER", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
 LABEL_OFFSET = {".": 0, "0": 1, "E": 2, "ENTER": 2, **{str(n): n + 2 for n in range(1, 10)}}
+#: A pad offset's label as a card writes it (ENTER as E).
+OFFSET_LABEL = {0: ".", 1: "0", 2: "E", **{n + 2: str(n) for n in range(1, 10)}}
 #: The keypad top row first (7 8 9 / 4 5 6 / 1 2 3 / . 0 ENTER) as note offsets.
 KEYPAD_ORDER = [9, 10, 11, 6, 7, 8, 3, 4, 5, 0, 1, 2]
 GROUPS = "ABCD"
@@ -94,6 +112,23 @@ ASSUMED_KIT = {
     "AENTER": "crash",
 }
 
+#: The pads of the EP-40 Riddim pack's first project (P01, which Arc's Live plays offline with that kit): group A's
+#: drum loops on 7-9 and fills on . 0 ENTER, its one-shots below them. The same table is in references/ep40-kit.md.
+ASSUMED_KIT_EP40 = {
+    "A7": "drum loop a",
+    "A8": "drum loop b",
+    "A9": "drum loop c",
+    "A4": "closed hat",
+    "A5": "open hat",
+    "A6": "tom",
+    "A1": "kick",
+    "A2": "rimshot",
+    "A3": "rim",
+    "A.": "fill a",
+    "A0": "fill b",
+    "AENTER": "fill c",
+}
+
 #: The master effects an fx line names, in the order Arc offers them.
 FX_TYPES = ("none", "delay", "reverb", "distortion", "chorus", "filter", "compressor")
 #: The settings a pad line can give, in the order Arc writes them.
@@ -112,6 +147,29 @@ FX_KNOBS = {
 }
 #: The pad sheet's ranges (PadSettings).
 PITCH_MAX, LEVEL_MAX, PAN_MAX, ENV_MAX = 12, 100, 16, 255
+
+#: A synth line's sound types, in order: the index seeds the noise (SynthType).
+SYNTH_TYPES = ("kick", "snare", "clap", "hat", "openhat", "tom", "rim", "cowbell", "sub", "bass", "pluck", "stab", "bell", "zap", "lead", "pad", "riser")
+#: A synth line's settings, in the order a card writes them. No key is a type, wave, chord or line word.
+SYNTH_KEYS = ("note", "wave", "chord", "attack", "decay", "length", "tone", "reso", "sweep", "bend", "click", "noise", "snap", "drive", "detune", "level", "seed", "name")
+SYNTH_WAVES = ("sine", "tri", "saw", "square", "metal", "none")
+#: A synth line's chords: the notes stacked on the root, in semitones.
+SYNTH_CHORDS = {
+    "one": (0,),
+    "min": (0, 3, 7),
+    "maj": (0, 4, 7),
+    "min7": (0, 3, 7, 10),
+    "maj7": (0, 4, 7, 11),
+    "dom7": (0, 4, 7, 10),
+    "sus2": (0, 2, 7),
+    "sus4": (0, 5, 7),
+    "fifth": (0, 7),
+    "oct": (0, 12),
+}
+#: A synth's name keeps at most this many characters; its note is C0..C7 (MIDI) and its length 0.05..4 s (hundredths).
+SYNTH_NAME_MAX = 13
+SYNTH_NOTE_MIN, SYNTH_NOTE_MAX = 12, 96
+SYNTH_LENGTH_MIN, SYNTH_LENGTH_MAX = 5, 400
 
 ERROR = "error"
 WARNING = "warning"
@@ -181,6 +239,32 @@ class PadShape:
 
 
 @dataclass
+class Synth:
+    """A synth line: a sound Arc makes. Only the settings the line gave (None for the rest: the renderer fills in its type's default)."""
+
+    type: str  # one of SYNTH_TYPES
+    line: int
+    note: Optional[int] = None  # MIDI, 12..96
+    wave: Optional[str] = None  # one of SYNTH_WAVES
+    chord: Optional[str] = None  # a key of SYNTH_CHORDS
+    attack: Optional[int] = None  # the knobs are 0..100
+    decay: Optional[int] = None
+    length: Optional[int] = None  # hundredths of a second, 5..400
+    tone: Optional[int] = None
+    reso: Optional[int] = None
+    sweep: Optional[int] = None
+    bend: Optional[int] = None
+    click: Optional[int] = None
+    noise: Optional[int] = None
+    snap: Optional[int] = None
+    drive: Optional[int] = None
+    detune: Optional[int] = None
+    level: Optional[int] = None  # 1..100
+    seed: Optional[int] = None  # 0..999
+    name: Optional[str] = None  # one word, at most SYNTH_NAME_MAX characters
+
+
+@dataclass
 class CardComp:
     """A comp line: off, or on with a drive and a speed (percent 0..100)."""
 
@@ -229,6 +313,7 @@ class Pattern:
     hits: List[Hit] = field(default_factory=list)
     sounds: Dict[int, Sound] = field(default_factory=dict)  # by pad offset
     pads: Dict[int, PadShape] = field(default_factory=dict)  # by pad offset
+    synths: Dict[int, Synth] = field(default_factory=dict)  # by pad offset; the later line wins, in the place of the first
 
     @property
     def letter(self) -> str:
@@ -282,6 +367,10 @@ class Card:
     #: The `chain` line as (card scene number from 1, passes) steps, None when the card has none; its line number.
     chain: Optional[List[Tuple[int, int]]] = None
     chain_line: int = 0
+    #: The factory kit its slots are read by: "ep133" or "ep40" ([card_kit] from its sound lines; the command line or the sound list may say otherwise).
+    kit: str = "ep133"
+    #: The `lesson` lines, in order: what Arc's PRACTICE runs a step at a time.
+    lesson: List["LessonStep"] = field(default_factory=list)
 
     @property
     def all_patterns(self) -> List[Pattern]:
@@ -354,6 +443,28 @@ def parse_note_name(text: str) -> Optional[int]:
     return _NOTE_NUMBERS.get(text)
 
 
+#: A lesson step has at most this many, and its speed is a percent of the tempo in this range.
+LESSON_MAX = 12
+LESSON_SPEEDS = (25, 100)
+
+
+@dataclass
+class LessonStep:
+    """A `lesson` line: its title, the group and pads (offsets, None for all the group's) played, the speed in percent, a tip."""
+
+    title: str
+    group: int
+    pads: Optional[List[int]]
+    speed: int = 100
+    tip: Optional[str] = None
+    line: int = 0
+
+    def pads_text(self) -> str:
+        if self.pads is None:
+            return GROUPS[self.group]
+        return " ".join(GROUPS[self.group] + OFFSET_LABEL[o] for o in KEYPAD_ORDER if o in self.pads)
+
+
 def parse_pad(token: str) -> Tuple[int, int]:
     """(group 0..3, offset 0..11) of a pad token such as A7, A., AE or AENTER; ValueError with a reason if it isn't one."""
     if len(token) < 2 or token[0] not in GROUPS:
@@ -413,6 +524,11 @@ _CARD_START = re.compile(r"[ \t ]*ARC[ \t ]+BEAT(?:[ \t ]|\Z)", re.I)
 _LINE_BREAK = re.compile(r"\r\n|\r|\n")
 _AT = re.compile(r"([0-9]{1,6})\.([0-9]{1,6})\.([0-9]{1,6})(?:([+-])([0-9]{1,6}))?")
 _BEATS_PER_BAR = 4
+#: A synth line's values: ASCII digits only.
+_SYNTH_INT = re.compile(r"[0-9]{1,3}")
+_SYNTH_NOTE = re.compile(r"[A-G]#?[0-9]")
+_SYNTH_LENGTH = re.compile(r"([0-9])(?:\.([0-9]{1,2}))?")
+_SYNTH_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 
 
 def _first_is_pad(text: str) -> bool:
@@ -470,6 +586,7 @@ class _Reader:
         if self.section_lines == 0:
             self.err(start + 1, "no-sections", "the card has no section: add [A], [B], [C] or [D] with grid rows")
         self.check_chain()
+        self.check_lesson()
         self.card.fx = self.fx if self.fx.kinds() else None
         self.card.scenes = self.scenes
         self.card.patterns = self.scenes[0].patterns
@@ -503,8 +620,67 @@ class _Reader:
             return False
         return True
 
+    def lesson_line(self, n: int, text: str) -> None:
+        """lesson <title> | <pads> | <speed> | <tip>: a step of the lesson. A line with a fault is left out."""
+        parts = [_trim(p) for p in text[len(_tokens(text)[0]):].split("|")]
+        title = parts[0] if parts else ""
+        pads_text = parts[1] if len(parts) > 1 else ""
+        if not title or not pads_text:
+            self.err(n, "lesson-line", "a lesson line needs a title and the pads to play, as in lesson Kick alone | A7 | 50")
+            return
+        if len(self.card.lesson) == LESSON_MAX:
+            self.err(n, "lesson-too-long", "the lesson has more than %d steps, the most is %d" % (LESSON_MAX, LESSON_MAX))
+            return
+        if len(title) > NAME_MAX:
+            self.warn(n, "lesson-title-long", "a lesson step title is longer than %d characters; shortened" % NAME_MAX)
+            title = _trim(title[:NAME_MAX])
+        group: Optional[int] = None
+        pads: Optional[List[int]] = []
+        for tok in _tokens(pads_text):
+            whole = len(tok) == 1 and tok in GROUPS
+            if whole:
+                g = GROUPS.index(tok)
+            else:
+                try:
+                    g, offset = parse_pad(tok)
+                except ValueError:
+                    self.err(n, "lesson-pad", "'%s' isn't a pad or a group: write pads such as A7 A9, or A for the whole group" % tok)
+                    return
+            if group is not None and g != group:
+                self.err(n, "lesson-groups", "a lesson step's pads are all in one group")
+                return
+            group = g
+            if whole:
+                pads = None
+            elif pads is not None and offset not in pads:
+                pads.append(offset)
+        speed_text = _trim(parts[2].rstrip("%")) if len(parts) > 2 else ""
+        speed = 100 if speed_text == "" else (int(speed_text) if re.fullmatch(r"[0-9]{1,3}", speed_text) else None)
+        if speed is None or not LESSON_SPEEDS[0] <= speed <= LESSON_SPEEDS[1]:
+            self.err(n, "lesson-speed", "a lesson step's speed is %d to %d percent of the tempo" % LESSON_SPEEDS)
+            return
+        tip = _trim(" | ".join(parts[3:])) or None
+        self.card.lesson.append(LessonStep(title, group, sorted(pads) if pads is not None else None, speed, tip, n))
+
+    def check_lesson(self) -> None:
+        """Each step's pads have pad hits in the first scene's pattern of its group."""
+        first = self.scenes[0].patterns if self.scenes else []
+        for step in self.card.lesson:
+            p = next((q for q in first if q.group == step.group), None)
+            played = {h.pad for h in (p.hits if p else []) if h.semi is None}
+            missing = [o for o in (step.pads or []) if o not in played]
+            if not played:
+                self.err(step.line, "lesson-no-hits", "lesson step '%s': the card's first scene has no pad hits in group %s" % (step.title, GROUPS[step.group]))
+            elif missing:
+                self.err(step.line, "lesson-no-hits", "lesson step '%s': %s has no hits in the first scene's [%s]" % (
+                    step.title, " ".join(GROUPS[step.group] + OFFSET_LABEL[o] for o in missing), GROUPS[step.group]))
+
     def line(self, n: int, text: str) -> None:
         first = _tokens(text)[0].lower()
+        # A lesson line may come anywhere: it names no section's pads but its own.
+        if first == "lesson":
+            self.lesson_line(n, text)
+            return
         if first == "scene":
             self.scene_line(n, text)
             return
@@ -525,6 +701,8 @@ class _Reader:
             self.sound(n, text)
         elif _tokens(text)[0].lower() == "pad":
             self.pad_line(n, text)
+        elif _tokens(text)[0].lower() == "synth":
+            self.synth_line(n, text)
         elif _tokens(text)[0].lower() in FX_WORDS:
             self.err(n, "late-fx", "'%s' belongs before the first section" % _tokens(text)[0])
         elif self.in_notes:
@@ -556,6 +734,8 @@ class _Reader:
             self.err(n, "sound-outside-section", "'sound' has to come after a section line like [A]")
         elif key == "pad":
             self.err(n, "pad-outside-section", "'pad' has to come after a section line like [A]")
+        elif key == "synth":
+            self.err(n, "synth-outside-section", "'synth' has to come after a section line like [A]")
         elif key in FX_WORDS:
             self.fx_line(n, word, key, _tokens(rest))
         elif "|" in text or _first_is_pad(text):
@@ -997,6 +1177,86 @@ class _Reader:
                     setattr(shape, key, value)
         pattern.pads[offset] = shape
 
+    # -- synth lines --------------------------------------------------------
+
+    def synth_line(self, n: int, text: str) -> None:
+        """synth <pad> <type> [<key> <value>]...: a sound Arc makes. A line with an error is left out, and an earlier line for the pad stays."""
+        pattern = self.draft
+        assert pattern is not None
+        if self.in_notes:
+            self.warn(n, "synth-after-notes", "put synth lines before notes, so older Arc can read the card")
+        if "|" in text:
+            self.err(n, "bad-synth-line", "a synth line can't hold a |; older Arc would read it as a grid row")
+            return
+        t = _tokens(text)
+        if len(t) < 3:
+            self.err(n, "bad-synth-line", "a synth line looks like 'synth A7 kick decay 40': the pad, a sound type, then settings")
+            return
+        try:
+            group, offset = parse_pad(t[1])
+        except ValueError as e:
+            self.err(n, "bad-pad", str(e))
+            return
+        if group != pattern.group:
+            self.err(n, "wrong-group", "pad %s is in group %s but the section is [%s]" % (t[1], GROUPS[group], pattern.letter))
+            return
+        label = pad_label(group, offset)
+        if t[2].lower() not in SYNTH_TYPES:
+            self.warn(n, "unknown-synth-type", "unknown sound type '%s' on the %s synth line; the line is ignored (use %s)" % (t[2], label, " ".join(SYNTH_TYPES)))
+            return
+        synth = Synth(t[2].lower(), n)
+        i = 3
+        while i < len(t):
+            key = t[i].lower()
+            value = t[i + 1] if i + 1 < len(t) else None
+            if key not in SYNTH_KEYS:
+                self.warn(n, "unknown-synth-setting", "unknown setting '%s' on the %s synth line ignored" % (t[i], label))
+                i += 2 if value is not None and value.lower() not in SYNTH_KEYS else 1
+                continue
+            if value is None:
+                self.err(n, "bad-synth-line", "%s synth: %s needs a value" % (label, key))
+                return
+            if key == "note":
+                midi = parse_note_name(value) if _SYNTH_NOTE.fullmatch(value) else None
+                if midi is None or not SYNTH_NOTE_MIN <= midi <= SYNTH_NOTE_MAX:
+                    self.err(n, "bad-synth-line", "%s synth: note '%s' must be C0 to C7 with a capital letter, sharps as F#1" % (label, value))
+                    return
+                synth.note = midi
+            elif key == "length":
+                # Whole hundredths, never a float: 1.25 is 125, 2.5 is 250.
+                m = _SYNTH_LENGTH.fullmatch(value)
+                cs = None
+                if m:
+                    frac = m.group(2) or ""
+                    cs = int(m.group(1)) * 100 + (int(frac) * 10 if len(frac) == 1 else int(frac or "0"))
+                if cs is None or not SYNTH_LENGTH_MIN <= cs <= SYNTH_LENGTH_MAX:
+                    self.err(n, "bad-synth-line", "%s synth: length '%s' must be 0.05 to 4 seconds, with up to two decimals" % (label, value))
+                    return
+                synth.length = cs
+            elif key in ("wave", "chord"):
+                if value.lower() in (SYNTH_WAVES if key == "wave" else SYNTH_CHORDS):
+                    setattr(synth, key, value.lower())
+                else:
+                    self.warn(n, "unknown-synth-word", "%s synth: unknown %s '%s' ignored" % (label, key, value))
+            elif key == "name":
+                if not _SYNTH_NAME.fullmatch(value):
+                    self.err(n, "bad-synth-line", "%s synth: name '%s' must be one word of letters, digits, _ or -, starting with a letter or digit" % (label, value))
+                    return
+                if len(value) > SYNTH_NAME_MAX:
+                    self.warn(n, "long-synth-name", "%s synth: the name is longer than %d characters; shortened" % (label, SYNTH_NAME_MAX))
+                synth.name = value[:SYNTH_NAME_MAX]
+            else:
+                low, high = {"level": (1, 100), "seed": (0, 999)}.get(key, (0, 100))
+                if not _SYNTH_INT.fullmatch(value) or not low <= int(value) <= high:
+                    self.err(n, "bad-synth-line", "%s synth: %s '%s' must be a whole number from %d to %d" % (label, key, value, low, high))
+                    return
+                setattr(synth, key, int(value))
+            i += 2
+        old = pattern.synths.get(offset)
+        if old is not None:
+            self.warn(n, "duplicate-synth", "%s already has a synth line on line %d; kept the later" % (label, old.line))
+        pattern.synths[offset] = synth
+
     # -- notes list --------------------------------------------------------
 
     def note(self, n: int, text: str) -> None:
@@ -1146,6 +1406,7 @@ def parse_card(text: str) -> Card:
     card = _Reader(text).read()
     card.problems.sort(key=lambda p: p.line)  # stable, as Arc's reader sorts them
     card.silent_pads = silent_pads_of(text)
+    card.kit = card_kit(card)
     return card
 
 
@@ -1206,6 +1467,96 @@ def parse_sound_list(text: str) -> Dict[int, str]:
     return out
 
 
+#: The factory kits a sound list or a card can be read by.
+KITS = ("ep133", "ep40")
+#: An EP-40 loop's name: a producer, the part, a letter and its tempo ("jammy drms a 85", "mpc melo b 82").
+_EP40_LOOP = re.compile(r"\b(drms|fill|bass|mel|melo)\s+[a-d]\s+([0-9]{2,3})\s*$", re.IGNORECASE)
+#: What Arc's share says when Live plays the EP-40 Riddim's sounds (ClaudeText.kitLine).
+_EP40_SENTENCE = re.compile(r"EP-40 Riddim factory kit", re.IGNORECASE)
+#: What it says when the EP-133's own sounds are on it.
+_EP133_SENTENCE = re.compile(r"EP-133's own factory sounds", re.IGNORECASE)
+
+
+def loop_tempo(slot: int, name: Optional[str]) -> Optional[int]:
+    """The tempo an EP-40 loop is named with ("jammy drms a 85" is 85), when [name] is one and [slot] is in its loops block (800-899); else None."""
+    if not name or not 800 <= slot <= 899:
+        return None
+    m = _EP40_LOOP.search(name)
+    return int(m.group(2)) if m else None
+
+
+def _ep40_names(names: Dict[int, str]) -> bool:
+    """Whether slot -> name looks like the EP-40 pack's: its "ep 40" sounds, or three of its tempo-named loops."""
+    if any(re.match(r"\s*ep[ -]?40\b", n, re.IGNORECASE) for n in names.values()):
+        return True
+    return sum(1 for slot, n in names.items() if loop_tempo(slot, n) is not None) >= 3
+
+
+#: The built-in sound lists `check --sounds` takes by name: the factory packs in references/factory-sounds.md, by its headings.
+FACTORY_LISTS = {"factory": ("EP-133 factory sounds", "ep133"), "factory-ep40": ("EP-40 Riddim factory sounds", "ep40")}
+
+
+def factory_sounds_path() -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "references", "factory-sounds.md")
+
+
+def factory_list(name: str, path: Optional[str] = None) -> Tuple[str, str]:
+    """The text of a factory pack's sound list ("factory" or "factory-ep40") from factory-sounds.md, and the kit it is."""
+    heading, kit = FACTORY_LISTS[name]
+    with open(path or factory_sounds_path(), encoding="utf-8") as f:
+        text = f.read()
+    out, inside = [], False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            inside = line[3:].strip() == heading
+        elif inside:
+            out.append(line)
+    return "\n".join(out), kit
+
+
+def detect_kit(text: str) -> Optional[str]:
+    """The kit a share's text or a sound list says: "ep40" for Arc's EP-40 sentence or the EP-40 pack's names, "ep133" for its EP-133 sentence, else None (no telling: the EP-133's)."""
+    if _EP40_SENTENCE.search(text):
+        return "ep40"
+    if _EP133_SENTENCE.search(text):
+        return "ep133"
+    return "ep40" if _ep40_names(parse_sound_list(text)) else None
+
+
+def card_kit(card: Card) -> str:
+    """The kit a card's sound lines suggest: "ep40" when one names an EP-40 loop or an "ep 40" sound, else "ep133"."""
+    names = {s.slot: s.name for p in card.all_patterns for s in p.sounds.values() if s.name}
+    if any(loop_tempo(slot, n) is not None for slot, n in names.items()):
+        return "ep40"
+    return "ep40" if _ep40_names(names) else "ep133"
+
+
+def check_loops(card: Card, available: Optional[Dict[int, str]] = None) -> List[Problem]:
+    """
+    A warning for each sound line on an EP-40 loop (named with its tempo, slot 800-899; the name from the line or,
+    without one, from [available]) whose tempo is more than 0.5 BPM from the card's: the loop would drift.
+    """
+    out: List[Problem] = []
+    if card.tempo is None:
+        return out
+    for pattern in card.all_patterns:
+        for pad in KEYPAD_ORDER:
+            sound = pattern.sounds.get(pad)
+            if sound is None:
+                continue
+            name = sound.name or (available or {}).get(sound.slot, "")
+            bpm = loop_tempo(sound.slot, name)
+            if bpm is None or abs(bpm - card.tempo) <= 0.5:
+                continue
+            out.append(Problem(sound.line, WARNING, "loop-tempo", "%s plays loop '%s' (%d BPM) but the card's tempo is %s: it will drift; set tempo %d" % (
+                pad_label(pattern.group, pad), name, bpm, _num(card.tempo), bpm)))
+    return out
+
+
+def _num(x: float) -> str:
+    return str(int(x)) if float(x).is_integer() else str(x)
+
+
 def unnamed_slot(slot: int, name: Optional[str]) -> bool:
     """Whether [name] is the one the EP-133 gives a sound nobody named, its slot's file ("200.pcm" for slot 200): a factory sound whose name can't be checked (FactorySounds.unnamed)."""
     return name is not None and name.strip().lower() == "%03d.pcm" % slot
@@ -1232,9 +1583,11 @@ def resolve_sound(sound: Sound, available: Dict[int, str], current: Optional[int
 
 
 def check_sounds(card: Card, available: Dict[int, str]) -> List[Problem]:
-    """A warning for each sound line whose slot or name isn't in [available] (slot -> name): the slot holds another sound, the sound is in another slot (which Arc would use) or in none. Lines that use a slot listed unnamed ("200.pcm") get one note between them, at the first: their names can't be checked."""
+    """A warning for each sound line whose slot or name isn't in [available] (slot -> name): the slot holds another sound, the sound is in another slot (which Arc would use) or in none. A sound in no slot on a pad with a synth line is a note instead: Arc makes the synth. A synth line that makes no sound doesn't count, as Arc ignores it. Lines that use a slot listed unnamed ("200.pcm") get one note between them, at the first: their names can't be checked."""
     out: List[Problem] = []
     unnamed: List[Tuple[int, str, int]] = []  # (line, pad, slot): one note for them all, not one a line
+    # A pad whose sound is missing plays its synth line instead, unless that line makes no sound.
+    synths = {pad: s for pad, s in synths_by_pad(card).items() if not synth_silent(s)}
     for pattern in card.all_patterns:
         for pad in KEYPAD_ORDER:
             sound = pattern.sounds.get(pad)
@@ -1251,6 +1604,8 @@ def check_sounds(card: Card, available: Dict[int, str]) -> List[Problem]:
             if slot is not None:
                 out.append(Problem(sound.line, WARNING, "sound-moved", "%s: %s, not '%s'; that sound is in slot %d ('%s'), which Arc will use instead" % (
                     label, where, sound.name, slot, available[slot])))
+            elif (pattern.group, pad) in synths:
+                out.append(Problem(sound.line, NOTE, "synth-fallback", "%s: %s; Arc will use the pad's synth line instead" % (label, where)))
             elif sound.name:
                 out.append(Problem(sound.line, WARNING, "sound-missing", "%s: %s, and no slot holds '%s'; Arc will skip this sound line" % (label, where, sound.name)))
             else:
@@ -1263,6 +1618,442 @@ def check_sounds(card: Card, available: Dict[int, str]) -> List[Problem]:
         out.append(Problem(unnamed[0][0], NOTE, "sound-unnamed", "%s: slots %s are factory sounds without a name; using them by slot" % (
             ", ".join(u[1] for u in unnamed), ", ".join(str(u[2]) for u in unnamed))))
     return sorted(out, key=lambda p: p.line)
+
+
+# ---------------------------------------------------------------------------
+# Synth sounds: what a synth line makes
+#
+# The same bytes as Arc's SynthVoice.kt, bit for bit. Everything is a float
+# (an IEEE double), one rounding a step, in the order written here, with
+# standard precedence left to right: never reordered, factored or fused.
+# Only + - * /, comparisons, abs, floor, integer maths (a 32-bit LCG for the
+# noise) and min/max: no sin, exp, pow, tanh or other library function whose
+# last bit can differ between runtimes. An int becomes a float only through
+# float(). The literals are the shortest text that reads back to the same
+# double in Kotlin and Python.
+#
+# test_synth_golden.txt, written by Arc's SynthVoiceTest, pins the frames,
+# the PCM's CRC and the device name of every case; test_beatcard.py renders
+# each one. Any change to a byte must bump SYNTH_VERSION, which renames
+# every made sound.
+# ---------------------------------------------------------------------------
+
+SYNTH_VERSION = 1
+SYNTH_RATE = 46875
+SYNTH_MAX_FRAMES = 187500
+SYNTH_MIN_AUTO_FRAMES = 2344
+_R = 46875.0
+_MS = 46.875
+#: Semitone ratios 2^(i/12), as their shortest double text.
+_SEMI = [1.0, 1.0594630943592953, 1.122462048309373, 1.189207115002721, 1.2599210498948732, 1.3348398541700344,
+         1.4142135623730951, 1.4983070768766815, 1.5874010519681994, 1.681792830507429, 1.7817974362806785, 1.8877486253633868]
+#: The six square partials of `metal`, as the 808's hat has them.
+_METAL = [1.0, 1.48271, 1.80029, 2.54603, 2.6303, 3.89674]
+
+#: The fields of a resolved synth, in order (SynthSpec).
+_SYNTH_SPEC = ("type", "shape", "note", "wave", "chord", "attack", "decay", "dLo", "dHi", "tone", "cLo", "cHi", "filter",
+               "reso", "bend", "bendMs", "click", "noise", "snap", "drive", "detune", "sweep", "level", "seed", "length", "name")
+#: A type's defaults: shape, note, wave, chord, attack, decay (dLo..dHi ms), tone (cLo..cHi Hz, filter), reso, bend
+#: (bendMs), click, noise, snap, drive, detune, sweep, level and length (hundredths; SUSTAIN only).
+_SYNTH_PRESETS = {
+    "kick": ("PERC", 31, "sine", "one", 0, 40, 20.0, 600.0, 30, 100.0, 12000.0, "LP", 0, 50, 30.0, 30, 0, None, 10, 0, 0, 100, None),
+    "snare": ("PERC", 54, "sine", "one", 0, 30, 20.0, 400.0, 70, 500.0, 16000.0, "LP", 0, 20, 15.0, 20, 70, 40, 0, 0, 0, 100, None),
+    "clap": ("CLAP", 60, "none", "one", 0, 35, 30.0, 500.0, 55, 400.0, 6000.0, "BP", 20, 0, 30.0, 0, 100, None, 0, 0, 0, 80, None),
+    "hat": ("PERC", 56, "metal", "one", 0, 15, 10.0, 300.0, 70, 2000.0, 14000.0, "HP", 10, 0, 30.0, 0, 40, None, 0, 0, 0, 60, None),
+    "openhat": ("PERC", 56, "metal", "one", 0, 50, 10.0, 500.0, 70, 2000.0, 14000.0, "HP", 10, 0, 30.0, 0, 40, None, 0, 0, 0, 55, None),
+    "tom": ("PERC", 43, "sine", "one", 0, 40, 30.0, 800.0, 30, 100.0, 8000.0, "LP", 0, 30, 60.0, 15, 5, None, 0, 0, 0, 100, None),
+    "rim": ("PERC", 81, "tri", "one", 0, 10, 3.0, 60.0, 60, 500.0, 8000.0, "BP", 30, 0, 30.0, 50, 20, None, 0, 0, 0, 70, None),
+    "cowbell": ("PERC", 73, "square", "fifth", 0, 25, 20.0, 600.0, 50, 300.0, 8000.0, "BP", 30, 0, 30.0, 0, 0, None, 0, 0, 0, 70, None),
+    "sub": ("PERC", 36, "sine", "one", 0, 30, 100.0, 3000.0, 40, 100.0, 8000.0, "LP", 0, 10, 40.0, 10, 0, None, 20, 0, 0, 100, None),
+    "bass": ("PERC", 36, "saw", "one", 0, 30, 50.0, 2000.0, 40, 80.0, 12000.0, "LP", 20, 0, 30.0, 0, 0, None, 0, 0, 40, 100, None),
+    "pluck": ("PERC", 60, "saw", "one", 0, 30, 30.0, 1500.0, 50, 100.0, 16000.0, "LP", 10, 0, 30.0, 0, 0, None, 0, 0, 50, 100, None),
+    "stab": ("PERC", 60, "saw", "min", 0, 25, 30.0, 1500.0, 55, 100.0, 16000.0, "LP", 10, 0, 30.0, 0, 0, None, 0, 20, 40, 100, None),
+    # Bell has no filter: its tone is the FM depth, so its cutoff range is unused.
+    "bell": ("PERC", 72, "sine", "one", 0, 35, 100.0, 3000.0, 40, 0.0, 0.0, "NONE", 0, 0, 30.0, 0, 0, None, 0, 0, 0, 100, None),
+    "zap": ("PERC", 48, "sine", "one", 0, 25, 20.0, 600.0, 100, 200.0, 16000.0, "LP", 0, 100, 40.0, 0, 0, None, 0, 0, 0, 100, None),
+    "lead": ("SUSTAIN", 60, "saw", "one", 5, 30, 10.0, 1500.0, 60, 100.0, 16000.0, "LP", 10, 0, 30.0, 0, 0, None, 0, 15, 0, 100, 100),
+    "pad": ("SUSTAIN", 48, "saw", "min", 60, 50, 50.0, 3000.0, 45, 100.0, 12000.0, "LP", 5, 0, 30.0, 0, 0, None, 0, 40, 0, 100, 300),
+    # Riser's cutoff also rises with the attack ramp.
+    "riser": ("SUSTAIN", 60, "none", "one", 100, 5, 10.0, 1500.0, 70, 500.0, 12000.0, "BP", 40, 0, 30.0, 0, 100, None, 0, 0, 0, 100, 200),
+}
+_PRESET_FIELDS = ("shape", "note", "wave", "chord", "attack", "decay", "dLo", "dHi", "tone", "cLo", "cHi", "filter", "reso", "bend",
+                  "bendMs", "click", "noise", "snap", "drive", "detune", "sweep", "level", "length")
+
+
+def synth_resolve(synth: Synth) -> dict:
+    """[synth] with every setting filled in, as SynthVoice.resolve: what the line gave, else its type's default (seed 0; length and snap may stay None)."""
+    preset = dict(zip(_PRESET_FIELDS, _SYNTH_PRESETS[synth.type]))
+    out = {"type": synth.type}
+    for key in _SYNTH_SPEC[1:]:
+        given = getattr(synth, key, None)
+        out[key] = given if given is not None else preset.get(key, 0 if key == "seed" else None)
+    return out
+
+
+def synth_canonical(synth: Synth) -> str:
+    """The sound's settings as text, every one resolved and in a fixed order: what its tag is made from. The name is not in it."""
+    r = synth_resolve(synth)
+    return ("arc synth %d %s note %d wave %s chord %s attack %d decay %d length %s tone %d reso %d sweep %d bend %d click %d noise %d"
+            " snap %s drive %d detune %d level %d seed %d") % (
+        SYNTH_VERSION, r["type"], r["note"], r["wave"], r["chord"], r["attack"], r["decay"], "auto" if r["length"] is None else r["length"],
+        r["tone"], r["reso"], r["sweep"], r["bend"], r["click"], r["noise"], "off" if r["snap"] is None else r["snap"],
+        r["drive"], r["detune"], r["level"], r["seed"])
+
+
+def synth_crc(synth: Synth) -> int:
+    return zlib.crc32(synth_canonical(synth).encode("ascii")) & 0xFFFFFFFF
+
+
+def synth_tag(synth: Synth) -> str:
+    """Six hex digits of the canonical text's CRC-32 (its top 24 bits)."""
+    return "%06x" % (synth_crc(synth) >> 8)
+
+
+def synth_shown_name(synth: Synth) -> str:
+    """The line's name, else its type, `_` as a space ("808 kick")."""
+    return (synth.name or synth.type).replace("_", " ")
+
+
+def synth_device_name(synth: Synth) -> str:
+    """The sound's name on the EP-133: the shown name and the tag ("808 kick 29f789"), at most 20 characters."""
+    return synth_shown_name(synth) + " " + synth_tag(synth)
+
+
+def synth_silent(synth: Synth) -> bool:
+    """Whether the sound is all silence: no oscillator, no noise and no click. Arc never offers one; it still renders, as zeros."""
+    r = synth_resolve(synth)
+    return r["wave"] == "none" and r["noise"] == 0 and r["click"] == 0
+
+
+def _synth_frames(r: dict) -> int:
+    if r["length"] is not None:
+        return r["length"] * 1875 // 4
+    ka = r["attack"] / 100.0
+    kd = r["decay"] / 100.0
+    attack_ms = 2000.0 * (ka * ka * ka)
+    decay_ms = r["dLo"] + (r["dHi"] - r["dLo"]) * (kd * kd)
+    tail = decay_ms
+    if r["snap"] is not None:
+        ks = r["snap"] / 100.0
+        snap_ms = 10.0 + 990.0 * (ks * ks)
+        if snap_ms > tail:
+            tail = snap_ms
+    n = math.floor((attack_ms + 5.0 * tail + (30.0 if r["shape"] == "CLAP" else 0.0)) * 46.875)
+    return min(max(n, SYNTH_MIN_AUTO_FRAMES), SYNTH_MAX_FRAMES)
+
+
+def synth_frames(synth: Synth) -> int:
+    """How many frames the sound has: its length when it has one, else the attack and five times the decay (0.05 to 4 s)."""
+    return _synth_frames(synth_resolve(synth))
+
+
+def synth_note_hz(midi: int) -> float:
+    """MIDI [midi] in Hz, from A4 = 440 by the semitone table and octave doublings."""
+    d = midi - 69
+    o = d // 12
+    s = d - 12 * o
+    h = 440.0 * _SEMI[s]
+    for _ in range(o):
+        h = h * 2.0
+    for _ in range(-o):
+        h = h * 0.5
+    return h
+
+
+def _coef(ms: float) -> float:
+    """A one-pole step that settles over about [ms]."""
+    return 1.0 / (1.0 + ms * _MS)
+
+
+def _sine(p: float) -> float:
+    """About sin(2 pi p) for p in [0, 1), within about 0.001: a parabola, corrected."""
+    t = 2.0 * p if p < 0.5 else 2.0 * p - 2.0
+    a = abs(t)
+    y = 4.0 * t * (1.0 - a)
+    return 0.225 * (y * abs(y) - y) + y
+
+
+def _tri(p: float) -> float:
+    if p < 0.25:
+        return 4.0 * p
+    if p < 0.75:
+        return 2.0 - 4.0 * p
+    return 4.0 * p - 4.0
+
+
+def _blep(p: float, dt: float) -> float:
+    """The band-limited step's correction near a jump, so a saw or square doesn't alias."""
+    if p < dt:
+        x = p / dt
+        return x + x - x * x - 1.0
+    if p > 1.0 - dt:
+        x = (p - 1.0) / dt
+        return x * x + x + x + 1.0
+    return 0.0
+
+
+def _wave_at(w: str, p: float, dt: float) -> float:
+    """One sample of a sine, tri, saw or square at phase [p]."""
+    if w == "sine":
+        return _sine(p)
+    if w == "tri":
+        return _tri(p)
+    if w == "saw":
+        return (2.0 * p - 1.0) - _blep(p, dt)
+    q = p + 0.5
+    if q >= 1.0:
+        q = q - 1.0
+    return ((1.0 if p < 0.5 else -1.0) + _blep(p, dt)) - _blep(q, dt)
+
+
+def _soft_clip(x: float) -> float:
+    if x > 3.0:
+        return 1.0
+    if x < -3.0:
+        return -1.0
+    return (x * (27.0 + x * x)) / (27.0 + 9.0 * (x * x))
+
+
+def render_synth(synth: Synth) -> List[int]:
+    """The sound as 16-bit samples (SynthVoice.render): the first and last are 0, and the peak is 29204 times its level (all 0 when silent)."""
+    r = synth_resolve(synth)
+    floor = math.floor
+    big_n = _synth_frames(r)
+    ka, kd, kt, kr, kb = r["attack"] / 100.0, r["decay"] / 100.0, r["tone"] / 100.0, r["reso"] / 100.0, r["bend"] / 100.0
+    kc, kn, kdr, kdt, ksw = r["click"] / 100.0, r["noise"] / 100.0, r["drive"] / 100.0, r["detune"] / 100.0, r["sweep"] / 100.0
+    attack_ms = 2000.0 * (ka * ka * ka)
+    decay_ms = r["dLo"] + (r["dHi"] - r["dLo"]) * (kd * kd)
+    cutoff = r["cLo"] + (r["cHi"] - r["cLo"]) * (kt * kt * kt)
+    q = 0.6 + 7.4 * kr
+    bend_mult = 1.0 + 15.0 * (kb * kb)
+    noise_gain = 1.5 * kn
+    drive_gain = 1.0 + 9.0 * kdr
+    cents = 40.0 * kdt
+    fm_index = 0.5 + 7.5 * kt
+    level = r["level"] / 100.0
+    hz = synth_note_hz(r["note"])
+    c = cents * 0.0005776226504666211
+    # The voices: chord notes from the root up, each as -c, 0, +c when detuned.
+    ratios: List[float] = []
+    for i in SYNTH_CHORDS[r["chord"]]:
+        iv = _SEMI[i % 12] * (2.0 if i >= 12 else 1.0)
+        if cents > 0.0:
+            ratios += [iv * (1.0 - c), iv, iv * (1.0 + c)]
+        else:
+            ratios.append(iv)
+    nv = len(ratios)
+    shape, wave, filt = r["shape"], r["wave"], r["filter"]
+    bell = r["type"] == "bell"
+    rise = r["type"] == "riser"
+    metal = wave == "metal"
+    phase = [[0.0] * 6 for _ in range(nv)]
+    mod = [0.0] * nv
+    # The noise: a 32-bit LCG; its top 24 bits are the sample.
+    s = 1592590336 + 7919 * SYNTH_TYPES.index(r["type"]) + 104729 * r["seed"]
+    a_n = floor(attack_ms * _MS)
+    keep_d = 1.0 - _coef(decay_ms)
+    keep_burst = 1.0 - _coef(2.0)
+    snap = r["snap"]
+    keep_s = None if snap is None else 1.0 - _coef(10.0 + 990.0 * ((snap / 100.0) * (snap / 100.0)))
+    keep_f = 1.0 - _coef(0.5 * decay_ms)
+    keep_c = 1.0 - _coef(1.0)
+    keep_b = 1.0 - _coef(r["bendMs"])
+    r_n = min(floor(decay_ms * _MS), big_n // 2)
+    kq = 1.0 / q
+    d = e = ns = fe = ec = bf = 1.0
+    ic1 = ic2 = 0.0
+    y = [0.0] * big_n
+    # Each voice's phase steps, worked out again only when the pitch moves (the same values, so the same bits).
+    last_f: Optional[float] = None
+    steps: List[List[float]] = []
+    mod_steps: List[float] = []
+    for n in range(big_n):
+        # 1. Noise: exactly one draw a sample, always.
+        s = (s * 1664525 + 1013904223) & 0xFFFFFFFF
+        w = float(s >> 8) / 16777216.0 * 2.0 - 1.0
+        # 2. Envelopes, as they are for this sample.
+        ramp = float(n) / float(a_n) if (a_n > 0 and n < a_n) else 1.0
+        if shape == "PERC":
+            env = ramp * d
+        elif shape == "CLAP":
+            if n < 1407:
+                if n % 469 == 0:
+                    e = 1.0
+                env = ramp * e
+            else:
+                env = ramp * d
+        else:
+            rel = float(big_n - n) / float(r_n) if (r_n > 0 and n >= big_n - r_n) else 1.0
+            env = ramp * rel
+        env_n = env if keep_s is None else ramp * ns
+        # 3. Pitch, with the bend falling away.
+        f = hz * (1.0 + (bend_mult - 1.0) * bf)
+        # 4. Oscillators.
+        o = 0.0
+        if wave != "none":
+            if f != last_f:
+                last_f = f
+                steps = []
+                mod_steps = []
+                for v in range(nv):
+                    fv = f * ratios[v]
+                    if metal:
+                        steps.append([_held_dt(fv * _METAL[j] / _R) for j in range(6)])
+                    else:
+                        steps.append([_held_dt(fv / _R)])
+                    mod_steps.append(_held_dt((fv * 3.5) / _R))
+            acc = 0.0
+            for v in range(nv):
+                off = 0.0
+                if bell:
+                    off = ((fm_index * 0.15915494309189535) * _sine(mod[v])) * env
+                ph = phase[v]
+                st = steps[v]
+                if metal:
+                    sm = 0.0
+                    for j in range(6):
+                        pp = ph[j]
+                        if bell:
+                            pp = pp + off
+                            pp = pp - floor(pp)
+                        sm = sm + (1.0 if pp < 0.5 else -1.0)
+                        p2 = ph[j] + st[j]
+                        ph[j] = p2 - 1.0 if p2 >= 1.0 else p2
+                    acc = acc + sm / 6.0
+                else:
+                    pp = ph[0]
+                    if bell:
+                        pp = pp + off
+                        pp = pp - floor(pp)
+                    acc = acc + _wave_at(wave, pp, st[0])
+                    p2 = ph[0] + st[0]
+                    ph[0] = p2 - 1.0 if p2 >= 1.0 else p2
+                if bell:
+                    m2 = mod[v] + mod_steps[v]
+                    mod[v] = m2 - 1.0 if m2 >= 1.0 else m2
+            o = acc / float(nv)
+        # 5. Mix.
+        x = o * env + (w * noise_gain) * env_n
+        # 6. Filter: a state-variable filter (Simper's TPT form) in doubles, retuned every sample.
+        if filt != "NONE":
+            base = cutoff * (0.125 + 0.875 * (ramp * ramp)) if rise else cutoff
+            cut = base + ((18000.0 - base) * ksw) * fe
+            h = 18750.0 if cut > 18750.0 else cut
+            w0 = (3.141592653589793 * h) / _R
+            w2 = w0 * w0
+            g = (w0 * (15.0 - w2)) / (15.0 - 6.0 * w2)
+            a1 = 1.0 / (1.0 + g * (g + kq))
+            a2 = g * a1
+            a3 = g * a2
+            v3 = x - ic2
+            v1 = a1 * ic1 + a2 * v3
+            v2 = ic2 + a2 * ic1 + a3 * v3
+            ic1 = 2.0 * v1 - ic1
+            if abs(ic1) < 1e-30:
+                ic1 = 0.0
+            ic2 = 2.0 * v2 - ic2
+            if abs(ic2) < 1e-30:
+                ic2 = 0.0
+            out = v2 if filt == "LP" else (v1 if filt == "BP" else x - kq * v1 - v2)
+        else:
+            out = x
+        # 7. Click, after the filter.
+        y[n] = out + (kc * w) * ec
+        # 8. State updates, in this order.
+        if shape == "PERC" and n >= a_n:
+            d = d * keep_d
+        if shape == "CLAP":
+            if n < 1407:
+                e = e * keep_burst
+            else:
+                d = d * keep_d
+        if keep_s is not None and n >= a_n:
+            ns = ns * keep_s
+        fe = fe * keep_f
+        ec = ec * keep_c
+        bf = bf * keep_b
+    # Pass 2: normalise, drive, fades.
+    peak = 0.0
+    for v in y:
+        if abs(v) > peak:
+            peak = abs(v)
+    if peak > 0.0:
+        inv = 1.0 / peak
+        y = [v * inv for v in y]
+    if r["drive"] > 0:
+        y = [_soft_clip(v * drive_gain) for v in y]
+    for n in range(min(8, big_n)):
+        y[n] = y[n] * (float(n) / 8.0)
+    fade = min(256, big_n // 4)
+    for n in range(big_n - fade, big_n):
+        y[n] = y[n] * (float(big_n - 1 - n) / float(fade))
+    # Pass 3: level and 16 bits.
+    peak = 0.0
+    for v in y:
+        if abs(v) > peak:
+            peak = abs(v)
+    gain = (0.8912509381337456 * level) / peak if peak > 0.0 else 0.0
+    return [min(max(floor(v * gain * 32767.0 + 0.5), -32768), 32767) for v in y]
+
+
+def _held_dt(dt: float) -> float:
+    """A phase step, held to 0.45 of a cycle a sample."""
+    return 0.45 if dt > 0.45 else dt
+
+
+def synth_pcm_bytes(pcm: List[int]) -> bytes:
+    """[pcm] as 16-bit little-endian bytes."""
+    return struct.pack("<%dh" % len(pcm), *pcm)
+
+
+def synth_wav(pcm: List[int]) -> bytes:
+    """[pcm] as a WAV file: 46875 Hz, mono, 16 bits, no settings chunk (SampleEdit.toWavBytes)."""
+    data = synth_pcm_bytes(pcm)
+    return struct.pack("<4sI4s4sIHHIIHH4sI", b"RIFF", 36 + len(data), b"WAVE", b"fmt ", 16, 1, 1, SYNTH_RATE, SYNTH_RATE * 2, 2, 16, b"data", len(data)) + data
+
+
+def synths_by_pad(card: Card) -> Dict[Tuple[int, int], Synth]:
+    """The card's synth lines by (group, offset), in the card's order (sections as given, pads in keypad order). The sounds are the project's: a pad given a synth line in more than one scene takes the last, in the place of its first."""
+    out: Dict[Tuple[int, int], Synth] = {}
+    for pattern in card.all_patterns:
+        for pad in KEYPAD_ORDER:
+            if pad in pattern.synths:
+                out[(pattern.group, pad)] = pattern.synths[pad]
+    return out
+
+
+def _length_text(cs: int) -> str:
+    """Hundredths of a second as seconds, as few decimals as needed: 400 is 4, 50 is 0.5, 5 is 0.05, 125 is 1.25."""
+    return str(cs // 100) + ("" if cs % 100 == 0 else "." + ("%02d" % (cs % 100)).rstrip("0"))
+
+
+def synth_text(group: int, offset: int, synth: Synth) -> str:
+    """A synth line as Arc writes it (BeatCards.synthText): the pad and the type, then the settings the line gave in SYNTH_KEYS order."""
+    out = "synth %s%s %s" % (GROUPS[group], OFFSET_LABEL[offset], synth.type)
+    for key in SYNTH_KEYS:
+        value = getattr(synth, key)
+        if value is None:
+            continue
+        if key == "note":
+            value = note_name(value)
+        elif key == "length":
+            value = _length_text(value)
+        out += " %s %s" % (key, value)
+    return out
+
+
+def synth_report(group: int, offset: int, synth: Synth) -> dict:
+    """A synth line as plain data, without rendering it: the pad, the type, the shown and device names, its length and its resolved settings."""
+    frames = synth_frames(synth)
+    return {
+        "pad": pad_label(group, offset),
+        "type": synth.type,
+        "name": synth_shown_name(synth),
+        "device_name": synth_device_name(synth),
+        "frames": frames,
+        "seconds": round(frames / SYNTH_RATE, 3),
+        "settings": {k: v for k, v in synth_resolve(synth).items() if k not in ("dLo", "dHi", "cLo", "cHi")},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1285,10 +2076,25 @@ BACKBEAT_ROLES = ("snare", "clap", "rim")
 TIMEKEEPER_ROLES = ("hat", "cymbal", "perc")
 
 
-def role_of(name: str) -> Optional[str]:
-    """The role a sound name suggests (kick, snare, clap, rim, hat, cymbal, tom, perc, bass), or None."""
+#: The EP-40 pack's own words, read before the others with its kit: "sn" and "kik", "oh" for an open hat, its loops'
+#: parts (drms, fill, mel) and its keys, so "clavinet" is melodic and "sub kik" a kick.
+_EP40_ROLE_PATTERNS = [
+    ("hat", r"\boh\b"),
+    ("drums", r"\b(drms|drums?)\b"),
+    ("fill", r"\bfill\b"),
+    ("melodic", r"\b(mel|melo|clavinet|clav|clav wah|hammond|organ|melodica|piano\w*|horns?|trombone|strings?|\w*pluc?k\w*|lead|guitar|syn|pad|leroy|carillon)\b"),
+    ("kick", r"\b(kick|kik)\b"),
+    ("snare", r"\bsn\b"),
+]
+
+
+def role_of(name: str, kit: str = "ep133") -> Optional[str]:
+    """
+    The role a sound name suggests (kick, snare, clap, rim, hat, cymbal, tom, perc, bass), or None. With the EP-40
+    kit, also its words: drums and fill (loops), melodic (keys, horns and melody loops).
+    """
     low = name.lower()
-    for role, pattern in _ROLE_PATTERNS:
+    for role, pattern in (_EP40_ROLE_PATTERNS + _ROLE_PATTERNS if kit == "ep40" else _ROLE_PATTERNS):
         if re.search(pattern, low):
             return role
     return None
@@ -1296,36 +2102,41 @@ def role_of(name: str) -> Optional[str]:
 
 #: The factory pack's slot blocks (FeatureText.FACTORY_BLOCKS): the role a slot suggests when its sound has no name. 500-599 is melodic, no drum role.
 FACTORY_ROLES = ((1, 99, "kick", "kicks"), (100, 199, "snare", "snares"), (200, 299, "hat", "hats"), (300, 399, "perc", "percussion"), (400, 499, "bass", "bass"), (500, 599, None, "melodic"))
+#: The EP-40 Riddim pack's blocks: the EP-133's up to 599, then chord stabs, vocals and dub FX, and loops (whose role is in their names).
+EP40_ROLES = FACTORY_ROLES + ((600, 699, "chord", "chords"), (700, 799, "fx", "vocals and FX"), (800, 899, None, "loops"))
 #: Roles that count as the same kind of sound when a row's label and its sound line's slot are compared.
-_FAMILY = {"kick": "kick", "snare": "backbeat", "clap": "backbeat", "rim": "backbeat", "hat": "hat", "cymbal": "hat", "perc": "perc", "tom": "perc", "bass": "bass"}
+_FAMILY = {"kick": "kick", "snare": "backbeat", "clap": "backbeat", "rim": "backbeat", "hat": "hat", "cymbal": "hat", "perc": "perc", "tom": "perc", "bass": "bass",
+           "drums": "drums", "fill": "drums", "chord": "melodic", "melodic": "melodic", "fx": "fx"}
 
 
-def factory_block(slot: int) -> Optional[Tuple[Optional[str], str]]:
-    """(role, block name) of the factory block [slot] is in, or None outside 1-599."""
-    for lo, hi, role, block in FACTORY_ROLES:
+def factory_block(slot: int, kit: str = "ep133") -> Optional[Tuple[Optional[str], str]]:
+    """(role, block name) of the factory block [slot] is in, or None outside the kit's blocks (1-599 for the EP-133's, 1-899 for the EP-40's)."""
+    for lo, hi, role, block in (EP40_ROLES if kit == "ep40" else FACTORY_ROLES):
         if lo <= slot <= hi:
             return role, block
     return None
 
 
-def _sound_role(sound: Optional[Sound]) -> Tuple[Optional[str], Optional[str]]:
-    """The role a sound line suggests and how: by its name ("name"), or by its factory block when it has no real name ("slot")."""
+def _sound_role(sound: Optional[Sound], kit: str = "ep133") -> Tuple[Optional[str], Optional[str]]:
+    """The role a sound line suggests and how: by its name ("name"), or by its factory block when it has no real name or the name says nothing ("slot")."""
     if sound is None:
         return None, None
     if sound.name and not unnamed_slot(sound.slot, sound.name):
-        role = role_of(sound.name)
+        role = role_of(sound.name, kit)
         if role:
             return role, "name"
-    block = factory_block(sound.slot)
+    block = factory_block(sound.slot, kit)
     return (block[0], "slot") if block and block[0] else (None, None)
 
 
-def pad_roles(pattern: Pattern) -> Dict[int, Tuple[Optional[str], bool, str]]:
+def pad_roles(pattern: Pattern, kit: str = "ep133") -> Dict[int, Tuple[Optional[str], bool, str]]:
     """
     For each pad of [pattern] with pad hits: (role, assumed, name), the role its rhythm is read with. It comes from the
     pad's sound line's name, else its row's label, else (group A) the assumed kit's pad, else the factory block of the
     sound line's slot (a sound named like "200.pcm" says nothing by its name). The name shown is the first real one.
+    [kit] is the factory kit: the EP-40's has its own assumed pads and slot blocks.
     """
+    assumed_kit = ASSUMED_KIT_EP40 if kit == "ep40" else ASSUMED_KIT
     rows = pattern.pad_names()
     out: Dict[int, Tuple[Optional[str], bool, str]] = {}
     for hit in pattern.hits:
@@ -1336,38 +2147,38 @@ def pad_roles(pattern: Pattern) -> Dict[int, Tuple[Optional[str], bool, str]]:
         row = rows.get(hit.pad, "")
         if row and unnamed_slot(sound.slot if sound else -1, row):
             row = ""  # Arc labels a row with the pad's sound name, "343.pcm" for an unnamed one: no more telling
-        by_sound, how = _sound_role(sound)
-        kit = ASSUMED_KIT.get(pad_label(pattern.group, hit.pad), "") if pattern.group == 0 else ""
+        by_sound, how = _sound_role(sound, kit)
+        assumed = assumed_kit.get(pad_label(pattern.group, hit.pad), "") if pattern.group == 0 else ""
         if real and how == "name":
             out[hit.pad] = (by_sound, False, real)
-        elif row and role_of(row):
-            out[hit.pad] = (role_of(row), False, real or row)
-        elif kit and not real and not row:
-            out[hit.pad] = (role_of(kit), True, kit)
+        elif row and role_of(row, kit):
+            out[hit.pad] = (role_of(row, kit), False, real or row)
+        elif assumed and not real and not row:
+            out[hit.pad] = (role_of(assumed, kit), True, assumed)
         elif how == "slot":
-            out[hit.pad] = (by_sound, False, real or row or "slot %d (%s)" % (sound.slot, factory_block(sound.slot)[1]))
+            out[hit.pad] = (by_sound, False, real or row or "slot %d (%s)" % (sound.slot, factory_block(sound.slot, kit)[1]))
         else:
             name = real or row
-            out[hit.pad] = (role_of(name) if name else None, False, name)
+            out[hit.pad] = (role_of(name, kit) if name else None, False, name)
     return out
 
 
-def sound_mismatches(pattern: Pattern) -> List[dict]:
+def sound_mismatches(pattern: Pattern, kit: str = "ep133") -> List[dict]:
     """
     Pads whose rhythm reads as one kind of sound ([pad_roles]: the row's label, or the assumed kit's pad) while the
     sound line suggests another: a kick row playing slot 343, in the factory's percussion block, say. Worth a remark
     (the beat may not sound as its rows read) and maybe a sound swap.
     """
-    roles = pad_roles(pattern)
+    roles = pad_roles(pattern, kit)
     out = []
     for pad in sorted(pattern.sounds, key=KEYPAD_ORDER.index):
         if pad not in roles:
             continue
         row_role, assumed, name = roles[pad]
         sound = pattern.sounds[pad]
-        sound_role, how = _sound_role(sound)
+        sound_role, how = _sound_role(sound, kit)
         if row_role and sound_role and _FAMILY.get(row_role) != _FAMILY.get(sound_role):
-            block = factory_block(sound.slot)
+            block = factory_block(sound.slot, kit)
             out.append({
                 "pad": pad_label(pattern.group, pad),
                 "row": name,
@@ -1473,7 +2284,7 @@ def _slot_string(slots: Dict[int, int]) -> str:
 def pattern_report(pattern: Pattern, card: Card) -> dict:
     hits = [h for h in pattern.hits if h.semi is None]
     keys = [h for h in pattern.hits if h.semi is not None]
-    roles = pad_roles(pattern)
+    roles = pad_roles(pattern, card.kit)
     bars = pattern.bars
 
     def per_bar(items: List[Hit]) -> List[int]:
@@ -1550,7 +2361,7 @@ def pattern_report(pattern: Pattern, card: Card) -> dict:
         "pads": pads,
         "sounds": {pad_label(pattern.group, pad): _sound_data(pattern.sounds[pad]) for pad in KEYPAD_ORDER if pad in pattern.sounds},
         "pad_shaping": pad_shaping(pattern),
-        "sound_mismatches": sound_mismatches(pattern),
+        "sound_mismatches": sound_mismatches(pattern, card.kit),
         "keys": keys_report,
         "roles": by_role,
         "velocity": _velocity([h.vel for h in hits]),
@@ -1715,13 +2526,16 @@ def fingerprint(card: Card) -> Dict[str, set]:
     out: Dict[str, List[int]] = {"kick": [], "backbeat": [], "hat": []}
     bars_total = 0
     for pattern in _fingerprint_patterns(card):
-        roles = pad_roles(pattern)
+        roles = pad_roles(pattern, card.kit)
         hits = [h for h in pattern.hits if h.semi is None]
-        if not hits:
-            continue  # a group of KEYS notes only (bass, chords) has no drums: its bars mustn't dilute theirs
+        found = {key: [slots for slots in _role_slots(hits, roles, wanted, pattern.bars)]
+                 for key, wanted in (("kick", ("kick",)), ("backbeat", BACKBEAT_ROLES[:2]), ("hat", ("hat",)))}
+        # A group with no kick, backbeat or hat (KEYS notes, a skank, shouts and FX) has no drums: its bars mustn't dilute theirs.
+        if not any(slots for runs in found.values() for slots in runs):
+            continue
         bars_total += pattern.bars
-        for key, wanted in (("kick", ("kick",)), ("backbeat", BACKBEAT_ROLES[:2]), ("hat", ("hat",))):
-            for slots in _role_slots(hits, roles, wanted, pattern.bars):
+        for key, runs in found.items():
+            for slots in runs:
                 out[key].extend(slots)
     result: Dict[str, set] = {}
     for key, slots in out.items():
@@ -1880,6 +2694,7 @@ def analyse_card(card: Card, recipes: Optional[List[dict]] = None) -> dict:
     every = card.all_patterns
     all_hits = [h for p in every for h in p.hits if h.semi is None]
     report = {
+        "lesson": [{"title": st.title, "pads": st.pads_text(), "speed": st.speed, "tip": st.tip} for st in card.lesson],
         "name": card.name,
         "tempo": card.tempo,
         "swing": card.swing,
@@ -1891,6 +2706,7 @@ def analyse_card(card: Card, recipes: Optional[List[dict]] = None) -> dict:
         "velocity": _velocity([h.vel for h in all_hits]),
         "patterns": patterns,
         "similar_to": similarity(card, recipes) if recipes else [],
+        "synths": [synth_report(group, pad, s) for (group, pad), s in synths_by_pad(card).items()],
     }
     if scenes is not None:
         report["scenes"] = scenes
@@ -2060,6 +2876,10 @@ def _grid_pattern(out: List[str], pattern: Pattern, card: Card) -> None:
     for pad in KEYPAD_ORDER:
         if pad in pattern.sounds:
             out.append("sound " + _sound_text(pad_label(pattern.group, pad), pattern.sounds[pad]))
+    for pad in KEYPAD_ORDER:
+        if pad in pattern.synths:
+            synth = pattern.synths[pad]
+            out.append("%s  -> '%s', %.2f s" % (synth_text(pattern.group, pad, synth), synth_device_name(synth), synth_frames(synth) / SYNTH_RATE))
     for label, shape in pad_shaping(pattern).items():
         out.append("pad %s: %s" % (label, shape["reads"]))
     label_width = max([len(pad_label(pattern.group, o)) + 1 + len(names.get(o, "")) for o in range(12)] + [4])
@@ -2114,6 +2934,8 @@ def render_grid(card: Card) -> str:
     if card.fx is not None:
         for text in fx_lines(describe_fx(card.fx)):
             out.append(text)
+    for i, step in enumerate(card.lesson):
+        out.append("lesson %d: %s (%s, %d%%)%s" % (i + 1, step.title, step.pads_text(), step.speed, " - " + step.tip if step.tip else ""))
     if card.multi_scene:
         if card.chain:
             out.append("chain %s (loops)" % _chain_text(card.chain))
@@ -2317,6 +3139,9 @@ def summary_line(card: Card) -> str:
     head += ", swing %d" % card.swing
     if card.fx is not None:
         head += ", fx (%s)" % ", ".join(card.fx.kinds())
+    synths = len(synths_by_pad(card))
+    if synths:
+        head += ", %d synth sound%s" % (synths, "" if synths == 1 else "s")
     if not card.multi_scene:
         return head + " | " + _patterns_summary(card.patterns)
     parts = []
@@ -2447,10 +3272,16 @@ def render_analysis(report: dict) -> str:
     out.append("%s | tempo %s | swing %s | groups %s" % (head, report["tempo"] if report["tempo"] is not None else "-", report["swing"], " ".join(report["groups"])))
     if report.get("silent_pads"):
         out.append("silent pads (no sound on the EP-133, from the share's comment): %s" % " ".join(report["silent_pads"]))
+    for i, step in enumerate(report.get("lesson") or []):
+        out.append("lesson %d: %s (%s, %d%%)%s" % (i + 1, step["title"], step["pads"], step["speed"], " - " + step["tip"] if step["tip"] else ""))
     if report.get("fx"):
         out.append("fx:")
         for text in fx_lines(report["fx"]):
             out.append("  " + text)
+    if report.get("synths"):
+        out.append("synths (sounds Arc makes):")
+        for s in report["synths"]:
+            out.append("  %s %s: '%s', %.2f s" % (s["pad"], s["type"], s["device_name"], s["seconds"]))
     v = report["velocity"]
     out.append("pad hits %d, KEYS notes %d, velocity %s-%s (mean %s, stdev %s, %d distinct; %d ghost, %d normal, %d accent)" % (
         report["pad_hits"], report["keys_notes"], v["min"], v["max"], v["mean"], v["stdev"], v["distinct"], v["ghosts"], v["normal"], v["accents"]))
@@ -2504,9 +3335,15 @@ def cmd_check(args: argparse.Namespace) -> int:
     try:
         card = parse_card(_read(args.card))
         available = None
-        if args.sounds:
+        if args.sounds in FACTORY_LISTS:
+            # The factory pack as shipped, when the user shared no list: its kit is the list's.
+            text, card.kit = factory_list(args.sounds)
+            available = parse_sound_list(text)
+        elif args.sounds:
             with open(args.sounds, encoding="utf-8", errors="replace") as f:
-                available = parse_sound_list(f.read())
+                text = f.read()
+            available = parse_sound_list(text)
+            card.kit = detect_kit(text) or card.kit
     except OSError as e:
         print("beatcard: %s" % e, file=sys.stderr)
         return 2
@@ -2515,7 +3352,10 @@ def cmd_check(args: argparse.Namespace) -> int:
             print("beatcard: no sounds found in %s: expected lines like '12 Kick 808'" % args.sounds, file=sys.stderr)
             return 2
         card.problems.extend(check_sounds(card, available))
-        card.problems.sort(key=lambda p: p.line)
+    if args.kit:
+        card.kit = args.kit
+    card.problems.extend(check_loops(card, available))
+    card.problems.sort(key=lambda p: p.line)
     if args.json:
         print(json.dumps({"ok": card.ok, "problems": [p.to_dict() for p in card.problems]}, indent=2))
         return 0 if card.ok else 1
@@ -2533,6 +3373,8 @@ def cmd_analyse(args: argparse.Namespace) -> int:
     card = _load(args)
     if card is None:
         return 1
+    if args.kit:
+        card.kit = args.kit
     report = analyse_card(card, load_recipes(args.recipes or _default_recipes()))
     print(json.dumps(report, indent=2) if args.json else render_analysis(report))
     return 0
@@ -2567,6 +3409,81 @@ def cmd_midi(args: argparse.Namespace) -> int:
     return 0
 
 
+def _settings_text(settings: dict) -> str:
+    """A synth's resolved settings in card order: "note C2 (36), wave saw, chord one, attack 0, ..., length auto, snap off"."""
+    parts = []
+    for key in SYNTH_KEYS[:-1]:
+        value = settings[key]
+        if key == "note":
+            parts.append("note %s (%d)" % (note_name(value), value))
+        elif key == "length":
+            parts.append("length %s" % ("auto" if value is None else _length_text(value) + " s"))
+        elif key == "snap":
+            parts.append("snap %s" % ("off" if value is None else value))
+        else:
+            parts.append("%s %s" % (key, value))
+    return ", ".join(parts)
+
+
+def cmd_synth(args: argparse.Namespace) -> int:
+    try:
+        card = parse_card(_read(args.card))
+    except OSError as e:
+        print("beatcard: %s" % e, file=sys.stderr)
+        return 2
+    if not card.ok:
+        if args.json:
+            print(json.dumps({"ok": False, "problems": [p.to_dict() for p in card.problems]}, indent=2))
+            return 1
+        for p in card.problems:
+            print(p)
+        print("%d error%s, %d warning%s: the card can't be read" % (
+            len(card.errors), "" if len(card.errors) == 1 else "s", len(card.warnings), "" if len(card.warnings) == 1 else "s"))
+        return 1
+    for p in card.warnings:
+        print(p, file=sys.stderr)
+    synths = synths_by_pad(card)
+    if args.pad:
+        try:
+            wanted = parse_pad(args.pad)
+        except ValueError as e:
+            print("beatcard: --pad: %s" % e, file=sys.stderr)
+            return 2
+        if wanted not in synths:
+            print("beatcard: the card has no synth line on %s" % args.pad, file=sys.stderr)
+            return 2
+        synths = {wanted: synths[wanted]}
+    if args.output:
+        os.makedirs(args.output, exist_ok=True)
+    out = []
+    for (group, pad), synth in synths.items():
+        info = synth_report(group, pad, synth)
+        info["bytes"] = 44 + 2 * info["frames"]
+        info["silent"] = synth_silent(synth)
+        info["line"] = synth.line
+        if args.output:
+            pcm = render_synth(synth)
+            path = os.path.join(args.output, "%s %s.wav" % (info["pad"], info["device_name"]))
+            with open(path, "wb") as f:
+                f.write(synth_wav(pcm))
+            info["file"] = path
+            info["peak"] = max((abs(v) for v in pcm), default=0)
+            info["pcm_crc32"] = "%08x" % (zlib.crc32(synth_pcm_bytes(pcm)) & 0xFFFFFFFF)
+        out.append(info)
+    if args.json:
+        print(json.dumps(out, indent=2))
+        return 0
+    if not out:
+        print("the card has no synth lines")
+    for info in out:
+        print("%s %s: '%s', %.2f s, %d frames, %d bytes%s" % (
+            info["pad"], info["type"], info["device_name"], info["seconds"], info["frames"], info["bytes"], ", makes no sound" if info["silent"] else ""))
+        print("  " + _settings_text(info["settings"]))
+        if "file" in info:
+            print("  wrote %s (peak %d, PCM CRC-32 %s)" % (info["file"], info["peak"], info["pcm_crc32"]))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="beatcard.py", description="Check, analyse, convert and print ARC BEAT cards.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -2579,15 +3496,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = add("check", cmd_check, "read a card and print its problems with line numbers")
     p.add_argument("--json", action="store_true", help="print the problems as JSON")
-    p.add_argument("--sounds", metavar="FILE", help="the user's sound list (Arc's share text, or lines of '<slot> <name>'): warn about sound lines whose slot or name isn't in it")
+    p.add_argument("--sounds", metavar="FILE", help="the user's sound list (Arc's share text, or lines of '<slot> <name>'), or 'factory' / 'factory-ep40' for a factory pack as shipped (references/factory-sounds.md): warn about sound lines whose slot or name isn't in it")
+    p.add_argument("--kit", choices=KITS, help="the factory kit the slots are read by (default: what the sound list or the card's sound lines say, else ep133)")
     p = add("analyse", cmd_analyse, "describe a card's groove, density, velocity, swing and gaps", ("analyze",))
     p.add_argument("--json", action="store_true", help="print the report as JSON")
     p.add_argument("--recipes", help="genres.md to compare with (default: the skill's own)")
+    p.add_argument("--kit", choices=KITS, help="the factory kit the slots are read by (default: what the card's sound lines say, else ep133)")
     add("grid", cmd_grid, "print the card as a step grid")
     p = add("midi", cmd_midi, "write the card as a type-1 .mid file (a card of scenes: the chain in order, each scene for its passes)")
     p.add_argument("-o", "--output", help="output file (default: the card's name .mid); '-' for standard output")
     p.add_argument("--loops", type=int, default=1, help="repeat the longest pattern this many times; for a card of scenes, the whole chain (default 1)")
     p.add_argument("--channel", type=int, help="MIDI channel 1-16 for every track (default: the group's, A is 1 ... D is 4)")
+    p = add("synth", cmd_synth, "list the card's synth lines: the sound each makes, its device name and length; -o renders them as WAV files")
+    p.add_argument("--pad", help="only this pad's synth line, like A7")
+    p.add_argument("--json", action="store_true", help="print the synths as JSON")
+    p.add_argument("-o", "--output", metavar="DIR", help="render each synth into DIR as '<pad> <device name>.wav', as Arc makes it")
     return parser
 
 

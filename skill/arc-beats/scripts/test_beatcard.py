@@ -10,6 +10,7 @@ has the frontmatter and size Claude expects.
 
 import io
 import json
+import math
 import os
 import re
 import struct
@@ -344,6 +345,8 @@ class Errors(unittest.TestCase):
         "late-fx": "ARC BEAT 1\n" + kick() + "fx delay\n",
         "pad-outside-section": "ARC BEAT 1\npad A7 level 5\n" + kick(),
         "bad-pad-line": "ARC BEAT 1\n" + kick() + "pad A7 level 101\n",
+        "synth-outside-section": "ARC BEAT 1\nsynth A7 kick\n" + kick(),
+        "bad-synth-line": "ARC BEAT 1\n" + kick() + "synth A7\n",
         "section-before-scene": "ARC BEAT 1\n" + kick() + "scene\n" + kick(),
         "too-many-scenes": "ARC BEAT 1\n" + ("scene\n" + kick()) * 17,
         "late-chain": "ARC BEAT 1\nscene\n" + kick() + "chain 1\n",
@@ -354,6 +357,12 @@ class Errors(unittest.TestCase):
         "chain-too-long": "ARC BEAT 1\nchain " + "1 " * 65 + "\nscene\n" + kick(),
         "chain-unknown-scene": "ARC BEAT 1\nchain 1 2\nscene\n" + kick(),
         "chain-without-scenes": "ARC BEAT 1\nchain 1\n" + kick(),
+        "lesson-line": "ARC BEAT 1\nlesson Nothing\n" + kick(),
+        "lesson-too-long": "ARC BEAT 1\n" + "lesson Kick | A7\n" * 13 + kick(),
+        "lesson-pad": "ARC BEAT 1\nlesson Bad | Z7\n" + kick(),
+        "lesson-groups": "ARC BEAT 1\nlesson Two | A7 B7\n" + kick(),
+        "lesson-speed": "ARC BEAT 1\nlesson Fast | A7 | 120\n" + kick(),
+        "lesson-no-hits": "ARC BEAT 1\nlesson Clap | A6\n" + kick(),
     }
 
     def test_every_case_gives_its_error(self):
@@ -716,6 +725,19 @@ class Analyse(unittest.TestCase):
         for heading, _before, text in bc.split_cards(read(os.path.join(REFS, "genres.md"))):
             top = bc.similarity(bc.parse_card(text), recipes, 1)
             self.assertEqual((top[0]["genre"], top[0]["score"]), (heading, 100), heading)
+
+    def test_groups_with_no_drums_dont_dilute_the_drums(self):
+        # The Jungle recipe's break, with a skank on C and shouts on D: those groups have pad hits but no kick, snare or hat.
+        recipes = bc.load_recipes(os.path.join(REFS, "genres.md"))
+        card = bc.parse_card("ARC BEAT 1\ntempo 166\nswing 54\n[A] bars 2 step 1/16\n"
+                             "A7 kick        | X.x. .... ..xx .... | X.x. .... ..x. x... |\n"
+                             "A9 snare       | .... X..o .o.X ...o | .... X..o .... X..o |\n"
+                             "A4 closed hat  | x.x. x.x. x.x. x.x. | x.x. x.x. x.x. x.x. |\n"
+                             "A5 open hat    | .... .... .... .... | .... .... .... ..x. |\n"
+                             "[C] bars 2\nC7 skank | ..x. ..x. ..x. ..x. | ..x. ..x. ..x. ..x. |\n"
+                             "[D] bars 2\nD3 shout | x... .... .... .... | .... .... .... .... |\n")
+        top = bc.similarity(card, recipes, 1)
+        self.assertEqual((top[0]["genre"], top[0]["score"]), ("Jungle", 100))
 
     def test_a_half_speed_tempo_ranks_below_one_in_range(self):
         # A lo-fi beat at 80: Footwork (about 160) fits only at double speed, so lo-fi stays well ahead and the note says why.
@@ -1212,6 +1234,43 @@ class SoundReports(unittest.TestCase):
         self.assertNotIn("sound", bc.render_grid(one("[A]\n" + BAR + "\n")))
 
 
+class FactoryLists(unittest.TestCase):
+    """The factory packs as shipped (references/factory-sounds.md), for check --sounds factory / factory-ep40."""
+
+    def run_cli(self, *args, stdin=None):
+        return subprocess.run([sys.executable, os.path.join(HERE, "beatcard.py")] + list(args), input=stdin, capture_output=True, text=True)
+
+    def test_the_lists_hold_each_pack_and_only_its_own(self):
+        ep133, kit = bc.factory_list("factory")
+        self.assertEqual(kit, "ep133")
+        names = bc.parse_sound_list(ep133)
+        self.assertEqual(len(names), 309)
+        self.assertEqual((names[1], names[340], names[540]), ("micro kick", "shaker", "sky lead"))
+        self.assertTrue(all(s < 600 for s in names))
+        ep40, kit = bc.factory_list("factory-ep40")
+        self.assertEqual(kit, "ep40")
+        names = bc.parse_sound_list(ep40)
+        self.assertEqual(len(names), 471)
+        self.assertEqual((names[55], names[742], names[824]), ("ep 40 kick", "syren", "jammy drms a 85"))
+
+    def test_a_card_from_the_factory_list_checks_clean(self):
+        card = "ARC BEAT 1\n[A]\nsound A3 340 shaker\nA3 shaker | .o.o .o.o .o.o .o.o |\n[D]\nsound D7 540 sky lead\nnotes\nD7 at 1.1.1 note C5\n"
+        r = self.run_cli("check", "--sounds", "factory", stdin=card)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("warning", r.stdout)
+        # A name the pack doesn't have is warned about, with the slot's own.
+        r = self.run_cli("check", "--sounds", "factory", stdin="ARC BEAT 1\n[A]\nsound A3 340 shakerz\nA3 shaker | .o.o .o.o .o.o .o.o |\n")
+        self.assertIn("slot 340 holds 'shaker'", r.stdout)
+
+    def test_the_ep40_list_reads_by_the_ep40_kit(self):
+        # A loop off its tempo warns, as the EP-40 kit's loops do.
+        r = self.run_cli("check", "--sounds", "factory-ep40", stdin="ARC BEAT 1\ntempo 90\n[B] bars 2\nsound B7 830 jammy bass a 85\nB7 bass loop | X... .... .... .... | .... .... .... .... |\n")
+        self.assertIn("(85 BPM) but the card's tempo is 90", r.stdout)
+        # An EP-40 slot isn't in the EP-133's list.
+        r = self.run_cli("check", "--sounds", "factory", stdin="ARC BEAT 1\n[A]\nsound A3 742 syren\nA3 x | x... .... .... .... |\n")
+        self.assertIn("warning", r.stdout)
+
+
 class SoundsCli(unittest.TestCase):
     def run_cli(self, *args, stdin=None):
         return subprocess.run([sys.executable, os.path.join(HERE, "beatcard.py")] + list(args), input=stdin, capture_output=True, text=True)
@@ -1297,6 +1356,93 @@ class SoundsCli(unittest.TestCase):
 
 def cards_in(name):
     return bc.split_cards(read(os.path.join(REFS, name)))
+
+
+#: A few lines of the EP-40 Riddim pack as Arc lists it.
+EP40_LIST = "55 ep 40 kick\n48 jammy kick\n147 jammy rim a\n229 jammy hh\n230 jammy oh\n619 pianchrd cmaj\n742 syren\n" \
+            "824 jammy drms a 85\n827 jammy fill a 85\n830 jammy bass a 85\n833 jammy mel a 85\n"
+
+
+class Ep40Kit(unittest.TestCase):
+    def test_the_kit_is_told_by_arcs_sentence_the_packs_names_or_nothing(self):
+        self.assertEqual(bc.detect_kit("Improve this.\nMy EP-133 plays the EP-40 Riddim factory kit.\n```\nARC BEAT 1\n```\n"), "ep40")
+        self.assertEqual(bc.detect_kit("My EP-133's sounds (slot name), from the factory pack:\n" + EP40_LIST), "ep40")
+        self.assertEqual(bc.detect_kit("824 jammy drms a 85\n830 jammy bass a 85\n833 jammy mel a 85\n"), "ep40")
+        self.assertIsNone(bc.detect_kit("824 jammy drms a 85\n12 Kick 808\n"))  # one loop alone says nothing
+        self.assertIsNone(bc.detect_kit("My EP-133's sounds (slot name), from the EP-133:\n12 Kick 808\n14 Snare\n"))
+        self.assertEqual(bc.detect_kit("Write a beat.\nMy EP-133 plays the EP-133's own factory sounds.\n"), "ep133")
+        # The sentence isn't a sound line.
+        self.assertEqual(bc.parse_sound_list("My EP-133 plays the EP-40 Riddim factory kit.\n12 Kick\n"), {12: "Kick"})
+
+    def test_a_card_naming_an_ep40_loop_is_read_by_the_ep40_kit(self):
+        self.assertEqual(bc.parse_card("ARC BEAT 1\ntempo 85\n[A]\nsound A7 824 jammy drms a 85\nA7 | X... .... .... .... |\n").kit, "ep40")
+        self.assertEqual(bc.parse_card("ARC BEAT 1\n[A]\nsound A7 55 ep 40 kick\nA7 | X... .... .... .... |\n").kit, "ep40")
+        self.assertEqual(bc.parse_card("ARC BEAT 1\n[A]\nsound A7 12 Kick 808\nA7 | X... .... .... .... |\n").kit, "ep133")
+
+    def test_ep40_blocks_and_words(self):
+        self.assertEqual(bc.factory_block(619, "ep40"), ("chord", "chords"))
+        self.assertEqual(bc.factory_block(742, "ep40"), ("fx", "vocals and FX"))
+        self.assertEqual(bc.factory_block(830, "ep40"), (None, "loops"))
+        self.assertIsNone(bc.factory_block(619))  # the EP-133's blocks end at 599
+        for name, role in (("rimmy sn", "snare"), ("jammy oh", "hat"), ("kik oh", "hat"), ("sub kik", "kick"), ("jammy drms a 85", "drums"),
+                           ("jammy fill b 85", "fill"), ("jammy bass a 85", "bass"), ("mpc melo a 82", "melodic"), ("clavinet", "melodic"),
+                           ("ep 40 clave", "rim"), ("syren", None)):
+            self.assertEqual(bc.role_of(name, "ep40"), role, name)
+        self.assertEqual(bc.role_of("rimmy sn"), None)  # the EP-133's words are as they were
+        self.assertEqual(bc.role_of("clavinet"), "perc")
+
+    def test_ep40_roles_in_the_report(self):
+        card = bc.parse_card("ARC BEAT 1\ntempo 85\n[A]\nsound A7 824 jammy drms a 85\nsound A2 147 jammy rim a\nsound A6 742 syren\n"
+                             "A7 | X... .... .... .... |\nA2 rim | .... .... X... .... |\nA6 siren fx | .... .... .... ..X. |\n"
+                             "[C]\nsound C1 619 pianchrd cmaj\nC1 chords | ..X. ..X. ..X. ..X. |\n")
+        self.assertEqual(card.kit, "ep40")
+        r = bc.analyse_card(card)
+        a, c = r["patterns"]
+        self.assertEqual(a["pads"]["A7"]["role"], "drums")
+        self.assertEqual(a["sound_mismatches"], [])
+        self.assertEqual(c["sound_mismatches"], [])  # a chord stab on a chords row is no mismatch
+        self.assertEqual(bc._sound_role(bc.Sound(742, "syren", 1), "ep40"), ("fx", "slot"))
+        self.assertEqual(bc._sound_role(bc.Sound(619, "pianchrd cmaj", 1), "ep40"), ("chord", "slot"))
+        # A kick row on a chord stab known only by its slot is worth a remark.
+        kick = bc.parse_card("ARC BEAT 1\n[A]\nsound A7 824 jammy drms a 85\nsound A1 619 619.pcm\nA1 kick | X... X... X... X... |\n")
+        self.assertEqual([(m["pad"], m["sound_role"]) for m in bc.analyse_card(kick)["patterns"][0]["sound_mismatches"]], [("A1", "chord")])
+
+    def test_unlabelled_group_a_pads_are_read_by_the_ep40_assumed_kit(self):
+        card = bc.parse_card("ARC BEAT 1\ntempo 85\n[A]\nsound A9 826 jammy drms c 85\nA1 | X... .... X... .... |\nA2 | .... .... X... .... |\nA4 | x.x. x.x. x.x. x.x. |\nA9 | X... .... .... .... |\n")
+        pads = bc.analyse_card(card)["patterns"][0]["pads"]
+        self.assertEqual({k: (v["role"], v["name_assumed"]) for k, v in pads.items() if k in ("A1", "A2", "A4")},
+                         {"A1": ("kick", True), "A2": ("snare", True), "A4": ("hat", True)})
+
+    def test_a_loop_off_the_cards_tempo_is_a_warning(self):
+        card = bc.parse_card("ARC BEAT 1\ntempo 90\n[A]\nsound A7 824 jammy drms a 85\nA7 | X... .... .... .... |\n"
+                             "[B]\nsound B7 830\nB7 | X... .... .... .... |\n")
+        problems = bc.check_loops(card, bc.parse_sound_list(EP40_LIST))
+        self.assertEqual([str(p) for p in problems], [
+            "line 4: warning: A7 plays loop 'jammy drms a 85' (85 BPM) but the card's tempo is 90: it will drift; set tempo 85",
+            "line 7: warning: B7 plays loop 'jammy bass a 85' (85 BPM) but the card's tempo is 90: it will drift; set tempo 85",
+        ])
+        self.assertEqual(bc.check_loops(bc.parse_card("ARC BEAT 1\ntempo 85.4\n[A]\nsound A7 824 jammy drms a 85\nA7 | X... .... .... .... |\n")), [])
+        # A name ending in a number outside the loops block is no loop.
+        self.assertEqual(bc.check_loops(bc.parse_card("ARC BEAT 1\ntempo 90\n[A]\nsound A7 12 kick bass a 85\nA7 | X... .... .... .... |\n")), [])
+
+    def run_cli(self, *args, stdin=None):
+        return subprocess.run([sys.executable, os.path.join(HERE, "beatcard.py")] + list(args), input=stdin, capture_output=True, text=True)
+
+    def test_the_cli_warns_about_a_loop_and_takes_kit(self):
+        r = self.run_cli("check", stdin="ARC BEAT 1\ntempo 92\n[A]\nsound A7 824 jammy drms a 85\nA7 | X... .... .... .... |\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("line 4: warning: A7 plays loop 'jammy drms a 85' (85 BPM) but the card's tempo is 92: it will drift; set tempo 85", r.stdout)
+        # Unnamed sounds' slots by the EP-40's blocks: a chords row on 619 is fine with --kit ep40, a mismatch by the EP-133's (no block, so none).
+        chords = "ARC BEAT 1\n[C]\nsound C1 619 619.pcm\nC1 chords | ..X. ..X. ..X. ..X. |\nC2 kick | X... X... X... X... |\nsound C2 742 742.pcm\n"
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as f:
+            f.write(chords)
+        self.addCleanup(os.unlink, f.name)
+        r40 = json.loads(self.run_cli("analyse", f.name, "--json", "--kit", "ep40").stdout)
+        self.assertEqual([(m["pad"], m["sound_role"]) for m in r40["patterns"][0]["sound_mismatches"]], [("C2", "fx")])
+        r133 = json.loads(self.run_cli("analyse", f.name, "--json").stdout)
+        self.assertEqual(r133["patterns"][0]["sound_mismatches"], [])
+        bad = self.run_cli("check", "--kit", "ep41", stdin="ARC BEAT 1\n")
+        self.assertEqual(bad.returncode, 2)
 
 
 class Effects(unittest.TestCase):
@@ -1933,6 +2079,312 @@ class SceneCli(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
 
 
+LESSON = """ARC BEAT 1
+name L
+tempo 92
+lesson Kick alone | A7 | 50 | Count 1 e and a out loud
+lesson Add the snare | A9 A7 | 50%
+lesson The whole groove | A
+[A]
+A7 kick  | X... .... X... .... |
+A9 snare | .... X... .... X... |
+A4 hat   | x.x. x.x. x.x. x.x. |
+"""
+
+
+class Lesson(unittest.TestCase):
+    def test_lesson_lines_read_in_order_with_their_pads_speed_and_tip(self):
+        card = bc.parse_card(LESSON)
+        self.assertTrue(card.ok, card.problems)
+        self.assertEqual(card.problems, [])
+        self.assertEqual([s.title for s in card.lesson], ["Kick alone", "Add the snare", "The whole groove"])
+        self.assertEqual([s.pads_text() for s in card.lesson], ["A7", "A7 A9", "A"])
+        self.assertEqual([s.speed for s in card.lesson], [50, 50, 100])
+        self.assertEqual([s.tip for s in card.lesson], ["Count 1 e and a out loud", None, None])
+        self.assertIsNone(card.lesson[2].pads)
+
+    def test_a_lesson_line_may_come_after_the_sections(self):
+        card = bc.parse_card(LESSON + "lesson Hats | A4 | 25\n")
+        self.assertTrue(card.ok, card.problems)
+        self.assertEqual(card.lesson[-1].pads_text(), "A4")
+
+    def test_faults_name_the_line(self):
+        cases = [
+            ("lesson Clap | A6 | 50", "lesson-no-hits"),
+            ("lesson Two groups | A7 B7", "lesson-groups"),
+            ("lesson Fast | A7 | 120", "lesson-speed"),
+            ("lesson Slow | A7 | 10", "lesson-speed"),
+            ("lesson Odd | A7 | half", "lesson-speed"),
+            ("lesson Nothing", "lesson-line"),
+            ("lesson Bad | Z7", "lesson-pad"),
+            ("lesson Empty group | B", "lesson-no-hits"),
+        ]
+        for line, code in cases:
+            card = bc.parse_card("ARC BEAT 1\n" + line + "\n" + kick())
+            self.assertEqual([(p.line, p.code) for p in card.problems if p.level == "error"], [(2, code)], line)
+
+    def test_a_long_title_is_shortened(self):
+        card = bc.parse_card("ARC BEAT 1\nlesson " + "k" * 50 + " | A7\n" + kick())
+        self.assertTrue(card.ok, card.problems)
+        self.assertEqual(codes(card), ["lesson-title-long"])
+        self.assertEqual(len(card.lesson[0].title), bc.NAME_MAX)
+
+    def test_at_most_twelve_steps(self):
+        card = bc.parse_card("ARC BEAT 1\n" + "lesson Kick | A7\n" * 13 + kick())
+        self.assertEqual(len(card.lesson), 12)
+        self.assertEqual([(p.line, p.code) for p in card.problems], [(14, "lesson-too-long")])
+
+    def test_the_steps_apply_to_the_first_scene(self):
+        card = one("lesson Snare | A9\nscene\n" + kick() + "scene\n[A]\nA9 snare | .... X... .... X... |\n")
+        self.assertEqual(codes(card, "error"), ["lesson-no-hits"])
+
+    def test_grid_and_analyse_list_the_steps(self):
+        card = bc.parse_card(LESSON)
+        grid = bc.render_grid(card)
+        self.assertIn("lesson 1: Kick alone (A7, 50%) - Count 1 e and a out loud", grid)
+        self.assertIn("lesson 3: The whole groove (A, 100%)", grid)
+        report = bc.analyse_card(card)
+        self.assertEqual(report["lesson"][1], {"title": "Add the snare", "pads": "A7 A9", "speed": 50, "tip": None})
+        self.assertIn("lesson 2: Add the snare (A7 A9, 50%)", bc.render_analysis(report))
+        self.assertEqual(bc.analyse_card(bc.parse_card(spec_card()))["lesson"], [])
+
+
+# ---------------------------------------------------------------------------
+# Synth lines: sounds Arc makes from the card
+# ---------------------------------------------------------------------------
+
+
+def synth_cases():
+    """The cases of test_synth_cases.txt, shared with Arc's readers: (name, card text, [(line, level, code)])."""
+    cases, mode = [], None
+    for line in read(os.path.join(HERE, "test_synth_cases.txt")).split("\n"):
+        if line.startswith("=== "):
+            cases.append((line[4:], [], []))
+            mode = "card"
+        elif not cases:
+            continue  # the comments before the first case
+        elif line == "--- expect":
+            mode = "expect"
+        elif line == "--- python":
+            mode = "python"
+        elif mode == "card":
+            cases[-1][1].append(line)
+        elif mode == "python" and line.strip():
+            at, level, code = line.split(" ", 2)
+            cases[-1][2].append((int(at), level, code))
+    return [(name, "\n".join(lines) + "\n", want) for name, lines, want in cases]
+
+
+def synth_golden():
+    """The cases of test_synth_golden.txt, written by Arc: (body, frames, PCM CRC-32, device name)."""
+    out = []
+    for line in read(os.path.join(HERE, "test_synth_golden.txt")).splitlines():
+        if line and not line.startswith("#"):
+            body, frames, crc, name = [part.strip() for part in line.split("|")]
+            out.append((body, int(frames), crc, name))
+    return out
+
+
+def synth_of(body):
+    """The synth on A1 of a card made of [body], which must read clean."""
+    card = bc.parse_card("ARC BEAT 1\n[A]\nsynth A1 %s\n" % body)
+    assert card.problems == [], (body, card.problems)
+    return card.patterns[0].synths[3]
+
+
+def pcm_crc(pcm):
+    return "%08x" % (bc.zlib.crc32(bc.synth_pcm_bytes(pcm)) & 0xFFFFFFFF)
+
+
+SYNTH_CARD = """ARC BEAT 1
+name Made sounds
+tempo 120
+[A] bars 1 step 1/16
+sound A7 999 Nope Kick
+synth A7 kick note F1 decay 70 bend 40 click 10 drive 20 name 808_kick
+synth A6 clap
+A7 kick | X... .... X... .... |
+A6 clap | .... X... .... X... |
+[D]
+synth D7 lead wave none
+pad D7 mode key
+notes
+D7 at 1.1.1 note C4
+"""
+
+
+class Synth(unittest.TestCase):
+    def run_cli(self, *args, stdin=None):
+        return subprocess.run([sys.executable, os.path.join(HERE, "beatcard.py")] + list(args), input=stdin, capture_output=True, text=True)
+
+    def test_every_shared_case_gives_its_problems(self):
+        cases = synth_cases()
+        self.assertEqual(len(cases), 27)
+        for name, text, want in cases:
+            with self.subTest(name):
+                card = bc.parse_card(text)
+                self.assertEqual([(p.line, p.level, p.code) for p in card.problems], want)
+                # The card is refused exactly when an error is listed.
+                self.assertEqual(card.ok, not any(level == bc.ERROR for _, level, _ in want))
+
+    def test_a_length_with_a_line_separator_after_it_is_refused_as_arc_refuses_it(self):
+        for end in ("\u0085", " ", " "):
+            for v in ("1", "2.5"):
+                card = bc.parse_card("ARC BEAT 1\n[A] bars 1 step 1/16\nsynth A7 kick length %s%s\n" % (v, end))
+                self.assertFalse(card.ok)
+                self.assertEqual([(p.line, p.level, p.code) for p in card.problems], [(3, bc.ERROR, "bad-synth-line")])
+
+    def test_the_values_a_line_gave_are_stored_and_nothing_else(self):
+        cases = {name: bc.parse_card(text) for name, text, _ in synth_cases()}
+        self.assertEqual(cases["minimal"].patterns[0].synths, {9: bc.Synth("kick", 3)})
+        self.assertEqual(cases["every-key"].patterns[0].synths[9], bc.Synth(
+            "bass", 3, note=36, wave="square", chord="oct", attack=3, decay=25, length=125, tone=30, reso=75, sweep=70, bend=5,
+            click=10, noise=5, snap=20, drive=40, detune=10, level=90, seed=7, name="acid_bass"))
+        self.assertEqual(cases["any-case"].patterns[0].synths[9], bc.Synth("kick", 3, decay=20, wave="saw", name="Decay"))
+        self.assertEqual([s.name for s in cases["names"].patterns[0].synths.values()], ["808_kick", "a_very_long_k", "808"])
+        self.assertEqual([s.length for s in cases["lengths-ok"].patterns[0].synths.values()], [400, 50, 5, 250])
+        self.assertEqual([s.note for s in cases["notes-edges"].patterns[0].synths.values()], [12, 96, 30])
+        self.assertEqual(cases["duplicate"].patterns[0].synths[9].decay, 60)
+        self.assertEqual(cases["duplicate-with-error"].patterns[0].synths[9].decay, 40)  # a line with an error is left out
+        self.assertEqual(set(cases["unknown-type"].patterns[0].synths), {10})
+        self.assertEqual({o: s.tone for o, s in cases["unknown-setting"].patterns[0].synths.items()}, {9: 40, 10: 40, 11: 40, 6: 40})
+        words = cases["unknown-words"].patterns[0].synths[9]
+        self.assertEqual((words.wave, words.chord, words.tone), (None, None, 50))
+        self.assertEqual(cases["after-notes"].patterns[0].synths[3], bc.Synth("sub", 6, note=36))
+        both = cases["sound-and-synth"].patterns[0]
+        self.assertEqual((set(both.sounds), set(both.synths)), ({9}, {9}))
+
+    def test_the_writer_form_reads_back_the_same(self):
+        for name, text, want in synth_cases():
+            card = bc.parse_card(text)
+            if not card.ok:
+                continue
+            for p in card.all_patterns:
+                for offset, s in p.synths.items():
+                    again = bc.parse_card("ARC BEAT 1\n[%s]\n%s\n" % (p.letter, bc.synth_text(p.group, offset, s)))
+                    self.assertEqual(again.patterns[0].synths[offset], bc.Synth(**{**s.__dict__, "line": 3}), name)
+        lengths = bc.parse_card(dict((n, t) for n, t, _ in synth_cases())["lengths-ok"]).patterns[0]
+        self.assertEqual([bc.synth_text(3, o, s).split(" ")[-1] for o, s in lengths.synths.items()], ["4", "0.5", "0.05", "2.5"])
+        self.assertEqual(bc.synth_text(0, 2, bc.Synth("bass", 1, note=36, wave="square", decay=25, name="acid")),
+                         "synth AE bass note C2 wave square decay 25 name acid")
+
+    def test_scenes_keep_the_last_synth_of_a_pad_in_the_place_of_its_first(self):
+        card = bc.parse_card(dict((n, t) for n, t, _ in synth_cases())["scenes"])
+        self.assertEqual(list(bc.synths_by_pad(card).items()), [((0, 9), bc.Synth("kick", 8, decay=60))])
+
+    def test_every_golden_case_renders_the_same_bytes_as_arc(self):
+        golden = synth_golden()
+        self.assertEqual(len(golden), 48)
+        for body, frames, crc, name in golden:
+            with self.subTest(body):
+                s = synth_of(body)
+                pcm = bc.render_synth(s)
+                self.assertEqual((len(pcm), pcm_crc(pcm), bc.synth_device_name(s)), (frames, crc, name))
+                self.assertEqual(bc.synth_frames(s), frames)
+                self.assertEqual((pcm[0], pcm[-1]), (0, 0))
+                peak = max(abs(v) for v in pcm)
+                level = bc.synth_resolve(s)["level"]
+                self.assertEqual(peak, 0 if bc.synth_silent(s) else math.floor(0.8912509381337456 * level / 100 * 32767 + 0.5))
+
+    def test_canonical_text_tag_and_names(self):
+        kick = synth_of("kick")
+        self.assertEqual(bc.synth_canonical(kick), "arc synth 1 kick note 31 wave sine chord one attack 0 decay 40 length auto tone 30 reso 0 sweep 0 bend 50 click 30 noise 0 snap off drive 10 detune 0 level 100 seed 0")
+        self.assertEqual(bc.synth_device_name(synth_of("kick decay 40")), "kick 08bcfa")
+        self.assertNotEqual(bc.synth_tag(synth_of("kick decay 41")), bc.synth_tag(kick))
+        self.assertEqual(bc.synth_tag(synth_of("kick name boom")), bc.synth_tag(kick))
+        self.assertEqual(bc.synth_device_name(synth_of("kick name boom")), "boom 08bcfa")
+        self.assertEqual(bc.synth_note_hz(69), 440.0)
+        self.assertEqual(bc.synth_note_hz(60), 261.6255653005986)
+        self.assertEqual((bc.synth_frames(synth_of("riser length 0.05")), bc.synth_frames(synth_of("riser length 4"))), (2343, 187500))
+        self.assertTrue(bc.synth_silent(synth_of("lead wave none")))
+        self.assertFalse(bc.synth_silent(synth_of("lead wave none click 1")))
+
+    def test_the_wav_is_46875_hz_mono_16_bits(self):
+        pcm = [0, 1, -1, 32767, -32768]
+        wav = bc.synth_wav(pcm)
+        self.assertEqual(len(wav), 44 + 10)
+        self.assertEqual(struct.unpack("<4sI4s4sIHHIIHH4sI", wav[:44]), (b"RIFF", 46, b"WAVE", b"fmt ", 16, 1, 1, 46875, 93750, 2, 16, b"data", 10))
+        self.assertEqual(list(struct.unpack("<5h", wav[44:])), pcm)
+
+    def test_the_warning_codes(self):
+        cases = {
+            "synth-after-notes": kick() + "notes\nA1 at 1.1.1\nsynth A1 sub\n",
+            "unknown-synth-type": kick() + "synth A1 kik\n",
+            "unknown-synth-setting": kick() + "synth A1 kick foo 3\n",
+            "unknown-synth-word": kick() + "synth A1 kick wave pulse\n",
+            "long-synth-name": kick() + "synth A1 kick name a_very_long_kick_name\n",
+            "duplicate-synth": kick() + "synth A1 kick\nsynth A1 kick decay 60\n",
+        }
+        for code, text in cases.items():
+            card = one(text)
+            self.assertTrue(card.ok, code)
+            self.assertEqual(codes(card), [code], code)
+
+    def test_grid_analyse_and_summary_show_the_synths(self):
+        card = bc.parse_card(SYNTH_CARD)
+        self.assertTrue(card.ok, card.problems)
+        grid = bc.render_grid(card)
+        self.assertIn("synth A7 kick note F1 decay 70 bend 40 click 10 drive 20 name 808_kick  -> '808 kick 29f789', 1.52 s", grid)
+        self.assertIn("synth D7 lead wave none  -> 'lead f85d37', 1.00 s", grid)
+        self.assertLess(grid.index("sound A7"), grid.index("synth A7"))
+        report = bc.analyse_card(card)
+        self.assertEqual([(s["pad"], s["type"], s["name"], s["device_name"], s["frames"]) for s in report["synths"]], [
+            ("A7", "kick", "808 kick", "808 kick 29f789", 71296), ("A6", "clap", "clap", "clap 333cb7", 21931), ("D7", "lead", "lead", "lead f85d37", 46875)])
+        self.assertEqual(report["synths"][0]["seconds"], 1.521)
+        self.assertNotIn("dLo", report["synths"][0]["settings"])
+        self.assertEqual(report["synths"][0]["settings"]["note"], 29)
+        self.assertIn("A7 kick: '808 kick 29f789', 1.52 s", bc.render_analysis(report))
+        self.assertEqual(bc.analyse_card(bc.parse_card(spec_card()))["synths"], [])
+        self.assertIn(", 3 synth sounds |", bc.summary_line(card))
+        self.assertNotIn("synth", bc.summary_line(bc.parse_card(spec_card())))
+
+    def test_check_sounds_notes_a_missing_sound_with_a_synth_line(self):
+        card = bc.parse_card(SYNTH_CARD)
+        found = bc.check_sounds(card, {1: "kick"})
+        self.assertEqual([(p.line, p.level, p.code) for p in found], [(5, bc.NOTE, "synth-fallback")])
+        self.assertEqual(found[0].message, "A7: slot 999 isn't in the sound list; Arc will use the pad's synth line instead")
+        # Without the synth line, the same sound line is still a warning; a pad with only a synth line gives nothing.
+        plain = bc.parse_card(SYNTH_CARD.replace("synth A7 kick", "# synth A7 kick"))
+        self.assertEqual(codes(bc.Card(problems=bc.check_sounds(plain, {1: "kick"}))), ["sound-missing"])
+        # A synth line that makes no sound is ignored by Arc, so the missing sound is still a warning.
+        silent = bc.parse_card(SYNTH_CARD.replace("synth A7 kick note F1", "synth A7 lead wave none note F1").replace("click 10 ", ""))
+        self.assertTrue(bc.synth_silent(silent.patterns[0].synths[9]))
+        self.assertEqual(codes(bc.Card(problems=bc.check_sounds(silent, {1: "kick"}))), ["sound-missing"])
+        r = self.run_cli("check", "--sounds", "factory", stdin=SYNTH_CARD)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("line 5: note: A7: slot 999", r.stdout)
+
+    def test_the_synth_command(self):
+        r = self.run_cli("synth", stdin=SYNTH_CARD)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("A7 kick: '808 kick 29f789', 1.52 s, 71296 frames, 142636 bytes", r.stdout)
+        self.assertIn("note F1 (29), wave sine", r.stdout)
+        self.assertIn("D7 lead: 'lead f85d37', 1.00 s, 46875 frames, 93794 bytes, makes no sound", r.stdout)
+        r = self.run_cli("synth", "--json", "--pad", "A6", stdin=SYNTH_CARD)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        data = json.loads(r.stdout)
+        self.assertEqual([(d["pad"], d["device_name"], d["frames"], d["bytes"], d["silent"]) for d in data], [("A6", "clap 333cb7", 21931, 43906, False)])
+        self.assertEqual(self.run_cli("synth", "--pad", "A9", stdin=SYNTH_CARD).returncode, 2)
+        bad = self.run_cli("synth", stdin="ARC BEAT 1\n[A]\nsynth A7 kick decay 101\n")
+        self.assertEqual(bad.returncode, 1)
+        self.assertIn("line 3: error:", bad.stdout)
+        golden = {body: (frames, crc, name) for body, frames, crc, name in synth_golden()}
+        frames, crc, name = golden["kick note F1 decay 70 bend 40 click 10 drive 20 name 808_kick"]
+        with tempfile.TemporaryDirectory() as d:
+            r = self.run_cli("synth", "--pad", "A7", "--json", "-o", d, stdin=SYNTH_CARD)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            info = json.loads(r.stdout)[0]
+            self.assertEqual((info["pcm_crc32"], info["peak"]), (crc, 29204))
+            path = os.path.join(d, "A7 %s.wav" % name)
+            self.assertEqual(info["file"], path)
+            with open(path, "rb") as f:
+                wav = f.read()
+            head = struct.unpack("<4sI4s4sIHHIIHH4sI", wav[:44])
+            self.assertEqual(head, (b"RIFF", 36 + 2 * frames, b"WAVE", b"fmt ", 16, 1, 1, 46875, 93750, 2, 16, b"data", 2 * frames))
+            self.assertEqual("%08x" % (bc.zlib.crc32(wav[44:]) & 0xFFFFFFFF), crc)
+            r = self.run_cli("synth", "--pad", "A7", "-o", d, stdin=SYNTH_CARD)
+            self.assertIn("wrote %s (peak 29204, PCM CRC-32 %s)" % (path, crc), r.stdout)
+
 
 class SkillFiles(unittest.TestCase):
     def test_every_card_in_the_references_is_valid_and_has_no_warnings(self):
@@ -1970,6 +2422,12 @@ class SkillFiles(unittest.TestCase):
         pairs = re.findall(r"\|\s*(A(?:[0-9.]|ENTER))\s*\|\s*([a-z0-9 ]+?)\s*(?=\|)", text)
         found = {p: s for p, s in pairs if p in bc.ASSUMED_KIT}
         self.assertEqual(found, bc.ASSUMED_KIT)
+
+    def test_the_ep40_kit_table_matches_the_script(self):
+        text = read(os.path.join(REFS, "ep40-kit.md"))
+        pairs = re.findall(r"\|\s*(A(?:[0-9.]|ENTER))\s*\|\s*([a-z0-9 ]+?)\s*(?=\|)", text)
+        found = {p: s for p, s in pairs if p in bc.ASSUMED_KIT_EP40}
+        self.assertEqual(found, bc.ASSUMED_KIT_EP40)
 
     def test_lessons(self):
         text = read(os.path.join(REFS, "lessons.md"))
