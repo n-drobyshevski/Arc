@@ -246,3 +246,17 @@
 .beat-cell.is-accent { background: var(--signal); }
 .beat-cell.is-normal { background: var(--navy); }
 .beat-cell.is-ghost { background: color-mix(in srgb, var(--navy) 40%, transparent); }
+
+/* A lesson's step: its number in an 18 wide column, the title over the tip, the pads and speed at the end; 48 high. */
+.beat-lesson {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 16px;
+  box-sizing: border-box;
+}
+.beat-lesson__n { flex: none; width: 18px; white-space: nowrap; }
+.beat-lesson__what { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.beat-lesson__title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.beat-lesson__pads { flex: none; white-space: nowrap; }

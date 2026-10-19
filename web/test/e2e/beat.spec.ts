@@ -82,7 +82,7 @@ test('BEAT CARDS: the CLAUDE section, a pasted card, IMPORT', async ({ page }) =
   await expect(set).toHaveAttribute('aria-checked', 'true')
   await expect(set).toHaveText('SetOn')
   await expect(sheet).toContainText(/\d+ → 124/)
-  await sheet.getByRole('button', { name: 'Import' }).click()
+  await sheet.getByRole('button', { name: 'Import', exact: true }).click()
   await expect(sheet).toBeHidden()
   await expect(page.getByRole('status').filter({ hasText: /^Imported to A · 02/ })).toBeVisible()
 
@@ -216,7 +216,7 @@ test('SHARE CHAIN: a card of scenes sets the chain, shared with the sound list o
     document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }))
   }, SCENES)
   const sheet = page.getByRole('dialog', { name: 'Two' })
-  await sheet.getByRole('button', { name: 'Import' }).click()
+  await sheet.getByRole('button', { name: 'Import', exact: true }).click()
   await expect(sheet).toBeHidden()
 
   await page.getByRole('button', { name: 'Live tools' }).click()
@@ -274,7 +274,7 @@ test("SCENES and SET CHAIN: a card's scenes under their titles, a row for each, 
   await expect(sheet.getByRole('switch', { name: "Leave the project's chain as it is, 2 steps" })).toHaveAttribute('aria-checked', 'false')
   await expect(sheet).not.toContainText("Replaces this project's chain with the card's")
 
-  await sheet.getByRole('button', { name: 'Import' }).click()
+  await sheet.getByRole('button', { name: 'Import', exact: true }).click()
   await expect(sheet).toBeHidden()
   await expect(page.getByRole('status').filter({ hasText: 'Imported to scenes S02\u2013S03. UNDO takes it back.' })).toBeVisible()
   // No chain was set: nothing for SHARE CHAIN.
@@ -309,7 +309,7 @@ test("REPLACE: a card's scenes take the project's place from S01, the choice kep
   await expect(sheet).toContainText('S01\u00D72 \u2192 S02')
   await expect(sheet).toContainText("The card's scenes take the place of this project's 1 scene, from S01.")
 
-  await sheet.getByRole('button', { name: 'Import' }).click()
+  await sheet.getByRole('button', { name: 'Import', exact: true }).click()
   await expect(sheet).toBeHidden()
   await expect(page.getByRole('status').filter({ hasText: 'Imported to scenes S01\u2013S02. Chain set. UNDO takes it back.' })).toBeVisible()
   // The next card's sheet opens with REPLACE still on, now over the project's two scenes.
@@ -355,7 +355,7 @@ test('SOUNDS and SILENT PADS: a card\'s sound and one picked for a silent pad go
   await expect(sounds.getByRole('checkbox', { name: /^D9: No sound becomes 003 / })).toHaveAttribute('aria-checked', 'true')
   await expect(sheet).toContainText(/Writes 2 pads in project \d+ on the EP-133/)
 
-  await sheet.getByRole('button', { name: 'Import' }).click()
+  await sheet.getByRole('button', { name: 'Import', exact: true }).click()
   await expect(sheet).toBeHidden()
   await expect(page.getByRole('status').filter({ hasText: /^Imported to scene S02 and 2 sounds\./ })).toBeVisible()
 })
@@ -392,7 +392,7 @@ test('SILENT PADS suggests a sound by the row\'s name, marked SUGGESTED until an
   await expect(silent).not.toContainText('Suggested')
   await expect(sheet).toContainText('A pad with no sound plays nothing.')
 
-  await sheet.getByRole('button', { name: 'Import' }).click()
+  await sheet.getByRole('button', { name: 'Import', exact: true }).click()
   await expect(sheet).toBeHidden()
 })
 
@@ -427,7 +427,7 @@ test("FX and PAD SHAPING: the card's FX old to new with APPLY FX, its pad line t
   await expect(row).toHaveAttribute('aria-checked', 'true')
   await expect(sheet).toContainText("Writes the ticked pads' settings on the EP-133")
 
-  await sheet.getByRole('button', { name: 'Import' }).click()
+  await sheet.getByRole('button', { name: 'Import', exact: true }).click()
   await expect(sheet).toBeHidden()
   await expect(page.getByRole('status').filter({ hasText: /^Imported to A · 02\. FX/ })).toBeVisible()
 })
@@ -472,7 +472,7 @@ test("SOUNDS: a card's sound the EP-133 lacks is uploaded from the saved EP-40 p
   await expect(upload).toContainText('Upload 100 riddim snare')
   await expect(upload).toContainText('From the EP-40 pack, into a free slot')
 
-  await sheet.getByRole('button', { name: 'Import' }).click()
+  await sheet.getByRole('button', { name: 'Import', exact: true }).click()
   await expect(sheet).toBeHidden()
   await expect(page.getByRole('status').filter({ hasText: /^Imported to A · 02 and 1 sound\./ })).toBeVisible()
 })
@@ -496,7 +496,7 @@ test("SOUNDS: a card's synth line is made by Arc, its play key plays it first, a
   await sounds.getByRole('button', { name: 'Play 808 kick' }).click()
   await expect(sheet).toBeVisible()
 
-  await sheet.getByRole('button', { name: 'Import' }).click()
+  await sheet.getByRole('button', { name: 'Import', exact: true }).click()
   await expect(sheet).toBeHidden()
   await expect(page.getByRole('status').filter({ hasText: /^Imported to A · 02 and 1 sound\./ })).toBeVisible()
 })

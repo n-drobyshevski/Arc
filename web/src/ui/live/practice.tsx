@@ -32,8 +32,8 @@ import { lazy } from '../lazy'
  * time (the counts as they are then), [running] while the transport plays.
  * ▶ ([onPlay]) starts it over from a bar counted in, ■ ([onStop]) stops it
  * with the counts kept, ✕ ([onClose]) ends it; the keys change its
- * PracticeSpec ([onChange]), and COPY puts how it went on the clipboard for
- * Claude ([onCopy]).
+ * PracticeSpec ([onChange]), ‹ and › a lesson's step ([onStep]), and COPY
+ * puts how it went on the clipboard for Claude ([onCopy]).
  */
 export interface PracticeActions {
   readonly ui: PracticeUi | null
@@ -45,6 +45,7 @@ export interface PracticeActions {
   onStop(): void
   onClose(): void
   onChange(change: (spec: PracticeSpec) => PracticeSpec): void
+  onStep(delta: number): void
   onCopy(): void
 }
 

@@ -28,11 +28,15 @@
 // the next card): off, "After S05", its scenes follow the project's; on,
 // "Replace S01–S05", they take their place from S01, and the scene rows, the
 // new scene and the chain say where they go then, with a line under the plate.
+// A card with `lesson` lines has a LESSON block after the pad shaping: a row
+// for each step, its number, title and tip, and the pads and speed on the
+// right; under it, that IMPORT AND PRACTISE runs them.
 // IMPORT puts it all in as one UNDO step; it is off, and says why, when the
 // card can't be read or a group is full. [onImport] gets whether the tempo
 // is to be set, the pads whose sounds are to be put on, the sounds picked
 // for silent pads, whether the FX are applied, the pads to shape and
-// whether the card's chain is set.
+// whether the card's chain is set. IMPORT AND PRACTISE ([onPractise]) imports
+// it, then plays along with it on Live's pads.
 //
 // Web deltas:
 // - The grid's cells are spans in a row that scrolls sideways when long,
@@ -57,13 +61,14 @@
 import { Fragment, type JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type { ReadonlySignal } from '@preact/signals'
-import { SoundStatus, type CardProblem, type CardSynth } from '../../core/features/beatCard'
+import { BeatCards, SoundStatus, type CardProblem, type CardSynth, type LessonStep } from '../../core/features/beatCard'
 import { SynthVoice } from '../../core/features/synthVoice'
 import { SoundSource } from '../../core/features/offlinePads'
 import { padKey, type PhysicalPad } from '../../core/features/padNotes'
 import { ClaudeText } from '../../core/text/claudeText'
 import { plural } from '../../core/text/format'
 import { MirrorText } from '../../core/text/mirrorText'
+import { PracticeText } from '../../core/text/practiceText'
 import { SettingsText } from '../../core/text/settingsText'
 import { Strings } from '../../core/text/strings'
 import { WebText } from '../../core/text/webText'
@@ -104,6 +109,8 @@ export interface BeatImportSheetProps {
    */
   onImport(setTempo: boolean, soundPads: ReadonlySet<number>, picked: ReadonlyMap<number, number>, applyFx: boolean, shapePads: ReadonlySet<number>, setChain: boolean): void
   onCopyProblems(problems: readonly CardProblem[]): void
+  /** IMPORT AND PRACTISE, after the import: practice on Live's pads (undefined hides it). */
+  onPractise?(): void
   /** A text pasted into the box. */
   onPaste(text: string): void
   /** The preview of the sounds PICK SOUND lists: the key of the one playing, read by each row (controller.playing). */
@@ -384,6 +391,7 @@ function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; choices: Cho
           }}
         />
       )}
+      {(ui.read.card?.lesson ?? []).length > 0 && <LessonBlock steps={ui.read.card!.lesson!} practising={props.onPractise !== undefined} />}
       {ui.swing !== null && <p class="t-small beat-sheet__dim">{ClaudeText.swingLine(ui.swing)}</p>}
       {problems.length > 0 && (
         <div class="beat-sheet__problems">
@@ -405,6 +413,49 @@ function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; choices: Cho
         <Key text={Strings.CANCEL} onClick={props.onCancel} />
         <Key text={ClaudeText.IMPORT} variant="signal" disabled={ui.blocked !== null} onClick={onImport} />
       </div>
+      {/* IMPORT, then play along with it on Live's pads. */}
+      {props.onPractise !== undefined && (
+        <Key
+          text={PracticeText.IMPORT_PRACTICE}
+          block
+          disabled={ui.blocked !== null}
+          onClick={() => {
+            onImport()
+            props.onPractise?.()
+          }}
+        />
+      )}
+    </>
+  )
+}
+
+/**
+ * The LESSON block: a row for each step of the card's lesson, its number,
+ * title and tip, and the pads and speed on the right; under it, that IMPORT
+ * AND PRACTISE runs them ([practising]: the key is there).
+ */
+function LessonBlock(props: { steps: readonly LessonStep[]; practising: boolean }): JSX.Element {
+  return (
+    <>
+      <GridPlate role="group" aria-label={PracticeText.LESSON}>
+        <div class="beat-block__head">
+          <span class="t-caps beat-sheet__dim">{PracticeText.LESSON}</span>
+        </div>
+        {props.steps.map((step, i) => (
+          <Fragment key={i}>
+            <PlateLine />
+            <div class="beat-lesson" role="note">
+              <span class="t-caps beat-sheet__dim beat-lesson__n">{i + 1}</span>
+              <span class="beat-lesson__what">
+                <b class="t-small beat-sheet__strong beat-lesson__title">{step.title}</b>
+                {step.tip !== null && <span class="t-tiny beat-sheet__dim beat-sheet__clamp">{step.tip}</span>}
+              </span>
+              <span class="t-small beat-sheet__ink beat-lesson__pads">{PracticeText.lessonPads(BeatCards.lessonPads(step), step.speed)}</span>
+            </div>
+          </Fragment>
+        ))}
+      </GridPlate>
+      {props.practising && <p class="t-small beat-sheet__dim">{PracticeText.LESSON_NOTE}</p>}
     </>
   )
 }

@@ -1,12 +1,15 @@
 // Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/LivePractice.kt (PracticeHeader, PlayStopChip, PracticeDeck,
-// Lane, Result, PracticeKey)
+// Lane, LessonLine, Result, PracticeKey)
 //
 // PRACTICE on Live (an addition): play along with a pattern. Its panel's
 // header names what is practised with ▶ or ■ and how it goes; under it the
 // lane, each pad played a row and its next hits coming in from the right to
 // the orange line, and the keys WAIT, the speed, the bars looped and the
 // backing. After a stop the lane gives way to how it went, with COPY.
-// Meanwhile Live's pads light ahead of each hit (practice.tsx's cues).
+// Meanwhile Live's pads light ahead of each hit (practice.tsx's cues). A
+// card's lesson runs a step at a time: STEP 2/4 heads the panel, the step's
+// title and tip sit over the lane, ‹ and › take the place of LOOP, and how
+// it went lists every step.
 //
 // Web deltas:
 // - A chunk of its own (practice.tsx's PracticeSlot). The panel takes the
@@ -14,8 +17,8 @@
 //   (MirrorScreen.css), as STEP's does; Escape ends the practice, as Back.
 // - The lane is a canvas drawn on the frame clock while it plays; the
 //   header's counts follow the frames, re-rendering it only when they change.
-// - A card's lesson (STEP 2/4, the step's line, ‹ ›, the steps' results)
-//   comes with lesson lines, not ported yet.
+// - A stepping key that can't step (‹ on the first step) is aria-disabled
+//   as well as dimmed.
 
 import type { JSX } from 'preact'
 import { useComputed } from '@preact/signals'
@@ -23,7 +26,7 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { Seq } from '../../core/features/pattern'
 import { PracticeCounts, PracticeSpec, type PracticeCounts as Counts } from '../../core/features/practice'
 import { PracticeText } from '../../core/text/practiceText'
-import type { PracticeUi } from '../../state/practicePlan'
+import type { LessonPlace, PracticeUi } from '../../state/practicePlan'
 import { useFingerTick } from '../useHaptic'
 import { usePractice, type PracticeActions } from './practice'
 import { Spoken } from './spoken'
@@ -92,7 +95,7 @@ function PracticeHeader(props: { p: PracticeActions; ui: PracticeUi; running: bo
         </button>
       )}
       <span class="practice-panel__place" aria-hidden="true">
-        {PracticeText.head(ui.place).toUpperCase()}
+        {(ui.lesson !== null ? PracticeText.step(ui.lesson.step, ui.lesson.steps) : PracticeText.head(ui.place)).toUpperCase()}
       </span>
       <span class="practice-panel__status" aria-hidden="true">
         {status.toUpperCase()}
@@ -109,15 +112,25 @@ function PracticeHeader(props: { p: PracticeActions; ui: PracticeUi; running: bo
  * The lane (or, stopped after playing, how it went: the share in time, the
  * counts and the pad most often off), then WAIT, the speed (50, 75, 100%), the
  * bars looped (all, 1, 2, 4) and BACKING (the rest of the scene underneath).
+ * In a lesson its step's line is over the lane, and ‹ and › step it.
  */
 function PracticeDeck(props: { p: PracticeActions; ui: PracticeUi; running: boolean }): JSX.Element {
   const { p, ui, running } = props
   const s = ui.spec
+  const lesson = ui.lesson
   const stopped = !running && !s.wait && PracticeCounts.hits(ui.counts) > 0
   return (
     <div class="practice-panel__deck">
-      <div class="practice-panel__lane">{stopped ? <Result ui={ui} onCopy={() => p.onCopy()} /> : <Lane p={p} ui={ui} running={running} />}</div>
+      <div class="practice-panel__lane">
+        {lesson !== null && <LessonLine lesson={lesson} />}
+        <div class="practice-panel__view">
+          {stopped || lesson?.done === true ? <Result ui={ui} onCopy={() => p.onCopy()} /> : <Lane p={p} ui={ui} running={running} />}
+        </div>
+      </div>
       <div class="practice-panel__keys">
+        {lesson !== null && (
+          <PracticeKey word={PracticeText.PREVIOUS} on={lesson.step > 1} latch={false} narrow description={PracticeText.PREVIOUS_NAME} onClick={() => p.onStep(-1)} />
+        )}
         <PracticeKey word={PracticeText.WAIT} on={s.wait} description={PracticeText.WAIT_NAME} onClick={() => p.onChange((x) => ({ ...x, wait: !x.wait }))} />
         <PracticeKey
           word={PracticeText.speed(s.speed)}
@@ -127,14 +140,20 @@ function PracticeDeck(props: { p: PracticeActions; ui: PracticeUi; running: bool
           description={PracticeText.speedName(s.speed, ui.bpm)}
           onClick={() => p.onChange((x) => ({ ...x, speed: PracticeSpec.SPEEDS[(PracticeSpec.SPEEDS.indexOf(x.speed) + 1) % PracticeSpec.SPEEDS.length]! }))}
         />
-        <PracticeKey
-          word={PracticeText.loop(s.bars)}
-          on
-          latch={false}
-          description={PracticeText.loopName(s.bars)}
-          onClick={() => p.onChange((x) => ({ ...x, bars: LOOPS[(LOOPS.indexOf(x.bars) + 1) % LOOPS.length]! }))}
-        />
+        {/* A lesson's step plays its whole pattern: ‹ and › take LOOP's room. */}
+        {lesson === null && (
+          <PracticeKey
+            word={PracticeText.loop(s.bars)}
+            on
+            latch={false}
+            description={PracticeText.loopName(s.bars)}
+            onClick={() => p.onChange((x) => ({ ...x, bars: LOOPS[(LOOPS.indexOf(x.bars) + 1) % LOOPS.length]! }))}
+          />
+        )}
         <PracticeKey word={PracticeText.BACKING} on={s.backing} description={PracticeText.BACKING_NAME} onClick={() => p.onChange((x) => ({ ...x, backing: !x.backing }))} />
+        {lesson !== null && (
+          <PracticeKey word={PracticeText.NEXT} on={lesson.step < lesson.steps} latch={false} narrow description={PracticeText.NEXT_NAME} onClick={() => p.onStep(1)} />
+        )}
       </div>
     </div>
   )
@@ -230,19 +249,41 @@ function Lane(props: { p: PracticeActions; ui: PracticeUi; running: boolean }): 
   )
 }
 
-/** Stopped after playing: the share in time large, the counts, the pad most often off in orange. COPY puts how it went on the clipboard. */
+/** A lesson's step over the lane: its title and tip, and the clean passes still to play (or that it is done). */
+function LessonLine(props: { lesson: LessonPlace }): JSX.Element {
+  const { lesson } = props
+  return (
+    <div class="practice-lesson">
+      <span class="practice-lesson__step">{[lesson.title, lesson.tip].filter((t) => t !== null).join(' · ').toUpperCase()}</span>
+      <span class="practice-lesson__togo">
+        {(lesson.done ? PracticeText.LESSON_DONE.slice(0, PracticeText.LESSON_DONE.indexOf(':')) : PracticeText.toGo(lesson.passesToGo)).toUpperCase()}
+      </span>
+    </div>
+  )
+}
+
+/**
+ * Stopped after playing: the share in time large, the counts, the pad most
+ * often off in orange; in a lesson, each step's share in time ("1 94% ✓ · 2
+ * 71% · 3 –"). COPY puts how it went on the clipboard.
+ */
 function Result(props: { ui: PracticeUi; onCopy(): void }): JSX.Element {
   const { ui } = props
   const n = ui.counts
   const hits = PracticeCounts.hits(n)
   const worst = ui.worst
+  const lesson = ui.lesson
   return (
-    <div class="practice-result">
+    // Under a lesson's line the room is shorter: the share in time smaller, the lines closer.
+    <div class={`practice-result${lesson !== null ? ' is-lesson' : ''}`}>
       <div class="practice-result__text" role="status">
         <span class="practice-result__percent">{PracticeText.result(PracticeCounts.percent(n)).toUpperCase()}</span>
         <span class="practice-result__counts">
           {(PracticeText.counts(hits, n.onTime, n.early, n.late, n.missed, n.extra) + ' · ' + PracticeText.passes(n.passes)).toUpperCase()}
         </span>
+        {lesson !== null && (
+          <span class="practice-result__steps">{PracticeText.steps(lesson.records.map((r) => (r === null ? null : ([r.percent, r.done] as const))))}</span>
+        )}
         {worst !== null && <span class="practice-result__worst">{PracticeText.worst(ui.names.get(worst[0]) ?? '', worst[1]).toUpperCase()}</span>}
       </div>
       <PracticeKey word={PracticeText.COPY_REPORT} sub={PracticeText.COPY_REPORT_SUB} on latch={false} description={PracticeText.COPY_REPORT_NAME} wide onClick={props.onCopy} />
@@ -253,7 +294,8 @@ function Result(props: { ui: PracticeUi; onCopy(): void }): JSX.Element {
 /**
  * A key on the panel's dark screen: its [word] (and [sub] under it); a latch
  * ([latch]: WAIT, BACKING) filled orange while [on], a switch for screen
- * readers; a stepping key (the speed, the loop) outlined.
+ * readers; a stepping key (the speed, the loop, ‹ ›) outlined, dimmed when
+ * not [on]; [narrow]: ‹ and ›, at 0.6 of a key.
  */
 function PracticeKey(props: {
   word: string
@@ -262,17 +304,21 @@ function PracticeKey(props: {
   description: string
   latch?: boolean
   wide?: boolean
+  narrow?: boolean
   onClick(): void
 }): JSX.Element {
   const latch = props.latch ?? true
   const filled = latch && props.on
+  // A stepping key that can't step (‹ on the first step) stays, dimmed.
+  const dim = !latch && !props.on
   return (
     <button
       type="button"
       role={latch ? 'switch' : undefined}
       aria-checked={latch ? props.on : undefined}
+      aria-disabled={dim ? true : undefined}
       aria-label={props.description}
-      class={`practice-key${filled ? ' is-on' : ''}${props.wide ? ' practice-key--wide' : ''}`}
+      class={`practice-key${filled ? ' is-on' : ''}${dim ? ' is-dim' : ''}${props.wide ? ' practice-key--wide' : ''}${props.narrow ? ' practice-key--narrow' : ''}`}
       onClick={() => props.onClick()}
     >
       <span class="practice-key__word" aria-hidden="true">

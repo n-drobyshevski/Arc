@@ -1,5 +1,5 @@
 /* LivePractice.kt's look: the panel on the display's dark screen (STEP's, StepPanel.css: its chips and ✕), its
- * header (▶ / ■, PRACTICE A · 01, how it goes, ✕), the lane or the result, and the keys' row. */
+ * header (▶ / ■, PRACTICE A · 01 or STEP 2/4, how it goes, ✕), a lesson's line, the lane or the result, and the keys' row. */
 
 .practice-panel {
   display: flex;
@@ -36,7 +36,13 @@
 }
 
 .practice-panel__deck { display: flex; flex-direction: column; gap: 6px; }
-.practice-panel__lane { height: 96px; min-width: 0; }
+.practice-panel__lane { height: 96px; min-width: 0; display: flex; flex-direction: column; }
+.practice-panel__view { flex: 1 1 0; min-height: 0; min-width: 0; }
+
+/* A lesson's step over the lane: its title and tip, and the clean passes to go in orange; 18 high. */
+.practice-lesson { flex: none; display: flex; align-items: center; gap: 8px; height: 18px; font-size: 10px; letter-spacing: 0.04em; }
+.practice-lesson__step { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.practice-lesson__togo { flex: none; color: var(--signal); white-space: nowrap; }
 
 .practice-lane { display: flex; height: 100%; min-width: 0; }
 .practice-lane__names { flex: none; width: 52px; display: flex; flex-direction: column; }
@@ -65,6 +71,11 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.practice-result__steps { font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Under a lesson's line: the share in time smaller, the lines closer, the counts on one line. */
+.practice-result.is-lesson .practice-result__text { gap: 0; }
+.practice-result.is-lesson .practice-result__percent { font-size: 17px; }
+.practice-result.is-lesson .practice-result__counts { -webkit-line-clamp: 1; }
 .practice-result__worst { font-size: 11px; color: var(--signal); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .practice-panel__keys { display: flex; gap: 6px; height: 40px; }
@@ -85,6 +96,8 @@
 }
 .practice-key.is-on { background: var(--signal); border-color: var(--signal); color: var(--on-signal); }
 .practice-key--wide { flex: none; width: 76px; height: 40px; }
+.practice-key--narrow { flex: 0.6 1 0; }
+.practice-key.is-dim { color: color-mix(in srgb, var(--display-dim) 50%, transparent); cursor: default; }
 .practice-key__word { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; line-height: 1.1; white-space: nowrap; }
 .practice-key__sub { font-size: 9px; line-height: 1.1; color: var(--display-dim); }
 .practice-key.is-on .practice-key__sub { color: var(--on-signal); }

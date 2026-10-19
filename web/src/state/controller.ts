@@ -521,6 +521,7 @@ export class ArcController {
       shapeOf: (pad, keys) => this.shapeFor({ group: Math.floor(pad / 12), offset: pad % 12 }, keys),
       noteNames: () => this.deps.settings.settings.keysNames,
       padName: (pad) => this.mirrorName(pad),
+      practiceStarted: () => this.showPracticePads(),
       beatBlocks: () => this.beatBlocks(),
       claudeAnswered: () => this.stopWaitingForClaude(),
       applyBeatFx: (fx, entry) => this.applyBeatFx(fx, entry),
@@ -3287,14 +3288,23 @@ export class ArcController {
 
   // ---------- PRACTICE: play along with a pattern, Live's pads lit ahead of each hit (an addition) ----------
 
-  /**
-   * PRACTICE on [spec] (PatternDesk.practise): once it starts, Live shows that
-   * group's pads (one group, PADS), as Kotlin's startPractice sets them.
-   */
+  /** PRACTICE on [spec] (PatternDesk.practise): once it starts, Live shows that group's pads ([showPracticePads]). */
   practise(spec: PracticeSpec): void {
-    if (!this.pattern.practise(spec)) return
+    this.pattern.practise(spec)
+  }
+
+  /** A practice started (each lesson step too): Live shows one group's pads (one group, PADS), as Kotlin's startPractice sets them. */
+  private showPracticePads(): void {
     const s = this.settingsSignal.peek()
     if (!s.liveOneGroup || s.liveKeys) this.changeSettings((x) => ({ ...x, liveOneGroup: true, liveKeys: false }))
+  }
+
+  /**
+   * IMPORT AND PRACTISE: practice on what the last import placed, in the scene it selected: a card with a lesson runs
+   * its steps from the first, else the first of its groups with pad hits at 75% (PatternDesk.practiseImport).
+   */
+  practiseImport(): void {
+    this.pattern.practiseImport(PRACTICE_START_SPEED)
   }
 
   /** Practice from Claude's page: [pick]'s group ([group] for a pattern; for the scene or the chain, the scene's first group with pad hits). */

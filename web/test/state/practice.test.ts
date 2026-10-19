@@ -1,20 +1,25 @@
 // PRACTICE in the controller (ArcController.kt's PRACTICE section, state/pattern.ts): a web addition, as Kotlin has no
 // test of it. A practice plays the scene from a bar counted in with the player's hits taken out, at its own speed, on
 // one group's pads; a press is scored by when it is heard (in WAIT, by whether the step waits for it); ■ keeps the
-// counts, ✕ puts the scene back, RECORD ends it, and COPY puts how it went on the clipboard.
+// counts, ✕ puts the scene back, RECORD ends it, and COPY puts how it went on the clipboard. IMPORT AND PRACTISE
+// practises what the last IMPORT placed: a card's lesson a step at a time (four clean passes open the next, ‹ › change
+// step, each step's record kept for the result and the report).
 import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ProjectPatterns } from '../../src/core/features/pattern'
-import { physicalPad } from '../../src/core/features/padNotes'
-import { Practice, practiceSpec } from '../../src/core/features/practice'
+import { physicalPad, type PhysicalPad } from '../../src/core/features/padNotes'
+import { Practice, PracticeCounts, practiceSpec } from '../../src/core/features/practice'
 import { PracticeText } from '../../src/core/text/practiceText'
 import { memoryStorage } from '../../src/platform/storage/settings'
 import { disposeAll, liveHarness, until, type LiveHarness } from './liveHarness'
 
 let clockSpy: { mockRestore(): void } | null = null
+// How far the clock is ahead of the real one (a lesson's passes move it on, as playing them would).
+let shift = 100_000
 beforeEach(() => {
   const real = performance.now.bind(performance)
-  clockSpy = vi.spyOn(performance, 'now').mockImplementation(() => real() + 100_000)
+  shift = 100_000
+  clockSpy = vi.spyOn(performance, 'now').mockImplementation(() => real() + shift)
 })
 
 afterEach(() => {
@@ -180,5 +185,153 @@ describe('PRACTICE', () => {
       PracticeText.reportPlain(PracticeText.counts(0, 0, 0, 0, 0, 0), 0, null),
       PracticeText.REPORT_ASK,
     ])
+  })
+})
+
+/** Live on, nothing recorded. */
+async function liveOn(): Promise<LiveHarness> {
+  const h = await liveHarness({ storage: memoryStorage(ORDER) })
+  await h.c.connect()
+  h.c.setLive(true)
+  await until(h, (s) => s.mirror !== null && !s.mirror.loading && !s.busy && s.mirror.offline == null)
+  await vi.waitFor(() => expect(h.c.pattern.ui.value.project).toBe(1))
+  return h
+}
+
+const A7 = physicalPad(0, 9)
+const A9 = physicalPad(0, 11)
+const LESSON = [
+  'ARC BEAT 1',
+  'name Lesson beat',
+  'lesson Kick alone | A7 | 50 | Count out loud',
+  'lesson Add the snare | A7 A9 | 75',
+  '[A] bars 1',
+  'A7 kick  | X... .... X... .... |',
+  'A9 snare | .... X... .... X... |',
+].join('\n')
+
+// Where the practice on is heard from (tick 0), set by [playClean] from its first pass.
+let zero = 0
+
+/** The practice on, from pass [from] (0: heard from now) to [to]: its hits on [pads] each played in time, a frame at each pass's end. */
+async function playClean(h: LiveHarness, pads: Record<number, PhysicalPad>, from: number, to: number): Promise<void> {
+  const p = h.c.pattern
+  const bpm = h.liveAudio.plans.at(-1)!.bpm
+  if (from === 0) {
+    zero = now()
+    h.liveAudio.runAt(zero, bpm)
+  }
+  const ui = p.practice.value!
+  const length = ui.bars * 384
+  const hits = Object.entries(pads)
+    .flatMap(([o, pad]) => ProjectPatterns.group(p.patternsNow, pad.group).notes.filter((n) => n.offset === Number(o)).map((n) => [n.tick, pad] as const))
+    .sort((a, b) => a[0] - b[0])
+  for (let pass = from; pass < to; pass++) {
+    for (const [tick, pad] of hits) {
+      const at = zero + Practice.msOf(pass * length + tick, bpm)
+      // The clock gets to the press: a press stamped later than now is taken as now.
+      shift += Math.max(at - now(), 0)
+      await h.c.playPad(pad, true, false, at)
+      h.c.releasePad(pad, at)
+    }
+    p.practiceFrame(zero + Practice.msOf((pass + 1) * length, bpm))
+  }
+}
+
+describe('IMPORT AND PRACTISE', () => {
+  it("practises what the last IMPORT placed: its first group with pad hits, at 75%; another practice isn't a lesson", async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    // Nothing imported yet: nothing to practise.
+    h.c.practiseImport()
+    expect(p.practice.value).toBeNull()
+    await h.c.receiveBeat(['ARC BEAT 1', 'name Four', '[B]', 'B7 | X... X... X... X... |'].join('\n'))
+    p.importBeat(false)
+    h.c.practiseImport()
+    const ui = p.practice.value!
+    expect(ui.spec.group).toBe(1)
+    expect(ui.spec.speed).toBe(75)
+    expect(ui.lesson).toBeNull()
+    expect(h.c.settings.value.liveOneGroup).toBe(true)
+  })
+
+  it("a card's lesson runs a step at a time: its pads and speed, ‹ › change step, four clean passes open the next", async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    await h.c.receiveBeat(LESSON)
+    p.importBeat(false)
+    h.c.practiseImport()
+    let ui = p.practice.value!
+    expect(ui.lesson).toEqual({ step: 1, steps: 2, title: 'Kick alone', tip: 'Count out loud', passesToGo: 4, records: [null, null], done: false })
+    expect([...ui.spec.pads!]).toEqual([9])
+    expect(ui.spec.speed).toBe(50)
+    expect(ui.pads).toEqual([9])
+    // ›: the next step, its pads and speed; past the last, nothing.
+    p.lessonStep(1)
+    ui = p.practice.value!
+    expect(ui.lesson!.step).toBe(2)
+    expect([...ui.spec.pads!].sort()).toEqual([11, 9].sort())
+    expect(ui.spec.speed).toBe(75)
+    p.lessonStep(1)
+    expect(p.practice.value).toBe(ui)
+    // ‹: back to the first, nothing played so nothing kept.
+    p.lessonStep(-1)
+    expect(p.practice.value!.lesson!.step).toBe(1)
+    expect(p.practice.value!.lesson!.records).toEqual([null, null])
+
+    // Two clean passes: two to go.
+    await playClean(h, { 9: A7 }, 0, 2)
+    expect(p.practice.value!.lesson!.passesToGo).toBe(2)
+    // Four: the step is done, the next opens with a toast.
+    await playClean(h, { 9: A7 }, 2, 4)
+    expect(h.toasts.map((t) => t.text)).toContain(PracticeText.stepDone(1, 'Add the snare'))
+    await vi.waitFor(() => expect(p.practice.value!.lesson!.step).toBe(2))
+    expect(p.practice.value!.lesson!.records[0]).toEqual({ percent: 100, passes: 4, done: true, worst: null })
+    expect(p.practice.value!.spec.speed).toBe(75)
+
+    // The last step's clean passes: the lesson is done and it stops, the result listing every step.
+    await playClean(h, { 9: A7, 11: A9 }, 0, 4)
+    expect(h.toasts.at(-1)?.text).toBe(PracticeText.LESSON_DONE)
+    await vi.waitFor(() => expect(p.ui.value.phase).toBe('STOPPED'))
+    ui = p.practice.value!
+    expect(ui.lesson!.done).toBe(true)
+    expect(ui.lesson!.records.map((r) => r?.done)).toEqual([true, true])
+    expect(PracticeCounts.percent(ui.counts)).toBe(100)
+
+    // COPY: each step with its share in time and passes, for Claude.
+    const copied: string[] = []
+    ;(h.deps as { clipboard?: unknown }).clipboard = { writeText: async (t: string) => void copied.push(t) }
+    await h.c.copyPracticeReport()
+    const r0 = ui.lesson!.records[0]!
+    const r1 = ui.lesson!.records[1]!
+    expect(copied[0]!.split('\n')).toEqual([
+      // Live's tempo, the last step's at 75%.
+      PracticeText.reportLessonHead('Lesson beat', Math.round((h.liveAudio.plans.at(-1)!.bpm * 100) / 75)),
+      PracticeText.reportStep(1, 'Kick alone', 'A7', 50, PracticeText.reportResult(100, r0.passes, true, null)),
+      PracticeText.reportStep(2, 'Add the snare', 'A7 A9', 75, PracticeText.reportResult(100, r1.passes, true, null)),
+      PracticeText.REPORT_ASK,
+    ])
+
+    // A practice from elsewhere ends the lesson.
+    h.c.practise(practiceSpec(0))
+    expect(p.practice.value!.lesson).toBeNull()
+  })
+
+  it("a step left with hits keeps its record; one never played reads 'not played yet'; ✕ ends the lesson", async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    await h.c.receiveBeat(LESSON)
+    p.importBeat(false)
+    h.c.practiseImport()
+    await playClean(h, { 9: A7 }, 0, 1)
+    p.lessonStep(1)
+    const rec = p.practice.value!.lesson!.records[0]!
+    expect(rec).toEqual({ percent: 100, passes: 1, done: false, worst: null })
+    p.lessonStep(-1)
+    const report = p.practiceReport()!.split('\n')
+    expect(report[2]).toBe(PracticeText.reportStep(2, 'Add the snare', 'A7 A9', 75, PracticeText.REPORT_NOT_PLAYED))
+    p.endPractice()
+    h.c.practise(practiceSpec(0))
+    expect(p.practice.value!.lesson).toBeNull()
   })
 })

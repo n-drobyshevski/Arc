@@ -1563,6 +1563,7 @@ function practiceUi(c: ArcController): PracticeActions | null {
     onStop: () => p.practiceStop(),
     onClose: () => p.endPractice(),
     onChange: (change) => p.changePractice(change),
+    onStep: (delta) => p.lessonStep(delta),
     onCopy: () => void c.copyPracticeReport(),
   }
 }
@@ -1654,6 +1655,7 @@ function LiveBeatSheet(props: { view: NavView }): JSX.Element | null {
         stopPickPreview()
         p.importBeat(setTempo, soundPads, picked, applyFx, shapePads, setChain, replaceScenes && beat !== null && beat.replace !== null)
       }}
+      onPractise={() => c.practiseImport()}
       replaceScenes={replaceScenes}
       onReplaceScenes={(on) => c.setReplaceScenes(on)}
       onCopyProblems={(problems) => void c.copyProblems(problems)}

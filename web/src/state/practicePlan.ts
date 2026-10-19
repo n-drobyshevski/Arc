@@ -7,8 +7,7 @@
 // - The data classes are readonly interfaces; Kotlin's Pairs are tuples
 //   (upcoming's [target, ticks], worst's [offset, mark]) and its Map of names
 //   a ReadonlyMap.
-// - PracticeUi.lesson, LessonPlace and LessonRecord come with a card's lesson
-//   lines (ArcController's LessonRun), not ported yet.
+// - LessonRecord.worst is a [name, mark] tuple or null.
 // - PracticeUi.speed is spec.speed, read where it is needed.
 
 import type { HitMark, PracticeCounts, PracticeSpec, PracticeTarget } from '../core/features/practice'
@@ -21,7 +20,8 @@ import { Pattern, ProjectPatterns } from '../core/features/pattern'
  * names for the lane ([names]), the tempo it plays at ([bpm], spec.speed
  * percent of Live's), the bars it loops ([bars]), whether it runs, the counts
  * so far and the pad most often off ([worst]); in WAIT, the pads the step
- * waits for ([waiting]) and which step of how many.
+ * waits for ([waiting]) and which step of how many; the step a lesson card
+ * runs ([lesson]), null outside one.
  */
 export interface PracticeUi {
   readonly spec: PracticeSpec
@@ -36,6 +36,31 @@ export interface PracticeUi {
   readonly waiting: ReadonlySet<number>
   readonly waitStep: number
   readonly waitSteps: number
+  /** The step a lesson card runs (from 1), of how many, its title; null outside one. */
+  readonly lesson: LessonPlace | null
+}
+
+/**
+ * Where a lesson is: [step] (from 1) of [steps], called [title], its [tip] if
+ * any, and the clean passes that open the next; each step's [records] so far
+ * (null: not played), and whether every step is [done].
+ */
+export interface LessonPlace {
+  readonly step: number
+  readonly steps: number
+  readonly title: string
+  readonly tip: string | null
+  readonly passesToGo: number
+  readonly records: readonly (LessonRecord | null)[]
+  readonly done: boolean
+}
+
+/** How a lesson's step went the last time it played: the [percent] in time over [passes], whether it was [done] (its clean passes), the pad most often off by name. */
+export interface LessonRecord {
+  readonly percent: number
+  readonly passes: number
+  readonly done: boolean
+  readonly worst: readonly [string, HitMark] | null
 }
 
 /**

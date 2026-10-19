@@ -43,8 +43,8 @@ import { ClockFollow, TapTempo, Tempo, type Beat, type BeatGrid } from '../core/
 import type { MidiEvent } from '../core/protocol/midiInput'
 import { ArpSettings, type ArpNote, type ArpOrder } from '../core/features/arp'
 import { OutputDelay } from '../core/features/outputDelay'
-import { Practice, PracticeCounts, PracticeScore, PracticeWait, type PracticeSpec, type PracticeTarget } from '../core/features/practice'
-import { BeatCards, type BeatCard, type CardFx, type CardPad, type CardRead } from '../core/features/beatCard'
+import { Practice, PracticeCounts, PracticeScore, PracticeWait, practiceSpec, type HitMark, type PracticeSpec, type PracticeTarget } from '../core/features/practice'
+import { BeatCards, LESSON_MAX, type BeatCard, type CardFx, type CardPad, type CardRead, type LessonStep } from '../core/features/beatCard'
 import type { PadTarget } from '../core/features/liveMirror'
 import { OfflinePadSettings } from '../core/features/offlinePadSettings'
 import { OfflinePads } from '../core/features/offlinePads'
@@ -77,7 +77,7 @@ import {
 import { ARP_PRESSURE_MS, ARP_UI, ArpDesk, type ArpUi } from './arpPlan'
 import { applyBeat, beatImportUi, beatImported, beatShare, beatShareChain, isBefore, padShapes, type BeatApplied, type BeatBlocks, type BeatImportUi, type BeatShare, type ShareParts } from './beatPlan'
 import { ClipMode, PadStage, SCENE_UI, SceneDesk, type SceneUi } from './scenePlan'
-import { keypadOrder, type PracticeFrame, type PracticeUi } from './practicePlan'
+import { keypadOrder, practiceGroup, type LessonRecord, type PracticeFrame, type PracticeUi } from './practicePlan'
 import { CORRECT_SHOWN_MS, STEP_UI, StepDesk, arpTakesPress, auditionMs, stepOpens, stepWord, type StepNote, type StepUi } from './stepPlan'
 import type { Store } from './store'
 import type { UiState } from './types'
@@ -100,6 +100,9 @@ const CLICK_WATCH_MS = 500
 
 /** WAIT's lane shows this many steps ahead. */
 const PRACTICE_WAIT_AHEAD = 6
+
+/** A lesson's step opens the next after this many clean passes in a row. */
+export const LESSON_CLEAN_PASSES = 4
 
 /** A pick waiting takes over once the playhead heard is this far past its tick (Kotlin SCENE_GRACE_NS). */
 const SCENE_GRACE_MS = 100
@@ -132,6 +135,25 @@ interface PracticeRun {
   wait: PracticeWait | null
 }
 
+/**
+ * A lesson going on: the card's [name] and [steps], the step on ([at], from
+ * 0), each step's record so far, whether every step is [done], and [moving]
+ * while the next step is on its way (so a pass closing meanwhile counts once).
+ */
+class LessonRun {
+  at = 0
+  readonly records: (LessonRecord | null)[]
+  done = false
+  moving = false
+
+  constructor(
+    readonly name: string | null,
+    readonly steps: readonly LessonStep[],
+  ) {
+    this.records = steps.map(() => null)
+  }
+}
+
 /** Whether [a] and [b] practise the same (Kotlin's data class equality: the pads by what is in them). */
 function sameSpec(a: PracticeSpec, b: PracticeSpec): boolean {
   if (a.group !== b.group || a.bars !== b.bars || a.speed !== b.speed || a.wait !== b.wait || a.backing !== b.backing) return false
@@ -153,6 +175,8 @@ export interface PatternHost {
   noteNames?(): NoteNames
   /** [pad]'s sound name as Live shows it (a beat card's rows), or null. */
   padName?(pad: PhysicalPad): string | null
+  /** A practice started: Live shows its group's pads (one group, PADS), as Kotlin's startPractice sets them. */
+  practiceStarted?(): void
   /** A beat card's FX, SOUNDS, PAD SHAPING and SILENT PADS blocks as the pads are now (the controller knows them). */
   beatBlocks?(): BeatBlocks
   /** A card came in, or was imported: Claude's reply is here, the Claude page stops waiting for it (the controller's claudeWaiting). */
@@ -1715,13 +1739,16 @@ export class PatternDesk {
    * and the pattern plays from a bar counted in with the player's hits taken
    * out, the rest of the scene underneath (Practice.patterns). Nothing is
    * recorded. A toast, and no practice, when the group has no pad hits there.
-   * True when it started (web: the controller then shows one group's pads,
-   * as Kotlin's practise changes the settings itself).
+   * A lesson going on ends. True when it started (web: Live then shows one
+   * group's pads through host.practiceStarted, as Kotlin's startPractice
+   * changes the settings itself).
    */
   practise(spec: PracticeSpec): boolean {
+    this.lessonRun = null
     return this.startPractice(spec)
   }
 
+  /** [practise], a lesson going on kept (its step's spec, or the step's settings changed). */
   private startPractice(spec: PracticeSpec): boolean {
     const g = Math.min(Math.max(spec.group, 0), 3)
     const pat = ProjectPatterns.group(this.current, g)
@@ -1749,6 +1776,7 @@ export class PatternDesk {
       score: new PracticeScore(targets, length, bpm),
       wait: spec.wait ? new PracticeWait(targets) : null,
     }
+    this.host.practiceStarted?.()
     this.refreshPlan()
     this.showPractice()
     if (!spec.wait) this.practicePlay()
@@ -1761,6 +1789,7 @@ export class PatternDesk {
     if (run === null) return
     const next = change(run.spec)
     if (sameSpec(next, run.spec)) return
+    this.keepLessonRecord()
     this.startPractice(next)
   }
 
@@ -1768,6 +1797,8 @@ export class PatternDesk {
   practicePlay(): void {
     const run = this.practiceRun
     if (run === null) return
+    this.keepLessonRecord()
+    if (this.lessonRun !== null) this.lessonRun.moving = false
     run.score = new PracticeScore(run.targets, run.length, run.bpm)
     run.wait = run.spec.wait ? new PracticeWait(run.targets) : null
     if (!run.spec.wait) {
@@ -1789,6 +1820,7 @@ export class PatternDesk {
     if (this.practiceRun === null) return
     if (this.running()) this.stop()
     this.practiceRun = null
+    this.lessonRun = null
     this._practice.value = null
     this.refreshPlan()
   }
@@ -1844,33 +1876,137 @@ export class PatternDesk {
     if (tick === null) return { tick: 0, upcoming: [], counts: run.score.counts }
     const passes = run.score.counts.passes
     run.score.advance(tick)
-    if (run.score.counts.passes !== passes) this.showPractice()
+    if (run.score.counts.passes !== passes) {
+      this.showPractice()
+      this.lessonPassed()
+    }
     return { tick, upcoming: run.score.upcoming(tick), counts: run.score.counts }
   }
 
+  private lessonRun: LessonRun | null = null
+
+  /** The card and where the last IMPORT put it (IMPORT AND PRACTISE); null when it put nothing. */
+  private lastImport: { readonly applied: BeatApplied; readonly card: BeatCard } | null = null
+
   /**
-   * COPY HOW IT WENT: a short report of the practice on, for Claude: the
-   * counts, the passes and the pad most often off. Null when no practice is
-   * on. (Kotlin's practiceReport; a lesson's report comes with its lines.)
+   * IMPORT AND PRACTISE: practice on what the last import placed, in the
+   * scene it selected: a card with a lesson runs its steps from the first
+   * ([LessonRun]), else the first of its groups with pad hits
+   * (practiceGroup), at [speed].
+   */
+  practiseImport(speed: number): void {
+    const last = this.lastImport
+    if (last === null) return
+    const lesson = last.card.lesson ?? []
+    if (lesson.length > 0) {
+      this.lessonRun = new LessonRun(last.card.name, lesson.slice(0, LESSON_MAX))
+      this.startLessonStep(0)
+      return
+    }
+    const first = last.applied.placed[0]?.[0] ?? 0
+    this.practise(practiceSpec(practiceGroup(this.current, first), { speed }))
+  }
+
+  /** A lesson's step [i] (from 0, kept in range): practice on its group's pattern in the scene showing, its pads, at its speed. */
+  private startLessonStep(i: number): void {
+    const l = this.lessonRun
+    if (l === null) return
+    l.at = Math.min(Math.max(i, 0), l.steps.length - 1)
+    l.moving = false
+    const s = l.steps[l.at]!
+    this.startPractice(practiceSpec(s.group, { pads: s.pads === null ? null : new Set(s.pads), speed: s.speed }))
+  }
+
+  /** PRACTICE's ‹ and ›: the lesson's step before or after, its record of how it went kept. */
+  lessonStep(delta: number): void {
+    const l = this.lessonRun
+    if (l === null) return
+    const next = Math.min(Math.max(l.at + delta, 0), l.steps.length - 1)
+    if (next === l.at) return
+    this.keepLessonRecord()
+    this.startLessonStep(next)
+  }
+
+  /** How the lesson's step on went, kept as its record once it has hits ([done]: its clean passes were played). */
+  private keepLessonRecord(done = false): void {
+    const l = this.lessonRun
+    const run = this.practiceRun
+    if (l === null || run === null) return
+    const counts = run.wait?.counts ?? run.score.counts
+    if (PracticeCounts.hits(counts) === 0 && !done) return
+    const old = l.records[l.at]
+    l.records[l.at] = { percent: PracticeCounts.percent(counts), passes: counts.passes, done: done || old?.done === true, worst: this.worstNamed(run) }
+  }
+
+  // The pad most often off in [run], by its name, and how.
+  private worstNamed(run: PracticeRun): readonly [string, HitMark] | null {
+    const w = run.score.worst()
+    return w === null ? null : [run.names.get(w[0]) ?? LABELS[w[0]]!, w[1]]
+  }
+
+  /**
+   * A pass closed in a lesson's step: enough clean ones in a row open the
+   * next (LessonPlace.passesToGo); after the last, the lesson is done. The
+   * next step starts (or the transport stops) once the frame is drawn, as
+   * Kotlin's scope.launch.
+   */
+  private lessonPassed(): void {
+    const l = this.lessonRun
+    const run = this.practiceRun
+    if (l === null || run === null || l.moving || run.score.counts.cleanRun < LESSON_CLEAN_PASSES) return
+    l.moving = true
+    this.keepLessonRecord(true)
+    const step = l.at
+    if (step < l.steps.length - 1) {
+      this.host.toast(PracticeText.stepDone(step + 1, l.steps[step + 1]!.title))
+      this.host.deps.setTimeout(() => {
+        if (this.lessonRun === l && l.at === step) this.startLessonStep(step + 1)
+      }, 0)
+    } else {
+      l.done = true
+      this.host.toast(PracticeText.LESSON_DONE)
+      this.host.deps.setTimeout(() => {
+        if (this.lessonRun === l) this.practiceStop()
+      }, 0)
+    }
+  }
+
+  /**
+   * COPY HOW IT WENT: a short report of the practice on, for Claude: with a
+   * lesson, each step with its share in time, passes and the pad most often
+   * off; else the counts. Null when no practice is on.
    */
   practiceReport(): string | null {
     const run = this.practiceRun
     if (run === null) return null
     const t = PracticeText
-    const n = run.wait?.counts ?? run.score.counts
-    const w = run.score.worst()
-    const worst = w === null ? null : t.worst(run.names.get(w[0]) ?? LABELS[w[0]]!, w[1])
-    return [
-      t.reportHead(run.place, Math.round(run.bpm), run.spec.speed),
-      t.reportPlain(t.counts(PracticeCounts.hits(n), n.onTime, n.early, n.late, n.missed, n.extra), n.passes, worst),
-      t.REPORT_ASK,
-    ].join('\n')
+    const l = this.lessonRun
+    const worstText = (w: readonly [string, HitMark] | null): string | null => (w === null ? null : t.worst(w[0], w[1]))
+    if (l === null) {
+      const n = run.wait?.counts ?? run.score.counts
+      return [
+        t.reportHead(run.place, Math.round(run.bpm), run.spec.speed),
+        t.reportPlain(t.counts(PracticeCounts.hits(n), n.onTime, n.early, n.late, n.missed, n.extra), n.passes, worstText(this.worstNamed(run))),
+        t.REPORT_ASK,
+      ].join('\n')
+    }
+    this.keepLessonRecord()
+    const lines = [t.reportLessonHead(l.name, Math.round(this.bpm()))]
+    l.steps.forEach((s, i) => {
+      const r = l.records[i] ?? null
+      const result = r === null ? t.REPORT_NOT_PLAYED : t.reportResult(r.percent, r.passes, r.done, worstText(r.worst))
+      lines.push(t.reportStep(i + 1, s.title, BeatCards.lessonPads(s), s.speed, result))
+    })
+    lines.push(t.REPORT_ASK)
+    return lines.join('\n')
   }
 
   private showPractice(): void {
     const run = this.practiceRun
     if (run === null) return
     const w = run.wait
+    const counts = w?.counts ?? run.score.counts
+    const l = this.lessonRun
     this._practice.value = {
       spec: run.spec,
       place: run.place,
@@ -1879,11 +2015,23 @@ export class PatternDesk {
       bpm: Math.round(run.bpm),
       bars: Math.trunc(run.length / Seq.TICKS_PER_BAR),
       running: w === null && this.running(),
-      counts: w?.counts ?? run.score.counts,
+      counts,
       worst: run.score.worst(),
       waiting: w?.waiting ?? new Set(),
       waitStep: w?.step ?? 0,
       waitSteps: w?.steps.length ?? 0,
+      lesson:
+        l === null
+          ? null
+          : {
+              step: l.at + 1,
+              steps: l.steps.length,
+              title: l.steps[l.at]!.title,
+              tip: l.steps[l.at]!.tip,
+              passesToGo: Math.max(LESSON_CLEAN_PASSES - counts.cleanRun, 0),
+              records: [...l.records],
+              done: l.done,
+            },
     }
   }
 
@@ -1983,6 +2131,7 @@ export class PatternDesk {
     const ui = this._beat.peek()
     const card = ui?.read.card ?? null
     if (ui === null || card === null) return
+    this.lastImport = null
     let applied: BeatApplied | null = null
     // The sequencer as it was: UNDO is that one, once the sounds are back with it.
     const before = this.seq
@@ -1999,6 +2148,7 @@ export class PatternDesk {
       this.host.toast(ClaudeText.groupFull(a.fullGroup), true)
       return
     }
+    this.lastImport = { applied: a, card }
     this._beat.value = null
     this.host.claudeAnswered?.()
     if (setTempo && card.tempo !== null) this.setTempo(Tempo.round(card.tempo))

@@ -86,8 +86,8 @@ export interface BeatCard {
 
 /**
  * A step of a card's lesson (`lesson Kick alone | A7 | 50 | Count out loud`): its [title], the [group] and [pads]
- * (offsets; null: all the group's) the player plays, at [speed] percent of the tempo, and a [tip]. Arc on Android
- * runs it in PRACTICE; the web reads and writes it.
+ * (offsets; null: all the group's) the player plays, at [speed] percent of the tempo, and a [tip]. It is played on the
+ * first scene's pattern of that group.
  */
 export interface LessonStep {
   readonly title: string
