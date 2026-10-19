@@ -17,6 +17,8 @@ object TourText {
     const val LATER = "Later"
     const val NEXT = "Next"
     const val PLAY_IT = "Play it"
+    const val OFFLINE = "Without the EP-133"
+    const val OPEN_IT = "Open it"
 
     fun stepOf(n: Int, of: Int) = "Step $n of $of"
 
@@ -42,6 +44,18 @@ object TourText {
     const val BACKUP_HINT = "arc saves every sound and project on the EP-133 to the phone. Nothing on it is changed."
 
     const val NEEDS_MIDI = "Needs MIDI"
+
+    // Without the EP-133.
+    const val TOOLS_HEAD = "More tools"
+    const val TOOLS_HINT = "Tap the strip on the right for the view, Follow and pad numbering. Close it to go on."
+    const val GUIDE_HEAD = "EP-133 shortcuts"
+    const val GUIDE_HINT = "Tap GUIDE on the left for the EP-133's key combinations. Close it to go on."
+    const val SECTIONS_HEAD = "Backups"
+    const val SECTIONS_HINT = "Tap the tag at the top and pick Backups. Your backups and Import are there."
+    const val DEVICE_HERE = "Your EP-133 is connected."
+    const val TRY_PADS = "Try the pads"
+    const val CONNECT_NOW = "Connect and try the pads"
+    const val OFFLINE_NOTE = "Settings has Try arc again for when the EP-133 is here."
 
     const val DONE_HEAD = "That's the basics"
     const val DONE_HINT = "? names every control. GUIDE has the EP-133's own shortcuts, and the strip on the right has more tools."

@@ -10,12 +10,15 @@ class TourTextTest {
         TourText.WELCOME_HINT, TourText.WELCOME_STEPS, TourText.CONNECT_HINT, TourText.NEEDS_DEVICE,
         TourText.PAD_NOTE, TourText.HEAR_HINT, TourText.BACKUP_HINT, TourText.DONE_HINT, TourText.LATER_NOTE,
         SettingsText.TRY_AGAIN_NOTE, SettingsText.SHOW_NOTE, Strings.PLUG_IN_HINT,
+        TourText.TOOLS_HINT, TourText.GUIDE_HINT, TourText.SECTIONS_HINT, TourText.DEVICE_HERE, TourText.OFFLINE_NOTE,
     )
     private val labels = listOf(
         TourText.TITLE, TourText.WELCOME_SUB, TourText.RESUME_HEAD, TourText.START, TourText.CONTINUE, TourText.NOT_NOW,
         TourText.SKIP, TourText.LATER, TourText.NEXT, TourText.PLAY_IT, TourText.RESTORE_HEAD, TourText.FIRST_TIME,
         TourText.CONNECT_HEAD, TourText.ROW_MIDI, TourText.ROW_PLUGGED, TourText.ROW_CONNECTED, TourText.PAD_HEAD,
         TourText.HEAR_HEAD, TourText.BACKUP_HEAD, TourText.NEEDS_MIDI, TourText.DONE_HEAD,
+        TourText.OFFLINE, TourText.OPEN_IT, TourText.TOOLS_HEAD, TourText.GUIDE_HEAD, TourText.SECTIONS_HEAD,
+        TourText.TRY_PADS, TourText.CONNECT_NOW,
     )
 
     @Test

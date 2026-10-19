@@ -5,7 +5,9 @@ package dev.arc.ep133.features
  * place of the first-run guide overlay (an addition to the web version).
  *
  * Every step waits until the thing was done: the EP-133 connected, a pad
- * pressed on it lit here, a pad held here sounded, a backup saved. This is the
+ * pressed on it lit here, a pad held here sounded, a backup saved. Without
+ * the EP-133 (chosen on the welcome card, or where MIDI is missing) it shows
+ * what works offline instead: Live tools, the shortcut guide, Backups. This is the
  * tour's logic only, pure so both ports share it: which step shows, when one
  * counts as done, and what is kept. The overlay and the cards are the UI's.
  *
@@ -23,6 +25,10 @@ enum class TourStep(val id: String) {
     PAD("pad"),
     HEAR("hear"),
     BACKUP("backup"),
+    /** The offline path: Live tools, the EP-133 shortcut guide, Backups. */
+    TOOLS("tools"),
+    GUIDE("guide"),
+    SECTIONS("sections"),
     DONE("done"),
 }
 
@@ -52,6 +58,10 @@ data class TourSnapshot(
     val heard: Boolean = false,
     /** The web demo's simulated EP-133. */
     val demo: Boolean = false,
+    /** Live tools, the shortcut guide, Backups: open on screen now. */
+    val toolsOpen: Boolean = false,
+    val guideOpen: Boolean = false,
+    val onBackups: Boolean = false,
 )
 
 /** One run of the tour on screen: never stored. */
@@ -75,19 +85,26 @@ data class TourSession(
     val connectAcked: Boolean = false,
     /** Done was reached: it stays for the rest of the run. */
     val reachedDone: Boolean = false,
+    /** The run without the EP-133: the offline steps instead of the device's. */
+    val offline: Boolean = false,
 )
 
 enum class FirstRun { TOUR, COACH, NONE }
 
 object Tour {
-    /** The numbered steps, "Step n of 4". */
+    /** The numbered steps, "Step n of 4" (of 3 without the EP-133). */
     const val STEPS = 4
+    const val OFFLINE_STEPS = 3
 
     /** The coach marks Done tags: "?", the GUIDE tab and the more-tools strip. */
     val DONE_TAGS: Set<String> = setOf("top.help", "edge.guide", "side.more")
 
     /** The steps that are kept (WELCOME and DONE never are). */
-    private val KEPT = listOf(TourStep.RESTORE, TourStep.CONNECT, TourStep.MIDI, TourStep.PAD, TourStep.HEAR, TourStep.BACKUP)
+    private val KEPT = listOf(
+        TourStep.RESTORE, TourStep.CONNECT, TourStep.MIDI, TourStep.PAD, TourStep.HEAR, TourStep.BACKUP,
+        TourStep.TOOLS, TourStep.GUIDE, TourStep.SECTIONS,
+    )
+    private val OFFLINE = listOf(TourStep.TOOLS, TourStep.GUIDE, TourStep.SECTIONS)
 
     fun encode(p: TourProgress): String = KEPT.mapNotNull { s ->
         when (s) {
@@ -144,7 +161,8 @@ object Tour {
         if (!s.welcomed) return TourStep.WELCOME
         if (s.reachedDone) return TourStep.DONE
         if (!p.handled(TourStep.RESTORE) && s.openBackups == 0 && snap.canRestore && !snap.demo) return TourStep.RESTORE
-        if (!snap.midi) return if (p.handled(TourStep.MIDI)) TourStep.DONE else TourStep.MIDI
+        if (s.offline) return offlineStep(p)
+        if (!snap.midi) return if (p.handled(TourStep.MIDI)) offlineStep(p) else TourStep.MIDI
         val connectDone = TourStep.CONNECT in p.done
         if (!p.handled(TourStep.CONNECT) || (s.connectTickedNow && !s.connectAcked)) return TourStep.CONNECT
         if (!connectDone) return TourStep.DONE
@@ -153,6 +171,8 @@ object Tour {
         if (!p.handled(TourStep.BACKUP)) return TourStep.BACKUP
         return TourStep.DONE
     }
+
+    private fun offlineStep(p: TourProgress) = OFFLINE.firstOrNull { !p.handled(it) } ?: TourStep.DONE
 
     /**
      * Brings the run and the progress up to date with what the app shows now:
@@ -180,6 +200,9 @@ object Tour {
                 TourStep.PAD -> snap.hitAt != null && snap.hitAt > sess.stepAt
                 TourStep.HEAR -> sess.heardSince && !snap.heard
                 TourStep.BACKUP -> snap.backups > sess.stepBackups
+                TourStep.TOOLS -> snap.toolsOpen
+                TourStep.GUIDE -> snap.guideOpen
+                TourStep.SECTIONS -> snap.onBackups
                 else -> false
             }
             if (!ticks) return prog to sess
@@ -200,11 +223,20 @@ object Tour {
     /** Next on the Connect card once every row is ticked. */
     fun ackConnect(s: TourSession) = s.copy(connectAcked = true)
 
-    /** "Step n of 4", or null for the cards that aren't counted. */
+    /** "Without the EP-133" on the welcome card. */
+    fun goOffline(s: TourSession) = welcome(s).copy(offline = true)
+
+    /** "Try the pads": from the offline path to the device's steps. */
+    fun goDevice(s: TourSession) = s.copy(welcomed = true, offline = false, reachedDone = false, step = null)
+
+    /** How many steps this run counts. */
+    fun stepsFor(s: TourSession) = if (s.offline) OFFLINE_STEPS else STEPS
+
+    /** "Step n of 4" (or of 3, offline), or null for the cards that aren't counted. */
     fun number(step: TourStep): Int? = when (step) {
-        TourStep.CONNECT -> 1
-        TourStep.PAD -> 2
-        TourStep.HEAR -> 3
+        TourStep.CONNECT, TourStep.TOOLS -> 1
+        TourStep.PAD, TourStep.GUIDE -> 2
+        TourStep.HEAR, TourStep.SECTIONS -> 3
         TourStep.BACKUP -> 4
         else -> null
     }
@@ -221,11 +253,14 @@ object Tour {
         TourStep.CONNECT -> "top.connection"
         TourStep.PAD, TourStep.HEAR -> "live.pads"
         TourStep.BACKUP -> "top.backup"
+        TourStep.TOOLS -> "side.more"
+        TourStep.GUIDE -> "edge.guide"
+        TourStep.SECTIONS -> "top.sections"
         else -> null
     }
 
-    /** Only HEAR lets touches through to the page (the pads). */
-    fun passThrough(step: TourStep) = step == TourStep.HEAR
+    /** The steps done on the page itself: touches go through to it (the pads, the strip, the tab, the tag). */
+    fun passThrough(step: TourStep) = step == TourStep.HEAR || step in OFFLINE
 
     /** Done mentions Try arc again when a step that could be done was left. */
     fun laterNote(p: TourProgress, midi: Boolean): Boolean = midi && (

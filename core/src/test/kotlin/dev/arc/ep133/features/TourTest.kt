@@ -3,10 +3,13 @@ package dev.arc.ep133.features
 import dev.arc.ep133.features.TourStep.BACKUP
 import dev.arc.ep133.features.TourStep.CONNECT
 import dev.arc.ep133.features.TourStep.DONE
+import dev.arc.ep133.features.TourStep.GUIDE
 import dev.arc.ep133.features.TourStep.HEAR
 import dev.arc.ep133.features.TourStep.MIDI
 import dev.arc.ep133.features.TourStep.PAD
 import dev.arc.ep133.features.TourStep.RESTORE
+import dev.arc.ep133.features.TourStep.SECTIONS
+import dev.arc.ep133.features.TourStep.TOOLS
 import dev.arc.ep133.features.TourStep.WELCOME
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -39,6 +42,7 @@ class TourTest {
         assertEquals("connect,pad,~backup", Tour.encode(p))
         assertEquals(p, Tour.decode("connect,pad,~backup"))
         assertEquals(p, Tour.decode(" ~backup ,pad,welcome,nonsense,,connect,done"))
+        assertEquals("connect,~tools,sections", Tour.encode(Tour.decode("sections,~tools,connect")))
         assertEquals("", Tour.encode(TourProgress()))
         assertEquals(TourProgress(), Tour.decode(""))
         // Done wins over skipped.
@@ -76,24 +80,66 @@ class TourTest {
 
     @Test
     fun `done stays for the rest of the run`() {
-        val r = Run(snap = fresh.copy(midi = false))
+        val r = Run(snap = fresh)
         r.start()
-        assertEquals(MIDI, r.step())
         r.skip()
         assertEquals(DONE, r.step())
-        // MIDI showing up later doesn't bring the steps back in this run.
-        assertEquals(DONE, r.update { it.copy(midi = true) })
+        // The EP-133 showing up later doesn't bring the steps back in this run.
+        assertEquals(DONE, r.update { it.copy(connected = true) })
     }
 
     @Test
-    fun `without MIDI only the Needs MIDI card shows`() {
+    fun `without MIDI the Needs MIDI card leads to the offline steps`() {
         val r = Run(snap = fresh.copy(midi = false))
         r.start()
         assertEquals(MIDI, r.step())
         r.skip()
+        assertEquals(TOOLS, r.step())
+        r.skip(); r.skip(); r.skip()
         assertEquals(DONE, r.step())
-        assertEquals("~midi", Tour.encode(r.p))
+        assertEquals("~midi,~tools,~guide,~sections", Tour.encode(r.p))
         assertFalse(Tour.laterNote(r.p, midi = false))
+    }
+
+    @Test
+    fun `without the EP-133, each offline step waits until it was opened`() {
+        val r = Run(snap = fresh)
+        r.s = Tour.goOffline(r.s)
+        assertEquals(TOOLS, r.update())
+        assertEquals(3, Tour.stepsFor(r.s))
+        // Live tools open: ticked; the next card waits until it is closed (the UI hides the tour meanwhile).
+        assertEquals(GUIDE, r.update { it.copy(toolsOpen = true) })
+        assertEquals(GUIDE, r.update { it.copy(toolsOpen = false) })
+        assertEquals(SECTIONS, r.update { it.copy(guideOpen = true) })
+        assertEquals(SECTIONS, r.update { it.copy(guideOpen = false) })
+        assertEquals(DONE, r.update { it.copy(onBackups = true) })
+        assertEquals("tools,guide,sections", Tour.encode(r.p))
+        // Nothing of the device's was ticked or skipped.
+        assertFalse(r.p.handled(CONNECT) || r.p.handled(PAD) || r.p.handled(BACKUP))
+    }
+
+    @Test
+    fun `try the pads moves from the offline path to the device's steps`() {
+        val r = Run(snap = fresh)
+        r.s = Tour.goOffline(r.s)
+        r.update()
+        // The EP-133 connects on the way: ticked, and the Connect card shows it once.
+        r.update { it.copy(connected = true) }
+        assertEquals(TOOLS, r.step())
+        r.s = Tour.goDevice(r.s)
+        assertEquals(4, Tour.stepsFor(r.s))
+        assertEquals(CONNECT, r.update())
+        assertTrue(CONNECT in r.p.done)
+        r.s = Tour.ackConnect(r.s)
+        assertEquals(PAD, r.update())
+        // From the offline Done without a device: plain Connect.
+        val d = Run(snap = fresh)
+        d.s = Tour.goOffline(d.s)
+        d.update(); d.skip(); d.skip(); d.skip()
+        assertEquals(DONE, d.step())
+        d.s = Tour.goDevice(d.s)
+        assertEquals(CONNECT, d.update())
+        assertFalse(CONNECT in d.p.done)
     }
 
     @Test
@@ -223,8 +269,8 @@ class TourTest {
 
     @Test
     fun `numbers, targets and what passes touches through`() {
-        assertEquals(listOf(null, null, 1, null, 2, 3, 4, null), TourStep.entries.map { Tour.number(it) })
-        assertEquals(listOf(HEAR), TourStep.entries.filter { Tour.passThrough(it) })
+        assertEquals(listOf(null, null, 1, null, 2, 3, 4, 1, 2, 3, null), TourStep.entries.map { Tour.number(it) })
+        assertEquals(listOf(HEAR, TOOLS, GUIDE, SECTIONS), TourStep.entries.filter { Tour.passThrough(it) })
         assertEquals(listOf(PAD, BACKUP), TourStep.entries.filter { Tour.needsDevice(it) })
         assertEquals("top.connection", Tour.target(CONNECT))
         assertEquals("live.pads", Tour.target(PAD))
@@ -233,7 +279,10 @@ class TourTest {
         assertNull(Tour.target(WELCOME))
         assertNull(Tour.target(DONE))
         // Every id is a coach mark the app has (Coach.kt's call sites).
-        val marks = setOf("top.connection", "live.pads", "top.backup", "top.help", "edge.guide", "side.more")
+        val marks = setOf("top.connection", "live.pads", "top.backup", "top.help", "edge.guide", "side.more", "top.sections")
+        assertEquals("side.more", Tour.target(TOOLS))
+        assertEquals("edge.guide", Tour.target(GUIDE))
+        assertEquals("top.sections", Tour.target(SECTIONS))
         assertTrue(marks.containsAll(TourStep.entries.mapNotNull { Tour.target(it) } + Tour.DONE_TAGS))
         assertEquals(4, Tour.resumeAt(Tour.decode("connect,pad,~hear")))
         assertEquals(1, Tour.resumeAt(TourProgress()))
