@@ -167,6 +167,27 @@ describe('MixerHost click', () => {
     expect(beats(out)).toEqual([[-4, true], [-3, false], [-2, false], [-1, false]])
   })
 
+  it("(web) the click on the pattern's beats follows a new tempo", () => {
+    const out: FromMixer[] = []
+    const host = new MixerHost(RATE, (m) => out.push(m))
+    host.handle({ t: 'click', on: true, bpm: 120, grid: null })
+    host.handle({ t: 'plan', patterns: projectPatterns([pattern(), pattern(), pattern(), pattern()]), voices: [], skip: [], bpm: 120, phase: PhaseAnchors.ZERO })
+    host.handle({ t: 'play', countInBars: 0, leadMs: 0, atFrame: null, atPress: false })
+    const l = new Float32Array(128)
+    const r = new Float32Array(128)
+    let i = 0
+    const run = (seconds: number): number => {
+      out.length = 0
+      for (const end = i + Math.round((seconds * RATE) / 128); i < end; i++) host.render(l, r, 128, (i * 128) / RATE)
+      return beats(out).length
+    }
+    run(1)
+    expect(run(4)).toBe(8)
+    host.handle({ t: 'seqBpm', bpm: 240 })
+    run(1)
+    expect(run(4)).toBe(16)
+  })
+
   it('TAKE leaves the click out', () => {
     const out: FromMixer[] = []
     const host = new MixerHost(RATE, (m) => out.push(m))

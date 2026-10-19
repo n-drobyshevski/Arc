@@ -10,11 +10,13 @@ ui/
   AppContext.tsx    useController(), useNav()
   nav.ts            the navigation stack (one history entry per layer)
   coachPlace.ts     pure coach-tag placement (tested)
+  lazy.ts           a screen or sheet as a chunk of its own, preloaded when idle
   tourPlace.ts      pure placement of Try arc's step card and the veil's hole (tested)
   theme/            tokens.css, cap.css, base.css, theme.ts (applyTheme), fonts.ts
   components/       primitives + the shell (one .tsx + .css each)
   screens/          one file per Kotlin screen (+ its .css)
-  sheets/           the sheets/dialogs mounted by app.tsx (Backups, Device, progress, licence)
+  sheets/           the sheets/dialogs mounted by app.tsx (Backups, Device, progress, licence,
+                    the beat card sheet BeatImportSheet, KEYS' ScaleSheet)
   live/             Live-tab helpers: glow.ts (pad fade maths), press.ts (hold-to-play
                     per pointer), keys.ts (KEYS grid, picker layers), keyboard.ts (the
                     piano's room, the keys view rule, the computer keyboard), Words.tsx
@@ -23,8 +25,18 @@ ui/
                     window.ts (landscape / short, the display line in the top bar),
                     SoundPicker.tsx (EDIT's device sounds: the pad sheet, the desk's
                     Sounds tab; offline a Device / Factory switch and dimmed rows; its
-                    RangeKey is the Device tab's too, as Kotlin's in PadSheet.kt); the
-                    .ts ones are tested
+                    RangeKey is the Device tab's too, as Kotlin's in PadSheet.kt), memo.ts
+                    (memo, useHas, useIs: what the memoized caps share),
+                    DeckKeys.tsx (the device-display pages' key strip: DeckStrip,
+                    DeckKey with its SVG DeckGlyph and an optional 1 s hold; one row
+                    where each key gets 48px, else two), Takes.tsx (the Takes page:
+                    the glass of T01... and its keys) with TakeTrim.tsx (TRIM's wave
+                    and handles), ClaudeSection.tsx (the Claude page's lazy slot)
+                    with ClaudeDeck.tsx (the glass, the prompt builder's tabs,
+                    sentence, answers and saved prompts), practice.tsx (PRACTICE's
+                    context, pad cues and lazy slot) with PracticePanel.tsx (the
+                    header, lane, keys and result), quickPick.ts + QuickPickFan.tsx
+                    (KEYS' hold fan); the .ts ones are tested
 ```
 
 File header: `// Port of app/src/main/kotlin/dev/arc/ep133/ui/<path>.kt`.
@@ -44,6 +56,44 @@ All screens are ported (no stubs left). Tab sheets mount in `App` under
 `DevicePadsSheet` / `DeviceUploadSheet` (pads, upload, trim); `FontLicenceSheet`
 mounts over Settings and `ProgressSheet` (modal) over any tab. Pure logic the
 screens factored out is tested under `test/ui/`.
+
+## What re-renders (web addition)
+
+The EP-133 publishes its mirror many times a second, and a pad played changes
+KEYS's pad, so the shell reads neither:
+
+- Root and the non-Live tabs read `c.stateShell.value`: the same object while
+  only `mirror` or `keysPad` changes. Its `mirror` and `keysPad` may be old;
+  read them from `c.state` (or `c.state.peek()` in a callback). Settings reads
+  `c.state.value` in its own branch only.
+- `LiveTab` alone follows the mirror, through `c.liveMirror` (the mirror, its
+  last read offline, or one kept note to connect). KEYS's pad and its name come
+  from `c.keysSound`, read only where they show; the device's tempo alone is
+  `c.deviceBpm`.
+- `c.playing` goes down as the signal itself; each row reads its own answer
+  with `useIs` (`live/memo.ts`). Live's pads, KEYS keys, the piano's keys and
+  the drawn device's parts are `memo` components fed values, reading their
+  voice with `useHas`; `playingNotes` stays the same set while its notes do.
+  Give a memoized part kept callbacks (a latest ref), not new arrows.
+- Live tools render under LiveTab, so on each publish: the Takes deck is
+  `memo`ized behind kept callbacks (`TakesSection` keeps them, reading the
+  latest props) and `ClaudeSection` on its group, the deck reading what it
+  shows from signals through `ClaudeActions`' getters.
+- The Claude page's prompt and saved prompts are signals of their own
+  (`c.claudePrompt`, `c.claudePrompts`): a word tapped re-renders that page,
+  and `c.settings` keeps its object while only they change.
+- Settings, Debug, Compare, Contents, Search and the beat import, keyboard keys,
+  KEYS (`ScaleSheet`) and font licence sheets are `lazy` (`lazy.ts`): chunks of their own, fetched
+  once the app is idle. So is the Claude page's deck, with the prompt
+  builder's genres and words (`state/promptPlan.ts`), and the PRACTICE panel
+  (`live/practice.tsx`'s slot).
+- PRACTICE's frames stay out of every state: the lane is a canvas drawn on
+  the frame clock, and the pads' cues are a signal of their own
+  (`PracticeActions.cues`), set by Live's frame loop only when a cue changes
+  (at most once a beat), each pad reading its own (`usePracticePadCue`).
+
+The `?demo` render counter (`dev/perf.ts`, `window.__arcPerf`) and
+`test/e2e/perf.spec.ts` (`PERF=1`) show what a change does to these.
 
 ## Navigation (`nav.ts`)
 
@@ -71,7 +121,8 @@ Sheet/dialog ids in use: `detail:<id>`, `restore:<id>`, `comparePick:<id>`,
 `pads:backup:<id>:<n>`, `pads:device:<n>`, `upload`, `trim:<i>`, `licence`,
 `progress` (owned by app.tsx), `edit:<group>:<offset>` (Live's EDIT pad sheet; Live
 also mounts the `upload` / `trim:<i>` sheets for a pad's new sample), dialogs `delete`, `prune:<keep>`, `forget`,
-`pick:scale` / `pick:octave` (Live's KEYS lists, owned by app.tsx).
+`scale:<part>` (Live's KEYS sheet, `ScaleSheet`, opened at `scale`, `key` or `octave`),
+`pick:scale` / `pick:octave` / `pick:key` (KEYS' lists where a screen has no sheet, owned by app.tsx).
 
 Mounting a sheet (in `app.tsx`, under `tabs` = `onTabs(v)` for tab sheets):
 

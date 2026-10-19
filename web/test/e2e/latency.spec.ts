@@ -95,6 +95,8 @@ test('the latency test shows each engine tried, and its choice reopens Live at t
   // Folded under its title above the log; open, how to run it and the choice, in the log's place.
   const panel = page.locator('.debug__latency')
   await expect(page.getByRole('log')).toBeVisible()
+  // The mixer runs in the AudioWorklet, not on the main thread (its module loaded in the worklet's scope).
+  await expect(page.getByRole('log')).toContainText(/live audio: \d+ Hz, AudioWorklet,/)
   await panel.getByRole('button', { name: LatencyText.TITLE }).click()
   await expect(panel.getByText(LatencyText.HOW_TO)).toBeVisible()
   await expect(page.getByRole('log')).toHaveCount(0)

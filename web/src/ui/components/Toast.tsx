@@ -284,7 +284,7 @@ export function ControllerToast(props: { controller: ArcController; bottomInset?
   const c = props.controller
   return (
     <Toast
-      toast={c.state.value.toast}
+      toast={c.stateShell.value.toast}
       onTimeout={(id) => c.dismissToast(id)}
       onAction={(id) => c.runToastAction(id)}
       bottomInset={props.bottomInset}

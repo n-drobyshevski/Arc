@@ -23,6 +23,10 @@
 // - Recordings live in the samples store (IndexedDB), not files/samples.
 // - The device side (the upload onto a pad, the pad's names, the offline
 //   changes the mirror shows) is the controller's, through [SampleHost].
+// - A card's synth sounds made offline (syn-…wav) are kept in the samples
+//   store as recorded changes too, and go up with them: here they are only
+//   uploaded (or put on, where the EP-133 has the sound by its name already),
+//   swept and thrown away, never moved to Takes.
 
 import { signal, type ReadonlySignal, type Signal } from '@preact/signals'
 import type { PadTarget } from '../core/features/liveMirror'
@@ -37,6 +41,7 @@ import { MirrorText } from '../core/text/mirrorText'
 import { WebText } from '../core/text/webText'
 import type { TapPhase, TapTake } from '../platform/audio/sampleTap'
 import { decodeWav } from '../core/formats/wav'
+import { isSynth } from '../platform/storage/sampleStore'
 import {
   type AppSettings,
   SAMPLE_BARS,
@@ -103,6 +108,10 @@ export interface SampleHost {
    * toast said why.
    */
   upload(name: string, wav: Uint8Array, t: PadTarget, slot: number | null, onProgress: (fraction: number) => void): Promise<number | null>
+  /** The device's lowest slot holding a sound called [name] (PadSoundCache.sameName), as listed; null when none. */
+  deviceSlotNamed(name: string): number | null
+  /** [slot] written onto [t]'s pad, the mirror following: null error when done; null when nothing was written (busy). */
+  writePad(t: PadTarget, slot: number): Promise<{ error: string | null } | null>
   /** Takes changed (a recording put there). */
   takesChanged(): void
   /** The patterns, for a hands-free take of set bars (PatternDesk's SAMPLE section). */
@@ -216,12 +225,18 @@ export class SampleDesk {
   /**
    * Recordings left from before this start (the page closed on a take waiting
    * for KEEP, or a KEEP half done) that no offline change names: into Takes,
-   * never lost.
+   * never lost. Synth sounds no offline change names are thrown away, as the
+   * card can make them again.
    */
   async moveStrays(startedAt: number): Promise<void> {
     const store = this.host.deps.samples
     if (store === undefined) return
     const referenced = new Set((await this.host.live.loadOfflinePads()).list.map((p) => p.file).filter((f): f is string => f != null))
+    try {
+      for (const name of await store.synthStrays(referenced, startedAt)) await store.delete(name)
+    } catch {
+      // Swept at the next start.
+    }
     let moved = 0
     for (const name of await store.strays(referenced, startedAt)) if (await this.toTakes(name)) moved++
     if (moved > 0) this.host.takesChanged()
@@ -910,6 +925,20 @@ export class SampleDesk {
         await this.recordingsToTakes([p])
         return null
       }
+      const t: PadTarget = { project: p.project, group: p.group, pad: p.pad, slot: null }
+      // A synth sound made offline that the EP-133 has already (by its device name): put on the pad, not uploaded again.
+      const have = isSynth(name) ? this.host.deviceSlotNamed(p.name) : null
+      if (have !== null) {
+        const w = await this.host.writePad(t, have)
+        if (w === null || w.error !== null) {
+          this.failed.add(name)
+          if (w !== null && w.error !== null) this.host.toast(MirrorText.assignFailed(w.error), true)
+          return null
+        }
+        this.failed.delete(name)
+        await this.dropUploaded(name)
+        return have
+      }
       const wav = await store.read(name)
       if (wav === null) {
         this.failed.add(name)
@@ -917,7 +946,6 @@ export class SampleDesk {
         return null
       }
       if (pad !== null) this.setUploading(SamplePhase.Uploading(pad, 0))
-      const t: PadTarget = { project: p.project, group: p.group, pad: p.pad, slot: null }
       const into = await this.host.upload(p.name, wav, t, slot, (f) => {
         if (pad !== null) this.setUploading(SamplePhase.Uploading(pad, Math.min(100, Math.max(0, Math.trunc(f * 100)))))
       })
@@ -926,10 +954,7 @@ export class SampleDesk {
         return null
       }
       this.failed.delete(name)
-      const left = await this.host.live.loadOfflinePads()
-      this.host.live.setOfflinePads({ list: left.list.filter((x) => x.file !== name) })
-      this.host.live.forgetRecorded(name)
-      await store.delete(name)
+      await this.dropUploaded(name)
       return into
     } finally {
       this.goingUp.delete(name)
@@ -937,12 +962,32 @@ export class SampleDesk {
     }
   }
 
-  /** Recordings among [entries] moved into Takes (their pad changes dropped elsewhere); how many were. */
+  // A recording on the EP-133 now: its change, its sound in memory and its WAV go.
+  private async dropUploaded(name: string): Promise<void> {
+    const left = await this.host.live.loadOfflinePads()
+    this.host.live.setOfflinePads({ list: left.list.filter((x) => x.file !== name) })
+    this.host.live.forgetRecorded(name)
+    await this.host.deps.samples?.delete(name)
+  }
+
+  /**
+   * Recordings among [entries] moved into Takes (their pad changes dropped
+   * elsewhere); how many were. Synth sounds made offline are deleted instead
+   * (the card can make them again): never Takes, and never counted.
+   */
   async recordingsToTakes(entries: readonly OfflinePad[]): Promise<number> {
     let moved = 0
     for (const e of entries) {
       if (e.source !== SoundSource.RECORDED || e.file == null) continue
       this.host.live.forgetRecorded(e.file)
+      if (isSynth(e.file)) {
+        try {
+          await this.host.deps.samples?.delete(e.file)
+        } catch {
+          // Swept at the next start.
+        }
+        continue
+      }
       if (await this.toTakes(e.file)) moved++
     }
     if (moved > 0) this.host.takesChanged()

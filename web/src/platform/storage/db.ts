@@ -69,7 +69,8 @@ export interface IndexedRow {
 /** A row in "padSounds": one file of PadSoundCache's folder (s<slot>.wav, index.json). */
 export interface PadSoundRow {
   name: string
-  bytes: Uint8Array
+  /** A Blob; a Uint8Array in a row written before (web: so a row's size is read without its sample). */
+  bytes: Blob | Uint8Array
 }
 
 /** A row in "takes": one take's WAV and what its file name and header would say. */
@@ -80,6 +81,8 @@ export interface TakeRow {
   frames: number
   rate: number
   wav: Blob
+  /** Its trim, as Takes.kt's .trim file beside the take says it ("start end", TakeTrim.text); absent, the whole take. */
+  trim?: string
 }
 
 /** A row in "samples": a SAMPLE recording's WAV (SampleFiles' smp-yyyyMMdd-HHmmss.wav) and when it was written. */

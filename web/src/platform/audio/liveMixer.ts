@@ -24,11 +24,12 @@
 //
 // PATTERN (PatternScheduler.kt): 'plan' hands the host's PatternScheduler
 // what it plays (the patterns, and the pads' sounds by the ids loaded here),
-// 'play' and 'stopSeq' start and stop it, and 'seqArmed' asks for the
-// output's stamps while RECORD waits for a press. It reports its clock
-// ('timeline'), the pads it has no sound for ('missing') and, while it runs
-// or is armed, where the mix is ('stamp': mix frame [frame] plays at context
-// time [time]), for the main thread's own stamp.
+// 'seqBpm' only its tempo (web only), 'play' and 'stopSeq' start and stop
+// it, and 'seqArmed' asks for the output's stamps while RECORD waits for a
+// press. It reports its clock ('timeline'), the pads it has no sound for
+// ('missing') and, while it runs or is armed, where the mix is ('stamp': mix
+// frame [frame] plays at context time [time]), for the main thread's own
+// stamp.
 //
 // TEMPO's click ('click') is mixed in after TAKE has the block, at the
 // metronome level's gain ('clickLevel', web only: the drawn EP-133's TEMPO
@@ -46,9 +47,6 @@ import { ClickScheduler, ClickTrack, type Click, type FrameGrid } from './clickS
 import { SampleTap, type TapAsk, type TapPhase, type TapTake } from './sampleTap'
 import { Seq } from '../../core/features/pattern'
 import { framesPerTick, frameOf } from '../../core/features/sequencer'
-
-/** The AudioWorkletProcessor's registered name. */
-export const LIVE_PROCESSOR = 'arc-live-mixer'
 
 /** Main thread to mixer. */
 export type ToMixer =
@@ -93,6 +91,8 @@ export type ToMixer =
       /** The patterns waiting to take over a group (scenes), each from its global tick. */
       readonly queued?: readonly { readonly group: number; readonly pattern: Pattern; readonly atTick: number }[]
     }
+  /** The plan as it is but at [bpm] (web only: the EP-133's clock moved, nothing else did). */
+  | { readonly t: 'seqBpm'; readonly bpm: number }
   /** PatternScheduler.play: tick 0 at mix frame [atFrame] (a press), else a lookahead and [leadMs] on, after [countInBars]. */
   | { readonly t: 'play'; readonly countInBars: number; readonly leadMs: number; readonly atFrame: number | null; readonly atPress: boolean }
   | { readonly t: 'stopSeq' }
@@ -142,19 +142,6 @@ export interface ArpPlanMessage {
   readonly seed: number
   readonly pressMs: number
   readonly atFrame: number | null
-}
-
-/**
- * [m] as it is posted to the worklet, and what moves with it: a 'load' takes
- * a copy of just its samples (a view's whole buffer would be cloned
- * otherwise) whose buffer is transferred, so the main thread's own array is
- * never detached and no second clone waits in the port. Every other command
- * is posted as it is.
- */
-export function transferable(m: ToMixer): [ToMixer, Transferable[]] {
-  if (m.t !== 'load') return [m, []]
-  const pcm = m.pcm.slice()
-  return [{ t: 'load', id: m.id, pcm }, [pcm.buffer]]
 }
 
 /** A voice that began: its press [tag] and the context time ([time], s) its first frame plays at. */
@@ -240,6 +227,10 @@ export class MixerHost {
   private clickOn = false
   private clickBpm = 120
   private clickGrid: FrameGrid | null = null
+  // The pattern's beats as a grid, kept while its clock is the same; and the count-in's clicks, reused (web: no garbage a block).
+  private seqGridOf: TransportClock | null = null
+  private seqGrid: FrameGrid | null = null
+  private readonly countClicks: Click[] = []
   private readonly clickTimes: ClickScheduler
   private readonly clickTrack: ClickTrack
   private clicking = false
@@ -317,6 +308,9 @@ export class MixerHost {
         this.seq.plan = { patterns: m.patterns, voices, skip: new Map(m.skip), bpm: m.bpm, phase: m.phase, queued }
         return
       }
+      case 'seqBpm':
+        this.seq.plan = { ...this.seq.plan, bpm: m.bpm }
+        return
       case 'play':
         this.seq.play(m.countInBars, m.leadMs, m.atFrame, m.atPress)
         this.stampedAt = Number.NEGATIVE_INFINITY
@@ -389,13 +383,19 @@ export class MixerHost {
     let clicks: readonly Click[] = NO_CLICKS
     if (on) {
       if (!this.clicking) this.clickTimes.reset()
-      const grid: FrameGrid | null =
-        c !== null ? { anchorFrame: frameOf(c, 0), beatIndex: 0, periodFrames: framesPerTick(c) * Seq.PPQN, barKnown: true } : this.clickGrid
+      if (c !== null && this.seqGridOf !== c) {
+        this.seqGridOf = c
+        this.seqGrid = { anchorFrame: frameOf(c, 0), beatIndex: 0, periodFrames: framesPerTick(c) * Seq.PPQN, barKnown: true }
+      }
+      const grid: FrameGrid | null = c !== null ? this.seqGrid : this.clickGrid
       clicks = this.clickTimes.block(before, frames, this.clickBpm, grid)
       // Off, it only counts in: nothing from bar 1 on.
       if (!this.clickOn && c !== null) {
         const zero = frameOf(c, 0)
-        if (clicks.some((k) => k.frame >= zero)) clicks = clicks.filter((k) => k.frame < zero)
+        const kept = this.countClicks
+        kept.length = 0
+        for (const k of clicks) if (k.frame < zero) kept.push(k)
+        if (kept.length < clicks.length) clicks = kept
       }
       for (const k of clicks) this.post({ t: 'beat', index: k.index, time: time + (k.frame - before) / this.rate, accent: k.accent })
     }

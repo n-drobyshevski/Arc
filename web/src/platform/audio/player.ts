@@ -78,8 +78,20 @@ export function pcmToFloat32(pcm: Uint8Array, channels: number): Float32Array[] 
   return out
 }
 
+/** Whether this platform stores 16-bit numbers little end first (every browser in practice). */
+const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1
+
 /** Writes [frames] frames of s16le [pcm] into the per-channel arrays [target] gives. */
 function fillChannels(pcm: Uint8Array, channels: number, frames: number, target: (channel: number) => Float32Array): void {
+  // Web addition: an aligned array is read as 16-bit numbers in place (the same floats, without a DataView call a sample).
+  if (LITTLE_ENDIAN && pcm.byteOffset % 2 === 0) {
+    const s16 = new Int16Array(pcm.buffer, pcm.byteOffset, frames * channels)
+    for (let c = 0; c < channels; c++) {
+      const data = target(c)
+      for (let i = 0, j = c; i < frames; i++, j += channels) data[i] = (s16[j] as number) / 32768
+    }
+    return
+  }
   const dv = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength)
   const step = channels * 2
   for (let c = 0; c < channels; c++) {

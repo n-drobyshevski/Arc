@@ -60,7 +60,8 @@ export function UpdatePrompt(): JSX.Element | null {
     registerPwa({ whenIdle: (run) => whenIdle(c, run) })
   }, [c])
 
-  const state = c.state.value
+  // Only the toast, the task and busy: not each publish.
+  const state = c.stateShell.value
   // Only into a free toast slot, as the update prompt waits: it never takes the place of a toast
   // that says what was just done (and may carry its UNDO).
   const ready = offlineReady.value

@@ -20,9 +20,11 @@ import {
   memoryStorage,
   parseLearned,
   readSettings,
+  settingValues,
   settingsFromIndex,
   type AppSettings,
 } from '../../../src/platform/storage/settings'
+import { ClaudePrompt, PromptTask, SavedPrompt, claudePrompt, savedPrompt } from '../../../src/core/features/claudePrompt'
 
 describe('SAMPLE settings', () => {
   it('store and index as Android: Off and Free as "off" and 0, floats as Float.toString', async () => {
@@ -67,6 +69,10 @@ describe('SettingsStore', () => {
       pianoWhites: null,
       haptics: true,
       makeUpDelay: true,
+      shareSounds: true,
+      claudePrompt: '',
+      claudePrompts: '',
+      replaceScenes: false,
       sampleSource: 'mic',
       sampleStereo: false,
       sampleGainMic: 12,
@@ -162,6 +168,10 @@ describe('SettingsStore', () => {
       'app.pianoWhites',
       'app.haptics',
       'app.makeUpDelay',
+      'app.shareSounds',
+      'app.claudePrompt',
+      'app.claudePrompts',
+      'app.replaceScenes',
       'app.sampleSource',
       'app.sampleStereo',
       'app.sampleGainMic',
@@ -191,6 +201,27 @@ describe('SettingsStore', () => {
     expect(readSettings(JSON.stringify({ haptics: 'no' })).haptics).toBe(true)
     expect(settingsFromIndex({ 'app.haptics': 'true' }, s.settings).haptics).toBe(true)
     expect(settingsFromIndex({ 'app.haptics': 'off' }, s.settings).haptics).toBe(false)
+  })
+
+  it('sharing the sound list is on by default, stored like the other switches and read back from library json', () => {
+    const storage = memoryStorage()
+    const s = new SettingsStore(storage)
+    expect(s.settings.shareSounds).toBe(true)
+    expect(settingValues(DEFAULT_SETTINGS).shareSounds).toBe('true')
+    expect(settingValues({ ...DEFAULT_SETTINGS, shareSounds: false }).shareSounds).toBe('false')
+    s.update((c) => ({ ...c, shareSounds: false }))
+    expect(JSON.parse(storage.getItem(SETTINGS_KEY)!)).toEqual({ shareSounds: false })
+    expect(s.toIndex()).toEqual({ 'app.shareSounds': 'false' })
+    expect(new SettingsStore(storage).settings.shareSounds).toBe(false)
+    expect(settingsFromIndex({ 'app.shareSounds': 'false' }, DEFAULT_SETTINGS).shareSounds).toBe(false)
+    expect(settingsFromIndex({ 'app.shareSounds': 'true' }, { ...DEFAULT_SETTINGS, shareSounds: false }).shareSounds).toBe(true)
+    // The beat card sheet's REPLACE: off at first (a card's scenes follow the project's), kept with the rest.
+    expect(s.settings.replaceScenes).toBe(false)
+    expect(settingValues({ ...DEFAULT_SETTINGS, replaceScenes: true }).replaceScenes).toBe('true')
+    expect(settingsFromIndex({ 'app.replaceScenes': 'true' }, DEFAULT_SETTINGS).replaceScenes).toBe(true)
+    // Missing or unreadable: left as it is.
+    expect(settingsFromIndex({}, { ...DEFAULT_SETTINGS, shareSounds: false }).shareSounds).toBe(false)
+    expect(settingsFromIndex({ 'app.shareSounds': 'maybe' }, DEFAULT_SETTINGS).shareSounds).toBe(true)
   })
 
   it('keeps the factory kit by its id, an unknown one read as the EP-133\'s', () => {
@@ -408,6 +439,23 @@ describe('fromIndex', () => {
     const other = new SettingsStore(memoryStorage())
     other.fromIndex(s.toIndex())
     expect(other.settings).toEqual(s.settings)
+  })
+
+  // AppSettingsTest "every setting round-trips through library json": the Claude page's prompt and saved prompts.
+  it("keeps the Claude page's prompt and saved prompts as they are written, and reads them back from library json", () => {
+    const prompt = ClaudePrompt.encode(claudePrompt({ task: PromptTask.BEAT, genre: 'dub-techno', text: 'a;b' }))
+    const saved = SavedPrompt.encodeAll([savedPrompt('Dub', claudePrompt())])
+    const storage = memoryStorage()
+    const s = new SettingsStore(storage)
+    expect(s.settings.claudePrompt).toBe('')
+    s.update((c) => ({ ...c, claudePrompt: prompt, claudePrompts: saved }))
+    expect(s.toIndex()).toEqual({ 'app.claudePrompt': prompt, 'app.claudePrompts': saved })
+    expect(new SettingsStore(storage).settings).toEqual({ ...DEFAULT_SETTINGS, claudePrompt: prompt, claudePrompts: saved })
+    const other = new SettingsStore(memoryStorage())
+    other.fromIndex(s.toIndex())
+    expect(other.settings).toEqual(s.settings)
+    // Missing: left as it is.
+    expect(settingsFromIndex({}, s.settings).claudePrompt).toBe(prompt)
   })
 
   it('parses ints the way Kotlin toIntOrNull does', () => {

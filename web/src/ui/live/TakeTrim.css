@@ -1,0 +1,85 @@
+/* TRIM on the Takes page (TakeTrimDeck.kt): the glass with the take's wave, its handles and playhead. */
+.take-trim {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 16px;
+  border-radius: 16px;
+  background: var(--display);
+  color: var(--display-ink);
+}
+.take-trim__head { display: flex; align-items: center; min-height: 24px; }
+.take-trim__grow { flex: 1 1 auto; min-width: 0; }
+/* TrimHead: displaySub at 13, tracked .08em. */
+.take-trim__sub {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0.08em;
+  white-space: pre;
+  font-variant-numeric: tabular-nums;
+  color: var(--display-dim);
+}
+.take-trim__sub.is-signal { color: var(--signal); }
+.take-trim__sub.is-ink { color: var(--display-ink); }
+.take-trim__small { font-size: 11px; }
+.take-trim__part { display: flex; align-items: flex-end; gap: 10px; }
+.take-trim__part .take-trim__sub { padding-bottom: 4px; }
+/* statNum at 26. */
+.take-trim__length {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: var(--track-stat-num);
+  font-variant-numeric: tabular-nums;
+  color: var(--display-ink);
+}
+.take-trim__opening { display: flex; align-items: center; justify-content: center; height: 76px; }
+.take-trim__foot { display: flex; align-items: center; min-height: 18px; }
+
+/* The wave (76 high): the bars over the knobs' room, the handles to its foot. */
+.take-trim__wave {
+  position: relative;
+  touch-action: pan-y;
+  cursor: ew-resize;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.take-trim__canvas.waveform { background: none; border-radius: 0; }
+/* A handle: a 3px line of signal down to a 7px-radius knob; a wider target than it looks. */
+.take-trim__handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 24px;
+  transform: translateX(-50%);
+  outline: none;
+}
+.take-trim__handle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 7px;
+  left: calc(50% - 1.5px);
+  width: 3px;
+  background: var(--signal);
+}
+.take-trim__handle::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: calc(50% - 7px);
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+.take-trim__handle:focus-visible::after { outline: var(--focus-ring); outline-offset: 2px; }
+.take-trim__head-line {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--display-ink);
+  pointer-events: none;
+}

@@ -1,12 +1,30 @@
-// BEAT CARDS end to end, on the simulated EP-133 of ?demo: Live tools' CLAUDE section
-// (its shares dimmed with no notes, PASTE BEAT), a beat card pasted on Live opening its
-// sheet (the grid, where it goes, the tempo chip), IMPORT placing it with a toast, and
-// PASTE BEAT reading the clipboard.
+// BEAT CARDS end to end, on the simulated EP-133 of ?demo: Live tools' Claude page as the
+// device's display (its picks and SHARE off with no notes, the glass saying so, PASTE CARD held
+// opening a card file), the prompt builder (NEW: a genre and its tempo picked on the sentence's
+// words, NEXT and DONE, SHARE alone and the glass waiting, EDIT's own words with COPY, SAVE and a
+// saved prompt brought back and deleted, the prompt kept as Live tools close), a beat card pasted on Live opening its
+// sheet (the grid, where it goes, the tempo's SET key), IMPORT placing it with a toast, and
+// PASTE reading the clipboard. A card of scenes imported sets a chain: CHAIN picked, SHARE
+// shares it, followed by the sound list while SOUNDS is on, and the glass waits for Claude's
+// reply until STOP; its sheet
+// shows each scene and the chain, and with SET CHAIN off IMPORT leaves the chain. REPLACE
+// on the Scenes row puts a card's scenes in the project's place from S01, and is kept for
+// the next card. A card's
+// SOUNDS and SILENT PADS: its sound ticked, a sound picked for a silent pad with PICK
+// SOUND, both put on the pads by IMPORT; a silent pad with a name starts with a sound Arc
+// suggests, until CHANGE picks another. A card's FX and PAD SHAPING: APPLY FX switched,
+// a pad line ticked, and IMPORT applying the FX. A card's sound no slot holds that the
+// saved EP-40 pack has: ticked to upload into a free slot, and IMPORT puts it on the pad.
+// A card's synth line: "Make 808 kick", ticked, its play key, and IMPORT making it.
+import { encodeWav } from '../../src/core/formats/wav'
+import { writeZip } from '../../src/core/formats/zip'
+import { tone } from '../helpers/demoData'
 import { expect, test } from './fixtures'
 
 test.use({ viewport: { width: 412, height: 915 } })
 
 const CARD = ['ARC BEAT 1', 'name Four on the floor', 'tempo 124', '[A]', 'A7 | X... X... X... X... |'].join('\n')
+const SCENES = ['ARC BEAT 1', 'name Two', 'chain 1x2 2', '', 'scene One', '[A]', 'A7 | X... .... X... .... |', '', 'scene Two', '[A]', 'A7 | X.X. X.X. X.X. X.X. |'].join('\n')
 
 test('BEAT CARDS: the CLAUDE section, a pasted card, IMPORT', async ({ page }) => {
   await page.goto('/?demo#/live')
@@ -15,11 +33,32 @@ test('BEAT CARDS: the CLAUDE section, a pasted card, IMPORT', async ({ page }) =
   const tools = page.getByRole('dialog', { name: 'Live tools' })
   const claude = tools.getByRole('region', { name: 'Claude' })
   await expect(claude).toBeVisible()
-  // Nothing recorded yet: the shares are dimmed, and say so.
-  await expect(claude.getByRole('button', { name: /^Share scene S01 with Claude, no notes yet$/ })).toBeDisabled()
-  await expect(claude.getByRole('button', { name: /^Share A · 01 with Claude, no notes yet$/ })).toBeDisabled()
-  await expect(claude.getByRole('button', { name: 'Paste a beat card from the clipboard' })).toBeEnabled()
+  // The prompt as it starts: IMPROVE, of the card picked. Nothing recorded yet: the picks and SHARE are off, and say so; the glass too.
+  await expect(claude.getByRole('tab', { name: 'Task: Improve' })).toHaveAttribute('aria-selected', 'true')
+  await expect(claude.getByRole('radio', { name: 'Scene S01, no notes yet' })).toBeDisabled()
+  await expect(claude.getByRole('radio', { name: 'A \u00B7 01, no notes yet' })).toBeDisabled()
+  await expect(claude.getByRole('radio', { name: 'Add scenes to the chain to share it' })).toBeDisabled()
+  await expect(claude.getByRole('button', { name: 'Share scene S01 with Claude, no notes yet' })).toBeDisabled()
+  await expect(claude.getByRole('button', { name: 'Copy the prompt, to paste into Claude' })).toBeDisabled()
+  await expect(claude).toContainText('No notes in this scene yet')
+  const paste = claude.getByRole('button', { name: "Paste Claude's card from the clipboard" })
+  await expect(paste).toBeEnabled()
+  await expect(paste).toHaveAccessibleDescription('Hold PASTE CARD to open a card file.')
   await expect(claude.getByRole('link', { name: 'Get the arc-beats skill' })).toHaveAttribute('href', '/arc-beats-skill.zip')
+  // PASTE CARD held for a second opens a card file, as it is let go of.
+  // Held mid-sheet: a toast at the foot of the window would take the pointer from a key under it.
+  await paste.evaluate((e) => e.scrollIntoView({ block: 'center' }))
+  const chooser = page.waitForEvent('filechooser')
+  await paste.hover()
+  await page.mouse.down()
+  await page.waitForTimeout(1200)
+  await page.mouse.up()
+  const fc = await chooser
+  await fc.setFiles({ name: 'four.arcbeat.txt', mimeType: 'text/plain', buffer: Buffer.from(CARD) })
+  const fromFile = page.getByRole('dialog', { name: 'Four on the floor' })
+  await expect(fromFile).toBeVisible()
+  await fromFile.getByRole('button', { name: 'Cancel' }).click()
+  await expect(fromFile).toBeHidden()
 
   // A card pasted on Live opens its sheet.
   await page.keyboard.press('Escape')
@@ -33,22 +72,431 @@ test('BEAT CARDS: the CLAUDE section, a pasted card, IMPORT', async ({ page }) =
   await expect(sheet).toBeVisible()
   await expect(sheet.getByRole('group', { name: /^Group A/ })).toBeVisible()
   await expect(sheet).toContainText('A · 02')
-  const chip = sheet.getByRole('switch')
+  // The tempo's SET key, OFF to begin with: the row keeps Arc's tempo with the card's beside it, and on says the change.
+  const chip = sheet.getByRole('switch', { name: /^Keep the tempo at \d+, the card says 124$/ })
   await expect(chip).toHaveAttribute('aria-checked', 'false')
+  await expect(chip).toHaveText('SetOff')
+  await expect(sheet).toContainText(/\d+ · card 124/)
   await chip.click()
-  await expect(chip).toHaveAttribute('aria-checked', 'true')
-  await sheet.getByRole('button', { name: 'Import' }).click()
+  const set = sheet.getByRole('switch', { name: /^Set the tempo to 124, now \d+$/ })
+  await expect(set).toHaveAttribute('aria-checked', 'true')
+  await expect(set).toHaveText('SetOn')
+  await expect(sheet).toContainText(/\d+ → 124/)
+  await sheet.getByRole('button', { name: 'Import', exact: true }).click()
   await expect(sheet).toBeHidden()
   await expect(page.getByRole('status').filter({ hasText: /^Imported to A · 02/ })).toBeVisible()
 
-  // PASTE BEAT reads the clipboard: the same card again goes to the next free pattern.
+  // PASTE reads the clipboard: the same card again goes to the next free pattern.
   await page.evaluate((text) => {
     Object.defineProperty(navigator.clipboard, 'readText', { configurable: true, value: async () => text })
   }, CARD)
   await page.getByRole('button', { name: 'Live tools' }).click()
-  await tools.getByRole('button', { name: 'Paste a beat card from the clipboard' }).click()
+  await tools.getByRole('button', { name: "Paste Claude's card from the clipboard" }).click()
   await expect(sheet).toBeVisible()
   await expect(sheet).toContainText('A · 03')
   await sheet.getByRole('button', { name: 'Cancel' }).click()
   await expect(sheet).toBeHidden()
+})
+
+test('the prompt builder: NEW with a genre and its tempo, SHARE alone, EDIT and COPY, SAVE, kept as Live tools close', async ({ page }) => {
+  await page.addInitScript(() => {
+    const sent: string[] = []
+    const copied: string[] = []
+    ;(window as unknown as { sent: string[]; copied: string[] }).sent = sent
+    ;(window as unknown as { sent: string[]; copied: string[] }).copied = copied
+    Object.defineProperty(navigator, 'share', { configurable: true, value: async (d: { text?: string }) => void sent.push(d.text ?? '') })
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (t: string) => void copied.push(t) } })
+  })
+  await page.goto('/?demo#/live')
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
+  await page.getByRole('button', { name: 'Live tools' }).click()
+  const tools = page.getByRole('dialog', { name: 'Live tools' })
+  const claude = tools.getByRole('region', { name: 'Claude' })
+  const sent = (): Promise<string[]> => page.evaluate(() => (window as unknown as { sent: string[] }).sent)
+  const copied = (): Promise<string[]> => page.evaluate(() => (window as unknown as { copied: string[] }).copied)
+
+  // NEW: a beat from nothing, no card to pick; the arrow keys move along the tabs.
+  const improve = claude.getByRole('tab', { name: 'Task: Improve' })
+  await improve.focus()
+  await page.keyboard.press('ArrowLeft')
+  const fresh = claude.getByRole('tab', { name: 'Task: New beat' })
+  await expect(fresh).toHaveAttribute('aria-selected', 'true')
+  await expect(fresh).toBeFocused()
+  await expect(claude.getByRole('radio', { name: /^Scene S01/ })).toHaveCount(0)
+  await expect(claude).toContainText('Tap an orange word to change it.')
+  // The genre's word turns the keys into its answers: a genre picked brings its tempo.
+  const genre = claude.getByRole('button', { name: 'Genre: any style' })
+  await genre.click()
+  await expect(genre).toHaveAttribute('aria-expanded', 'true')
+  const genres = claude.getByRole('group', { name: 'Genre' })
+  await genres.getByRole('radio', { name: 'Dub techno' }).click()
+  await expect(genres.getByRole('radio', { name: 'Dub techno' })).toHaveAttribute('aria-checked', 'true')
+  await expect(claude.getByRole('button', { name: 'Genre: dub techno' })).toBeVisible()
+  await expect(claude.getByRole('button', { name: 'Tempo: 122 BPM' })).toBeVisible()
+  await expect(claude).toContainText('Dub techno: 118-126 BPM. Picking a genre sets its tempo.')
+  // NEXT: the tempo's answers; DONE gives the focus back to its word.
+  await claude.getByRole('button', { name: 'The next word' }).click()
+  await claude.getByRole('button', { name: 'Faster by 5 BPM' }).click()
+  await claude.getByRole('button', { name: 'Done', exact: true }).click()
+  await expect(claude.getByRole('button', { name: 'Tempo: 127 BPM' })).toBeFocused()
+  await expect(claude.getByRole('group', { name: 'Tempo' })).toHaveCount(0)
+
+  // SHARE: the words alone (the sound list after them), and the glass waits for the new beat.
+  await claude.getByRole('button', { name: 'Share', exact: true }).click()
+  await expect.poll(async () => (await sent()).length).toBe(1)
+  const words = (await sent())[0]!
+  expect(words.startsWith('Use the arc-beats skill to write a new beat for my EP-133.')).toBe(true)
+  expect(words).toContain('- Style: dub techno')
+  expect(words).toContain('- Tempo: 127 BPM')
+  expect(words).not.toContain('ARC BEAT 1')
+  await expect(claude).toContainText('Sent New beat')
+  await claude.getByRole('button', { name: "Stop waiting for Claude's reply" }).click()
+
+  // EDIT: the prompt's own text, the box taking the focus; DONE keeps one's own words, COPY copies them.
+  await claude.getByRole('button', { name: 'Edit the prompt' }).click()
+  const box = claude.getByRole('textbox', { name: 'Your prompt' })
+  await expect(box).toBeFocused()
+  await expect(box).toHaveValue(/^Use the arc-beats skill to write a new beat/)
+  await box.fill('Write me a dub techno beat.')
+  await claude.getByRole('button', { name: 'Done', exact: true }).click()
+  await expect(claude.getByRole('button', { name: 'Edit the prompt' })).toBeFocused()
+  await expect(claude).toContainText('Write me a dub techno beat.')
+  await expect(claude).toContainText('Prompt · Edited')
+  await claude.getByRole('button', { name: 'Copy the prompt, to paste into Claude' }).click()
+  await expect.poll(async () => (await copied()).length).toBe(1)
+  expect((await copied())[0]!.startsWith('Write me a dub techno beat.\n')).toBe(true)
+  await expect(page.getByRole('status').filter({ hasText: 'Prompt copied. Paste it into a chat with Claude.' })).toBeVisible()
+  await claude.getByRole('button', { name: "Stop waiting for Claude's reply" }).click()
+
+  // SAVE keeps it under a name of its own, in use; REBUILD drops the words, and the saved one brings them back.
+  await claude.getByRole('button', { name: 'Save this prompt' }).click()
+  const chip = claude.getByRole('button', { name: 'Saved prompt Dub techno 127 \u270E, in use' })
+  await expect(chip).toBeVisible()
+  await expect(claude.getByRole('button', { name: 'Save this prompt' })).toBeDisabled()
+  await claude.getByRole('button', { name: 'Drop your words and build the prompt again' }).click()
+  await expect(claude).not.toContainText('Write me a dub techno beat.')
+  const kept = claude.getByRole('button', { name: 'Saved prompt Dub techno 127 \u270E' })
+  await kept.click()
+  await expect(chip).toBeVisible()
+  await expect(claude).toContainText('Write me a dub techno beat.')
+
+  // Kept as Live tools close and open again: the tab, the words and the saved prompt; Delete on the chip deletes it.
+  await page.keyboard.press('Escape')
+  await expect(tools).toBeHidden()
+  await page.getByRole('button', { name: 'Live tools' }).click()
+  await expect(claude.getByRole('tab', { name: 'Task: New beat' })).toHaveAttribute('aria-selected', 'true')
+  await expect(claude).toContainText('Write me a dub techno beat.')
+  await chip.focus()
+  await page.keyboard.press('Delete')
+  await expect(page.getByRole('status').filter({ hasText: 'Deleted \u201CDub techno 127 \u270E\u201D' })).toBeVisible()
+  await expect(chip).toHaveCount(0)
+})
+
+test('SHARE CHAIN: a card of scenes sets the chain, shared with the sound list or without it', async ({ page }) => {
+  await page.addInitScript(() => {
+    const sent: string[] = []
+    ;(window as unknown as { sent: string[] }).sent = sent
+    Object.defineProperty(navigator, 'share', { configurable: true, value: async (d: { text?: string }) => void sent.push(d.text ?? '') })
+  })
+  await page.goto('/?demo#/live')
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
+  await page.getByRole('button', { name: 'Live tools' }).click()
+  const tools = page.getByRole('dialog', { name: 'Live tools' })
+  const claude = tools.getByRole('region', { name: 'Claude' })
+  // No chain yet: CHAIN is off. The demo EP-133's sounds are known: SOUNDS is on, and the glass says how many.
+  await expect(claude.getByRole('radio', { name: 'Add scenes to the chain to share it' })).toBeDisabled()
+  const tick = claude.getByRole('switch', { name: /^With my sound list · \d+ sounds$/ })
+  await expect(tick).toBeChecked()
+  await expect(claude).toContainText(/Sounds · \d+/i)
+
+  await page.keyboard.press('Escape')
+  await page.evaluate((text) => {
+    const data = new DataTransfer()
+    data.setData('text/plain', text)
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }))
+  }, SCENES)
+  const sheet = page.getByRole('dialog', { name: 'Two' })
+  await sheet.getByRole('button', { name: 'Import', exact: true }).click()
+  await expect(sheet).toBeHidden()
+
+  await page.getByRole('button', { name: 'Live tools' }).click()
+  // The chain picked, its scenes and steps on the glass.
+  const chain = claude.getByRole('radio', { name: 'Chain, 2 scenes' })
+  await chain.click()
+  await expect(chain).toHaveAttribute('aria-checked', 'true')
+  await expect(claude).toContainText('2 scenes \u00B7 2 steps')
+  const share = claude.getByRole('button', { name: 'Share the chain with Claude, 2 steps' })
+  await expect(share).toHaveText(/^share$/i)
+  await share.click()
+  const sent = (): Promise<string[]> => page.evaluate(() => (window as unknown as { sent: string[] }).sent)
+  await expect.poll(async () => (await sent()).length).toBe(1)
+  const [withList] = await sent()
+  expect(withList).toContain('name Chain\n')
+  expect(withList).toContain("\n```\n\nMy EP-133's sounds (slot name), from the EP-133:\n")
+  // The glass waits for Claude's reply, until STOP.
+  await expect(claude).toContainText('Waiting for Claude')
+  await expect(claude).toContainText('Sent Chain')
+  await expect(claude).toContainText("Copy Claude's reply, then press PASTE")
+  await claude.getByRole('button', { name: "Stop waiting for Claude's reply" }).click()
+  await expect(claude).not.toContainText('Waiting for Claude')
+  await expect(claude.getByRole('tab', { name: 'Task: Improve' })).toBeVisible()
+  // Unticked: the card alone.
+  await tick.click()
+  await expect(tick).not.toBeChecked()
+  await share.click()
+  await expect.poll(async () => (await sent()).length).toBe(2)
+  const plain = (await sent())[1]!
+  expect(plain).not.toContain("My EP-133's sounds")
+  expect(plain.endsWith('\n```\n')).toBe(true)
+})
+
+test("SCENES and SET CHAIN: a card's scenes under their titles, a row for each, and SET CHAIN off keeps the project's chain", async ({ page }) => {
+  await page.goto('/?demo#/live')
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
+  await page.evaluate((text) => {
+    const data = new DataTransfer()
+    data.setData('text/plain', text)
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }))
+  }, SCENES)
+  const sheet = page.getByRole('dialog', { name: 'Two' })
+  await expect(sheet).toBeVisible()
+  // Each scene's grids under its title, and a row saying the new scene it becomes.
+  await expect(sheet.getByRole('heading', { name: 'Scene 1 \u00B7 One' })).toBeVisible()
+  await expect(sheet.getByRole('heading', { name: 'Scene 2 \u00B7 Two' })).toBeVisible()
+  await expect(sheet.getByRole('note', { name: /^Scene 1, One, becomes S02, patterns A \d+, B \d+, C \d+, D \d+$/ })).toBeVisible()
+  await expect(sheet.getByRole('note', { name: /^Scene 2, Two, becomes S03, patterns / })).toBeVisible()
+  // The chain on the new scenes, set by IMPORT unless SET CHAIN is off.
+  await expect(sheet).toContainText('S02\u00D72 \u2192 S03')
+  const setChain = sheet.getByRole('switch', { name: "Set the project's chain from the card, 2 steps" })
+  await expect(setChain).toHaveAttribute('aria-checked', 'true')
+  await expect(sheet).toContainText("Replaces this project's chain with the card's")
+  await setChain.click()
+  await expect(sheet.getByRole('switch', { name: "Leave the project's chain as it is, 2 steps" })).toHaveAttribute('aria-checked', 'false')
+  await expect(sheet).not.toContainText("Replaces this project's chain with the card's")
+
+  await sheet.getByRole('button', { name: 'Import', exact: true }).click()
+  await expect(sheet).toBeHidden()
+  await expect(page.getByRole('status').filter({ hasText: 'Imported to scenes S02\u2013S03. UNDO takes it back.' })).toBeVisible()
+  // No chain was set: nothing for SHARE CHAIN.
+  await page.getByRole('button', { name: 'Live tools' }).click()
+  const claude = page.getByRole('dialog', { name: 'Live tools' }).getByRole('region', { name: 'Claude' })
+  await expect(claude).toBeVisible()
+  await expect(claude.getByRole('radio', { name: 'Add scenes to the chain to share it' })).toBeDisabled()
+})
+
+test("REPLACE: a card's scenes take the project's place from S01, the choice kept for the next card", async ({ page }) => {
+  await page.goto('/?demo#/live')
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
+  const paste = (): Promise<void> =>
+    page.evaluate((text) => {
+      const data = new DataTransfer()
+      data.setData('text/plain', text)
+      document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }))
+    }, SCENES)
+  await paste()
+  const sheet = page.getByRole('dialog', { name: 'Two' })
+  await expect(sheet).toBeVisible()
+  // Off to begin with: the card's scenes follow the project's one.
+  await expect(sheet).toContainText('After S01')
+  const replace = sheet.getByRole('switch', { name: "Add the card's scenes after the project's 1 scene" })
+  await expect(replace).toHaveAttribute('aria-checked', 'false')
+  await replace.click()
+  // On: the rows, the chain and the line under the plate say where they go now.
+  await expect(sheet.getByRole('switch', { name: "Replace the project's 1 scene with the card's" })).toHaveAttribute('aria-checked', 'true')
+  await expect(sheet).toContainText('Replace S01')
+  await expect(sheet.getByRole('note', { name: /^Scene 1, One, becomes S01, patterns / })).toBeVisible()
+  await expect(sheet.getByRole('note', { name: /^Scene 2, Two, becomes S02, patterns / })).toBeVisible()
+  await expect(sheet).toContainText('S01\u00D72 \u2192 S02')
+  await expect(sheet).toContainText("The card's scenes take the place of this project's 1 scene, from S01.")
+
+  await sheet.getByRole('button', { name: 'Import', exact: true }).click()
+  await expect(sheet).toBeHidden()
+  await expect(page.getByRole('status').filter({ hasText: 'Imported to scenes S01\u2013S02. Chain set. UNDO takes it back.' })).toBeVisible()
+  // The next card's sheet opens with REPLACE still on, now over the project's two scenes.
+  await paste()
+  await expect(sheet).toBeVisible()
+  await expect(sheet.getByRole('switch', { name: "Replace the project's 2 scenes with the card's" })).toHaveAttribute('aria-checked', 'true')
+  await expect(sheet).toContainText('Replace S01\u2013S02')
+})
+
+test('SOUNDS and SILENT PADS: a card\'s sound and one picked for a silent pad go on the pads with IMPORT', async ({ page }) => {
+  const card = ['ARC BEAT 1', 'name Snare swap', '[A]', 'sound A2 2 snare', 'A2 | X... X... X... X... |', '[D]', 'D9 | X... .... X... .... |'].join('\n')
+  await page.goto('/?demo#/live')
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
+  await page.evaluate((text) => {
+    const data = new DataTransfer()
+    data.setData('text/plain', text)
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }))
+  }, card)
+  const sheet = page.getByRole('dialog', { name: 'Snare swap' })
+  await expect(sheet).toBeVisible()
+  const sounds = sheet.getByRole('group', { name: 'Sounds' })
+  await expect(sounds.getByRole('checkbox', { name: /^A2: .*002 snare$/ })).toHaveAttribute('aria-checked', 'true')
+  // PUT ON PADS off leaves them all as they are; on again, ticked again.
+  const put = sounds.getByRole('switch', { name: 'Put 1 sound on the pads' })
+  await put.click()
+  await expect(sounds.getByRole('switch', { name: "Leave the pads' sounds as they are" })).toHaveAttribute('aria-checked', 'false')
+  await expect(sounds.getByRole('checkbox')).toBeDisabled()
+  await sounds.getByRole('switch').click()
+  await expect(sounds.getByRole('checkbox')).toHaveAttribute('aria-checked', 'true')
+
+  // D9 has no sound: PICK SOUND swaps the sheet for the sound list, and a pick comes back as a ticked SOUNDS row.
+  const silent = sheet.getByRole('group', { name: 'Silent pads' })
+  await expect(silent.getByRole('note', { name: 'D9: 2 notes, no sound, they will be silent' })).toBeVisible()
+  await silent.getByRole('button', { name: 'Pick a sound for D9' }).click()
+  const picker = page.getByRole('dialog', { name: 'Sound for D9' })
+  await expect(picker).toBeVisible()
+  // The key that opened it is gone: focus is on the picker's title, and back on the pad's key after.
+  await expect(picker.getByRole('heading', { name: 'Sound for D9' })).toBeFocused()
+  await picker.getByRole('button', { name: /^003/ }).click()
+  await expect(sheet).toBeVisible()
+  await expect(silent.getByRole('note', { name: /^D9: will get 003 / })).toBeVisible()
+  await expect(silent.getByRole('button', { name: /^Pick another sound for D9, now 003 / })).toBeFocused()
+  await expect(sounds.getByRole('checkbox', { name: /^D9: No sound becomes 003 / })).toHaveAttribute('aria-checked', 'true')
+  await expect(sheet).toContainText(/Writes 2 pads in project \d+ on the EP-133/)
+
+  await sheet.getByRole('button', { name: 'Import', exact: true }).click()
+  await expect(sheet).toBeHidden()
+  await expect(page.getByRole('status').filter({ hasText: /^Imported to scene S02 and 2 sounds\./ })).toBeVisible()
+})
+
+test('SILENT PADS suggests a sound by the row\'s name, marked SUGGESTED until another is picked', async ({ page }) => {
+  const card = ['ARC BEAT 1', 'name Kick in', '[D]', 'D9 kick | X... .... X... .... |'].join('\n')
+  await page.goto('/?demo#/live')
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
+  await page.evaluate((text) => {
+    const data = new DataTransfer()
+    data.setData('text/plain', text)
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }))
+  }, card)
+  const sheet = page.getByRole('dialog', { name: 'Kick in' })
+  await expect(sheet).toBeVisible()
+  const silent = sheet.getByRole('group', { name: 'Silent pads' })
+  // Picked to begin with, said so, and a ticked SOUNDS row like any pick.
+  const suggested = silent.getByRole('note', { name: /^D9: will get .*, suggested$/ })
+  await expect(suggested).toBeVisible()
+  await expect(silent).toContainText('Suggested')
+  await expect(sheet).toContainText("Arc suggested a sound for these pads from your library, by the card's names for them.")
+  const sounds = sheet.getByRole('group', { name: 'Sounds' })
+  await expect(sounds.getByRole('checkbox', { name: /^D9: No sound becomes / })).toHaveAttribute('aria-checked', 'true')
+  // Unticked under SOUNDS, the pad is silent again; ticked, suggested again.
+  await sounds.getByRole('checkbox', { name: /^D9: No sound becomes / }).click()
+  await expect(silent.getByRole('note', { name: 'D9: 2 notes, no sound, they will be silent' })).toBeVisible()
+  await sounds.getByRole('checkbox', { name: /^D9: No sound becomes / }).click()
+  await expect(suggested).toBeVisible()
+  // CHANGE picks another: no longer the suggestion.
+  await silent.getByRole('button', { name: /^Pick another sound for D9, now / }).click()
+  const picker = page.getByRole('dialog', { name: 'Sound for D9' })
+  await picker.getByRole('button', { name: /^003/ }).click()
+  await expect(silent.getByRole('note', { name: /^D9: will get 003 [^,]*$/ })).toBeVisible()
+  await expect(silent).not.toContainText('Suggested')
+  await expect(sheet).toContainText('A pad with no sound plays nothing.')
+
+  await sheet.getByRole('button', { name: 'Import', exact: true }).click()
+  await expect(sheet).toBeHidden()
+})
+
+test("FX and PAD SHAPING: the card's FX old to new with APPLY FX, its pad line ticked, applied by IMPORT", async ({ page }) => {
+  const card = ['ARC BEAT 1', 'name Shaped', 'fx reverb 60 40', 'send A 40', '[A]', 'pad A7 pitch +2 level 90', 'A7 | X... X... X... X... |'].join('\n')
+  await page.goto('/?demo#/live')
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
+  await page.evaluate((text) => {
+    const data = new DataTransfer()
+    data.setData('text/plain', text)
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }))
+  }, card)
+  const sheet = page.getByRole('dialog', { name: 'Shaped' })
+  await expect(sheet).toBeVisible()
+  const fx = sheet.getByRole('group', { name: 'FX' })
+  await expect(fx.getByRole('note', { name: /^Effect: OFF becomes REVERB/ })).toBeVisible()
+  await expect(fx.getByRole('note', { name: /^Sends: A 0 .* becomes A 40%/ })).toBeVisible()
+  await expect(sheet).toContainText("Replaces this project's FX on the phone")
+  // APPLY FX off leaves the project's FX; on again for the import.
+  await fx.getByRole('switch', { name: "Apply the card's FX to this project" }).click()
+  await expect(fx.getByRole('switch', { name: "Leave this project's FX as they are" })).toHaveAttribute('aria-checked', 'false')
+  await expect(sheet).not.toContainText("Replaces this project's FX on the phone")
+  await fx.getByRole('switch').click()
+
+  const shaping = sheet.getByRole('group', { name: 'Pad shaping' })
+  const row = shaping.getByRole('checkbox', { name: /^A7: .* becomes .*Level 90/ })
+  await expect(row).toHaveAttribute('aria-checked', 'true')
+  await row.click()
+  await expect(row).toHaveAttribute('aria-checked', 'false')
+  await expect(sheet).not.toContainText("Writes the ticked pads' settings on the EP-133")
+  await row.press('Space')
+  await expect(row).toHaveAttribute('aria-checked', 'true')
+  await expect(sheet).toContainText("Writes the ticked pads' settings on the EP-133")
+
+  await sheet.getByRole('button', { name: 'Import', exact: true }).click()
+  await expect(sheet).toBeHidden()
+  await expect(page.getByRole('status').filter({ hasText: /^Imported to A · 02\. FX/ })).toBeVisible()
+})
+
+test("SOUNDS: a card's sound the EP-133 lacks is uploaded from the saved EP-40 pack into a free slot by IMPORT", async ({ page }) => {
+  // teenage engineering's site at arc's /te/ path, serving the EP-40's pack: riddim snare in slot 100, which the demo EP-133 has free.
+  const wav = encodeWav(tone(4000, 220), 1, 46875)
+  const meta = { pak_type: 'factory', device_name: 'EP-40', device_sku: 'TE032AS006', device_version: '0.0.0', generated_at: '2023-11-24T00:00:00.000Z' }
+  const riddim = Buffer.from(
+    await writeZip(
+      [
+        { path: 'meta.json', data: new TextEncoder().encode(JSON.stringify(meta)), compress: false },
+        { path: 'sounds/100 riddim snare.wav', data: wav, compress: false },
+      ],
+      { date: 0, offsetMin: 0 },
+    ),
+  )
+  await page.route('**/te/apps/ep-sample-tool**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('.pak')) return route.fulfill({ body: riddim, contentType: 'binary/octet-stream' })
+    if (path.endsWith('.js')) return route.fulfill({ body: 'a="/apps/ep-sample-tool/assets/ep-40-factory-content-E2e40.pak"', contentType: 'text/javascript' })
+    return route.fulfill({ body: '<script type="module" src="/apps/ep-sample-tool/assets/index-E2e.js"></script>', contentType: 'text/html' })
+  })
+  await page.goto('/?demo#/settings')
+  const row = page.locator('.app__screen[data-view="settings"] .setting-row').filter({ has: page.getByText('EP-40 Riddim', { exact: true }) })
+  await row.getByRole('button', { name: 'Get', exact: true }).click()
+  await expect(page.getByText('EP-40 factory sounds saved: 1 sound.', { exact: false })).toBeVisible()
+
+  const card = ['ARC BEAT 1', 'name Riddim snare', '[A]', 'sound A2 100 riddim snare', 'A2 | .... X... .... X... |'].join('\n')
+  await page.goto('/?demo#/live')
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
+  await page.evaluate((text) => {
+    const data = new DataTransfer()
+    data.setData('text/plain', text)
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }))
+  }, card)
+  const sheet = page.getByRole('dialog', { name: 'Riddim snare' })
+  await expect(sheet).toBeVisible()
+  const sounds = sheet.getByRole('group', { name: 'Sounds' })
+  const upload = sounds.getByRole('checkbox', { name: 'A2: Upload 100 riddim snare, from the ep-40 pack, into a free slot' })
+  await expect(upload).toHaveAttribute('aria-checked', 'true')
+  await expect(upload).toContainText('Upload 100 riddim snare')
+  await expect(upload).toContainText('From the EP-40 pack, into a free slot')
+
+  await sheet.getByRole('button', { name: 'Import', exact: true }).click()
+  await expect(sheet).toBeHidden()
+  await expect(page.getByRole('status').filter({ hasText: /^Imported to A · 02 and 1 sound\./ })).toBeVisible()
+})
+
+test("SOUNDS: a card's synth line is made by Arc, its play key plays it first, and IMPORT puts it on the pad", async ({ page }) => {
+  const card = ['ARC BEAT 1', 'name Made kick', '[A]', 'synth A2 kick note F1 decay 70 bend 40 click 10 drive 20 name 808_kick', 'A2 | X... X... X... X... |'].join('\n')
+  await page.goto('/?demo#/live')
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
+  await page.evaluate((text) => {
+    const data = new DataTransfer()
+    data.setData('text/plain', text)
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }))
+  }, card)
+  const sheet = page.getByRole('dialog', { name: 'Made kick' })
+  await expect(sheet).toBeVisible()
+  const sounds = sheet.getByRole('group', { name: 'Sounds' })
+  const make = sounds.getByRole('checkbox', { name: 'A2: Make 808 kick, made by Arc from the card, into a free slot' })
+  await expect(make).toHaveAttribute('aria-checked', 'true')
+  await expect(make).toContainText('Make 808 kick')
+  await expect(make).toContainText('Made by Arc from the card, into a free slot')
+  await sounds.getByRole('button', { name: 'Play 808 kick' }).click()
+  await expect(sheet).toBeVisible()
+
+  await sheet.getByRole('button', { name: 'Import', exact: true }).click()
+  await expect(sheet).toBeHidden()
+  await expect(page.getByRole('status').filter({ hasText: /^Imported to A · 02 and 1 sound\./ })).toBeVisible()
 })

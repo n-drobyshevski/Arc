@@ -15,6 +15,15 @@ const playing = (recording = false): Transport => {
 }
 
 describe('TransportTest', () => {
+  it('PRACTICE plays after a bar counted in, recording nothing, and leaves a running transport be', () => {
+    const t = new Transport()
+    expect(t.practise()).toEqual(Start(1, false))
+    expect(t.state).toEqual(transportState('COUNT_IN'))
+    expect(t.practise()).toEqual(None)
+    t.countedIn()
+    expect(t.state).toEqual(transportState('PLAYING'))
+  })
+
   it('RECORD arms and disarms while stopped', () => {
     const t = new Transport()
     expect(t.state).toEqual(transportState())

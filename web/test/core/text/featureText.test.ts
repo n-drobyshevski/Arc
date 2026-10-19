@@ -21,6 +21,7 @@ import { FeatureText } from '../../../src/core/text/featureText'
 import { MirrorText } from '../../../src/core/text/mirrorText'
 import { NavText } from '../../../src/core/text/navText'
 import { SettingsText } from '../../../src/core/text/settingsText'
+import { WebText } from '../../../src/core/text/webText'
 
 describe('FeatureTextTest', () => {
   it('browser text', () => {
@@ -503,14 +504,15 @@ describe('FeatureTextTest', () => {
       'Share B \u00B7 12 with Claude, no notes yet',
     ])
     expect(ClaudeText.SKILL_URL).toBe('https://arc-ko.vercel.app/arc-beats-skill.zip')
-    expect(ClaudeText.LEARN_PROMPT.startsWith('Use the arc-beats skill.')).toBe(true)
+    expect(ClaudeText.LEARN_PROMPT.startsWith('Use the arc-beats skill to teach me')).toBe(true)
+    expect(WebText.LEARN_PROMPT.startsWith('Use the arc-beats skill to teach me') && WebText.LEARN_PROMPT.includes('Arc web app')).toBe(true)
     expect(CoachText.CLAUDE).toBe('Share a beat with Claude, paste one back')
     // What is shared: the card in a fenced block after the prompt, named by where it sits.
     expect([ClaudeText.patternCardName(1, 1), ClaudeText.patternCardName(99, 9), ClaudeText.sceneCardName(1)]).toEqual(['P01 S02', 'P99 S10', 'S02'])
     expect(ClaudeText.shareSubject('P01 S02')).toBe('Arc beat P01 S02')
-    expect(ClaudeText.shareText('Analyse this beat:', 'ARC BEAT 1\nswing 50\n')).toBe('Analyse this beat:\n\n```\nARC BEAT 1\nswing 50\n```\n')
+    expect(ClaudeText.shareText('Analyse this beat:', 'ARC BEAT 1\nswing 50\n')).toBe("Analyse this beat:\n\nMy EP-133 plays the EP-133's own factory sounds.\n\n```\nARC BEAT 1\nswing 50\n```\n")
     // A kit other than the EP-133's is named between the prompt and the card; the EP-133's own kit adds nothing.
-    expect(ClaudeText.kitLine(FactoryKit.EP133)).toBeNull()
+    expect(ClaudeText.kitLine(FactoryKit.EP133)).toBe("My EP-133 plays the EP-133's own factory sounds.")
     expect(ClaudeText.kitLine(FactoryKit.EP40)).toBe('My EP-133 plays the EP-40 Riddim factory kit.')
     expect(ClaudeText.kitLine(FactoryKit.EP1320)).toBe('My EP-133 plays the EP-1320 Medieval factory kit.')
     expect(ClaudeText.shareText('Analyse this beat:', 'ARC BEAT 1\n', FactoryKit.EP40)).toBe(
@@ -542,6 +544,18 @@ describe('FeatureTextTest', () => {
     expect(ClaudeText.goesTo(0, 4)).toBe('A \u00B7 04 (next free)')
     expect([ClaudeText.GOES_TO, MirrorText.NEW_SCENE, ClaudeText.TEMPO]).toEqual(['Goes to', 'New scene', 'Tempo'])
     expect(ClaudeText.tempoChip(122).toUpperCase()).toBe('SET \u00B7 NOW 122')
+    expect([ClaudeText.SET_TEMPO.toUpperCase(), ClaudeText.tempoChange(136, 85), ClaudeText.tempoKept(136, 85)]).toEqual(['SET', '136 \u2192 85', '136 \u00B7 card 85'])
+    expect([
+      ClaudeText.scenesAfter(5),
+      ClaudeText.scenesReplace(5),
+      ClaudeText.scenesReplace(1),
+      ClaudeText.cardSceneReplaced(2, [
+        [0, 4],
+        [1, null],
+      ]),
+      ClaudeText.replaceScenesName(false, 5),
+      ClaudeText.replaceScenesName(true, 1),
+    ]).toEqual(['After S05', 'Replace S01\u2013S05', 'Replace S01', 'S03 \u00B7 A 04 \u00B7 B (same)', "Add the card's scenes after the project's 5 scenes", "Replace the project's 1 scene with the card's"])
     expect([true, false].map((on) => ClaudeText.tempoChipName('92', 122, on))).toEqual(['Set the tempo to 92, now 122', 'Keep the tempo at 122, the card says 92'])
     expect(ClaudeText.swingLine(58)).toBe('Swing 58 \u00B7 placed in the notes')
     // Problems: listed, announced and copied for Claude.
@@ -724,6 +738,14 @@ describe('FeatureTextTest', () => {
     expect(ClaudeText.cardSceneGoes(4, [4, 2, 1, 1])).toBe('S05 \u00B7 A04 B02 C01 D01')
     expect(ClaudeText.SCENE_SAME).toBe('Plays the same patterns as the scene before.')
     expect([ClaudeText.shareChainKey(1), ClaudeText.shareChainKey(3)]).toEqual(['Share chain \u00B7 1 scene', 'Share chain \u00B7 3 scenes'])
+    expect([
+      ClaudeText.sent(ClaudeText.sharedScene('S02')),
+      ClaudeText.sceneTitle('S02'),
+      ClaudeText.chainLine(3, 6),
+      ClaudeText.pickScene('S02', true),
+      ClaudeText.pickPattern(0, 1, false),
+      ClaudeText.pickChain(1),
+    ]).toEqual(['Sent Scene S02', 'Scene S02', '3 scenes \u00B7 6 steps', 'Scene S02, no notes yet', 'A \u00B7 01', 'Chain, 1 scene'])
     expect(ClaudeText.cardSceneTarget(2, [[0, 4], [1, 2], [2, null]])).toBe('new S03 \u00B7 A 04 \u00B7 B 02 \u00B7 C (same)')
     expect(ClaudeText.chainImport([chainStep(2, 2), chainStep(3), chainStep(2, 2), chainStep(4)])).toBe('S03\u00D72 \u2192 S04 \u2192 S03\u00D72 \u2192 S05')
     expect(ClaudeText.cardSceneName(2, 'Drop', 4, [4, 2, 1, 1])).toBe('Scene 2, Drop, becomes S05, patterns A 4, B 2, C 1, D 1')
@@ -771,6 +793,15 @@ describe('FeatureTextTest', () => {
       MirrorText.takesSummary(3, 'Oct 4'),
       MirrorText.NO_TAKES,
     ]).toEqual(['Recording 0:12', '1 take \u00B7 last Oct 5, 2:23 PM', '3 takes \u00B7 last Oct 4', 'No takes yet'])
+    expect([
+      MirrorText.takeNumber(3),
+      MirrorText.takeNumber(12),
+      MirrorText.takesCount(3),
+      MirrorText.takeRow(3, 12.4, 'Oct 5, 2:23 PM', false),
+      MirrorText.takeRow(1, 73.0, 'Oct 4', true),
+      MirrorText.litTake(FeatureText.SHARE_WAV, 3),
+      MirrorText.deleteTakeAgain(2),
+    ]).toEqual(['T03', 'T12', 'Takes \u00B7 3', 'T03, 0:12, Oct 5, 2:23 PM', 'T01, 1:13, Oct 4, playing', 'Share WAV, T03', 'Delete T02? Press DEL again'])
     expect(MirrorText.toolsRow(MirrorText.PLAY, MirrorText.playOneGroup(true))).toBe('Play, One group \u00B7 Follow on')
     expect([
       MirrorText.BACK_TO_TOOLS,

@@ -1,0 +1,122 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/KeysSheet.kt's look: scale rows 42 high
+ * (40 short) with twelve 8px dots, the key and octave caps 44 high (40 short), navy when picked. */
+
+/* The caption sits closer under the grip than the sheet's spacing: the ✕'s touch area reaches up into it. */
+.scale-sheet__body { display: flex; flex-direction: column; margin-top: -10px; min-width: 0; }
+
+.scale-sheet__head { display: flex; align-items: center; height: 44px; }
+.scale-sheet__caption {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--graphite);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scale-sheet__section > .scale-sheet__caption { padding-block: 8px; }
+
+/* The ✕: a small cross at the caption's end, lined up with the rows' dots; its 44px reach into the margin. */
+.scale-sheet__close {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  margin-right: -12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--graphite);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.scale-sheet__close svg { stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; fill: none; overflow: visible; }
+
+.scale-sheet__scales { display: flex; flex-direction: column; }
+
+.scale-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--navy);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.scale-row:active { background: var(--key); }
+.scale-row.is-on { background: var(--navy); color: var(--on-navy); }
+.scale-row__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The root signal orange, the scale's notes filled in the row's ink, the rest rings (faded on navy). */
+.scale-dots { flex: none; overflow: visible; }
+.scale-dots__root { fill: var(--signal); }
+.scale-dots__in { fill: currentColor; }
+.scale-dots__out { fill: none; stroke: var(--graphite); }
+.scale-row.is-on .scale-dots__out { stroke: color-mix(in oklab, var(--on-navy) 50%, transparent); }
+
+/* Room for the caps' edges under the last row. */
+.scale-sheet__lower { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding-bottom: 4px; }
+.scale-sheet__section { min-width: 0; }
+.scale-sheet__keys { display: flex; flex-direction: column; gap: 8px; }
+.scale-sheet__row { display: flex; gap: 6px; }
+
+.scale-cap {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  --cap-face: var(--key);
+  --cap-edge: var(--key-edge);
+  color: var(--navy);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.scale-cap.is-on { --cap-face: var(--navy); --cap-edge: color-mix(in oklab, var(--navy) 70%, black); color: var(--on-navy); }
+
+/* A short window (a phone on its side): the scales in two columns, column by column, and the keys
+ * and the octaves side by side; the sheet as wide as that needs. */
+@media (max-height: 479.98px) {
+  .scale-sheet .sheet__panel { max-width: 720px; }
+  .scale-sheet__scales {
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-rows: repeat(var(--tall), auto);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 16px;
+  }
+  .scale-row { height: 40px; }
+  .scale-sheet__lower { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; margin-top: 10px; }
+  .scale-cap { height: 40px; }
+  .scale-sheet__octaves { gap: 5px; }
+}

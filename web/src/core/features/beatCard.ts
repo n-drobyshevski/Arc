@@ -16,6 +16,8 @@
 // - A section's `sounds` is a ReadonlyMap from pad offset to CardSound, built
 //   by `cardSound()`; `available` in resolveSounds is a ReadonlyMap from slot to
 //   name; SoundStatus is a const object plus a string union of its names.
+//   Its `foreign` comes last (optional), after `current`, where the Kotlin
+//   has it before the trailing lambda.
 // - A section's `pads` is a ReadonlyMap from pad offset to CardPad, built by
 //   `cardPad()`; the card's `fx` is a CardFx built by `cardFx()` (its `sends` a
 //   ReadonlyMap from group to send). Knobs are floats kept with Math.fround, as
@@ -34,8 +36,9 @@
 //   without them compare equal as before. A CardSynth, built by `cardSynth()`,
 //   leaves out the fields its line didn't give (Kotlin has nulls), and its
 //   enums are string unions of their words. BeatCards.synthsByPad is keyed by
-//   padKey where the Kotlin has PhysicalPads. The web reads, writes and keeps
-//   synth lines; it makes no sounds.
+//   padKey where the Kotlin has PhysicalPads. A chord's notes (Kotlin's
+//   SynthChord.intervals) are SYNTH_CHORD_INTERVALS. SynthVoice (synthVoice.ts)
+//   makes the sounds. A SoundPick's [synth] is absent where the Kotlin has null.
 
 import { clamp01 } from '../formats/fx/fxMath'
 import { Chain, chainStep, type ChainStep } from './chain'
@@ -83,8 +86,8 @@ export interface BeatCard {
 
 /**
  * A step of a card's lesson (`lesson Kick alone | A7 | 50 | Count out loud`): its [title], the [group] and [pads]
- * (offsets; null: all the group's) the player plays, at [speed] percent of the tempo, and a [tip]. Arc on Android
- * runs it in PRACTICE; the web reads and writes it.
+ * (offsets; null: all the group's) the player plays, at [speed] percent of the tempo, and a [tip]. It is played on the
+ * first scene's pattern of that group.
  */
 export interface LessonStep {
   readonly title: string
@@ -251,6 +254,19 @@ export const SYNTH_WAVES: readonly SynthWave[] = ['sine', 'tri', 'saw', 'square'
 /** The notes a synth line stacks on its root. */
 export type SynthChord = 'one' | 'min' | 'maj' | 'min7' | 'maj7' | 'dom7' | 'sus2' | 'sus4' | 'fifth' | 'oct'
 export const SYNTH_CHORDS: readonly SynthChord[] = ['one', 'min', 'maj', 'min7', 'maj7', 'dom7', 'sus2', 'sus4', 'fifth', 'oct']
+/** A chord's notes stacked on the root, in semitones. */
+export const SYNTH_CHORD_INTERVALS: Readonly<Record<SynthChord, readonly number[]>> = {
+  one: [0],
+  min: [0, 3, 7],
+  maj: [0, 4, 7],
+  min7: [0, 3, 7, 10],
+  maj7: [0, 4, 7, 11],
+  dom7: [0, 4, 7, 10],
+  sus2: [0, 2, 7],
+  sus4: [0, 5, 7],
+  fifth: [0, 7],
+  oct: [0, 12],
+}
 
 /**
  * A synth line: only what the line gave. A field the line left out is absent (Arc on Android fills in its type's
@@ -342,7 +358,9 @@ export const SoundStatus = {
  * is MISSING), the slot the pad plays now ([currentSlot], null when not known)
  * and the [status]. [unverified] is set when the slot is a factory sound the
  * EP-133 lists without a name ("200.pcm", see FactorySounds.unnamed): it is
- * used by its slot, as its name can't be checked.
+ * used by its slot, as its name can't be checked. [synth] is set when the
+ * pick is the pad's synth line: [wanted] then names its device name
+ * (SynthVoice.deviceName), and MISSING means Arc makes it.
  */
 export interface SoundPick {
   readonly pad: PhysicalPad
@@ -352,6 +370,7 @@ export interface SoundPick {
   readonly currentSlot: number | null
   readonly status: SoundStatus
   readonly unverified: boolean
+  readonly synth?: CardSynth
 }
 
 /** Something wrong with a card, at [line] (counted from 1 in the text read): an [error] stops the card being read, a warning doesn't. */
@@ -1437,16 +1456,21 @@ function write(card: BeatCard, names: (pad: PhysicalPad) => string | null = () =
   return out.join('\n') + '\n'
 }
 
-// The chain line: steps as 2 or 2x4; those naming a scene the card hasn't, or passes out of range, are left out, and so is a chain left with none.
 /** A lesson step as its line: "lesson Kick alone | A7 | 50 | Count out loud" (the speed left out at 100, A for the whole group). */
 export function lessonText(step: LessonStep): string {
-  const pads = step.pads === null ? letter(step.group) : ROWS.flat().filter((o) => step.pads!.includes(o)).map((o) => padText(step.group, o)).join(' ')
-  const parts = [cleanText(step.title, MAX_NAME), pads]
+  const parts = [cleanText(step.title, MAX_NAME), lessonPads(step)]
   if (step.speed !== LESSON_MAX_SPEED || step.tip !== null) parts.push(`${step.speed}`)
   if (step.tip !== null) parts.push(cleanText(step.tip, Number.MAX_SAFE_INTEGER))
   return 'lesson ' + parts.join(' | ')
 }
 
+/** A lesson step's pads as a card writes them, in keypad order ("A7 A9"), or the group's letter for all its pads. */
+export function lessonPads(step: LessonStep): string {
+  const pads = step.pads
+  return pads === null ? letter(step.group) : ROWS.flat().filter((o) => pads.includes(o)).map((o) => padText(step.group, o)).join(' ')
+}
+
+// The chain line: steps as 2 or 2x4; those naming a scene the card hasn't, or passes out of range, are left out, and so is a chain left with none.
 function writeChain(out: string[], chain: readonly (readonly [number, number])[], sceneCount: number): void {
   const steps = chain.filter(([sc, passes]) => sc >= 1 && sc <= sceneCount && passes >= Chain.MIN_PASSES && passes <= Chain.MAX_PASSES).slice(0, Chain.MAX_STEPS)
   if (steps.length === 0) return
@@ -2012,6 +2036,11 @@ function soundNames(device: ReadonlyMap<number, string>, factory: ReadonlyMap<nu
 }
 
 // Whether [slot] is in [available] under the name the EP-133 gives a sound nobody named ("200.pcm").
+/** The slot of [available] (slot to name) that holds a sound called [name], as resolveSounds looks one up: the pad's own ([now]) when it does, else the lowest; null when none. */
+function slotNamed(available: ReadonlyMap<number, string>, name: string, now: number | null): number | null {
+  return lookUp(available, name, now)
+}
+
 function unnamedIn(available: ReadonlyMap<number, string>, slot: number): boolean {
   const name = available.get(slot)
   return name !== undefined && unnamed(slot, name)
@@ -2031,9 +2060,16 @@ function unnamedIn(available: ReadonlyMap<number, string>, slot: number): boolea
  * pick whose slot is already on the pad is SAME, found by name or not. The
  * sounds are the project's, not a scene's: the lines of all the card's scenes
  * are matched, and a pad given a line in more than one scene takes the last
- * (one pick, in the place of its first).
+ * (one pick, in the place of its first). A line that is [foreign] (another
+ * kit's sound, by its slot and name) is never used by an unnamed slot: that
+ * slot holds another sound.
  */
-function resolveSounds(card: BeatCard, available: ReadonlyMap<number, string>, current: (pad: PhysicalPad) => number | null): SoundPick[] {
+function resolveSounds(
+  card: BeatCard,
+  available: ReadonlyMap<number, string>,
+  current: (pad: PhysicalPad) => number | null,
+  foreign: (wanted: CardSound) => boolean = () => false,
+): SoundPick[] {
   const picks = new Map<number, SoundPick>()
   for (const s of allSections(card)) {
     for (const offset of KEYPAD) {
@@ -2045,7 +2081,7 @@ function resolveSounds(card: BeatCard, available: ReadonlyMap<number, string>, c
       const name = wanted.name !== null && wanted.name.trim() !== '' && !unnamed(wanted.slot, wanted.name) ? wanted.name : null
       const direct = available.has(wanted.slot) && (name === null || holds(available.get(wanted.slot), name)) ? wanted.slot : null
       const byName = direct === null && name !== null ? lookUp(available, name, now) : null
-      const slot = direct ?? byName ?? (unnamedIn(available, wanted.slot) ? wanted.slot : null)
+      const slot = direct ?? byName ?? (unnamedIn(available, wanted.slot) && !foreign(wanted) ? wanted.slot : null)
       if (slot === null) {
         picks.set(padKey(pad), { pad, wanted, slot: null, name: null, currentSlot: now, status: SoundStatus.MISSING, unverified: false })
         continue
@@ -2274,4 +2310,4 @@ function isCardFile(name: string): boolean {
 /** The most of a card file Arc reads: a longer one is no card. */
 const MAX_CARD_FILE = 1 << 20
 
-export const BeatCards = { VERSION, MAX_NAME, MAX_SCENES, TIDY_COMMENT, read, hasCard, write, fromPatterns, fromScenes, fxOf, padOf, applyFx, applyPad, resolveSounds, soundNames, soundList, silentPads, synthsByPad, notesByPad, suggestSound, isCardFile, MAX_CARD_FILE, plan, planScenes } as const
+export const BeatCards = { VERSION, MAX_NAME, MAX_SCENES, TIDY_COMMENT, read, hasCard, write, lessonPads, fromPatterns, fromScenes, fxOf, padOf, applyFx, applyPad, resolveSounds, soundNames, soundList, silentPads, synthsByPad, slotNamed, notesByPad, suggestSound, isCardFile, MAX_CARD_FILE, plan, planScenes } as const

@@ -52,6 +52,8 @@ const EP133: FactoryKit = Object.freeze({ id: 'ep133', source: SOURCE, sku: 'TE0
 const EP1320: FactoryKit = Object.freeze({ id: 'ep1320', source: 'factory-ep1320', sku: 'TE032AS005', model: 'EP-1320' })
 const EP40: FactoryKit = Object.freeze({ id: 'ep40', source: 'factory-ep40', sku: 'TE032AS006', model: 'EP-40' })
 const KITS: readonly FactoryKit[] = Object.freeze([EP133, EP1320, EP40])
+/** The kits as Settings and Live list them: the downloadable ones first (EP-133, EP-40), then the EP-1320's. */
+const SHOWN: readonly FactoryKit[] = Object.freeze([EP133, EP40, EP1320])
 
 /** The Kotlin `enum class FactoryKit`, with its companion. */
 export const FactoryKit = {
@@ -59,6 +61,7 @@ export const FactoryKit = {
   EP1320,
   EP40,
   entries: KITS,
+  SHOWN,
   /** By [id] ("ep133", "ep1320", "ep40"). */
   ofId(id: string | null | undefined): FactoryKit | null {
     return KITS.find((k) => k.id === id) ?? null
@@ -221,6 +224,35 @@ export function unnamed(slot: number, name: string): boolean {
   return ktTrim(name).toLowerCase() === String(slot).padStart(3, '0') + '.pcm'
 }
 
+/**
+ * The kit whose factory sounds a device holds, told by its slots ([device]:
+ * the slots its list has) against each pack's ([packs], those saved): the
+ * pack sharing the most slots with it, counted over both lists (Jaccard),
+ * when that is at least [KIT_MATCH]; else null. An EP-133 with its own sounds
+ * shares about four in ten of its slots with the EP-40 Riddim's pack, and all
+ * of them with its own.
+ */
+export function kitOf(device: ReadonlySet<number>, packs: ReadonlyMap<FactoryKit, ReadonlySet<number>>): FactoryKit | null {
+  if (device.size === 0) return null
+  let best: FactoryKit | null = null
+  let bestShare = -1
+  for (const [kit, slots] of packs) {
+    let both = 0
+    for (const s of device) if (slots.has(s)) both++
+    const either = device.size + slots.size - both
+    if (either === 0) continue
+    const share = both / either
+    if (share >= KIT_MATCH && share > bestShare) {
+      best = kit
+      bestShare = share
+    }
+  }
+  return best
+}
+
+/** How much a device's slots have to be a pack's to hold that kit ([kitOf]). */
+export const KIT_MATCH = 0.6
+
 /** The library's factory pack of [kit], if it has one (the newest, should there be two). */
 export function inLibrary<B extends { readonly source: string; readonly createdAt: number }>(
   backups: readonly B[],
@@ -232,9 +264,6 @@ export function inLibrary<B extends { readonly source: string; readonly createdA
   }
   return best
 }
-
-/** The kits as Settings and Live list them: the downloadable ones first (EP-133, EP-40), then the EP-1320's. */
-const SHOWN: readonly FactoryKit[] = Object.freeze([EP133, EP40, EP1320])
 
 /**
  * The kits whose pack the library has, in the order Settings and Live list
@@ -279,6 +308,8 @@ export const FactorySounds = {
   snapshot,
   projects,
   unnamed,
+  kitOf,
+  KIT_MATCH,
   inLibrary,
   savedKits,
   activeKitOf,

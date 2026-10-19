@@ -25,6 +25,7 @@
 // The sheet scrolls by itself, so the left column and the tabs stay put.
 import type { ComponentChildren, JSX, TargetedMouseEvent } from 'preact'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
+import type { ReadonlySignal } from '@preact/signals'
 import { findSounds, hundreds, type DeviceContents, type SlotBlock, type SoundDetails } from '../../core/features/deviceBrowser'
 import type { ProjectEntry, SoundEntry } from '../../core/protocol/device'
 import { CoachText } from '../../core/text/coachText'
@@ -42,6 +43,7 @@ import { Key } from '../components/Key'
 import { PlayKey } from '../components/PlayKey'
 import { Segmented } from '../components/Segmented'
 import { RangeKey } from '../live/SoundPicker'
+import { useIs } from '../live/memo'
 import { WIDE_QUERY, useMedia } from '../useDesk'
 import './DeviceScreen.css'
 import { useFactoryKit } from '../FactoryKitContext'
@@ -55,7 +57,8 @@ export interface DeviceScreenProps {
   onAddSamples: () => void
   /** Null on the Device tab, which has no Done key. */
   onBack?: (() => void) | null
-  playing: string | null
+  /** The key of the sound playing (controller.playing), read by each row: a preview re-renders its rows alone. */
+  playing: ReadonlySignal<string | null>
   onPlay: (slot: number) => void
   onStop: () => void
   /** The project's pads sheet (a navigation layer 'pads:device:<n>'). */
@@ -325,7 +328,7 @@ export function DeviceScreen(props: DeviceScreenProps): JSX.Element {
           badge={wide && used?.has(e.slot) ? project : null}
           open={openSlot === e.slot}
           enabled={!state.busy}
-          playing={playing === `device:${e.slot}`}
+          playing={playing}
           onPlay={() => onPlay(e.slot)}
           onStop={onStop}
           onClick={() => toggleSlot(e.slot)}
@@ -639,12 +642,13 @@ function SoundRow(props: {
   badge: number | null
   open: boolean
   enabled: boolean
-  playing: boolean
+  playing: ReadonlySignal<string | null>
   onPlay: () => void
   onStop: () => void
   onClick: () => void
 }): JSX.Element {
-  const { e, b, open, enabled, playing } = props
+  const { e, b, open, enabled } = props
+  const playing = useIs(props.playing, `device:${e.slot}`)
   const detailsId = `device-d${e.slot}`
   const d = b.details.get(e.slot)
   const play = (

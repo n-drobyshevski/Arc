@@ -4,7 +4,9 @@ import { describe, expect, it } from 'vitest'
 import { MirrorText } from '../../src/core/text/mirrorText'
 import { WebText } from '../../src/core/text/webText'
 import { emptyMirrorState, type MirrorUi } from '../../src/state/types'
-import { DIGIT_GLYPHS, displayDigits, editWord, firstSentence, pageWord, plateStatus, readoutDigits } from '../../src/ui/live/DeviceView'
+import { DIGIT_GLYPHS, displayDigits, editWord, firstSentence, pageWord, patternBitsOf, patternKey, plateStatus, readoutDigits, stepsKey, stepsOf } from '../../src/ui/live/DeviceView'
+import { hasWords, patternRuns, recordLight, type TransportUi } from '../../src/ui/live/PatternLine'
+import { PATTERN_UI } from '../../src/state/patternPlan'
 import { EDIT_PAGES } from '../../src/ui/sheets/PadEditPages'
 import { FX_TYPES } from '../../src/core/features/fxSettings'
 import { cardSearch, shortcutsFor } from '../../src/ui/live/shortcuts'
@@ -77,6 +79,25 @@ describe('the plate', () => {
     expect(plateStatus(st(), ui(), { state: { kind: 'armed' }, onTake: noop })).toBe(WebText.TAKE_ARMED)
     expect(plateStatus(st(), ui(), { state: { kind: 'recording', seconds: 12 }, onTake: noop })).toBe('Take 0:12')
     expect(plateStatus(st(), ui({ offline: 'Last seen Oct 5, 2:04 PM' }), idle)).toBe('Offline · Last seen Oct 5, 2:04 PM')
+  })
+})
+
+describe('the keys the device renders by', () => {
+  it("hold − / +'s route and where each steps, and none without a layer", () => {
+    for (const s of [{ route: 'group', minus: true, plus: false }, { route: 'length', minus: false, plus: true }, { route: 'octave', minus: true, plus: true }] as const) {
+      expect(stepsOf(stepsKey(s))).toEqual(s)
+    }
+    expect(stepsKey(null)).toBe('')
+    expect(stepsOf('')).toBeNull()
+  })
+  it("hold what the device shows of the pattern, and none without one", () => {
+    const t = (over: Partial<typeof PATTERN_UI>): TransportUi => ({ ui: { ...PATTERN_UI, ...over } }) as unknown as TransportUi
+    for (const ui of [{}, { phase: 'ARMED' }, { phase: 'COUNT_IN' }, { phase: 'PLAYING', recording: true }, { phase: 'PLAYING' }, { erase: true }] as const) {
+      const u = t(ui).ui
+      expect(patternBitsOf(patternKey(t(ui))), JSON.stringify(ui)).toEqual({ light: recordLight(u), runs: patternRuns(u), erase: u.erase, words: hasWords(u) })
+    }
+    expect(patternKey(null)).toBe('')
+    expect(patternBitsOf('')).toBeNull()
   })
 })
 

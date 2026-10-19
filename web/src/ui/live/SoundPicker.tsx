@@ -20,6 +20,7 @@
 // RangeKey (Kotlin's, in PadSheet.kt) is exported for the Device tab's range keys.
 import type { JSX } from 'preact'
 import { useId, useMemo, useRef, useState } from 'preact/hooks'
+import type { ReadonlySignal } from '@preact/signals'
 import { findSounds, hundreds } from '../../core/features/deviceBrowser'
 import { SoundSource } from '../../core/features/offlinePads'
 import type { SoundEntry } from '../../core/protocol/device'
@@ -30,6 +31,7 @@ import { Search } from '../components/Icons'
 import { useFactoryKit } from '../FactoryKitContext'
 import { PlayKey } from '../components/PlayKey'
 import { Segmented } from '../components/Segmented'
+import { useIs } from './memo'
 import './SoundPicker.css'
 
 /** The drag data type of a device sound's slot (dragged from the Sounds tab onto a pad). */
@@ -57,8 +59,8 @@ export interface SoundPickerProps {
   current?: number | null
   /** The list [current] is in (default: the device's); the list shown first. */
   padSource?: SoundSource | null
-  /** The key of the sound playing (controller.playing). */
-  playing: string | null
+  /** The key of the sound playing (controller.playing), read by each row: a preview re-renders its rows alone. */
+  playing: ReadonlySignal<string | null>
   onPlay: (slot: number, source: SoundSource) => void
   onStop: () => void
   /** A tap on a row (the pad sheet). */
@@ -76,7 +78,7 @@ export interface SoundPickerProps {
 
 export function SoundPicker(props: SoundPickerProps): JSX.Element {
   const kit = useFactoryKit()
-  const { current = null, playing, onPick, onDrag, scroll = false, offline = false } = props
+  const { current = null, onPick, onDrag, scroll = false, offline = false } = props
   const factory = props.factory ?? null
   const id = useId()
   // Both lists offered: a switch; else the one there is.
@@ -152,52 +154,23 @@ export function SoundPicker(props: SoundPickerProps): JSX.Element {
               </h3>
               <ul class="snd__rows">
                 {b.sounds.map((snd) => {
-                  const on = playing === soundKey(snd.slot, source)
-                  const here = snd.slot === currentHere
                   // A device sound arc has no audio for: dimmed, neither picked, dragged nor played.
                   const dim = off?.has(snd.slot) === true && snd.slot !== props.readSlot
-                  const drag = onDrag !== undefined && !dim
                   return (
-                    <li
+                    <SoundRow
                       key={snd.slot}
-                      class={`snd__row${here ? ' is-current' : ''}${on ? ' is-playing' : ''}${drag ? ' snd__row--drag' : ''}${dim ? ' is-off' : ''}`}
-                      draggable={drag ? true : undefined}
-                      onDragStart={
-                        drag
-                          ? (e) => {
-                              e.dataTransfer?.setData(SLOT_MIME, String(snd.slot))
-                              e.dataTransfer?.setData(SOURCE_MIME, source)
-                              e.dataTransfer?.setData('text/plain', `${FeatureText.slot(snd.slot)} ${snd.name}`)
-                              if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy'
-                              onDrag(snd, source)
-                            }
-                          : undefined
-                      }
-                      onDragEnd={drag ? () => onDrag(null, source) : undefined}
-                    >
-                      {onPick ? (
-                        <button
-                          type="button"
-                          class="snd__pick"
-                          aria-current={here || undefined}
-                          disabled={props.disabled === true || dim}
-                          onClick={() => onPick(snd, source)}
-                        >
-                          <RowWords snd={snd} here={here} dim={dim} offline={offline} />
-                        </button>
-                      ) : (
-                        <span class="snd__pick">
-                          <RowWords snd={snd} here={here} dim={dim} offline={offline} />
-                        </span>
-                      )}
-                      <PlayKey
-                        class="snd__play"
-                        playing={on}
-                        disabled={dim}
-                        description={on ? FeatureText.stop(snd.name) : FeatureText.play(snd.name)}
-                        onClick={() => (on ? props.onStop() : props.onPlay(snd.slot, source))}
-                      />
-                    </li>
+                      snd={snd}
+                      source={source}
+                      here={snd.slot === currentHere}
+                      dim={dim}
+                      offline={offline}
+                      disabled={props.disabled === true}
+                      playing={props.playing}
+                      onPlay={props.onPlay}
+                      onStop={props.onStop}
+                      onPick={onPick}
+                      onDrag={onDrag}
+                    />
                   )
                 })}
               </ul>
@@ -206,6 +179,68 @@ export function SoundPicker(props: SoundPickerProps): JSX.Element {
         })}
       </div>
     </div>
+  )
+}
+
+interface SoundRowProps {
+  snd: SoundEntry
+  source: SoundSource
+  here: boolean
+  dim: boolean
+  offline: boolean
+  disabled: boolean
+  playing: ReadonlySignal<string | null>
+  onPlay: (slot: number, source: SoundSource) => void
+  onStop: () => void
+  onPick: ((snd: SoundEntry, source: SoundSource) => void) | undefined
+  onDrag: ((snd: SoundEntry | null, source: SoundSource) => void) | undefined
+}
+
+/** One sound's row (web addition, out of SoundPicker): it alone follows whether its sound plays. */
+function SoundRow(props: SoundRowProps): JSX.Element {
+  const { snd, source, here, dim, offline, onPick, onDrag } = props
+  const on = useIs(props.playing, soundKey(snd.slot, source))
+  const drag = onDrag !== undefined && !dim
+  return (
+    <li
+      class={`snd__row${here ? ' is-current' : ''}${on ? ' is-playing' : ''}${drag ? ' snd__row--drag' : ''}${dim ? ' is-off' : ''}`}
+      draggable={drag ? true : undefined}
+      onDragStart={
+        drag
+          ? (e) => {
+              e.dataTransfer?.setData(SLOT_MIME, String(snd.slot))
+              e.dataTransfer?.setData(SOURCE_MIME, source)
+              e.dataTransfer?.setData('text/plain', `${FeatureText.slot(snd.slot)} ${snd.name}`)
+              if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy'
+              onDrag(snd, source)
+            }
+          : undefined
+      }
+      onDragEnd={drag ? () => onDrag(null, source) : undefined}
+    >
+      {onPick ? (
+        <button
+          type="button"
+          class="snd__pick"
+          aria-current={here || undefined}
+          disabled={props.disabled || dim}
+          onClick={() => onPick(snd, source)}
+        >
+          <RowWords snd={snd} here={here} dim={dim} offline={offline} />
+        </button>
+      ) : (
+        <span class="snd__pick">
+          <RowWords snd={snd} here={here} dim={dim} offline={offline} />
+        </span>
+      )}
+      <PlayKey
+        class="snd__play"
+        playing={on}
+        disabled={dim}
+        description={on ? FeatureText.stop(snd.name) : FeatureText.play(snd.name)}
+        onClick={() => (on ? props.onStop() : props.onPlay(snd.slot, source))}
+      />
+    </li>
   )
 }
 

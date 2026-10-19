@@ -29,6 +29,23 @@ test('the Device view draws the EP-133 and follows the device', async ({ page })
   await expect(pads).toHaveCount(12)
   await demo(page, (d) => d.noteOn(45, 127))
   await expect.poll(() => pads.evaluateAll((els) => els.filter((el) => Number((el as HTMLElement).style.getPropertyValue('--glow')) > 0.5).length)).toBe(1)
+  // Only the lit pad runs its halo filter (data-lit, set with --glow).
+  await expect(ep.locator('[data-pad][data-lit]')).toHaveCount(1)
+  expect(await pads.evaluateAll((els) => els.filter((el) => getComputedStyle(el).filter !== 'none').length)).toBe(1)
+  // Faded out and hit again, it lights its halo again (the frame loop took data-lit off, not a render).
+  await demo(page, (d) => d.noteOff(45))
+  await expect(ep.locator('[data-pad][data-lit]')).toHaveCount(0)
+  await demo(page, (d) => d.noteOn(45, 127))
+  await expect(ep.locator('[data-pad][data-lit]')).toHaveCount(1)
+  // A pad the arp sounds is lit full by the CSS (is-arp-lit), and so has its halo.
+  const unlit = ep.locator('[data-pad]:not([data-lit])').first()
+  await unlit.evaluate((el) => el.classList.add('is-arp-lit'))
+  expect(await unlit.evaluate((el) => getComputedStyle(el).filter)).not.toBe('none')
+  await unlit.evaluate((el) => el.classList.remove('is-arp-lit'))
+  // Its group's LED lights at half while another group is shown.
+  await ep.getByRole('tab', { name: 'Group C' }).click()
+  const ledA = ep.locator('.ep-led--group[data-group="0"]')
+  await expect.poll(() => ledA.evaluate((el) => (el as HTMLElement).style.getPropertyValue('--glow'))).toBe('0.5')
   await demo(page, (d) => {
     d.noteOff(45)
     d.clock('stop')

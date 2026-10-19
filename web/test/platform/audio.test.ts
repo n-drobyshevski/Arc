@@ -158,6 +158,19 @@ describe('pcmToFloat32', () => {
     const [m] = pcmToFloat32(view, 1)
     expect(Array.from(m as Float32Array)).toEqual([0.5, -1])
   })
+
+  it('reads the same floats from an aligned array as from an odd byte offset', () => {
+    const bytes = new Uint8Array(2 * 2 * 64 + 1)
+    for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 73 + 11) & 0xff
+    const aligned = new Uint8Array(bytes.length + 2)
+    aligned.set(bytes, 2)
+    const odd = new Uint8Array(bytes.length + 1)
+    odd.set(bytes, 1)
+    const a = pcmToFloat32(aligned.subarray(2), 2)
+    const b = pcmToFloat32(odd.subarray(1), 2)
+    expect(a.map((ch) => Array.from(ch))).toEqual(b.map((ch) => Array.from(ch)))
+    expect(a[0]?.length).toBe(64)
+  })
 })
 
 describe('WebAudioPlayer', () => {

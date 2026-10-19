@@ -1,6 +1,7 @@
 // The drawn EP-133's key layer (web only: ui/live/deviceKeys.ts): pages, keys held and spent,
 // right-click latches, SHIFT clicked for the next key, numbers typed on the pads, − / + by what is held
 // or shown, and the layer that times the presses and takes the pads.
+import { computed } from '@preact/signals'
 import { describe, expect, it, vi } from 'vitest'
 import { FX_TYPES } from '../../src/core/features/fxSettings'
 import { MAX_OCTAVE } from '../../src/core/features/keys'
@@ -665,6 +666,20 @@ describe('DeviceKeys, the layer', () => {
     expect(l.page).toBe('TIMING')
     detach()
     expect(l.page).toBe('MAIN')
+  })
+
+  it("reads − / + for the group it is given: a computed made before the view attaches holds after it", () => {
+    const l = new DeviceKeys({ context: () => ({ ...CTX, bars: [1, 2, 4, 8] }), run: vi.fn() }, clock())
+    // As DeviceView: made and read in its render, before MirrorScreen's effect attaches the view.
+    const steps = computed(() => l.route(2))
+    expect(steps.value).toEqual({ route: 'group', minus: true, plus: true })
+    let group = 2
+    l.attach({ group: () => group, setGroup: (g) => (group = g) })
+    expect(steps.value).toEqual(l.route(2))
+    // RECORD held steps the length: the given group's (8 bars in D, 1 in A).
+    l.down('RECORD')
+    expect(computed(() => l.route(3)).value).toEqual({ route: 'length', minus: true, plus: true })
+    expect(computed(() => l.route(0)).value).toEqual({ route: 'length', minus: false, plus: true })
   })
 
   it("the computer's Shift is SHIFT: a press with it takes SHIFT's meaning", () => {

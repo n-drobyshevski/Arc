@@ -127,7 +127,12 @@ export default defineConfig({
     __ARC_VERSION__: JSON.stringify(version),
     __ARC_BUILD__: JSON.stringify(buildName(version)),
   },
-  build: { target: 'es2022', sourcemap: true },
+  build: {
+    target: 'es2022',
+    sourcemap: true,
+    // Fonts stay files (precached, fetched only when a face is used), not base64 in the CSS every load parses.
+    assetsInlineLimit: (file: string) => (/\.woff2?$/.test(file) ? false : undefined),
+  },
   test: {
     environment: 'node',
     include: ['test/**/*.test.ts'],

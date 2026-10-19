@@ -46,9 +46,9 @@ export function editPadOf(sheets: readonly string[]): PhysicalPad | null {
 export function PadEditSheet(props: { view: NavView }): JSX.Element {
   const c = useController()
   const nav = useNav()
-  const state = c.state.value
-  const playing = c.playing.value
   const pad = editPadOf(props.view.sheets)
+  // The mirror only while a pad is open: closed, a publish or a pad played doesn't re-render it (the list's rows follow a preview).
+  const state = pad !== null ? c.state.value : c.stateShell.value
   const id = pad !== null ? `${EDIT_PREFIX}${pad.group}:${pad.offset}` : null
   const target = pad !== null ? c.editTarget(pad, true) : null
   const close = (): void => {
@@ -170,7 +170,7 @@ export function PadEditSheet(props: { view: NavView }): JSX.Element {
             offline={offline !== null}
             current={target.slot}
             padSource={padSource}
-            playing={playing}
+            playing={c.playing}
             onPlay={(slot, source) => void c.playLiveSound(slot, source)}
             onStop={() => c.stopPlayback()}
             onPick={(snd, source) => {

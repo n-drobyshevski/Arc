@@ -13,7 +13,7 @@
 
 import type { CardFx, CardProblem } from '../features/beatCard'
 import type { ChainStep } from '../features/chain'
-import type { FactoryKit } from '../features/factorySounds'
+import { FactoryKit } from '../features/factorySounds'
 import { FxSettings, FxType } from '../features/fxSettings'
 import type { PadSettings } from '../features/padSettings'
 import { physicalPad, type PhysicalPad } from '../features/padNotes'
@@ -129,6 +129,47 @@ export const ClaudeText = {
   /** The chain's share, for a project with no chain: nothing to share. */
   NO_CHAIN_TO_SHARE: 'Add scenes to the chain to share it',
 
+  // The Claude page as the device's display: what will go on the glass, and the keys under it.
+  /** The glass's head (upper-cased where shown): ready, or a reply awaited. */
+  READY: 'Claude \u00B7 ready',
+  WAITING: 'Waiting for Claude',
+  /** "Sent Scene S02": what went, large on the glass while the reply is awaited ([what] as [sharedScene] gives it). */
+  sent(what: string): string {
+    return `Sent ${what}`
+  },
+  /** "Scene S02", "Chain": what SHARE sends, large on the glass. */
+  sceneTitle(scene: string): string {
+    return `Scene ${scene}`
+  },
+  CHAIN: 'Chain',
+  /** "3 scenes · 6 steps": the chain's line on the glass. */
+  chainLine(scenes: number, steps: number): string {
+    return `${plural(scenes, 'scene')} \u00B7 ${plural(steps, 'step')}`
+  },
+  SCENE_EMPTY: 'No notes in this scene yet',
+  PATTERN_EMPTY: 'No notes in this pattern yet',
+  /** On the glass while the reply is awaited. */
+  COPY_THEN_PASTE: "Copy Claude's reply, then press PASTE",
+  /** The glass's dismiss word, beside the head. */
+  STOP: 'Stop',
+  PICK_HINT: 'Pick what to share, then press SHARE. Hold PASTE to open a card file.',
+  /** The keys' words (upper-cased where shown); the pattern's key says its place, "A · 01". */
+  KEY_SCENE: 'Scene',
+  KEY_CHAIN: 'Chain',
+  KEY_SOUNDS: 'Sounds',
+  KEY_SHARE: 'Share',
+  KEY_PASTE: 'Paste',
+  /** The pick keys for screen readers: "Scene S02", "A · 01", "Chain, 3 scenes", and that there is nothing to share. */
+  pickScene(scene: string, empty: boolean): string {
+    return ClaudeText.sceneTitle(scene) + (empty ? NOTHING_TO_SHARE : '')
+  },
+  pickPattern(group: number, n: number, empty: boolean): string {
+    return place(group, n) + (empty ? NOTHING_TO_SHARE : '')
+  },
+  pickChain(scenes: number): string {
+    return `${ClaudeText.CHAIN}, ${plural(scenes, 'scene')}`
+  },
+
   /** The two links under the card. */
   GET_SKILL: 'Get the arc-beats skill',
   LEARN: 'Learn with Claude',
@@ -137,24 +178,29 @@ export const ClaudeText = {
   SKILL_URL: 'https://arc-ko.vercel.app/arc-beats-skill.zip',
 
   /** What Learn with Claude shares, to be sent to the Claude app as the first message. */
-  LEARN_PROMPT: 'Use the arc-beats skill. Teach me the EP-133 K.O. II from lesson 1, one step at a time. I use the Arc app on Android.',
+  LEARN_PROMPT:
+    'Use the arc-beats skill to teach me the EP-133 K.O. II, starting at lesson 1 (Meet the pads). I use the Arc app on Android. ' +
+    'Go one step at a time: explain the step, give me something to try on the device, and wait for me before the next one.',
   LEARN_TITLE: 'Learn the EP-133 with Claude',
 
   /** Said when no app can take the link or the text. */
   NO_APP: 'No app can open that.',
 
   // ---------- Sharing ----------
-  /** The line before the card in the shared text. */
+  /** The words before the card in the shared text: the skill and the task, why, the steps as a list, then the card. */
   SHARE_PROMPT:
-    'Analyse this EP-133 beat from Arc with the arc-beats skill, then suggest 2-3 edits as a new card. ' +
-    'Keep its sound, FX and pad lines, or choose sounds from my sound list if one follows the card:',
+    "Use the arc-beats skill to improve this EP-133 beat from Arc. I'll paste your new card back into Arc next to mine, so give it a short new name.\n" +
+    '- First: analyse it, its groove, its energy and what makes it work\n' +
+    '- Edits: 2-3, as one new card\n' +
+    'Keep its sound, FX and pad lines unless an edit needs to change them, or choose sounds from my sound list if one follows the card. The card:',
   SHARE_TITLE: 'Share beat card',
 
   /** The line before a shared chain: an arrangement of several scenes (its `chain` line gives their order). */
   SHARE_CHAIN_PROMPT:
-    'Analyse this EP-133 arrangement from Arc with the arc-beats skill: comment on its energy curve, contrast, length and transitions, ' +
-    'then suggest 2-3 edits as a new card of scenes with a chain line. ' +
-    'Keep its sound, FX and pad lines, or choose sounds from my sound list if one follows the card:',
+    "Use the arc-beats skill to improve this EP-133 arrangement from Arc. I'll paste your new card back into Arc next to mine, so give it a short new name.\n" +
+    '- First: analyse it, its energy curve, contrast, length and transitions\n' +
+    '- Edits: 2-3, as one new card of scenes with a chain line\n' +
+    'Keep its sound, FX and pad lines unless an edit needs to change them, or choose sounds from my sound list if one follows the card. The card:',
   SHARE_CHAIN_TITLE: 'Share chain as a beat card',
 
   /** "Chain": a chain's card, as the share's subject names it ("Arc beat Chain"). */
@@ -176,13 +222,13 @@ export const ClaudeText = {
   },
 
   /**
-   * The kit the EP-133 plays, when it isn't its own: "My EP-133 plays the EP-40 Riddim factory kit." (the skill
-   * reads its slots and pads by it). Null for the EP-133's own kit.
+   * The kit the EP-133 plays: "My EP-133 plays the EP-40 Riddim factory kit." (the skill reads its slots and pads
+   * by it); for the EP-133's own kit, [EP133_LINE].
    */
   kitLine(kit: FactoryKit): string | null {
     switch (kit.id) {
       case 'ep133':
-        return null
+        return ClaudeText.EP133_LINE
       case 'ep40':
         return `My EP-133 plays the ${FeatureText.FACTORY_40} factory kit.`
       case 'ep1320':
@@ -190,12 +236,15 @@ export const ClaudeText = {
     }
   },
 
+  /** The EP-133's own kit, said too, so Claude never takes another kit's sounds for it. */
+  EP133_LINE: "My EP-133 plays the EP-133's own factory sounds.",
+
   /**
-   * The shared text: [prompt], a blank line and [card] (which ends in a newline) in a fenced block; with a [kit]
-   * other than the EP-133's, its [kitLine] as a paragraph between them.
+   * The shared text: [prompt], a blank line and [card] (which ends in a newline) in a fenced block, with the
+   * [kit]'s [kitLine] (the EP-133's by default) as a paragraph between them.
    */
-  shareText(prompt: string, card: string, kit?: FactoryKit): string {
-    const line = kit === undefined ? null : ClaudeText.kitLine(kit)
+  shareText(prompt: string, card: string, kit: FactoryKit = FactoryKit.EP133): string {
+    const line = ClaudeText.kitLine(kit)
     return prompt + (line === null ? '' : '\n\n' + line) + '\n\n```\n' + card + '```\n'
   },
 
@@ -279,6 +328,14 @@ export const ClaudeText = {
   tempoChip(now: number): string {
     return `Set · now ${now}`
   },
+  /** The tempo row's key (SET, with its light and ON or OFF), and the row's value: "136 \u2192 85" while it sets the card's, "136 \u00B7 card 85" while not. */
+  SET_TEMPO: 'Set',
+  tempoChange(now: number, card: number): string {
+    return `${now} \u2192 ${card}`
+  },
+  tempoKept(now: number, card: number): string {
+    return `${now} \u00B7 card ${card}`
+  },
   tempoChipName(card: string, now: number, on: boolean): string {
     return on ? `Set the tempo to ${card}, now ${now}` : `Keep the tempo at ${now}, the card says ${card}`
   },
@@ -326,6 +383,37 @@ export const ClaudeText = {
 
   /** What a row says in place of a new sound: the pad plays it already. */
   ALREADY_THERE: 'Already there',
+
+  /** A sound no slot holds that a saved factory pack has: IMPORT uploads it ("Upload 234 mpc hh", "From the EP-40 pack, into a free slot"). */
+  upload(slot: number, name: string | null): string {
+    return `Upload ${ClaudeText.soundName(slot, name)}`
+  },
+  fromPack(model: string): string {
+    return `From the ${model} pack, into a free slot`
+  },
+  inPack(model: string): string {
+    return `In the ${model} pack: connect the EP-133 to upload it`
+  },
+  soundRowUpload(pad: PhysicalPad, slot: number, name: string | null, model: string): string {
+    return `${padLabel(pad)}: ${ClaudeText.upload(slot, name)}, ${ClaudeText.fromPack(model).toLowerCase()}`
+  },
+  /** An upload that stopped part way: the pads before it keep their sounds. */
+  UPLOAD_STOPPED: 'The upload stopped',
+
+  /** A card's synth line that no slot holds yet: IMPORT makes it ("Make 808 kick", "Made by Arc from the card, into a free slot"). */
+  make(name: string): string {
+    return `Make ${name}`
+  },
+  MADE_INTO_SLOT: 'Made by Arc from the card, into a free slot',
+  MADE_OFFLINE: 'Made by Arc, kept in Arc until you connect',
+  soundRowMake(pad: PhysicalPad, name: string, offline: boolean): string {
+    const where = offline ? ClaudeText.MADE_OFFLINE : ClaudeText.MADE_INTO_SLOT
+    return `${padLabel(pad)}: ${ClaudeText.make(name)}, ` + where.charAt(0).toLowerCase() + where.slice(1)
+  },
+  /** The progress sheet while IMPORT makes and uploads the card's synth sounds. */
+  MAKING_SOUNDS: 'Making sounds',
+  /** The play button on a make row (its label): hear the sound before it is made. */
+  PLAY_SYNTH: 'Play',
 
   /** What a row says when the sound is nowhere in the user's list: "Not on your EP-133: 301 Rim dusty". */
   soundMissing(slot: number, name: string | null): string {
@@ -390,13 +478,17 @@ export const ClaudeText = {
 
   /** Under the block: what a sound picked here does. */
   SILENT_NOTE: "A pad with no sound plays nothing. Pick a sound for it: it goes on the pad with IMPORT, with the card's other sounds.",
+  /** A pick Arc made by the card's row name (BeatCards.suggestSound), until the user changes it. */
+  SUGGESTED: 'Suggested',
+  SUGGESTED_NOTE:
+    "Arc suggested a sound for these pads from your library, by the card's names for them. IMPORT puts them on the pads with the card's other sounds; CHANGE picks another, or untick one under SOUNDS.",
 
   /** A silent row for screen readers: "D7: 12 notes, no sound, they will be silent", and once picked "D7: will get 512 PIANO". */
   silentRowName(pad: PhysicalPad, notes: number): string {
     return `${padLabel(pad)}: ${plural(notes, 'note')}, no sound, ${notes === 1 ? 'it' : 'they'} will be silent`
   },
-  pickedRowName(pad: PhysicalPad, sound: string): string {
-    return `${padLabel(pad)}: will get ${sound}`
+  pickedRowName(pad: PhysicalPad, sound: string, suggested = false): string {
+    return `${padLabel(pad)}: will get ${sound}` + (suggested ? ', suggested' : '')
   },
   pickSoundName(pad: PhysicalPad): string {
     return `Pick a sound for ${padLabel(pad)}`
@@ -582,6 +674,29 @@ export const ClaudeText = {
     return (on ? "Set the project's chain from the card" : "Leave the project's chain as it is") + `, ${plural(steps, 'step')}`
   },
   SET_CHAIN_NOTE: "Replaces this project's chain with the card's, on the new scenes, and turns it on. UNDO takes it back.",
+
+  /**
+   * REPLACE ([SCENES] row): the switch for where a card's scenes go. Its row: "After S05" (off: they follow the project's) or
+   * "Replace S01–S05" (on: they take their place), its name for screen readers, and the line under the plate while on.
+   */
+  REPLACE: 'Replace',
+  scenesAfter(count: number): string {
+    return `After ${ClaudeText.sceneCardName(count - 1)}`
+  },
+  scenesReplace(count: number): string {
+    return 'Replace ' + (count <= 1 ? ClaudeText.sceneCardName(0) : `${ClaudeText.sceneCardName(0)}–${ClaudeText.sceneCardName(count - 1)}`)
+  },
+  replaceScenesName(on: boolean, count: number): string {
+    return on ? `Replace the project's ${plural(count, 'scene')} with the card's` : `Add the card's scenes after the project's ${plural(count, 'scene')}`
+  },
+  replaceScenesNote(count: number): string {
+    return `The card's scenes take the place of this project's ${plural(count, 'scene')}, from S01. Their patterns stay in the banks; UNDO takes it back.`
+  },
+  /** A card scene's row with REPLACE on: "S01 · A 04 · B (same)", the scene it becomes from S01. */
+  cardSceneReplaced(index: number, parts: readonly (readonly [number, number | null])[]): string {
+    const s = ClaudeText.cardSceneTarget(index, parts)
+    return s.startsWith('new ') ? s.slice('new '.length) : s
+  },
 
   /** The card's chain as the sheet shows it: "1×2 2 1×2 3" (card scene numbers; ×passes when more than one). */
   chainText(steps: readonly (readonly [number, number])[]): string {

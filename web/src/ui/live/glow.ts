@@ -52,6 +52,11 @@ export function glowCss(g: number): string {
   return String(Math.round(clamp(g, 0, 1) * 10000) / 10000)
 }
 
+/** A pad's or key's data-lit at glow [g]: set while it shows any glow, so a drawn one's halo filter runs only then (web only). */
+export function litAttr(g: number): '' | undefined {
+  return glowCss(g) !== '0' ? '' : undefined
+}
+
 // ---------- the KEYS strip ----------
 
 const BLACK = new Set([1, 3, 6, 8, 10])

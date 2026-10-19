@@ -10,7 +10,9 @@
 //   Kotlin caps bytes only (16 MB); a single sound over the byte cap is not
 //   kept, where Kotlin keeps the one just put in.
 // - Keys are strings, and [clear] takes a key prefix (a backup deleted, the
-//   copies cleared). The web has no takes, so no take is ever kept here.
+//   copies cleared). Takes are kept here too ("take:<name>", cleared when the
+//   take is deleted); the controller keeps the last one read outside the
+//   cache as well, so a take over the byte cap isn't read again by TRIM.
 
 /** A decoded sound, ready for SoundPlayer.play: s16le, [channels] interleaved. */
 export interface DecodedSound {

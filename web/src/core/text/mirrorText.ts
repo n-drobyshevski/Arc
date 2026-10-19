@@ -4,12 +4,14 @@
 //
 // Web deltas:
 // - jsToFixed and String.format("%.0f") are native toFixed.
+// - The take trim's trimDescription(n, start, end), a Kotlin overload of the
+//   pad TRIM's, is takeTrimDescription.
 
 import type { ArpNote, ArpOrder } from '../features/arp'
 import { Chain, ChainPlay, type ChainStep } from '../features/chain'
 import { FactoryKit, FactorySounds } from '../features/factorySounds'
 import { FxSettings, FxType } from '../features/fxSettings'
-import { Keys, NoteNames, Scale } from '../features/keys'
+import { Keys, NoteNames, Scale, intervals } from '../features/keys'
 import type { Hit } from '../features/liveMirror'
 import type { PlayMode } from '../features/padSettings'
 import { noteName, type PhysicalPad } from '../features/padNotes'
@@ -190,6 +192,25 @@ export const MirrorText = {
   // The piano: − and + step the octave, and the key gets its own word.
   OCTAVE_DOWN: 'Octave down',
   OCTAVE_UP: 'Octave up',
+  /** A pick word's TalkBack actions, the same as a short swipe along it (right, left). */
+  PICK_NEXT: 'Next',
+  PICK_PREVIOUS: 'Previous',
+  /** Added to a scale or octave word's description: held, its choices fan out beside the thumb to pick from. */
+  QUICK_PICK_HINT: 'Hold to pick from the list',
+
+  // The KEYS sheet a tap on the scale, key or octave word opens: the scales with their notes as dots, the keys, the octaves.
+  OCTAVE: 'Octave',
+  /** The sheet's title for screen readers. */
+  KEYS_SHEET: 'Scale, key and octave',
+  CLOSE_KEYS_SHEET: 'Close scale, key and octave',
+  /** A scale's row for screen readers: "Major, 7 notes". */
+  scaleRow(s: Scale): string {
+    return `${MirrorText.scaleName(s)}, ${intervals(s).length} notes`
+  },
+  /** An octave's cap for screen readers: "Octave 4". */
+  octaveCap(n: number): string {
+    return `${MirrorText.OCTAVE} ${n}`
+  },
 
   /** "KEY DO", the key word above the piano. */
   keyWord(root: number, names: NoteNames): string {
@@ -656,6 +677,72 @@ export const MirrorText = {
     "A take holds the pads and keys played on the phone, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Trim keeps a part of one (nothing is cut) and Dup copies it, to trim a copy another way. Save or Share copies one out, its trimmed part if it has one; Share to Telegram sends it as a voice message.",
   TO_DEVICE: 'To EP-133',
   DELETE_TAKE: 'Delete this take?',
+
+  // The Takes page as the device's display: numbered takes on the glass, and one strip of keys for the lit one.
+  /** "T03": a take's number on the glass, the oldest T01. */
+  takeNumber: (n: number): string => 'T' + String(n).padStart(2, '0'),
+  /** "Takes · 3" (upper-cased where shown), the glass's head. */
+  takesCount: (count: number): string => `${MirrorText.TAKES} \u00B7 ${count}`,
+  /** "T03, 0:12, Oct 5, 2:23 PM", and ", playing": a take on the glass, for screen readers. */
+  takeRow(n: number, seconds: number, made: string, playing: boolean, trimmed: boolean = false): string {
+    return (
+      `${MirrorText.takeNumber(n)}, ${MirrorText.takeLength(seconds)}` +
+      (trimmed ? ' trimmed' : '') +
+      `, ${made}` +
+      (playing ? ', playing' : '')
+    )
+  },
+  TAKES_LIT_HINT: 'Tap a take to light it; the keys act on it.',
+  /** The keys' words, upper-cased where shown. */
+  TAKE_SHARE: 'Share',
+  TAKE_SAVE: 'Save',
+  TAKE_SEND: 'EP',
+  TAKE_DEL: 'Del',
+  TAKE_TRIM: 'Trim',
+  TAKE_DUP: 'Dup',
+  DUPLICATE: 'Duplicate',
+  /** "T05, a copy of T02": a duplicate made, its trim with it. */
+  takeDuplicated(copy: number, of: number): string {
+    return `${MirrorText.takeNumber(copy)}, a copy of ${MirrorText.takeNumber(of)}`
+  },
+
+  // TRIM: a take's part, kept with it (nothing is cut), on the glass.
+  TRIM_HEAD: 'Trim',
+  TRIM_START: 'Start',
+  TRIM_END: 'End',
+  TRIM_RESET: 'Reset',
+  TRIM_DONE: 'Done',
+  TRIM_DRAG: 'Drag the handles',
+  TRIM_TAP_HINT: 'Tap START or END while it plays to cut there. Nothing is cut from the take: RESET brings it all back.',
+  /** On the list under the glass: what the lit take's trim means. */
+  trimmedHint(n: number, seconds: number): string {
+    return `✂ ${MirrorText.takeNumber(n)} is trimmed to ${MirrorText.takeLength(seconds)}: SHARE, SAVE and EP send that part`
+  },
+  /** "0:18.4": a trim's edge, to a tenth of a second. */
+  trimTime(seconds: number): string {
+    // Kotlin's toLong() and Long division: toward zero.
+    const tenths = Math.trunc(seconds * 10)
+    return `${Math.trunc(tenths / 600)}:${String(Math.trunc(tenths / 10) % 60).padStart(2, '0')}.${tenths % 10}`
+  },
+  /** "0:18.4 → 0:39.0". */
+  trimSpan(start: number, end: number): string {
+    return `${MirrorText.trimTime(start)} → ${MirrorText.trimTime(end)}`
+  },
+  /** For screen readers: the wave and its part ("Trim of T02: 0:18.4 to 0:39.0, 0:21 long"). */
+  takeTrimDescription(n: number, start: number, end: number): string {
+    return `Trim of ${MirrorText.takeNumber(n)}: ${MirrorText.trimTime(start)} to ${MirrorText.trimTime(end)}, ${MirrorText.takeLength(end - start)} long`
+  },
+  TRIM_START_LATER: 'Start later',
+  TRIM_START_EARLIER: 'Start earlier',
+  TRIM_END_LATER: 'End later',
+  TRIM_END_EARLIER: 'End earlier',
+  /** The START and END keys, for screen readers. */
+  trimMark: (edge: string, playing: boolean): string => (playing ? `${edge} here` : `${edge} (while it plays)`),
+  /** "Share WAV, T03": a key for the lit take, for screen readers. */
+  litTake: (action: string, n: number): string => `${action}, ${MirrorText.takeNumber(n)}`,
+  /** "Delete T03? Press DEL again", on the glass after one press of DEL. */
+  deleteTakeAgain: (n: number): string => `Delete ${MirrorText.takeNumber(n)}? Press DEL again`,
+
   NO_OUTPUT: 'There is no sound output to record from.',
   SHARE_TAKE_FAILED: 'Sharing failed. Use Save WAV instead.',
   // A take as a voice message (Ogg Opus, which Telegram sends as one): SHARE gives it to Telegram.

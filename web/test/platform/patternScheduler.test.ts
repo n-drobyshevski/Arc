@@ -6,7 +6,7 @@ import { ProjectPatterns, Seq, pattern, patternNote, projectPatterns, type Patte
 import { PhaseAnchors, type TransportClock } from '../../src/core/features/sequencer'
 import { VoiceMixer, VoiceShape, VoiceMode } from '../../src/core/formats/voiceMixer'
 import { ClickSound, EMPTY_PLAN, PatternScheduler, type PadVoice, type QueuedSwitch, type ScheduleSink, type SeqPlan } from '../../src/platform/audio/patternScheduler'
-import { MixerHost, type FromMixer } from '../../src/platform/audio/liveMixer'
+import { MixerHost, type FromMixer, type ToMixer } from '../../src/platform/audio/liveMixer'
 
 // 48 kHz at 120 BPM: 250 frames a tick, a bar 96000 frames; the lookahead 2400.
 const rate = 48000
@@ -255,6 +255,48 @@ describe('MixerHost and the pattern', () => {
     host.handle({ t: 'stopSeq' })
     host.render(l, r, 128, 1)
     expect(posted[posted.length - 1]).toEqual(expect.objectContaining({ t: 'timeline', clock: null }))
+  })
+})
+
+// Web only: a tempo sent alone ('seqBpm') plays as the whole plan sent again at it.
+describe('MixerHost and a new tempo', () => {
+  it("plays 'seqBpm' frame for frame as the full plan at that tempo", () => {
+    const voices = [0, 1, 2, 3].map((o) => ({ pad: o, id: 1, channels: 1, sampleRate: rate }))
+    const planAt = (bpm: number): ToMixer => ({
+      t: 'plan',
+      patterns: projectPatterns([beats, pattern(), pattern(), pattern()]),
+      voices,
+      skip: [],
+      bpm,
+      phase: PhaseAnchors.ZERO,
+      queued: [{ group: 0, pattern: pattern(1, [patternNote(0, 2, 24)]), atTick: Seq.TICKS_PER_BAR }],
+    })
+    const hosts = [0, 1].map(() => {
+      const posted: FromMixer[] = []
+      const host = new MixerHost(rate, (m) => posted.push(m))
+      host.handle({ t: 'load', id: 1, pcm: new Int16Array(4000).fill(8000) })
+      host.handle(planAt(120))
+      host.handle({ t: 'play', countInBars: 0, leadMs: 0, atFrame: null, atPress: false })
+      return { host, posted, out: [] as number[] }
+    })
+    const render = (blocks: number, from: number): void => {
+      for (const h of hosts) {
+        const l = new Float32Array(128)
+        const r = new Float32Array(128)
+        for (let i = from; i < from + blocks; i++) {
+          h.host.render(l, r, 128, (i * 128) / rate)
+          h.out.push(...l, ...r)
+        }
+      }
+    }
+    render(300, 0)
+    hosts[0]!.host.handle(planAt(132))
+    hosts[1]!.host.handle({ t: 'seqBpm', bpm: 132 })
+    render(1500, 300)
+    expect(hosts[0]!.out.some((x) => x !== 0)).toBe(true)
+    expect(hosts[1]!.out).toEqual(hosts[0]!.out)
+    expect(hosts[1]!.posted).toEqual(hosts[0]!.posted)
+    expect(hosts[1]!.posted.some((m) => m.t === 'timeline' && m.clock?.bpm === 132)).toBe(true)
   })
 })
 

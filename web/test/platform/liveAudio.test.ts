@@ -1,18 +1,19 @@
 // Tests for platform/audio/liveAudio.ts (port of LiveAudio.kt) and liveMixer.ts,
 // with a fake backend whose mixer runs in-process.
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   LATE_OUTPUT_MS,
   LATE_STEP_MS,
+  GLITCH_WINDOW_MS,
   LATENCY_GLITCHES,
   CHOICE_KEY,
   HINT_KEY,
   VOLUME_KEY,
   CLICK_LEVEL_KEY,
   LiveAudio,
-  MixerHost,
   REPLACE_QUIET_MS,
+  FLUSH_SLICE_BYTES,
   SLOW_OUTPUT_MS,
   TAKE_END_WAIT_MS,
   takeWav,
@@ -37,6 +38,7 @@ import {
   type OutputEngine,
   type ToMixer,
 } from '../../src/platform/audio/liveAudio'
+import { MixerHost } from '../../src/platform/audio/liveMixer'
 import { WebLatencyHint } from '../../src/core/text/latencyText'
 import { pattern, patternNote, projectPatterns } from '../../src/core/features/pattern'
 import { PhaseAnchors } from '../../src/core/features/sequencer'
@@ -150,6 +152,19 @@ class FakeBackend implements LiveBackend {
   }
   settle(): void {
     for (const w of this.waiting.splice(0)) w()
+  }
+  /** [later]'s tasks wait for [runLater] (else each runs in a microtask). */
+  holdLater = false
+  private tasks: (() => void)[] = []
+  later(fn: () => void): void {
+    if (this.holdLater) this.tasks.push(fn)
+    else queueMicrotask(fn)
+  }
+  /** Runs the tasks [later] holds (one slice of a backlog each); false when there were none. */
+  runLater(): boolean {
+    const tasks = this.tasks.splice(0)
+    for (const t of tasks) t()
+    return tasks.length !== 0
   }
   now(): number {
     return this.clock
@@ -556,6 +571,7 @@ describe('LiveAudio', () => {
   it("while the mixer starts, a press's own sample and its start go over before the others", async () => {
     const backend = new FakeBackend()
     backend.deferred = true
+    backend.holdLater = true
     const live = new LiveAudio(backend)
     live.preload('a', tone(), 1, RATE)
     live.preload('b', tone(), 1, RATE)
@@ -564,8 +580,58 @@ describe('LiveAudio', () => {
     live.press('k', 'c', PAD)
     backend.settle()
     await flush()
+    const sent = () => backend.link.sent.map((m) => (m.t === 'load' ? `load ${m.id}` : m.t))
+    // The others in a later task (web only).
+    expect(sent()).toEqual(['load 3', 'start'])
+    while (backend.runLater());
+    expect(sent()).toEqual(['load 3', 'start', 'load 1', 'load 2'])
+  })
+
+  /** An output whose mixer is ready with four samples of [FLUSH_SLICE_BYTES] * 0.6 still to send: two slices. */
+  async function backlog() {
+    const backend = new FakeBackend()
+    backend.holdLater = true
+    const live = new LiveAudio(backend)
+    const frames = Math.ceil((FLUSH_SLICE_BYTES * 0.6) / 2)
+    for (const k of ['a', 'b', 'c', 'd']) live.preload(k, tone(frames), 1, RATE)
+    live.open()
+    await flush()
+    const loads = () => backend.link.sent.flatMap((m) => (m.t === 'load' ? [m.id] : []))
+    return { backend, live, loads }
+  }
+
+  it('a reopened output sends its sample backlog a slice per task, in order (web only)', async () => {
+    const { backend, loads } = await backlog()
+    expect(loads()).toEqual([])
+    backend.runLater()
+    expect(loads()).toEqual([1, 2])
+    backend.runLater()
+    expect(loads()).toEqual([1, 2, 3, 4])
+    expect(backend.runLater()).toBe(false)
+  })
+
+  it("a press while the backlog drains sends its sample at once, and it isn't sent again", async () => {
+    const { backend, live, loads } = await backlog()
+    backend.runLater()
+    expect(live.press('k', 'd', PAD)).toBe(true)
     const sent = backend.link.sent.map((m) => (m.t === 'load' ? `load ${m.id}` : m.t))
-    expect(sent).toEqual(['load 3', 'start', 'load 1', 'load 2'])
+    expect(sent.slice(-2)).toEqual(['load 4', 'start'])
+    backend.link.render(0)
+    expect([...live.voices.value]).toEqual(['k'])
+    while (backend.runLater());
+    expect(loads()).toEqual([1, 2, 4, 3])
+  })
+
+  it('a sample dropped, or the output closed, while the backlog drains is never sent', async () => {
+    const { backend, live, loads } = await backlog()
+    backend.runLater()
+    live.unload('c')
+    backend.runLater()
+    expect(loads()).toEqual([1, 2, 4])
+    const second = await backlog()
+    second.live.close()
+    while (second.backend.runLater());
+    expect(second.loads()).toEqual([])
   })
 
   it('while the mixer starts, the commands keep their order, and a sample dropped meanwhile never goes over', async () => {
@@ -1061,13 +1127,21 @@ describe('LiveAudio', () => {
     backend.link.render(0)
     expect(live.voices.value.has('k')).toBe(true)
     const old = backend.ctx
-    // The voice ends just after its press: too soon to be sure no press is on its way.
-    backend.link.render(128 / RATE, 1024)
-    expect(live.voices.value.size).toBe(0)
-    expect(old.closed).toBe(false)
-    // A while later, still quiet: the output makes way for one at 'interactive', woken at once.
-    backend.clock += REPLACE_QUIET_MS
-    await new Promise((r) => setTimeout(r, REPLACE_QUIET_MS + 20))
+    vi.useFakeTimers()
+    try {
+      // The voice ends just after its press: too soon to be sure no press is on its way.
+      backend.link.render(128 / RATE, 1024)
+      expect(live.voices.value.size).toBe(0)
+      expect(old.closed).toBe(false)
+      // A while later, still quiet: the output makes way for one at 'interactive', woken at once.
+      backend.clock += REPLACE_QUIET_MS - 1
+      vi.advanceTimersByTime(REPLACE_QUIET_MS - 1)
+      expect(old.closed).toBe(false)
+      backend.clock += 1
+      vi.advanceTimersByTime(1)
+    } finally {
+      vi.useRealTimers()
+    }
     expect(old.closed).toBe(true)
     expect(live.isOpen).toBe(true)
     expect(backend.hints).toEqual([0, 'interactive'])
@@ -1077,7 +1151,7 @@ describe('LiveAudio', () => {
     expect(live.press('k', 's', PAD)).toBe(true)
   })
 
-  it('a quiet report long after the last press replaces the output at once', async () => {
+  it('a quiet report long after the last press still waits for the tail', async () => {
     const { live, backend } = await opened()
     live.preload('s', tone(), 1, RATE)
     backend.ctx.playbackStats = { underrunEvents: 0 }
@@ -1086,11 +1160,62 @@ describe('LiveAudio', () => {
     live.press('k', 's', PAD)
     backend.link.render(0)
     const old = backend.ctx
-    backend.clock += 1000
-    live.release('k')
-    backend.link.render(128 / RATE, RATE)
+    backend.clock += 10 * REPLACE_QUIET_MS
+    vi.useFakeTimers()
+    try {
+      live.release('k')
+      backend.link.render(128 / RATE, RATE)
+      expect(old.closed).toBe(false)
+      // Something sounds again meanwhile: the wait starts over when it ends.
+      backend.clock += REPLACE_QUIET_MS / 2
+      live.press('k', 's', { pitch: 0, gate: false })
+      backend.link.render(1)
+      backend.clock += REPLACE_QUIET_MS / 2
+      vi.advanceTimersByTime(REPLACE_QUIET_MS / 2)
+      expect(old.closed).toBe(false)
+      backend.link.render(2, RATE)
+      expect(live.voices.value.size).toBe(0)
+      backend.clock += REPLACE_QUIET_MS
+      vi.advanceTimersByTime(REPLACE_QUIET_MS)
+    } finally {
+      vi.useRealTimers()
+    }
     expect(old.closed).toBe(true)
     expect(backend.hints).toEqual([0, 'interactive'])
+  })
+
+  it('glitches far apart do not step back; three within the window do', async () => {
+    const { live, backend } = await opened()
+    live.preload('s', tone(), 1, RATE)
+    backend.ctx.playbackStats = { underrunEvents: 0 }
+    backend.ctx.setState('running')
+    // One glitch every few minutes, with presses between: never three in a window.
+    for (let i = 1; i <= 2 * LATENCY_GLITCHES; i++) {
+      backend.clock += 3 * 60000
+      backend.ctx.playbackStats = { underrunEvents: i }
+      live.press('k', 's', PAD)
+      backend.link.render(i)
+      live.release('k')
+    }
+    live.suspend()
+    live.close()
+    live.open()
+    await flush()
+    expect(backend.hints).toEqual([0, 0])
+    // Three within the window: the next output steps back.
+    backend.ctx.playbackStats = { underrunEvents: 0 }
+    backend.ctx.setState('running')
+    for (let i = 1; i <= LATENCY_GLITCHES; i++) {
+      backend.clock += GLITCH_WINDOW_MS / (LATENCY_GLITCHES + 1)
+      backend.ctx.playbackStats = { underrunEvents: i }
+      live.press('k', 's', PAD)
+      backend.link.render(i)
+      live.release('k')
+    }
+    live.suspend()
+    live.open()
+    await flush()
+    expect(backend.hints).toEqual([0, 0, 'interactive'])
   })
 
   it('the step back is kept for the tab, and a new LiveAudio starts from it', async () => {
@@ -1786,6 +1911,42 @@ describe('LiveAudio PATTERN', () => {
     live.seqStop()
     expect(live.timeline.value).toBeNull()
     expect(b.link.sent.at(-1)).toEqual({ t: 'stopSeq' })
+  })
+
+  it("a plan while the backlog drains sends its sounds' loads first", async () => {
+    const b = new FakeBackend()
+    b.holdLater = true
+    const live = new LiveAudio(b)
+    const frames = Math.ceil((FLUSH_SLICE_BYTES * 0.6) / 2)
+    for (const k of ['a', 'b', 'kick']) live.preload(k, tone(frames), 1, RATE)
+    live.open()
+    await flush()
+    b.runLater()
+    live.seqPlan(plan(new Map([[0, 'kick']])))
+    const sent = b.link.sent.map((m) => (m.t === 'load' ? `load ${m.id}` : m.t))
+    expect(sent).toEqual(['load 1', 'load 2', 'load 3', 'plan'])
+    while (b.runLater());
+    expect(b.link.sent).toHaveLength(sent.length)
+  })
+
+  it('a new tempo goes alone, and the next play sends the plan at it (web only)', async () => {
+    const b = new FakeBackend()
+    const live = new LiveAudio(b)
+    live.preload('kick', tone(300), 1, RATE)
+    live.seqPlan(plan(new Map([[0, 'kick']])))
+    expect(live.seqPlay(0, 0, null)).toBe(true)
+    await flush()
+    b.ctx.timestamp = { contextTime: 1, performanceTime: 5000 }
+    for (let i = 0; i < 20; i++) b.link.render(1 + (i * 128) / RATE)
+    const plans = b.link.sent.filter((m) => m.t === 'plan').length
+    live.seqTempo(132)
+    expect(b.link.sent.at(-1)).toEqual({ t: 'seqBpm', bpm: 132 })
+    expect(b.link.sent.filter((m) => m.t === 'plan').length).toBe(plans)
+    for (let i = 20; i < 40; i++) b.link.render(1 + (i * 128) / RATE)
+    expect(live.timeline.value?.clock.bpm).toBe(132)
+    live.seqStop()
+    live.seqPlay(0, 0, null)
+    expect(b.link.sent.filter((m) => m.t === 'plan').at(-1)).toMatchObject({ bpm: 132, voices: [{ pad: 0, id: 1 }] })
   })
 
   it("plays each pad as its shapes say, else on its group's FX bus", async () => {

@@ -2,11 +2,12 @@
 // connected, the EP-133 switches to the next project and Live follows it; a tap while it switches moves the
 // target on; offline, Live steps through the views arc has; what the key and the sheet offer.
 import 'fake-indexeddb/auto'
+import { signal } from '@preact/signals'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ProjectSource } from '../../src/core/features/projectStep'
 import { MirrorText } from '../../src/core/text/mirrorText'
 import { emptyMirrorState, type MirrorUi } from '../../src/state/types'
-import { projectChoicesOf, projectKeyOf, projectKeyState } from '../../src/ui/live/projectKey'
+import { projectChoicesOf, projectKeyOf, projectKeySignal, projectKeyState } from '../../src/ui/live/projectKey'
 import { disposeAll, liveHarness, until, type LiveHarness } from './liveHarness'
 
 afterEach(() => disposeAll())
@@ -48,6 +49,22 @@ describe('projectKeyOf', () => {
     expect(on.find((c) => c.n === 3)).toEqual({ n: 3, enabled: false, shown: true })
     const off = projectChoicesOf(mirror({ offline: MirrorText.FACTORY, offlineProjects: [1, 2, 5] }, 1), false)
     expect(off.filter((c) => c.enabled).map((c) => c.n)).toEqual([2, 5])
+  })
+
+  it('as a signal: the same object while the mirror changes and what the key shows does not', () => {
+    const m = signal<MirrorUi | null>(mirror({}, 2))
+    const busy = signal(false)
+    const key = projectKeySignal(() => m.value, () => busy.value)
+    const first = key.value
+    m.value = { ...mirror({}, 2), state: { ...emptyMirrorState(), activeProject: 2, bpm: 120 } }
+    expect(key.value).toBe(first)
+    m.value = mirror({}, 3)
+    expect(key.value).not.toBe(first)
+    expect(key.value.shown).toBe(3)
+    const third = key.value
+    busy.value = true
+    expect(key.value.enabled).toBe(false)
+    expect(key.value).not.toBe(third)
   })
 })
 

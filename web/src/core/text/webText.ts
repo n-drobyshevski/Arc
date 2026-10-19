@@ -125,12 +125,14 @@ export const WebText = {
     'Sound plays late here (often 0.2 s or more), as it does over Bluetooth. A wired output or the built-in speakers are much quicker.',
   /** Replaces MirrorText.TAKES_NOTE "A take holds the pads and keys played on the phone, …". */
   TAKES_NOTE:
-    "A take holds the pads and keys played in this browser, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out, and Voice message shares one as a voice message (Telegram sends it as one).",
+    "A take holds the pads and keys played in this browser, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Trim keeps a part of one (nothing is cut) and Dup copies it, to trim a copy another way. Save or Share copies one out, its trimmed part if it has one, and Voice message shares one as a voice message (Telegram sends it as one).",
   /** A take's key (web only): Android's SHARE gives Telegram the voice message itself, which the Web Share API can't. */
   VOICE_MESSAGE: 'Share as a voice message',
+  /** The Takes strip's key for it (web only), upper-cased where shown; VOICE_MESSAGE is its name. */
+  TAKE_VOICE: 'Voice',
   /** Takes' "Save or Share" where the browser can't share files: Save WAV is the only way out. */
   TAKES_NOTE_SAVE_ONLY:
-    "A take holds the pads and keys played in this browser, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save WAV copies one out.",
+    "A take holds the pads and keys played in this browser, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Trim keeps a part of one (nothing is cut) and Dup copies it, to trim a copy another way. Save WAV copies one out, its trimmed part if it has one.",
   // ---------- Live's device view (web only: the EP-133 drawn on a wide screen) ----------
   /** The device view's label for screen readers. */
   DEVICE_VIEW: 'EP-133 K.O. II',
@@ -150,6 +152,13 @@ export const WebText = {
   DEVICE_FADER_NOTE: "Drag the fader for the shown group's level in arc's sound, or what FADER + a pad gave it (on the FX page, its send to the effect). Each group keeps its own, with the project's effects.",
   /** A knob's or the fader's second action, for screen readers. */
   DEVICE_TURN_HINT: 'Arrow keys turn it, Enter shows its shortcuts',
+  /**
+   * KEYS' scale or octave word's Next and Previous (MirrorText.PICK_NEXT, PICK_PREVIOUS: TalkBack's
+   * actions on Android, a short swipe along it), here on the arrow keys, for screen readers.
+   */
+  pickSteps(next: string, previous: string): string {
+    return `${next}: right arrow. ${previous}: left arrow`
+  },
   // What the drawn knobs and fader change, for screen readers ("Knob X", "effect X, 62%").
   TURN_VOLUME: "arc's volume",
   TURN_FX_X: 'effect X',
@@ -319,11 +328,26 @@ export const WebText = {
   VIEW_DEVICE: 'Device',
   /** A beat card or prompt copied where the browser has no share sheet (Android's chooser). */
   CARD_COPIED: 'Copied. Paste it to Claude.',
+  /** The Claude page's PASTE CARD, for screen readers: its hold (Android's long-click label, ClaudeText.OPEN_CARD_FILE). */
+  HOLD_PASTE_CARD: 'Hold PASTE CARD to open a card file.',
+  /** A saved prompt's chip, for screen readers: its hold (Android's long-click label, PromptText.DELETE), or the Delete key. */
+  HOLD_SAVED_PROMPT: 'Hold it, or press Delete, to delete it.',
+  /** The Claude page's EDIT box, for screen readers. */
+  PROMPT_BOX: 'Your prompt',
   /** PASTE BEAT where the page can't read the clipboard: the box a paste goes into. */
   PASTE_HERE: 'Paste the beat card here',
   PASTE_HERE_NOTE: 'This browser lets a page read the clipboard only from a paste: press Ctrl+V (⌘V), or long-press and Paste.',
   /** Replaces ClaudeText.LEARN_PROMPT, which says Android. */
-  LEARN_PROMPT: 'Use the arc-beats skill. Teach me the EP-133 K.O. II from lesson 1, one step at a time. I use the Arc web app.',
+  LEARN_PROMPT:
+    'Use the arc-beats skill to teach me the EP-133 K.O. II, starting at lesson 1 (Meet the pads). I use the Arc web app. ' +
+    'Go one step at a time: explain the step, give me something to try on the device, and wait for me before the next one.',
+  /** Replaces PromptText.learn, which says Android: lesson [n] ([title]) as LEARN_PROMPT has lesson 1. */
+  learn(n: number, title: string): string {
+    return (
+      `Use the arc-beats skill to teach me the EP-133 K.O. II, starting at lesson ${n} (${title}). I use the Arc web app. ` +
+      'Go one step at a time: explain the step, give me something to try on the device, and wait for me before the next one.'
+    )
+  },
   /** After a pad's or KEYS key's name for screen readers while it is held for the arp or note repeat (Android outlines it only). */
   ARP_HELD: ', held for the arp',
   /** The plate's line while TAKE waits. */

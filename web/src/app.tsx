@@ -71,7 +71,7 @@ import { WebText } from './core/text/webText'
 import { attachDrop, isPakName } from './platform/files/pick'
 import { supported as hapticsSupported } from './platform/haptics'
 import { REVIEW_KEY, type ArcController } from './state/controller'
-import { emptyMirrorState, type MirrorUi, type TaskUi, type UiState } from './state/types'
+import type { TaskUi, UiState } from './state/types'
 import { APP_BUILD } from './version'
 import { AppProvider, useController, useNav } from './ui/AppContext'
 import { FactoryKitContext } from './ui/FactoryKitContext'
@@ -80,7 +80,6 @@ import {
   Nav,
   bindViewHooks,
   browserNavEnv,
-  dialogLayer,
   onTabs,
   overlayLayer,
   rootView,
@@ -98,27 +97,20 @@ import { Sheet } from './ui/components/Sheet'
 import { Shell } from './ui/components/Shell'
 import { ControllerToast } from './ui/components/Toast'
 import { UpdatePrompt } from './ui/components/UpdatePrompt'
-import { CompareScreen } from './ui/screens/CompareScreen'
-import { ContentsScreen } from './ui/screens/ContentsScreen'
-import { DebugScreen } from './ui/screens/DebugScreen'
 import { DeviceScreen } from './ui/screens/DeviceScreen'
 import { GuideScreen } from './ui/screens/GuideScreen'
 import { MainScreen } from './ui/screens/MainScreen'
 import { BackupsSheets } from './ui/sheets/BackupsSheets'
 import { ProgressSheet } from './ui/sheets/ProgressSheet'
 import { LivePill, MirrorScreen, type LivePlaying } from './ui/screens/MirrorScreen'
-import { PICK_PREFIX as PICK, keysPickerOf, type KeysShown } from './ui/live/keys'
+import { KeysSheetPart, SCALE_SHEET_PREFIX, scaleSheetOf, type KeysShown } from './ui/live/keys'
 import { liveInBar } from './ui/live/window'
 import type { NoteRange } from './core/features/piano'
-import { SearchScreen } from './ui/screens/SearchScreen'
-import { SettingsScreen } from './ui/screens/SettingsScreen'
 import { EDIT_PREFIX, editPadOf, PadEditSheet } from './ui/sheets/PadEditSheet'
 import { BackupPadsSheet, DevicePadsSheet } from './ui/sheets/PadsSheet'
-import { FontLicenceSheet } from './ui/sheets/FontLicenceSheet'
 import { DeviceUploadSheet } from './ui/sheets/UploadSheet'
 import { useDesk, useFinePointer, useWindowSize } from './ui/useDesk'
 import { useAppKeys } from './ui/useAppKeys'
-import { KeyboardKeysSheet } from './ui/sheets/KeyboardKeysSheet'
 import { PatternSheet } from './ui/sheets/PatternSheet'
 import { TransportContext, type TransportUi } from './ui/live/PatternLine'
 import { FunctionKeysContext, ProjectHold, ProjectHoldContext, TempoContext, type FunctionKeysUi, type ProjectUi, type TempoUi } from './ui/live/FunctionRow'
@@ -135,23 +127,38 @@ import { SoundSource } from './core/features/offlinePads'
 import { Tempo } from './core/features/tempo'
 import { SAMPLE_BARS } from './platform/storage/settings'
 import { ClipMode } from './state/scenePlan'
+import { chainSceneCount } from './state/beatPlan'
 import { PunchContext, type PunchUi } from './ui/live/LivePunch'
 import { StepContext, type StepActions } from './ui/live/StepPanel'
+import { PracticeContext, preloadPracticePanel, type PadCue, type PracticeActions } from './ui/live/practice'
 import { SceneContext, type SceneActions } from './ui/live/ScenePanel'
 import { ArpContext, type ArpActions } from './ui/live/ArpWords'
-import { ClaudeContext, learnUrl, type ClaudeActions } from './ui/live/ClaudeSection'
-import { BeatImportSheet } from './ui/sheets/BeatImportSheet'
+import { ClaudeContext, preloadClaudeDeck, type ClaudeActions } from './ui/live/ClaudeSection'
 import { SampleContext, type SampleActions } from './ui/live/SamplePanel'
 import { SampleReviewSheet } from './ui/sheets/SampleReviewSheet'
 import { BeatCards } from './core/features/beatCard'
 import { stepWord } from './state/stepPlan'
-import { projectChoicesOf, projectKeyOf, projectKeyState } from './ui/live/projectKey'
+import { projectChoicesOf, projectKeySignal, projectKeyState, type ProjectKeyUi } from './ui/live/projectKey'
 import { ProjectSheet } from './ui/sheets/ProjectSheet'
 import { TempoSheet } from './ui/sheets/TempoSheet'
 import { FxSheet } from './ui/sheets/FxSheet'
 import { patternBpm } from './state/patternPlan'
 import { computerKeys, setComputerKeys } from './ui/keyPrefs'
+import { lazy, preloadWhenIdle } from './ui/lazy'
 import './app.css'
+
+// Web addition: what isn't on screen at start loads as chunks of its own, fetched once the app is idle
+// (the keys and beat sheets stay mounted, so theirs come in right after the first render).
+const SettingsScreen = lazy('SettingsScreen', () => import('./ui/screens/SettingsScreen').then((m) => m.SettingsScreen))
+const DebugScreen = lazy('DebugScreen', () => import('./ui/screens/DebugScreen').then((m) => m.DebugScreen))
+const CompareScreen = lazy('CompareScreen', () => import('./ui/screens/CompareScreen').then((m) => m.CompareScreen))
+const ContentsScreen = lazy('ContentsScreen', () => import('./ui/screens/ContentsScreen').then((m) => m.ContentsScreen))
+const SearchScreen = lazy('SearchScreen', () => import('./ui/screens/SearchScreen').then((m) => m.SearchScreen))
+const BeatImportSheet = lazy('BeatImportSheet', () => import('./ui/sheets/BeatImportSheet').then((m) => m.BeatImportSheet))
+const KeyboardKeysSheet = lazy('KeyboardKeysSheet', () => import('./ui/sheets/KeyboardKeysSheet').then((m) => m.KeyboardKeysSheet))
+const ScaleSheet = lazy('ScaleSheet', () => import('./ui/sheets/ScaleSheet').then((m) => m.ScaleSheet))
+const FontLicenceSheet = lazy('FontLicenceSheet', () => import('./ui/sheets/FontLicenceSheet').then((m) => m.FontLicenceSheet))
+const LAZY = [SettingsScreen, DebugScreen, CompareScreen, ContentsScreen, SearchScreen, BeatImportSheet, KeyboardKeysSheet, ScaleSheet, FontLicenceSheet, { preload: preloadClaudeDeck }, { preload: preloadPracticePanel }]
 
 /** The progress sheet's layer id. */
 const PROGRESS = 'progress'
@@ -196,6 +203,7 @@ export function App(props: AppProps): JSX.Element {
     const offDrop = typeof document === 'undefined'
       ? () => undefined
       : attachDrop(document.body, { onFiles: (f) => void c.importFiles(f), filter: (f) => isPakName(f.name) })
+    const offPreload = preloadWhenIdle(LAZY)
     // A beat card file (.txt or .md, as Claude may give one) dropped anywhere opens on the card's sheet.
     const offCardDrop = typeof document === 'undefined'
       ? () => undefined
@@ -203,6 +211,7 @@ export function App(props: AppProps): JSX.Element {
     return () => {
       off()
       offDrop()
+      offPreload()
       offCardDrop()
       nav.setBackGuard(() => false)
       if (!props.nav) nav.dispose()
@@ -250,9 +259,9 @@ function Root(): JSX.Element {
   const c = useController()
   const nav = useNav()
   const v = nav.view.value
-  const state = c.state.value
+  // Not the mirror or KEYS's pad: those re-render only what shows them.
+  const state = c.stateShell.value
   const settings = c.settings.value
-  const playing = c.playing.value
   const desk = useDesk()
   const fine = useFinePointer()
   // The computer keyboard (web, desktop): ? the keys sheet, Esc, Ctrl/Cmd+Z, and the screen's own (Live's).
@@ -270,9 +279,12 @@ function Root(): JSX.Element {
   const controls = useMemo(() => deviceControlsUi(c), [c])
   const step = useMemo(() => stepUi(c), [c])
   const scenes = useMemo(() => sceneUi(c), [c])
+  const practice = useMemo(() => practiceUi(c), [c])
   const arp = useMemo(() => arpUi(c), [c])
   const claude = useMemo(() => claudeUi(c), [c])
   const sample = useMemo(() => sampleUi(c), [c])
+  // PROJECT's key: only what it shows re-renders the shell, not each publish.
+  const projectKey = useMemo(() => projectKeySignal(() => c.liveMirror.value, () => c.state.value.busy), [c])
   // The top bar's mic key: its light read there alone.
   const micKey = useMemo(() => (sample === null ? null : { on: computed(() => c.sample.ui.value.on), onTap: () => c.toggleSample() }), [c, sample])
   // PROJECT held: the pads printed 1 to 9 pick a project instead of sounding.
@@ -338,12 +350,12 @@ function Root(): JSX.Element {
         }
       },
       onHold: () => {
-        const pad = state.keysPad
+        const pad = c.state.peek().keysPad
         if (pad === null) c.toast(MirrorText.PLAY_A_PAD)
         else if (c.editTarget(pad) !== null) nav.open(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
       },
     },
-    project: v.tab === 'live' ? projectUi(c, state.busy, () => nav.open(sheetLayer(PROJECT_SHEET))) : null,
+    project: v.tab === 'live' ? projectUi(c, projectKey.value, () => nav.open(sheetLayer(PROJECT_SHEET))) : null,
     fx:
       v.tab === 'live'
         ? {
@@ -427,7 +439,7 @@ function Root(): JSX.Element {
     page = (
       <SettingsScreen
         settings={settings}
-        state={state}
+        state={c.state.value}
         padOrder={c.padOrder()}
         version={APP_BUILD}
         onTheme={(t) => c.setTheme(t)}
@@ -502,7 +514,7 @@ function Root(): JSX.Element {
       <ContentsScreen
         b={b}
         contents={state.contents?.backupId === b.id ? state.contents : null}
-        playing={playing}
+        playing={c.playing.value}
         onPlay={(slot) => void c.playBackupSound(slot)}
         onStop={() => c.stopPlayback()}
         onShareWav={(snd) => void c.shareWav(b, snd)}
@@ -576,6 +588,7 @@ function Root(): JSX.Element {
     <TransportContext.Provider value={transport}>
     <StepContext.Provider value={step}>
     <SceneContext.Provider value={scenes}>
+    <PracticeContext.Provider value={practice}>
     <SampleContext.Provider value={sample}>
     <ArpContext.Provider value={arp}>
     <ClaudeContext.Provider value={claude}>
@@ -613,7 +626,7 @@ function Root(): JSX.Element {
       {/* The Device tab's sheets: pads 'pads:device:<n>', upload / trim from state.browser.draft. */}
       {tabs && v.tab === 'device' && <><DevicePadsSheet view={v} /><DeviceUploadSheet view={v} /></>}
       {/* Live's EDIT: the pad sheet 'edit:<group>:<offset>', and the upload / trim sheets for a new sample. */}
-      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /><LivePatternSheet view={v} /><LiveTempoSheet view={v} /><LiveProjectSheet view={v} /><LiveFxSheet view={v} /><LiveBeatSheet view={v} /><LiveReviewSheet view={v} /></>}
+      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /><LivePatternSheet view={v} /><LiveTempoSheet view={v} /><LiveProjectSheet view={v} /><LiveFxSheet view={v} /><LiveBeatSheet view={v} /><LiveReviewSheet view={v} /><LiveScaleSheet view={v} /></>}
       {/* The drawn device's pages: SOUND and EDIT keep the pad played last open for its knobs (after the pad sheet, which has it while open). */}
       {v.tab === 'live' && <DevicePages dk={deviceKeys} view={v} />}
       {/* The Backups tab's sheets: detail 'detail:<id>', compare picker 'comparePick:<id>',
@@ -646,6 +659,7 @@ function Root(): JSX.Element {
     </ClaudeContext.Provider>
     </ArpContext.Provider>
     </SampleContext.Provider>
+    </PracticeContext.Provider>
     </SceneContext.Provider>
     </StepContext.Provider>
     </TransportContext.Provider>
@@ -665,7 +679,8 @@ function tempoUi(c: ArcController, openSheet: () => void): TempoUi | null {
       return p.metronome.value.bpm
     },
     get deviceBpm() {
-      return c.state.value.mirror?.state.bpm ?? null
+      // The device's tempo alone, so the TEMPO key doesn't follow every publish.
+      return c.deviceBpm.value
     },
     get beat() {
       return p.beats.value
@@ -690,7 +705,7 @@ function deviceControlsUi(c: ArcController): DeviceControlsUi {
       return c.fx.desk.fx.value
     },
     get bpm() {
-      return patternBpm(c.state.value.mirror?.state.bpm, c.pattern.metronome.value.bpm)
+      return patternBpm(c.deviceBpm.value, c.pattern.metronome.value.bpm)
     },
     setFxXY: (x, y) => c.fx.desk.setXY(x, y),
     setGroupLevel: (g, v) => c.fx.desk.setGroupLevel(g, v),
@@ -1189,10 +1204,14 @@ const PAD_SETTLE_MS = 250
 function DevicePages(props: { dk: DeviceKeysUi; view: NavView }): null {
   const c = useController()
   const page = props.dk.layer.state.value.page
-  const pad = c.state.value.keysPad
+  // Each read on its own, so a publish re-renders this only when one of them changed.
+  const pad = useComputed(() => c.state.value.keysPad).value
   const sheet = editPadOf(props.view.sheets) !== null
-  const slot = pad !== null ? (c.editTarget(pad, true)?.slot ?? null) : null
-  const connected = c.state.value.device !== null
+  const slot = useComputed(() => {
+    const p = c.state.value.keysPad
+    return p !== null ? (c.editTarget(p, true)?.slot ?? null) : null
+  }).value
+  const connected = useComputed(() => c.state.value.device !== null).value
   const sound = page === 'SOUND' || page === 'EDIT'
   const padId = pad !== null ? padKey(pad) : null
   // The sheet opening takes the pad over (its own effect, before this one, has opened it): left open for it.
@@ -1224,7 +1243,7 @@ function DevicePages(props: { dk: DeviceKeysUi; view: NavView }): null {
   useEffect(() => {
     if (panel) props.dk.layer.panelOpened()
   }, [panel])
-  const project = c.state.value.mirror?.state.activeProject ?? null
+  const project = useComputed(() => c.state.value.mirror?.state.activeProject ?? null).value
   const projectWas = useRef(project)
   useEffect(() => {
     if (projectWas.current === project) return
@@ -1235,8 +1254,7 @@ function DevicePages(props: { dk: DeviceKeysUi; view: NavView }): null {
 }
 
 /** PROJECT as its key shows it (Kotlin projectKeyOf), and what it does. */
-function projectUi(c: ArcController, busy: boolean, openSheet: () => void): ProjectUi {
-  const k = projectKeyOf(liveMirror(c), busy)
+function projectUi(c: ArcController, k: ProjectKeyUi, openSheet: () => void): ProjectUi {
   return {
     shown: k.shown,
     state: projectKeyState(k),
@@ -1252,10 +1270,12 @@ function projectUi(c: ArcController, busy: boolean, openSheet: () => void): Proj
 function LiveProjectSheet(props: { view: NavView }): JSX.Element {
   const c = useController()
   const nav = useNav()
+  const open = props.view.sheets.includes(PROJECT_SHEET)
   return (
     <ProjectSheet
-      open={props.view.sheets.includes(PROJECT_SHEET)}
-      choices={projectChoicesOf(liveMirror(c), c.state.value.busy)}
+      open={open}
+      // Closed, it reads no mirror, so a publish doesn't re-render it (the sheet keeps what it showed as it closes).
+      choices={open ? projectChoicesOf(c.liveMirror.value, c.state.value.busy) : []}
       onPick={(n) => c.selectProject(n)}
       onDismiss={() => nav.close(sheetLayer(PROJECT_SHEET))}
     />
@@ -1267,27 +1287,64 @@ function LiveTempoSheet(props: { view: NavView }): JSX.Element | null {
   const c = useController()
   const nav = useNav()
   const p = c.pattern
+  // The settings alone, not the arp's and the pattern's whole state (the arp's is new each time the tempo moves).
+  const timing = useComputed(() => p.ui.value.timingSettings)
+  const arp = useComputed(() => p.arp.value.settings)
   if (!p.canClick) return null
   const m = p.metronome.value
+  const open = props.view.sheets.includes(TEMPO_SHEET)
   return (
     <TempoSheet
-      open={props.view.sheets.includes(TEMPO_SHEET)}
+      open={open}
       bpm={m.bpm}
-      deviceBpm={c.state.value.mirror?.state.bpm ?? null}
+      // The device's tempo only while open, so its clock doesn't re-render it closed.
+      deviceBpm={open ? c.deviceBpm.value : null}
       clickOn={m.on}
-      timing={p.ui.value.timingSettings}
+      timing={timing.value}
       onClick={(on) => p.setClick(on)}
       onBpm={(bpm) => p.setTempo(bpm)}
       onTap={(at) => p.tapTempo(at)}
       onInterval={(t) => p.setTimingInterval(t)}
       onSwing={(v) => p.setTimingSwing(v)}
       onQuantize={(on) => p.setTimingQuantize(on)}
-      arp={p.arp.value.settings}
+      arp={arp.value}
       onArpOrder={(o) => p.setArpOrder(o)}
       onArpOctaves={(n) => p.setArpOctaves(n)}
       onArpGate={(v) => p.setArpGate(v)}
       onArpLatch={(on) => p.setArpLatch(on)}
       onDismiss={() => nav.close(sheetLayer(TEMPO_SHEET))}
+    />
+  )
+}
+
+/**
+ * A tap on KEYS' scale, key or octave word: the KEYS sheet 'scale:<part>' (Kotlin's keysSheet), opened at
+ * that word's section. A pick applies at once and it stays open; it goes with KEYS.
+ */
+function LiveScaleSheet(props: { view: NavView }): JSX.Element {
+  const c = useController()
+  const nav = useNav()
+  const part = scaleSheetOf(props.view.sheets)
+  const open = part !== null
+  // The settings only while open, so a change elsewhere doesn't re-render it closed.
+  const settings = open ? c.settings.value : c.settings.peek()
+  const close = (): void => {
+    const id = props.view.sheets.find((s) => s.startsWith(SCALE_SHEET_PREFIX))
+    if (id !== undefined) nav.close(sheetLayer(id))
+  }
+  const keysOn = settings.liveKeys
+  useEffect(() => {
+    if (open && !keysOn) close()
+  }, [open, keysOn])
+  return (
+    <ScaleSheet
+      open={open}
+      keys={{ root: settings.keysRoot, scale: settings.keysScale, octave: settings.keysOctave, names: settings.keysNames }}
+      onRoot={(r) => c.setKeysRoot(r)}
+      onScale={(s) => c.setKeysScale(s)}
+      onOctave={(o) => c.setKeysOctave(o)}
+      part={part ?? KeysSheetPart.SCALE}
+      onDismiss={close}
     />
   )
 }
@@ -1298,13 +1355,16 @@ function LiveFxSheet(props: { view: NavView }): JSX.Element {
   const nav = useNav()
   const d = c.fx.desk
   const fx = d.fx.value
-  const state = c.state.value
-  const selected = state.keysPad
+  const open = props.view.sheets.includes(FX_SHEET)
+  // The whole state only while open (the pad names are read through nameOf, and a new mirror says they changed):
+  // closed, a pad played or the clock doesn't re-render it.
+  const state = open ? c.state.value : null
+  const selected = state?.keysPad ?? null
   return (
     <FxSheet
-      open={props.view.sheets.includes(FX_SHEET)}
+      open={open}
       settings={fx}
-      bpm={patternBpm(state.mirror?.state.bpm, c.pattern.metronome.value.bpm)}
+      bpm={patternBpm(state?.mirror?.state.bpm, c.pattern.metronome.value.bpm)}
       selected={selected}
       nameOf={(pad) => c.mirrorName(pad)}
       // An effect put on with no send anywhere: the group of the pad played last sends to it.
@@ -1688,11 +1748,47 @@ function claudeUi(c: ArcController): ClaudeActions | null {
     get hasNotes() {
       return p.ui.value.hasNotes
     },
-    onShareScene: () => void c.shareBeat(null),
-    onSharePattern: (g) => void c.shareBeat(g),
+    get sounds() {
+      return c.shareSoundCount.value
+    },
+    get withSounds() {
+      return c.settings.value.shareSounds
+    },
+    get chainSteps() {
+      return p.scene.value.chain.length
+    },
+    get chainScenes() {
+      return chainSceneCount(p.scene.value.chain)
+    },
+    get lights() {
+      return p.scene.value.groups.map((g) => g.lights)
+    },
+    // The prompt's own signals, not the settings: a word tapped re-renders this page only.
+    get prompt() {
+      return c.claudePrompt.value
+    },
+    get saved() {
+      return c.claudePrompts.value
+    },
+    get kit() {
+      return c.shareKit()
+    },
+    get liveTempo() {
+      return p.metronome.value.bpm
+    },
+    get waiting() {
+      return c.claudeWaiting.value
+    },
+    onWithSounds: (on) => c.setShareSounds(on),
+    onPrompt: (prompt) => void c.setClaudePrompt(prompt),
+    onShare: (pick, g) => void c.shareClaudePrompt(pick, g),
+    onCopy: (pick, g) => void c.shareClaudePrompt(pick, g, true),
+    onPractice: (pick, g) => c.practisePick(pick, g),
+    onSavePrompt: (prompt) => void c.saveClaudePrompt(prompt),
+    onDeletePrompt: (i) => void c.deleteClaudePrompt(i),
     onPaste: () => void c.pasteBeat(),
     onOpenFile: () => void c.openBeatFile(),
-    learnUrl: learnUrl(),
+    onDismissWaiting: () => c.stopWaitingForClaude(),
   }
 }
 
@@ -1744,6 +1840,32 @@ function stepUi(c: ArcController): StepActions | null {
   }
 }
 
+/**
+ * PRACTICE for Live (Kotlin LivePractice, as MainActivity builds it): its state read from the controller's signal as
+ * each part renders, running while the transport plays; the pads' cues a signal of its own (live/practice.tsx).
+ */
+function practiceUi(c: ArcController): PracticeActions | null {
+  const p = c.pattern
+  if (!p.available) return null
+  return {
+    get ui() {
+      return p.practice.value
+    },
+    get running() {
+      const phase = p.ui.value.phase
+      return phase === 'PLAYING' || phase === 'COUNT_IN'
+    },
+    frame: (now) => p.practiceFrame(now),
+    cues: signal<ReadonlyMap<number, PadCue>>(new Map()),
+    onPlay: () => p.practicePlay(),
+    onStop: () => p.practiceStop(),
+    onClose: () => p.endPractice(),
+    onChange: (change) => p.changePractice(change),
+    onStep: (delta) => p.lessonStep(delta),
+    onCopy: () => void c.copyPracticeReport(),
+  }
+}
+
 /** PATTERN's keys for Live's lines (Kotlin TransportUi), its state read from the controller's signal as each line renders. */
 function transportUi(c: ArcController, openSheet: () => void): TransportUi | null {
   const p = c.pattern
@@ -1774,16 +1896,29 @@ function LiveBeatSheet(props: { view: NavView }): JSX.Element | null {
   const p = c.pattern
   const beat = p.beat.value
   const pasting = c.beatPasting.value
+  // PICK SOUND's list waits while the device is busy (read alone: the sheet doesn't follow the mirror).
+  const busy = useComputed(() => c.state.value.busy).value
+  // The Scenes row's REPLACE, a setting kept for the next card (read alone, as busy is).
+  const replaceScenes = useComputed(() => c.settings.value.replaceScenes).value
   const shown = beat !== null || pasting
   const has = props.view.sheets.includes(BEAT_SHEET)
+  // A preview started by PICK SOUND stops with the sheet, as the pad sheet's does.
+  const stopPickPreview = (): void => {
+    const k = c.playing.peek()
+    if (k?.startsWith('device:') === true || k?.startsWith('factory:') === true) c.stopPlayback()
+  }
+  const closeBeat = (): void => {
+    stopPickPreview()
+    p.dismissBeat()
+    c.cancelBeatPaste()
+  }
   // The layer opens with the card; the layer closed (Back) while the card waits is a CANCEL.
   const opened = useRef(false)
   useEffect(() => {
     if (shown && !has) {
       if (opened.current) {
         opened.current = false
-        p.dismissBeat()
-        c.cancelBeatPaste()
+        closeBeat()
       } else {
         nav.open(sheetLayer(BEAT_SHEET))
       }
@@ -1813,13 +1948,21 @@ function LiveBeatSheet(props: { view: NavView }): JSX.Element | null {
       open={shown && has}
       ui={beat}
       pasting={pasting}
-      onCancel={() => {
-        p.dismissBeat()
-        c.cancelBeatPaste()
+      onCancel={closeBeat}
+      onImport={(setTempo, soundPads, picked, applyFx, shapePads, setChain) => {
+        stopPickPreview()
+        p.importBeat(setTempo, soundPads, picked, applyFx, shapePads, setChain, replaceScenes && beat !== null && beat.replace !== null)
       }}
-      onImport={(setTempo) => p.importBeat(setTempo)}
+      onPractise={() => c.practiseImport()}
+      replaceScenes={replaceScenes}
+      onReplaceScenes={(on) => c.setReplaceScenes(on)}
       onCopyProblems={(problems) => void c.copyProblems(problems)}
       onPaste={(text) => void c.receiveBeat(text)}
+      playing={c.playing}
+      onPlay={(slot, source) => void c.playLiveSound(slot, source)}
+      onStop={() => c.stopPlayback()}
+      onPlaySynth={(s) => void c.playSynth(s)}
+      busy={busy}
     />
   )
 }
@@ -1857,7 +2000,7 @@ function LiveBar(props: { pianoRange: NoteRange | null; editing: boolean }): JSX
   const c = useController()
   return (
     <LivePill
-      mirror={liveMirror(c)}
+      mirror={c.liveMirror.value}
       keys={liveKeys(c)}
       playing={livePlaying(c)}
       editing={props.editing}
@@ -1866,18 +2009,9 @@ function LiveBar(props: { pianoRange: NoteRange | null; editing: boolean }): JSX
   )
 }
 
-/** What Live shows: the mirror, or offline its last read, or a note to connect. */
-function liveMirror(c: ArcController): MirrorUi | null {
-  const state = c.state.value
-  return state.mirror ?? (state.device === null
-    ? { state: emptyMirrorState(c.padOrder()), loading: false, error: MirrorText.NOT_CONNECTED }
-    : null)
-}
-
-/** KEYS as the settings and the controller have it (MainActivity's KeysUi, less what plays). */
+/** KEYS as the settings and the controller have it (MainActivity's KeysUi, less what plays; its sound a signal). */
 function liveKeys(c: ArcController): KeysShown {
   const settings = c.settings.value
-  const state = c.state.value
   return {
     on: settings.liveKeys,
     root: settings.keysRoot,
@@ -1885,8 +2019,7 @@ function liveKeys(c: ArcController): KeysShown {
     octave: settings.keysOctave,
     names: settings.keysNames,
     showNames: settings.keysShowNames,
-    pad: state.keysPad,
-    padName: state.keysPad ? c.mirrorName(state.keysPad) : null,
+    sound: c.keysSound,
     pianoWhites: settings.pianoWhites,
   }
 }
@@ -1896,8 +2029,7 @@ function livePlaying(c: ArcController): LivePlaying {
   return { pads: c.playingPads, notes: c.playingNotes, arpPads: c.arpPads, arpNotes: c.arpNotes }
 }
 
-/** The section under the top bar (Root's `when (tab)`). */
-function TabScreen(props: {
+interface TabProps {
   view: NavView
   editPads: boolean
   onEditPads: (on: boolean) => void
@@ -1905,115 +2037,18 @@ function TabScreen(props: {
   inBar: boolean
   /** The piano's notes while it shows, for the line in the top bar. */
   onPianoRange: (r: NoteRange | null) => void
-}): JSX.Element {
+}
+
+/** The section under the top bar (Root's `when (tab)`). */
+function TabScreen(props: TabProps): JSX.Element {
   const c = useController()
   const nav = useNav()
   const v = props.view
-  const state = c.state.value
-  const settings = c.settings.value
+  // Not the mirror or KEYS's pad: Live alone follows those (LiveTab).
+  const state = c.stateShell.value
   switch (v.tab) {
-    case 'live': {
-      return (
-        <MirrorScreen
-          mirror={liveMirror(c)}
-          take={c.canRecord ? { state: c.rec.value, onTake: () => c.toggleTake() } : null}
-          deviceView={deviceView.value}
-          onDeviceView={(on) => setDeviceView(on)}
-          onGuide={(query) => {
-            guideSearch.value = { query }
-            nav.openScreen({ kind: 'guide' })
-          }}
-          takes={{
-            list: state.takes,
-            playing: c.playing.value,
-            keyOf: (t) => c.takeKey(t),
-            fmtWhen: (ms) => c.fmtDateTime(ms),
-            connected: state.device !== null,
-            canShare: c.canShareTakes,
-            canVoice: c.canShareVoice,
-            onPlay: (t) => void c.playTake(t),
-            onStop: () => c.stopPlayback(),
-            onShare: (t) => void c.shareTake(t),
-            onVoice: (t) => void c.shareTakeVoice(t),
-            onSave: (t) => void c.saveTake(t),
-            onToDevice: (t) => {
-              void c.takeToDevice(t)
-              nav.selectTab('device')
-            },
-            onDelete: (t) => void c.deleteTake(t),
-          }}
-          onGetFactory={c.canGetFactory && FactorySounds.inLibrary(state.backups, FactoryKit.EP133) === null ? () => void c.getFactorySounds() : null}
-          factoryKit={
-            FactorySounds.savedKits(state.backups).length >= 2
-              ? { kit: c.factoryKit, kits: FactorySounds.savedKits(state.backups), onKit: (k) => c.setFactoryKit(k) }
-              : null
-          }
-          offlinePads={state.offlinePads > 0 ? { count: state.offlinePads, onReset: () => void c.resetOfflinePads() } : null}
-          onStop={() => c.stopPlayback()}
-          nameOf={(pad) => c.mirrorName(pad)}
-          oneGroup={settings.liveOneGroup || v.tour}
-          onOneGroup={(on) => c.setLiveOneGroup(on)}
-          follow={settings.liveFollow}
-          onFollow={(on) => c.setLiveFollow(on)}
-          toolsOpen={v.side}
-          onTools={(open) => (open ? nav.open(overlayLayer('side')) : nav.close(overlayLayer('side')))}
-          // The tools' first row: they close and Settings opens in their place.
-          onSettings={() => nav.replace(overlayLayer('side'), screenLayer({ kind: 'settings' }))}
-          picker={keysPickerOf(v.dialogs)}
-          onPicker={(p) => {
-            // One list at a time: a dialog layer 'pick:<what>', so Back closes it (Kotlin's focusable Popup).
-            const cur = nav.current.dialogs.find((d) => d.startsWith(PICK))
-            if (p === null) {
-              if (cur !== undefined) nav.close(dialogLayer(cur))
-            } else if (cur === undefined) nav.open(dialogLayer(PICK + p))
-            else if (cur !== PICK + p) nav.replace(dialogLayer(cur), dialogLayer(PICK + p))
-          }}
-          onPad={(pad, hold, unsure, at) => void c.playPad(pad, hold, unsure, at)}
-          onPadHear={(pad) => void c.hearPad(pad)}
-          onPadKept={(pad) => void c.keepPad(pad)}
-          onPadUp={(pad) => c.releasePad(pad)}
-          onPadCut={(pad) => c.cutPad(pad)}
-          onPadPressure={(pad, p) => c.padPressure(pad, p)}
-          // Signals, read by each pad and key: a voice doesn't re-render this screen.
-          playing={livePlaying(c)}
-          haptics={settings.haptics}
-          // Try arc shows the pads.
-          keys={v.tour ? { ...liveKeys(c), on: false } : liveKeys(c)}
-          inBar={props.inBar}
-          onPianoRange={props.onPianoRange}
-          keysViewWide={settings.keysViewWide}
-          keysViewTall={settings.keysViewTall}
-          edit={{
-            on: props.editPads,
-            connected: state.device !== null,
-            offline: state.device === null ? (state.mirror?.offlineSounds ?? null) : null,
-            onChange: props.onEditPads,
-            onPad: (pad) => {
-              if (c.editTarget(pad) !== null) nav.open(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
-            },
-            onDropSlot: (pad, slot, source) => void c.assignPad(pad, slot, source),
-            onDropFile: (pad, file) => void c.uploadForPad(pad, [file]),
-            sounds: c.liveSounds(),
-            playing: c.playing.value,
-            onPlay: (slot, source) => void c.playLiveSound(slot, source),
-            onStop: () => c.stopPlayback(),
-            onUpload: (files) => void c.dropSamples(files),
-            nameNow: (pad) => c.padSoundName(pad),
-          }}
-          keysActions={{
-            onMode: (on) => c.setLiveKeys(on),
-            onRoot: (r) => c.setKeysRoot(r),
-            onScale: (s) => c.setKeysScale(s),
-            onOctave: (o) => c.setKeysOctave(o),
-            onNote: (n, hold, at) => void c.playNote(n, hold, at),
-            onNoteUp: (n) => c.releaseNote(n),
-            onNotePressure: (n, p) => c.notePressure(n, p),
-            onView: (wide, view) => c.setKeysView(wide, view),
-            onSelect: (pad) => c.selectKeysPad(pad),
-          }}
-        />
-      )
-    }
+    case 'live':
+      return <LiveTab {...props} />
     case 'device':
       return (
         <DeviceScreen
@@ -2022,7 +2057,7 @@ function TabScreen(props: {
           onSoundDetails={(slot) => void c.loadSoundDetails(slot)}
           onProjectSounds={(p) => void c.loadProjectSounds(p)}
           onAddSamples={() => void c.pickSamples()}
-          playing={c.playing.value}
+          playing={c.playing}
           onPlay={(slot) => void c.playDeviceSound(slot)}
           onStop={() => c.stopPlayback()}
           onPads={(n) => nav.open(sheetLayer(`pads:device:${n}`))}
@@ -2043,6 +2078,118 @@ function TabScreen(props: {
         />
       )
   }
+}
+
+/**
+ * Live under the top bar (web addition, out of TabScreen): it alone follows the
+ * mirror, and KEYS's pad only where it shows (KeysShown.sound), so a pad played
+ * re-renders none of the screen.
+ */
+function LiveTab(props: TabProps): JSX.Element {
+  const c = useController()
+  const nav = useNav()
+  const v = props.view
+  const state = c.stateShell.value
+  const settings = c.settings.value
+  const mirror = c.liveMirror.value
+  return (
+    <MirrorScreen
+      mirror={mirror}
+      take={c.canRecord ? { state: c.rec.value, onTake: () => c.toggleTake() } : null}
+      deviceView={deviceView.value}
+      onDeviceView={(on) => setDeviceView(on)}
+      onGuide={(query) => {
+        guideSearch.value = { query }
+        nav.openScreen({ kind: 'guide' })
+      }}
+      takes={{
+        list: state.takes,
+        playing: c.playing,
+        keyOf: (t) => c.takeKey(t),
+        fmtWhen: (ms) => c.fmtDateTime(ms),
+        connected: state.device !== null,
+        canShare: c.canShareTakes,
+        canVoice: c.canShareVoice,
+        onPlay: (t) => void c.playTake(t),
+        onStop: () => c.stopPlayback(),
+        onShare: (t) => void c.shareTake(t),
+        onVoice: (t) => void c.shareTakeVoice(t),
+        onSave: (t) => void c.saveTake(t),
+        onToDevice: (t) => {
+          void c.takeToDevice(t)
+          nav.selectTab('device')
+        },
+        onDelete: (t) => void c.deleteTake(t),
+        onDuplicate: (t) => void c.duplicateTake(t),
+        trimKeyOf: (t) => c.takeTrimKey(t),
+        onTrimPlay: (t, from, to) => void c.playTakeTrim(t, from, to),
+        onSetTrim: (t, trim) => void c.setTakeTrim(t, trim),
+        loadSound: (t) => c.takeSound(t),
+      }}
+      onGetFactory={c.canGetFactory && FactorySounds.inLibrary(state.backups, FactoryKit.EP133) === null ? () => void c.getFactorySounds() : null}
+      factoryKit={
+        FactorySounds.savedKits(state.backups).length >= 2
+          ? { kit: c.factoryKit, kits: FactorySounds.savedKits(state.backups), onKit: (k) => c.setFactoryKit(k) }
+          : null
+      }
+      offlinePads={state.offlinePads > 0 ? { count: state.offlinePads, onReset: () => void c.resetOfflinePads() } : null}
+      onStop={() => c.stopPlayback()}
+      nameOf={(pad) => c.mirrorName(pad)}
+      oneGroup={settings.liveOneGroup || v.tour}
+      onOneGroup={(on) => c.setLiveOneGroup(on)}
+      follow={settings.liveFollow}
+      onFollow={(on) => c.setLiveFollow(on)}
+      toolsOpen={v.side}
+      onTools={(open) => (open ? nav.open(overlayLayer('side')) : nav.close(overlayLayer('side')))}
+      // The tools' first row: they close and Settings opens in their place.
+      onSettings={() => nav.replace(overlayLayer('side'), screenLayer({ kind: 'settings' }))}
+      onPad={(pad, hold, unsure, at) => void c.playPad(pad, hold, unsure, at)}
+      onPadHear={(pad) => void c.hearPad(pad)}
+      onPadKept={(pad) => void c.keepPad(pad)}
+      onPadUp={(pad) => c.releasePad(pad)}
+      onPadCut={(pad) => c.cutPad(pad)}
+      onPadPressure={(pad, p) => c.padPressure(pad, p)}
+      // Signals, read by each pad and key: a voice doesn't re-render this screen.
+      playing={livePlaying(c)}
+      haptics={settings.haptics}
+      // Try arc shows the pads.
+      keys={v.tour ? { ...liveKeys(c), on: false } : liveKeys(c)}
+      inBar={props.inBar}
+      onPianoRange={props.onPianoRange}
+      keysViewWide={settings.keysViewWide}
+      keysViewTall={settings.keysViewTall}
+      edit={{
+        on: props.editPads,
+        connected: state.device !== null,
+        offline: state.device === null ? (mirror?.offlineSounds ?? null) : null,
+        onChange: props.onEditPads,
+        onPad: (pad) => {
+          if (c.editTarget(pad) !== null) nav.open(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
+        },
+        onDropSlot: (pad, slot, source) => void c.assignPad(pad, slot, source),
+        onDropFile: (pad, file) => void c.uploadForPad(pad, [file]),
+        sounds: c.liveSounds(),
+        playing: c.playing,
+        onPlay: (slot, source) => void c.playLiveSound(slot, source),
+        onStop: () => c.stopPlayback(),
+        onUpload: (files) => void c.dropSamples(files),
+        nameNow: (pad) => c.padSoundName(pad),
+      }}
+      keysActions={{
+        onMode: (on) => c.setLiveKeys(on),
+        onRoot: (r) => c.setKeysRoot(r),
+        onScale: (s) => c.setKeysScale(s),
+        onOctave: (o) => c.setKeysOctave(o),
+        onNote: (n, hold, at) => void c.playNote(n, hold, at),
+        onNoteUp: (n) => c.releaseNote(n),
+        onNotePressure: (n, p) => c.notePressure(n, p),
+        onView: (wide, view) => c.setKeysView(wide, view),
+        onSelect: (pad) => c.selectKeysPad(pad),
+        // The scale, key and octave words open KEYS' sheet at their section (a layer 'scale:<part>').
+        onSheet: (part) => nav.open(sheetLayer(SCALE_SHEET_PREFIX + part)),
+      }}
+    />
+  )
 }
 
 /** The progress sheet: modal (no Escape, no scrim, no Back), over any tab (ui/sheets/ProgressSheet). */
