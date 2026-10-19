@@ -500,6 +500,7 @@ export class ArcController {
       noteNames: () => this.deps.settings.settings.keysNames,
       padName: (pad) => this.mirrorName(pad),
       beatBlocks: () => this.beatBlocks(),
+      claudeAnswered: () => this.stopWaitingForClaude(),
       applyBeatFx: (fx, entry) => this.applyBeatFx(fx, entry),
       restoreBeatFx: (entry) => this.restoreBeatFx(entry),
       putBeatSounds: (card, soundPads, picked, entry) => this.putBeatSounds(card, soundPads, picked, entry),
@@ -3164,19 +3165,43 @@ export class ArcController {
   /**
    * SHARE (the scene playing when [group] is null): the card's prompt and text
    * through the share sheet, or, where the browser has none, copied to the
-   * clipboard with a toast saying so. Nothing when there are no notes.
+   * clipboard with a toast saying so. Nothing when there are no notes. Once it
+   * went, the Claude page waits for the reply ("Scene S02", "A · 01"; MainActivity's
+   * shareBeat).
    */
   async shareBeat(group: number | null): Promise<void> {
     const share = this.beatShare(group)
     if (share === null) return
-    await this.sendText(share.subject, share.text)
+    const scene = this.pattern.scene.peek()
+    const what = group === null ? ClaudeText.sharedScene(scene.label) : ClaudeText.sharedPattern(group, scene.groups[group]?.number ?? 1)
+    if (await this.sendText(share.subject, share.text)) this.waitForClaude(what)
   }
 
-  /** SHARE CHAIN: the chain's card as SHARE sends a pattern's; nothing when the chain has no steps. */
+  /** SHARE CHAIN: the chain's card as SHARE sends a pattern's; nothing when the chain has no steps. Then the page waits for the reply. */
   async shareChain(): Promise<void> {
     const share = this.beatShareChain()
     if (share === null) return
-    await this.sendText(share.subject, share.text)
+    if (await this.sendText(share.subject, share.text)) this.waitForClaude(ClaudeText.CHAIN_CARD_NAME)
+  }
+
+  private readonly _claudeWaiting = signal<string | null>(null)
+
+  /**
+   * What a share sent to Claude ("Scene S02", "A · 01", "Chain") while its
+   * reply is awaited, else null: the Claude page's glass asks for the card. In
+   * memory only. A card coming in (pattern's receiveBeat), its import and
+   * [stopWaitingForClaude] end it.
+   */
+  readonly claudeWaiting: ReadonlySignal<string | null> = this._claudeWaiting
+
+  /** A share went to Claude: the glass waits for [what] to be answered. */
+  waitForClaude(what: string): void {
+    this._claudeWaiting.value = what
+  }
+
+  /** The glass's STOP: stop waiting. */
+  stopWaitingForClaude(): void {
+    this._claudeWaiting.value = null
   }
 
   /** "With my sound list" on or off (kept like the other Live preferences). */
@@ -3793,16 +3818,19 @@ export class ArcController {
     await this.sendText(ClaudeText.LEARN_TITLE, WebText.LEARN_PROMPT)
   }
 
-  private async sendText(subject: string, text: string): Promise<void> {
+  /** Whether it went: shared (the share sheet not called off), or copied where there is no share sheet. */
+  private async sendText(subject: string, text: string): Promise<boolean> {
     try {
       const r = (await this.deps.share.shareText?.(subject, text)) ?? 'unsupported'
-      if (r !== 'unsupported') return
+      if (r !== 'unsupported') return r === 'shared'
       const cb = this.deps.clipboard
       if (!cb) throw new Error(ClaudeText.NO_APP)
       await cb.writeText(text)
       this.toast(WebText.CARD_COPIED)
+      return true
     } catch (e) {
       this.toast(errorText(e), true)
+      return false
     }
   }
 

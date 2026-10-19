@@ -14,10 +14,19 @@
 // - A switch is read on or off from aria-checked (Kotlin's stateDescription).
 // - [DeckKeyProps.focusable] keeps an off key in the tab order (aria-disabled),
 //   so a key that turns itself off (TRIM's END) doesn't drop the focus.
-// - KeyGrid and WordKey (the Claude page's prompt words) and DeckKey's hold
-//   (PASTE's) come with the Claude page's port.
-import type { JSX, Ref } from 'preact'
-import { useLayoutEffect, useRef, useState } from 'preact/hooks'
+// - DeckKey's hold (Compose's onLongClick, the Claude page's PASTE) is held
+//   for HOLD_MS, a pointer or Enter or Space, as IconBlock's onHold: a bar
+//   fills along the key's foot meanwhile, and it acts as it is let go of
+//   once the bar is full, not as the bar fills (a browser opens a file
+//   picker on a touch's release, not mid-press). [DeckKeyProps.describedBy]
+//   points a screen reader at the hint that tells of it (Kotlin's
+//   onLongClickLabel).
+// - KeyGrid and WordKey (the Claude page's prompt words) come with the
+//   prompt builder's port.
+import type { ButtonHTMLAttributes, JSX, Ref, TargetedKeyboardEvent, TargetedPointerEvent } from 'preact'
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
+import { HOLD_MS } from '../components/IconBlock'
+import { useHaptic } from '../useHaptic'
 import './DeckKeys.css'
 
 /** The narrowest a key of the strip gets; under it the strip takes two rows. */
@@ -84,6 +93,10 @@ export interface DeckKeyProps {
   focusable?: boolean
   /** The key's button, to put the focus back on it. */
   keyRef?: Ref<HTMLButtonElement>
+  /** Held (Kotlin onLongClick): called as a hold of HOLD_MS is let go of; a tap is then [onClick]'s. */
+  onHold?: () => void
+  /** Web: the id of what says how the key is used (aria-describedby; the hold's hint). */
+  describedBy?: string
 }
 
 /**
@@ -95,6 +108,7 @@ export function DeckKey(props: DeckKeyProps): JSX.Element {
   const { style = 'normal', enabled = true } = props
   const off = !enabled && props.focusable === true
   const role = props.selected !== undefined ? 'radio' : props.checked !== undefined ? 'switch' : undefined
+  const hold = useHold(props.onHold, props.onClick, enabled)
   return (
     <button
       type="button"
@@ -102,10 +116,13 @@ export function DeckKey(props: DeckKeyProps): JSX.Element {
       role={role}
       aria-checked={props.selected ?? props.checked}
       aria-label={props.description}
+      aria-describedby={props.describedBy}
       ref={props.keyRef}
       disabled={!enabled && !off}
       aria-disabled={off || undefined}
+      {...hold.handlers}
       onClick={() => {
+        if (hold.swallow()) return
         if (enabled) props.onClick()
       }}
     >
@@ -113,8 +130,116 @@ export function DeckKey(props: DeckKeyProps): JSX.Element {
       <span class="deck-key__label" aria-hidden="true">
         {props.label.toUpperCase()}
       </span>
+      {hold.holding && <span class="deck-key__hold" style={{ animationDuration: `${HOLD_MS}ms` }} aria-hidden="true" />}
     </button>
   )
+}
+
+/** Movement (px) that turns a press into a scroll and drops the hold. */
+const SLOP = 10
+
+/**
+ * A key's hold, when it has [onHold]: a pointer or Enter or Space held for
+ * HOLD_MS fills the bar (felt as a confirm), and letting go then calls it,
+ * the click that follows swallowed; let go early, it is a tap ([onTap], Enter's
+ * and Space's handled here). Without [onHold] it adds nothing.
+ */
+function useHold(
+  onHold: (() => void) | undefined,
+  onTap: () => void,
+  enabled: boolean,
+): { holding: boolean; swallow: () => boolean; handlers: ButtonHTMLAttributes<HTMLButtonElement> } {
+  const [holding, setHolding] = useState(false)
+  const feel = useHaptic()
+  const timer = useRef<number | null>(null)
+  // The bar is full: letting go acts.
+  const ready = useRef(false)
+  const byKey = useRef(false)
+  const start = useRef<{ x: number; y: number } | null>(null)
+  const swallowNext = useRef(false)
+  const clear = (): void => {
+    if (timer.current !== null) window.clearTimeout(timer.current)
+    timer.current = null
+  }
+  useEffect(() => clear, [])
+  const stop = (): void => {
+    clear()
+    ready.current = false
+    byKey.current = false
+    start.current = null
+    setHolding(false)
+  }
+  // A key that goes off mid-hold must not act when it is let go of.
+  useEffect(() => {
+    if (!enabled) stop()
+  }, [enabled])
+  if (onHold === undefined) return { holding: false, swallow: () => false, handlers: {} }
+  const begin = (): void => {
+    clear()
+    ready.current = false
+    setHolding(true)
+    timer.current = window.setTimeout(() => {
+      timer.current = null
+      ready.current = true
+      feel('confirm')
+    }, HOLD_MS)
+  }
+  // Let go: the hold's, when the bar is full (whether it acted).
+  const letGo = (): boolean => {
+    const done = ready.current
+    stop()
+    if (done) onHold()
+    return done
+  }
+  const activates = (e: KeyboardEvent): boolean => e.key === 'Enter' || e.key === ' '
+  return {
+    holding,
+    swallow: () => {
+      const s = swallowNext.current
+      swallowNext.current = false
+      return s
+    },
+    handlers: {
+      onPointerDown: (e: TargetedPointerEvent<HTMLButtonElement>) => {
+        swallowNext.current = false
+        if (!enabled || byKey.current || (e.pointerType === 'mouse' && e.button !== 0)) return
+        start.current = { x: e.clientX, y: e.clientY }
+        begin()
+      },
+      onPointerMove: (e: TargetedPointerEvent<HTMLButtonElement>) => {
+        const s = start.current
+        if (s !== null && Math.hypot(e.clientX - s.x, e.clientY - s.y) > SLOP) stop()
+      },
+      onPointerUp: () => {
+        if (byKey.current || start.current === null) return
+        if (letGo()) swallowNext.current = true
+      },
+      onPointerCancel: () => {
+        if (!byKey.current) stop()
+      },
+      onPointerLeave: () => {
+        if (!byKey.current) stop()
+      },
+      onContextMenu: (e: Event) => {
+        if (start.current !== null) e.preventDefault()
+      },
+      // The browser's click (Enter's keydown, Space's keyup) is held back: the tap is let go of here.
+      onKeyDown: (e: TargetedKeyboardEvent<HTMLButtonElement>) => {
+        if (!enabled || !activates(e)) return
+        e.preventDefault()
+        if (e.repeat || byKey.current) return
+        byKey.current = true
+        begin()
+      },
+      onKeyUp: (e: TargetedKeyboardEvent<HTMLButtonElement>) => {
+        if (!activates(e)) return
+        e.preventDefault()
+        if (!byKey.current) return
+        if (!letGo()) onTap()
+      },
+      onBlur: stop,
+    },
+  }
 }
 
 /** A glyph of the strip's keys (drawGlyph), [size] px square, in [color] or the text's. */

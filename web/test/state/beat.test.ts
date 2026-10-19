@@ -1,6 +1,6 @@
 // BEAT CARDS in the controller (ArcController.kt's BEAT CARDS section, state/pattern.ts and
 // controller.ts): SHARE sends the card through the share sheet (or copies it where there is
-// none), PASTE BEAT reads the clipboard (or waits for a paste where the page can't read it),
+// none) and the Claude page then waits for the reply until STOP or a card comes in, PASTE BEAT reads the clipboard (or waits for a paste where the page can't read it),
 // a card opens its sheet, IMPORT places it as one UNDO step, and COPY PROBLEMS copies them.
 // A share carries the pads' sound lines and, with "With my sound list" on, the sounds Arc knows;
 // SHARE CHAIN shares the project's chain; a card of scenes imported sets its chain unless SET CHAIN is off,
@@ -93,6 +93,33 @@ describe('BEAT CARDS', () => {
     await h.c.shareBeat(null)
     expect(copied[0]).toContain('ARC BEAT 1')
     expect(h.toasts.at(-1)?.text).toBe(WebText.CARD_COPIED)
+  })
+
+  // Web addition (Kotlin has no test of claudeWaiting): what went is waited for until STOP, a card or its import.
+  it("a share waits for Claude's reply until STOP or a card comes in; one called off does not wait", async () => {
+    const h = await liveOn()
+    await recordOne(h)
+    let result: 'shared' | 'cancelled' = 'cancelled'
+    mutable(h).share = { ...h.deps.share, shareText: async () => result }
+    await h.c.shareBeat(0)
+    expect(h.c.claudeWaiting.value).toBeNull()
+    result = 'shared'
+    await h.c.shareBeat(0)
+    expect(h.c.claudeWaiting.value).toBe('A · 01')
+    h.c.stopWaitingForClaude()
+    expect(h.c.claudeWaiting.value).toBeNull()
+    await h.c.shareBeat(null)
+    expect(h.c.claudeWaiting.value).toBe(ClaudeText.sharedScene('S01'))
+    // No card in the text: still waiting.
+    await h.c.receiveBeat('hello')
+    expect(h.c.claudeWaiting.value).toBe('Scene S01')
+    await h.c.receiveBeat(SCENES)
+    expect(h.c.claudeWaiting.value).toBeNull()
+    h.c.waitForClaude(ClaudeText.CHAIN_CARD_NAME)
+    h.c.pattern.importBeat(false)
+    expect(h.c.claudeWaiting.value).toBeNull()
+    await h.c.shareChain()
+    expect(h.c.claudeWaiting.value).toBe('Chain')
   })
 
   it("SHARE names the EP-133's own kit, not the one Live plays offline", async () => {

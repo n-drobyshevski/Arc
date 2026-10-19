@@ -126,6 +126,8 @@ export interface PatternHost {
   padName?(pad: PhysicalPad): string | null
   /** A beat card's FX, SOUNDS, PAD SHAPING and SILENT PADS blocks as the pads are now (the controller knows them). */
   beatBlocks?(): BeatBlocks
+  /** A card came in, or was imported: Claude's reply is here, the Claude page stops waiting for it (the controller's claudeWaiting). */
+  claudeAnswered?(): void
   /**
    * IMPORT's FX: the card's [fx] replace the project's, the kinds it has a
    * line for (BeatCards.applyFx), at once; [entry] keeps the FX before and
@@ -1688,6 +1690,8 @@ export class PatternDesk {
       this.host.toast(ClaudeText.NO_CARD)
       return
     }
+    // The reply is here.
+    this.host.claudeAnswered?.()
     await this.load()
     this.showBeat(BeatCards.read(text))
   }
@@ -1762,6 +1766,7 @@ export class PatternDesk {
       return
     }
     this._beat.value = null
+    this.host.claudeAnswered?.()
     if (setTempo && card.tempo !== null) this.setTempo(Tempo.round(card.tempo))
     const entry = new BeatUndo(this.recorder, before, a.seq)
     this.beatUndos.push(entry)

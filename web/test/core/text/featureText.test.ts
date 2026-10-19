@@ -738,6 +738,14 @@ describe('FeatureTextTest', () => {
     expect(ClaudeText.cardSceneGoes(4, [4, 2, 1, 1])).toBe('S05 \u00B7 A04 B02 C01 D01')
     expect(ClaudeText.SCENE_SAME).toBe('Plays the same patterns as the scene before.')
     expect([ClaudeText.shareChainKey(1), ClaudeText.shareChainKey(3)]).toEqual(['Share chain \u00B7 1 scene', 'Share chain \u00B7 3 scenes'])
+    expect([
+      ClaudeText.sent(ClaudeText.sharedScene('S02')),
+      ClaudeText.sceneTitle('S02'),
+      ClaudeText.chainLine(3, 6),
+      ClaudeText.pickScene('S02', true),
+      ClaudeText.pickPattern(0, 1, false),
+      ClaudeText.pickChain(1),
+    ]).toEqual(['Sent Scene S02', 'Scene S02', '3 scenes \u00B7 6 steps', 'Scene S02, no notes yet', 'A \u00B7 01', 'Chain, 1 scene'])
     expect(ClaudeText.cardSceneTarget(2, [[0, 4], [1, 2], [2, null]])).toBe('new S03 \u00B7 A 04 \u00B7 B 02 \u00B7 C (same)')
     expect(ClaudeText.chainImport([chainStep(2, 2), chainStep(3), chainStep(2, 2), chainStep(4)])).toBe('S03\u00D72 \u2192 S04 \u2192 S03\u00D72 \u2192 S05')
     expect(ClaudeText.cardSceneName(2, 'Drop', 4, [4, 2, 1, 1])).toBe('Scene 2, Drop, becomes S05, patterns A 4, B 2, C 1, D 1')

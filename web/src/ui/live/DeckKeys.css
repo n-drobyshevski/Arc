@@ -51,3 +51,23 @@
   line-height: 1.1;
   letter-spacing: var(--track-caps-key);
 }
+/* A hold under way (onHold): a bar filling along the key's foot over HOLD_MS, in the key's ink. */
+.deck-key__hold {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 5px;
+  height: 3px;
+  border-radius: 2px;
+  background: currentColor;
+  transform-origin: left;
+  transform: scaleX(0);
+  animation: deck-key-hold linear forwards;
+}
+@keyframes deck-key-hold {
+  to { transform: scaleX(1); }
+}
+/* No sweep, but the same wait: the bar is there full while it runs. */
+@media (prefers-reduced-motion: reduce) {
+  .deck-key__hold { animation: none; transform: none; }
+}

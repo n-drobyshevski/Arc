@@ -129,6 +129,47 @@ export const ClaudeText = {
   /** The chain's share, for a project with no chain: nothing to share. */
   NO_CHAIN_TO_SHARE: 'Add scenes to the chain to share it',
 
+  // The Claude page as the device's display: what will go on the glass, and the keys under it.
+  /** The glass's head (upper-cased where shown): ready, or a reply awaited. */
+  READY: 'Claude \u00B7 ready',
+  WAITING: 'Waiting for Claude',
+  /** "Sent Scene S02": what went, large on the glass while the reply is awaited ([what] as [sharedScene] gives it). */
+  sent(what: string): string {
+    return `Sent ${what}`
+  },
+  /** "Scene S02", "Chain": what SHARE sends, large on the glass. */
+  sceneTitle(scene: string): string {
+    return `Scene ${scene}`
+  },
+  CHAIN: 'Chain',
+  /** "3 scenes · 6 steps": the chain's line on the glass. */
+  chainLine(scenes: number, steps: number): string {
+    return `${plural(scenes, 'scene')} \u00B7 ${plural(steps, 'step')}`
+  },
+  SCENE_EMPTY: 'No notes in this scene yet',
+  PATTERN_EMPTY: 'No notes in this pattern yet',
+  /** On the glass while the reply is awaited. */
+  COPY_THEN_PASTE: "Copy Claude's reply, then press PASTE",
+  /** The glass's dismiss word, beside the head. */
+  STOP: 'Stop',
+  PICK_HINT: 'Pick what to share, then press SHARE. Hold PASTE to open a card file.',
+  /** The keys' words (upper-cased where shown); the pattern's key says its place, "A · 01". */
+  KEY_SCENE: 'Scene',
+  KEY_CHAIN: 'Chain',
+  KEY_SOUNDS: 'Sounds',
+  KEY_SHARE: 'Share',
+  KEY_PASTE: 'Paste',
+  /** The pick keys for screen readers: "Scene S02", "A · 01", "Chain, 3 scenes", and that there is nothing to share. */
+  pickScene(scene: string, empty: boolean): string {
+    return ClaudeText.sceneTitle(scene) + (empty ? NOTHING_TO_SHARE : '')
+  },
+  pickPattern(group: number, n: number, empty: boolean): string {
+    return place(group, n) + (empty ? NOTHING_TO_SHARE : '')
+  },
+  pickChain(scenes: number): string {
+    return `${ClaudeText.CHAIN}, ${plural(scenes, 'scene')}`
+  },
+
   /** The two links under the card. */
   GET_SKILL: 'Get the arc-beats skill',
   LEARN: 'Learn with Claude',

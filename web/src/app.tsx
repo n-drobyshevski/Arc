@@ -1458,12 +1458,19 @@ function claudeUi(c: ArcController): ClaudeActions | null {
     get chainScenes() {
       return chainSceneCount(p.scene.value.chain)
     },
+    get lights() {
+      return p.scene.value.groups.map((g) => g.lights)
+    },
+    get waiting() {
+      return c.claudeWaiting.value
+    },
     onWithSounds: (on) => c.setShareSounds(on),
     onShareScene: () => void c.shareBeat(null),
     onShareChain: () => void c.shareChain(),
     onSharePattern: (g) => void c.shareBeat(g),
     onPaste: () => void c.pasteBeat(),
     onOpenFile: () => void c.openBeatFile(),
+    onDismissWaiting: () => c.stopWaitingForClaude(),
     learnUrl: learnUrl(),
   }
 }
