@@ -2675,7 +2675,7 @@ function ModeRow(props: {
           description={MirrorText.scaleChoice(keys.scale)}
           coach={{ id: 'live.scale', label: CoachText.SCALE }}
           {...pick('scale')}
-          swipe
+          quick
           alignEnd
           down
           middle
@@ -2689,7 +2689,8 @@ function ModeRow(props: {
           description={MirrorText.octaveChoice(keys.octave)}
           coach={{ id: 'live.octave', label: CoachText.OCTAVE }}
           {...pick('octave')}
-          swipe
+          quick
+          fanReversed
           alignEnd
           middle
         />
@@ -2719,7 +2720,7 @@ function ModeRow(props: {
             description={MirrorText.scaleChoice(keys.scale)}
             coach={{ id: 'live.scale', label: CoachText.SCALE }}
             {...pick('scale')}
-            swipe
+            quick
           />
           <PickWord
             label={MirrorText.octave(keys.octave)}
@@ -2730,7 +2731,8 @@ function ModeRow(props: {
             description={MirrorText.octaveChoice(keys.octave)}
             coach={{ id: 'live.octave', label: CoachText.OCTAVE }}
             {...pick('octave')}
-            swipe
+            quick
+            fanReversed
             alignEnd
           />
         </>
@@ -2780,7 +2782,7 @@ function SidewaysRow(props: {
         description={MirrorText.scaleChoice(keys.scale)}
         coach={{ id: 'live.scale', label: CoachText.SCALE }}
         {...pick('scale')}
-        swipe
+        quick
         down
         middle
       />
@@ -2811,7 +2813,8 @@ function SidewaysRow(props: {
         description={MirrorText.octaveChoice(keys.octave)}
         coach={{ id: 'live.octave', label: CoachText.OCTAVE }}
         {...pick('octave')}
-        swipe
+        quick
+        fanReversed
         alignEnd
         down
         middle

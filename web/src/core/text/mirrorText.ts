@@ -195,6 +195,8 @@ export const MirrorText = {
   /** A pick word's TalkBack actions, the same as a short swipe along it (right, left). */
   PICK_NEXT: 'Next',
   PICK_PREVIOUS: 'Previous',
+  /** Added to a scale or octave word's description: held, its choices fan out beside the thumb to pick from. */
+  QUICK_PICK_HINT: 'Hold to pick from the list',
 
   /** "KEY DO", the key word above the piano. */
   keyWord(root: number, names: NoteNames): string {

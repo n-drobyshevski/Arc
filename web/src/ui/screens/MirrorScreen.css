@@ -558,8 +558,8 @@
   justify-content: center;
 }
 .live__side-tools .word svg { transform: rotate(90deg); }
-/* The turned scale and octave words step up and down (PickWord's swipe): that drag is theirs. */
-.live__side-end .pick > .word--swipe { touch-action: pan-x; }
+/* The turned scale and octave words step up and down (PickWord's quick): that drag is theirs. */
+.live__side-end .pick > .word--quick { touch-action: pan-x; }
 
 /* KEYS' grid on its side: the view switch on the left (none where it isn't offered: no column,
  * nor the gap before it), the scale and the octave on the right, both in the middle of the keys'
