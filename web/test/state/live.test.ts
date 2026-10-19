@@ -18,7 +18,7 @@ import { NullPlayer } from '../../src/platform/audio/player'
 import { MemoryTarget } from '../../src/platform/storage/external'
 import { LIVE_KEY, memoryStorage, SETTINGS_KEY } from '../../src/platform/storage/settings'
 import { LIVE_AUDIO_KEEP_MS } from '../../src/state/controller'
-import { LATE_LOAD_MS, latencyRows, packKey, PRESS_STAMP_MAX_MS, pressTime } from '../../src/state/live'
+import { LATE_LOAD_MS, latencyRows, packKey, padAudioOf, PRESS_STAMP_MAX_MS, pressTime } from '../../src/state/live'
 import { WebLatencyHint } from '../../src/core/text/latencyText'
 import { createStore } from '../../src/state/store'
 import { Tasks } from '../../src/state/tasks'
@@ -550,6 +550,32 @@ describe('Live: a backup opened once for the pads', () => {
     expect(h.liveAudio.presses.at(-1)).toMatchObject({ key: '1:kick' })
     expect(bytes).toHaveBeenCalledTimes(1)
     expect(preload.mock.calls.filter(([key]) => key === '1:kick')).toHaveLength(1)
+  })
+
+  it('a preload that runs past its slice still loads every pad, a task later', async () => {
+    const h = await fromBackup()
+    // Each read of the clock 10 ms on: every pad waits for a later task first.
+    let t = 0
+    const now = vi.spyOn(performance, 'now').mockImplementation(() => (t += 10))
+    try {
+      const preload = vi.spyOn(h.liveAudio, 'preload')
+      await h.c.clearPadSounds()
+      await vi.waitFor(() => expect(preload.mock.calls.map(([key]) => key).sort()).toEqual(['1:kick', '5:clap']))
+    } finally {
+      now.mockRestore()
+    }
+  })
+})
+
+describe('padAudioOf', () => {
+  it('reads s16le from an odd offset, drops a partial sample and keeps its own copy', () => {
+    const backing = new Uint8Array([0xff, 0x00, 0x40, 0x00, 0x80, 0x7f])
+    const pcm = backing.subarray(1) // 0x4000, 0x8000 and a stray byte
+    const a = padAudioOf(pcm, 3, 46875)
+    expect(Array.from(a.pcm)).toEqual([16384, -32768])
+    expect(a.channels).toBe(2)
+    backing.fill(0)
+    expect(Array.from(a.pcm)).toEqual([16384, -32768])
   })
 })
 

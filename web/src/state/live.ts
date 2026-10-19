@@ -91,23 +91,52 @@ export interface PadAudio {
   readonly silent: boolean
 }
 
+/** Whether this platform stores 16-bit numbers little end first (every browser in practice). */
+const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1
+
 /** PadAudio.of: from little-endian 16-bit PCM bytes (a partial last sample is dropped). */
 export function padAudioOf(pcm: Uint8Array, channels: number, sampleRate: number): PadAudio {
   const n = Math.floor(pcm.length / 2)
   const out = new Int16Array(n)
-  const dv = new DataView(pcm.buffer, pcm.byteOffset, n * 2)
-  for (let i = 0; i < n; i++) out[i] = dv.getInt16(i * 2, true)
+  // Web addition: little-endian, the bytes are the samples, so one copy (never a view: the download and take buffers are reused).
+  if (LITTLE_ENDIAN) {
+    new Uint8Array(out.buffer).set(pcm.subarray(0, n * 2))
+  } else {
+    const dv = new DataView(pcm.buffer, pcm.byteOffset, n * 2)
+    for (let i = 0; i < n; i++) out[i] = dv.getInt16(i * 2, true)
+  }
   return { pcm: out, channels: Math.min(2, Math.max(1, channels)), sampleRate, silent: isSilent(pcm) }
 }
 
 const padBytes = (a: PadAudio): number => a.pcm.length * 2
 
+/** How long preloadPads decodes before it lets taps in (web addition). */
+const PRELOAD_SLICE_MS = 8
+
+/**
+ * A later task: scheduler.yield where the browser has it, else a
+ * MessageChannel's message (a setTimeout per pad would be held back 4 ms each).
+ */
+function yieldTask(): Promise<void> {
+  const s = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler
+  if (typeof s?.yield === 'function') return s.yield()
+  return new Promise((resolve) => {
+    if (typeof MessageChannel === 'undefined') {
+      setTimeout(resolve, 0)
+      return
+    }
+    const c = new MessageChannel()
+    c.port1.onmessage = () => {
+      c.port1.close()
+      resolve()
+    }
+    c.port2.postMessage(null)
+  })
+}
+
 /** Whether library record [b] is still the one [o] was opened from (same id, size and time). */
 const sameRecord = (b: BackupRecord, o: { readonly id: string; readonly size: number; readonly createdAt: number }): boolean =>
   b.id === o.id && b.size === o.size && b.createdAt === o.createdAt
-
-/** Whether this platform stores 16-bit numbers little end first (every browser in practice). */
-const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1
 
 /** 16-bit samples as s16le bytes: a view of the same memory where the platform is little-endian, else a copy. */
 export function s16leBytes(pcm: Int16Array): Uint8Array {
@@ -661,8 +690,14 @@ export class LiveSounds {
   preloadPads(m: LiveMirror): Promise<void> {
     const gen = ++this.preloadGen
     return (async () => {
+      // Web addition: a turn for taps once the decoding has held the page this long.
+      let from = performance.now()
       // The pads' sounds with the offline changes over them, each once.
       for (const sample of m.padSamples()) {
+        if (performance.now() - from > PRELOAD_SLICE_MS) {
+          await yieldTask()
+          from = performance.now()
+        }
         if (gen !== this.preloadGen || this.host.mirror() !== m) return
         const key = this.keyOf(sample)
         if (this.padMemory.has(key) || this.padLoads.has(key)) continue
