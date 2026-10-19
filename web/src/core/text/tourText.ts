@@ -66,6 +66,6 @@ export const TourText = {
   OFFLINE_NOTE: 'Settings has Try arc again for when the EP-133 is here.',
 
   DONE_HEAD: "That's the basics",
-  DONE_HINT: "? names every control. GUIDE has the EP-133's own shortcuts, and the strip on the right has more tools.",
+  DONE_HINT: "? names every control. GUIDE has the EP-133's own shortcuts, and Live tools has the rest.",
   LATER_NOTE: 'Settings has Try arc again for the steps you skipped.',
 } as const

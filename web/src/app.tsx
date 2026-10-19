@@ -1441,13 +1441,14 @@ export function tourAway(v: NavView): boolean {
   return v.side || v.menu || v.guide
 }
 
-/** What the tour reads of the app now (MainActivity's snapshot); [v] gives what is open. */
+/** What the tour reads of the app now (MainActivity's snapshot); [v] gives what is open, [docked] Live tools docked on the desk. */
 export function tourSnapshot(
   state: UiState,
   heard: boolean,
   demo: boolean,
   nameOf: (pad: { group: number; offset: number }) => string | null,
   v: Pick<NavView, 'side' | 'guide' | 'tab'>,
+  docked = false,
 ): TourSnapshot {
   const m = state.mirror?.state ?? null
   const hit = m?.lastHit ?? null
@@ -1463,7 +1464,8 @@ export function tourSnapshot(
     hitNamed: pad !== null && nameOf(pad) !== null,
     heard,
     demo,
-    toolsOpen: v.side,
+    // On the desk Live tools are docked, always in view: there is no strip to open.
+    toolsOpen: v.side || docked,
     guideOpen: v.guide,
     onBackups: v.tab === 'backups',
   }
@@ -1515,7 +1517,8 @@ function useTourRun(): TourRun {
     setSession(null)
   }, [open, runs])
 
-  const snap = tourSnapshot(state, heard, c.demo, (pad) => c.mirrorName(pad), v)
+  const desk = useDesk()
+  const snap = tourSnapshot(state, heard, c.demo, (pad) => c.mirrorName(pad), v, desk && v.tab === 'live')
   const progress: TourProgress = Tour.decode(settings.tourSteps)
   const step = open && session !== null ? Tour.current(progress, session, snap) : null
   const snapKey = JSON.stringify(snap)

@@ -193,6 +193,8 @@ test('the cable pulled during Pad turns the card into Connect; Back pauses; Sett
 
 test('without Web MIDI: Welcome → Restore → First time here → Needs MIDI → Try the demo', async ({ page, context }) => {
   await notAutomated(page)
+  // A phone: on the desk Live tools are docked and the More tools step passes by itself (the desk test below).
+  await page.setViewportSize({ width: 393, height: 852 })
   await page.addInitScript(() => {
     delete (Navigator.prototype as { requestMIDIAccess?: unknown }).requestMIDIAccess
     delete (navigator as { requestMIDIAccess?: unknown }).requestMIDIAccess
@@ -311,6 +313,32 @@ test.describe('without the EP-133', () => {
       await tour.getByRole('button', { name: 'Done', exact: true }).click()
       await expect(tour).toBeHidden()
       expect(await page.evaluate(() => JSON.parse(localStorage.getItem('arc.settings') ?? '{}').tourSteps)).toContain('tools,guide,sections')
+    })
+  })
+
+  test.describe('on the desk', () => {
+    test.use({ viewport: { width: 1280, height: 800 } })
+
+    test('Live tools are docked, so the offline path starts at the guide and Done names Live tools, not a strip', async ({ page }) => {
+      await notAutomated(page)
+      await page.goto('/')
+      const tour = tourOf(page)
+      const card = cardOf(page)
+      await expect(tour).toBeVisible()
+      await tour.getByRole('button', { name: 'Without the EP-133' }).click()
+      const restore = tour.getByRole('heading', { name: 'Used arc before?' })
+      await expect(restore.or(tour.getByRole('heading', { name: 'EP-133 shortcuts' }))).toBeVisible()
+      if (await restore.isVisible()) await tour.getByRole('button', { name: 'First time here' }).click()
+      // No strip to tap: the docked tools count as open, and the run goes on to the guide.
+      await expect(tour.getByRole('heading', { name: 'EP-133 shortcuts' })).toBeVisible()
+      await expect(card.getByText('Step 2 of 3')).toBeVisible()
+      await tour.getByRole('button', { name: 'Skip' }).click()
+      await expect(tour.getByRole('heading', { name: 'Backups', exact: true })).toBeVisible()
+      await tour.getByRole('button', { name: 'Skip' }).click()
+      await expect(tour.getByRole('heading', { name: "That's the basics" })).toBeVisible()
+      await expect(card.getByText("? names every control. GUIDE has the EP-133's own shortcuts, and Live tools has the rest.")).toBeVisible()
+      await expect(card.getByText(/strip/)).toHaveCount(0)
+      expect(await page.evaluate(() => JSON.parse(localStorage.getItem('arc.settings') ?? '{}').tourSteps)).toContain('tools,~guide,~sections')
     })
   })
 
