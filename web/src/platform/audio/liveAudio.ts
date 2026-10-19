@@ -37,7 +37,7 @@
 //   new route have no counterpart.
 // - Samples are kept in memory on the audio side: [preload] gives a decoded
 //   sample a key, it is sent over once (as soon as it is decoded, a copy
-//   moved to the worklet: liveMixer's transferable), and a press only names
+//   moved to the worklet: liveProtocol's transferable), and a press only names
 //   it. Kotlin's play() takes the PCM itself (the controller's padMemory
 //   holds it); here the controller loads and [unload]s by key instead. A
 //   reopened output gets the loaded samples again; while the mixer is still
@@ -110,7 +110,8 @@ import type { FrameGrid } from './clickScheduler'
 import { FxSetup } from './fxSetup'
 import { levelGain } from '../../core/features/fxSettings'
 import { OutputDelay } from '../../core/features/outputDelay'
-import { LIVE_PROCESSOR, MixerHost, transferable, type FromMixer, type PlanVoice, type ToMixer } from './liveMixer'
+import type { FromMixer, PlanVoice, ToMixer } from './liveMixer'
+import { LIVE_PROCESSOR, transferable } from './liveProtocol'
 import type { ArpStep } from './patternScheduler'
 import type { TapPhase, TapTake } from './sampleTap'
 import { PeakMeter } from '../../core/features/peakMeter'
@@ -120,7 +121,8 @@ import { PeakMeter } from '../../core/features/peakMeter'
 // form inside `new Worker(...)`.)
 import workletUrl from './liveWorklet?worker&url'
 
-export { LIVE_PROCESSOR, MixerHost, transferable, type FromMixer, type StartedVoice, type ToMixer } from './liveMixer'
+export { LIVE_PROCESSOR, transferable } from './liveProtocol'
+export type { FromMixer, StartedVoice, ToMixer } from './liveMixer'
 
 /**
  * An output latency (baseLatency + outputLatency) at least this long is taken
@@ -1735,7 +1737,10 @@ async function workletLink(ctx: AudioContext, onMessage: (m: FromMixer) => void)
 }
 
 /** The main-thread mixer, for browsers without AudioWorklet (or where it fails to load). */
-function scriptLink(ctx: AudioContext, onMessage: (m: FromMixer) => void): MixerLink {
+async function scriptLink(ctx: AudioContext, onMessage: (m: FromMixer) => void): Promise<MixerLink> {
+  // Loaded only here: the worklet has its own copy, so the app's bundle leaves the mixer out.
+  // The chunk is precached with the app's other scripts; should it fail to load, connect() fails.
+  const { MixerHost } = await import('./liveMixer')
   const host = new MixerHost(ctx.sampleRate, onMessage)
   // Two input channels: SAMPLE's mic, while it is open.
   const node = ctx.createScriptProcessor(FALLBACK_FRAMES, 2, 2)
@@ -1812,7 +1817,7 @@ export function browserLiveBackend(): LiveBackend {
         }
       }
       if (typeof ctx.createScriptProcessor !== 'function') throw why ?? new Error('no AudioWorklet')
-      return scriptLink(ctx, onMessage)
+      return await scriptLink(ctx, onMessage)
     },
     ...(typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function'
       ? {

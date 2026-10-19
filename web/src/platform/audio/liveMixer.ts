@@ -48,9 +48,6 @@ import { SampleTap, type TapAsk, type TapPhase, type TapTake } from './sampleTap
 import { Seq } from '../../core/features/pattern'
 import { framesPerTick, frameOf } from '../../core/features/sequencer'
 
-/** The AudioWorkletProcessor's registered name. */
-export const LIVE_PROCESSOR = 'arc-live-mixer'
-
 /** Main thread to mixer. */
 export type ToMixer =
   /** Keeps sample [id] ready (16-bit, interleaved) until 'unload'. */
@@ -145,19 +142,6 @@ export interface ArpPlanMessage {
   readonly seed: number
   readonly pressMs: number
   readonly atFrame: number | null
-}
-
-/**
- * [m] as it is posted to the worklet, and what moves with it: a 'load' takes
- * a copy of just its samples (a view's whole buffer would be cloned
- * otherwise) whose buffer is transferred, so the main thread's own array is
- * never detached and no second clone waits in the port. Every other command
- * is posted as it is.
- */
-export function transferable(m: ToMixer): [ToMixer, Transferable[]] {
-  if (m.t !== 'load') return [m, []]
-  const pcm = m.pcm.slice()
-  return [{ t: 'load', id: m.id, pcm }, [pcm.buffer]]
 }
 
 /** A voice that began: its press [tag] and the context time ([time], s) its first frame plays at. */

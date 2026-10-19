@@ -12,7 +12,6 @@ import {
   VOLUME_KEY,
   CLICK_LEVEL_KEY,
   LiveAudio,
-  MixerHost,
   REPLACE_QUIET_MS,
   FLUSH_SLICE_BYTES,
   SLOW_OUTPUT_MS,
@@ -39,6 +38,7 @@ import {
   type OutputEngine,
   type ToMixer,
 } from '../../src/platform/audio/liveAudio'
+import { MixerHost } from '../../src/platform/audio/liveMixer'
 import { WebLatencyHint } from '../../src/core/text/latencyText'
 import { pattern, patternNote, projectPatterns } from '../../src/core/features/pattern'
 import { PhaseAnchors } from '../../src/core/features/sequencer'

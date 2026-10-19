@@ -83,9 +83,6 @@ import { Sheet } from './ui/components/Sheet'
 import { Shell } from './ui/components/Shell'
 import { ControllerToast } from './ui/components/Toast'
 import { UpdatePrompt } from './ui/components/UpdatePrompt'
-import { CompareScreen } from './ui/screens/CompareScreen'
-import { ContentsScreen } from './ui/screens/ContentsScreen'
-import { DebugScreen } from './ui/screens/DebugScreen'
 import { DeviceScreen } from './ui/screens/DeviceScreen'
 import { GuideScreen } from './ui/screens/GuideScreen'
 import { MainScreen } from './ui/screens/MainScreen'
@@ -95,15 +92,11 @@ import { LivePill, MirrorScreen, type LivePlaying } from './ui/screens/MirrorScr
 import { PICK_PREFIX as PICK, keysPickerOf, type KeysShown } from './ui/live/keys'
 import { liveInBar } from './ui/live/window'
 import type { NoteRange } from './core/features/piano'
-import { SearchScreen } from './ui/screens/SearchScreen'
-import { SettingsScreen } from './ui/screens/SettingsScreen'
 import { EDIT_PREFIX, editPadOf, PadEditSheet } from './ui/sheets/PadEditSheet'
 import { BackupPadsSheet, DevicePadsSheet } from './ui/sheets/PadsSheet'
-import { FontLicenceSheet } from './ui/sheets/FontLicenceSheet'
 import { DeviceUploadSheet } from './ui/sheets/UploadSheet'
 import { useDesk, useFinePointer, useWindowSize } from './ui/useDesk'
 import { useAppKeys } from './ui/useAppKeys'
-import { KeyboardKeysSheet } from './ui/sheets/KeyboardKeysSheet'
 import { PatternSheet } from './ui/sheets/PatternSheet'
 import { TransportContext, type TransportUi } from './ui/live/PatternLine'
 import { FunctionKeysContext, ProjectHold, ProjectHoldContext, TempoContext, type FunctionKeysUi, type ProjectUi, type TempoUi } from './ui/live/FunctionRow'
@@ -125,7 +118,6 @@ import { StepContext, type StepActions } from './ui/live/StepPanel'
 import { SceneContext, type SceneActions } from './ui/live/ScenePanel'
 import { ArpContext, type ArpActions } from './ui/live/ArpWords'
 import { ClaudeContext, learnUrl, type ClaudeActions } from './ui/live/ClaudeSection'
-import { BeatImportSheet } from './ui/sheets/BeatImportSheet'
 import { SampleContext, type SampleActions } from './ui/live/SamplePanel'
 import { SampleReviewSheet } from './ui/sheets/SampleReviewSheet'
 import { BeatCards } from './core/features/beatCard'
@@ -136,7 +128,20 @@ import { TempoSheet } from './ui/sheets/TempoSheet'
 import { FxSheet } from './ui/sheets/FxSheet'
 import { patternBpm } from './state/patternPlan'
 import { computerKeys, setComputerKeys } from './ui/keyPrefs'
+import { lazy, preloadWhenIdle } from './ui/lazy'
 import './app.css'
+
+// Web addition: what isn't on screen at start loads as chunks of its own, fetched once the app is idle
+// (the keys and beat sheets stay mounted, so theirs come in right after the first render).
+const SettingsScreen = lazy('SettingsScreen', () => import('./ui/screens/SettingsScreen').then((m) => m.SettingsScreen))
+const DebugScreen = lazy('DebugScreen', () => import('./ui/screens/DebugScreen').then((m) => m.DebugScreen))
+const CompareScreen = lazy('CompareScreen', () => import('./ui/screens/CompareScreen').then((m) => m.CompareScreen))
+const ContentsScreen = lazy('ContentsScreen', () => import('./ui/screens/ContentsScreen').then((m) => m.ContentsScreen))
+const SearchScreen = lazy('SearchScreen', () => import('./ui/screens/SearchScreen').then((m) => m.SearchScreen))
+const BeatImportSheet = lazy('BeatImportSheet', () => import('./ui/sheets/BeatImportSheet').then((m) => m.BeatImportSheet))
+const KeyboardKeysSheet = lazy('KeyboardKeysSheet', () => import('./ui/sheets/KeyboardKeysSheet').then((m) => m.KeyboardKeysSheet))
+const FontLicenceSheet = lazy('FontLicenceSheet', () => import('./ui/sheets/FontLicenceSheet').then((m) => m.FontLicenceSheet))
+const LAZY = [SettingsScreen, DebugScreen, CompareScreen, ContentsScreen, SearchScreen, BeatImportSheet, KeyboardKeysSheet, FontLicenceSheet]
 
 /** The progress sheet's layer id. */
 const PROGRESS = 'progress'
@@ -181,9 +186,11 @@ export function App(props: AppProps): JSX.Element {
     const offDrop = typeof document === 'undefined'
       ? () => undefined
       : attachDrop(document.body, { onFiles: (f) => void c.importFiles(f), filter: (f) => isPakName(f.name) })
+    const offPreload = preloadWhenIdle(LAZY)
     return () => {
       off()
       offDrop()
+      offPreload()
       nav.setBackGuard(() => false)
       if (!props.nav) nav.dispose()
     }
