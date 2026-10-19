@@ -151,10 +151,13 @@ object ClaudeText {
      * reads its slots and pads by it). Null for the EP-133's own kit.
      */
     fun kitLine(kit: dev.arc.ep133.features.FactoryKit): String? = when (kit) {
-        dev.arc.ep133.features.FactoryKit.EP133 -> null
+        dev.arc.ep133.features.FactoryKit.EP133 -> EP133_LINE
         dev.arc.ep133.features.FactoryKit.EP40 -> "My EP-133 plays the ${FeatureText.FACTORY_40} factory kit."
         dev.arc.ep133.features.FactoryKit.EP1320 -> "My EP-133 plays the ${FeatureText.FACTORY_1320} factory kit."
     }
+
+    /** The EP-133's own kit, said too, so Claude never takes another kit's sounds for it. */
+    const val EP133_LINE = "My EP-133 plays the EP-133's own factory sounds."
 
     /**
      * The shared text: [prompt], a blank line and [card] (which ends in a newline) in a fenced block; with a [kit]
@@ -268,6 +271,14 @@ object ClaudeText {
 
     /** What a row says in place of a new sound: the pad plays it already. */
     const val ALREADY_THERE = "Already there"
+
+    /** A sound no slot holds that a saved factory pack has: IMPORT uploads it ("Upload 234 mpc hh", "From the EP-40 pack, into a free slot"). */
+    fun upload(slot: Int, name: String?) = "Upload ${soundName(slot, name)}"
+    fun fromPack(model: String) = "From the $model pack, into a free slot"
+    fun inPack(model: String) = "In the $model pack: connect the EP-133 to upload it"
+    fun soundRowUpload(pad: PhysicalPad, slot: Int, name: String?, model: String) = "${padLabel(pad)}: ${upload(slot, name)}, ${fromPack(model).lowercase()}"
+    /** An upload that stopped part way: the pads before it keep their sounds. */
+    const val UPLOAD_STOPPED = "The upload stopped"
 
     /** What a row says when the sound is nowhere in the user's list: "Not on your EP-133: 301 Rim dusty". */
     fun soundMissing(slot: Int, name: String?) = "Not on your EP-133: ${soundName(slot, name)}"

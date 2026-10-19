@@ -1361,6 +1361,7 @@ class Ep40Kit(unittest.TestCase):
         self.assertEqual(bc.detect_kit("824 jammy drms a 85\n830 jammy bass a 85\n833 jammy mel a 85\n"), "ep40")
         self.assertIsNone(bc.detect_kit("824 jammy drms a 85\n12 Kick 808\n"))  # one loop alone says nothing
         self.assertIsNone(bc.detect_kit("My EP-133's sounds (slot name), from the EP-133:\n12 Kick 808\n14 Snare\n"))
+        self.assertEqual(bc.detect_kit("Write a beat.\nMy EP-133 plays the EP-133's own factory sounds.\n"), "ep133")
         # The sentence isn't a sound line.
         self.assertEqual(bc.parse_sound_list("My EP-133 plays the EP-40 Riddim factory kit.\n12 Kick\n"), {12: "Kick"})
 

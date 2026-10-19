@@ -785,8 +785,10 @@ private fun SoundRow(row: SoundRowUi, ticked: Boolean, chipOn: Boolean, onTick: 
     // A sound listed unnamed is its file name ("012.pcm") already: the slot isn't said twice.
     val now = if (missing) null else if (pick.unverified && pick.name != null) pick.name else ClaudeText.soundName(pick.slot ?: wanted.slot, pick.name)
     val cardSays = row.cardSays
+    val pack = row.fromPack
     val description = when {
-        missing -> ClaudeText.soundRowMissing(pick.pad, wanted.slot, wanted.name)
+        missing && pack != null && row.uploadable -> ClaudeText.soundRowUpload(pick.pad, pack.slot, pack.name, pack.kit.model)
+        missing -> ClaudeText.soundRowMissing(pick.pad, wanted.slot, wanted.name) + (pack?.let { ". " + ClaudeText.inPack(it.kit.model) } ?: "")
         pick.status == SoundStatus.SAME -> ClaudeText.soundRowSame(pick.pad, now.orEmpty())
         else -> ClaudeText.soundRowName(pick.pad, row.oldName, now.orEmpty())
     } + (cardSays?.let { ". " + ClaudeText.cardSays(it) } ?: "")
@@ -812,6 +814,18 @@ private fun SoundRow(row: SoundRowUi, ticked: Boolean, chipOn: Boolean, onTick: 
         Text(ClaudeText.padLabel(pick.pad), style = ArcType.fieldLabel, color = c.ink, maxLines = 1, modifier = Modifier.width(28.dp))
         val dim = if (row.changes && !chipOn) 0.5f else 1f
         when {
+            // Not on the EP-133, but in a pack Arc has: uploaded into a free slot as IMPORT goes.
+            missing && pack != null -> Column(Modifier.weight(1f).alpha(dim)) {
+                Text(
+                    if (row.uploadable) ClaudeText.upload(pack.slot, pack.name) else ClaudeText.soundMissing(wanted.slot, wanted.name),
+                    style = if (row.uploadable) ArcType.small.copy(fontWeight = FontWeight.Bold) else ArcType.small,
+                    color = c.ink, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    if (row.uploadable) ClaudeText.fromPack(pack.kit.model) else ClaudeText.inPack(pack.kit.model),
+                    style = ArcType.tiny, color = c.graphite, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+            }
             missing -> Text(
                 ClaudeText.soundMissing(wanted.slot, wanted.name),
                 style = ArcType.small, color = c.ink, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),

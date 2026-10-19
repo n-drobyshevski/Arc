@@ -1346,7 +1346,7 @@ class MainActivity : ComponentActivity() {
                                 chainScenes = dev.arc.ep133.controller.chainSceneCount(scene.chain.chain.steps),
                                 lights = scene.groups.map { it.lights },
                                 prompt = claudePrompt,
-                                kit = dev.arc.ep133.controller.activeKitOf(appSettings.factoryKit, state.backups),
+                                kit = controller.shareKit(),
                                 liveTempo = appSettings.liveTempo,
                                 saved = savedPrompts,
                                 onPrompt = controller::setClaudePrompt,

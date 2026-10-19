@@ -2747,6 +2747,26 @@ A5 | .... .... ..o. .... |
 fun BeatSheetSoundsUnnamedPreview() =
     BeatSheet(UNNAMED_BEAT, sounds = { card -> soundsUi(card, unnamedList, { soundNow[it] }, { soundWas[it] }, offline = false, project = 3) })
 
+// A card written for the EP-40 Riddim's sounds, on an EP-133 with its own: A5's 301 RIM DUSTY is in the EP-40 pack Arc has,
+// so it is ticked to be uploaded into a free slot; offline (dark) it says to connect. A7's KICK DEEP stays on its unnamed slot.
+private val riddimPack = mapOf(dev.arc.ep133.features.FactoryKit.EP40 to mapOf(301 to "rim dusty", 53 to "mpc kick"))
+
+@PreviewTest
+@Preview(name = "Beat sheet sounds upload", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetSoundsUploadPreview() = BeatSheet(
+    UNNAMED_BEAT,
+    sounds = { card -> soundsUi(card, unnamedList, { soundNow[it] }, { soundWas[it] }, offline = false, project = 3, packs = riddimPack, deviceKit = dev.arc.ep133.features.FactoryKit.EP133) },
+)
+
+@PreviewTest
+@Preview(name = "Beat sheet sounds upload offline dark", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetSoundsUploadOfflineDarkPreview() = BeatSheet(
+    UNNAMED_BEAT, dark = true,
+    sounds = { card -> soundsUi(card, unnamedList, { soundNow[it] }, { soundWas[it] }, offline = true, project = 3, packs = riddimPack, deviceKit = dev.arc.ep133.features.FactoryKit.EP133) },
+)
+
 // A card with FX lines: the project has a reverb on group A, the card swaps it for a distortion, sends A and B to it, turns
 // the compressor on and makes A7 duck B and C. The FX block comes after the tempo row, before the pads (no sound lines here).
 private val projectFx = FxSettings(FxType.REVERB, 0.5f, 0.5f, listOf(0.5f, 0f, 0f, 0f))

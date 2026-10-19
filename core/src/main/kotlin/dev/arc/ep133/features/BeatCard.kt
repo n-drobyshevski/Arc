@@ -1570,9 +1570,15 @@ object BeatCards {
      * whose slot is already on the pad is [SoundStatus.SAME], found by name
      * or not. The sounds are the project's, not a scene's: the lines of all
      * the card's scenes are matched, and a pad given a line in more than one
-     * scene takes the last (one pick, in the place of its first).
+     * scene takes the last (one pick, in the place of its first). A line that is [foreign] (another kit's sound, by its
+     * slot and name) is never used by an unnamed slot: that slot holds another sound.
      */
-    fun resolveSounds(card: BeatCard, available: Map<Int, String>, current: (PhysicalPad) -> Int?): List<SoundPick> {
+    fun resolveSounds(
+        card: BeatCard,
+        available: Map<Int, String>,
+        foreign: (CardSound) -> Boolean = { false },
+        current: (PhysicalPad) -> Int?,
+    ): List<SoundPick> {
         val picks = LinkedHashMap<PhysicalPad, SoundPick>()
         for (s in card.allSections) {
             for (offset in KEYPAD) {
@@ -1583,7 +1589,7 @@ object BeatCards {
                 val name = wanted.name?.takeIf { it.isNotBlank() && !FactorySounds.unnamed(wanted.slot, it) }
                 val direct = wanted.slot.takeIf { it in available && (name == null || holds(available[it], name)) }
                 val byName = if (direct == null && name != null) lookUp(available, name, now) else null
-                val slot = direct ?: byName ?: wanted.slot.takeIf { unnamedIn(available, it) }
+                val slot = direct ?: byName ?: wanted.slot.takeIf { unnamedIn(available, it) && !foreign(wanted) }
                 val unverified = slot != null && unnamedIn(available, slot)
                 picks[pad] = when {
                     slot == null -> SoundPick(pad, wanted, null, null, now, SoundStatus.MISSING)

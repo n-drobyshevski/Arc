@@ -1240,6 +1240,8 @@ KITS = ("ep133", "ep40")
 _EP40_LOOP = re.compile(r"\b(drms|fill|bass|mel|melo)\s+[a-d]\s+([0-9]{2,3})\s*$", re.IGNORECASE)
 #: What Arc's share says when Live plays the EP-40 Riddim's sounds (ClaudeText.kitLine).
 _EP40_SENTENCE = re.compile(r"EP-40 Riddim factory kit", re.IGNORECASE)
+#: What it says when the EP-133's own sounds are on it.
+_EP133_SENTENCE = re.compile(r"EP-133's own factory sounds", re.IGNORECASE)
 
 
 def loop_tempo(slot: int, name: Optional[str]) -> Optional[int]:
@@ -1280,9 +1282,11 @@ def factory_list(name: str, path: Optional[str] = None) -> Tuple[str, str]:
 
 
 def detect_kit(text: str) -> Optional[str]:
-    """The kit a share's text or a sound list says: "ep40" for Arc's EP-40 sentence or the EP-40 pack's names, else None (no telling: the EP-133's)."""
+    """The kit a share's text or a sound list says: "ep40" for Arc's EP-40 sentence or the EP-40 pack's names, "ep133" for its EP-133 sentence, else None (no telling: the EP-133's)."""
     if _EP40_SENTENCE.search(text):
         return "ep40"
+    if _EP133_SENTENCE.search(text):
+        return "ep133"
     return "ep40" if _ep40_names(parse_sound_list(text)) else None
 
 

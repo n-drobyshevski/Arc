@@ -209,6 +209,8 @@ data class UiState(
      * slot the EP-133 lists unnamed ("200.pcm") is called in the sound list a share carries and in a card's sound lines.
      */
     val factoryNames: Map<Int, String>? = null,
+    /** Each saved factory pack's sound names by slot, by its kit: what tells a card's sound from another kit's, and where IMPORT can upload one from. */
+    val kitNames: Map<FactoryKit, Map<Int, String>> = emptyMap(),
     val freshId: String? = null,
     val task: TaskUi? = null,
     val spaceLeft: Long? = null,
@@ -1819,9 +1821,33 @@ class ArcController(
     private fun refreshFactoryNames() {
         scope.launch {
             val names = factorySnapshots().values.firstOrNull()?.names?.takeIf { it.isNotEmpty() }
-            _state.update { if (it.factoryNames == names) it else it.copy(factoryNames = names) }
+            val kits = LinkedHashMap<FactoryKit, Map<Int, String>>()
+            for (kit in savedKits(_state.value.backups)) {
+                val b = FactorySounds.inLibrary(_state.value.backups, kit) ?: continue
+                val n = packNames[b.id] ?: try {
+                    withContext(Dispatchers.Default) { pakOf(b.id).sounds.mapValues { it.value.name } }.also { packNames[b.id] = it }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    continue
+                }
+                kits[kit] = n
+            }
+            _state.update { if (it.factoryNames == names && it.kitNames == kits) it else it.copy(factoryNames = names, kitNames = kits) }
         }
     }
+
+    /** Each pack's sound names, read once per library entry ([UiState.kitNames]). */
+    private val packNames = HashMap<String, Map<Int, String>>()
+
+    /**
+     * The kit the EP-133's own sounds are, and the names its unnamed ones ("200.pcm") go by: Live playing a pack offline,
+     * that pack's; else the kit whose pack its slots match ([deviceKitOf]: connected, or as last read), or the connected
+     * device's own, else the EP-133's with no names. What a share tells Claude, not the kit Live plays offline.
+     */
+    private fun deviceKit(): DeviceKit = deviceKitOf(_state.value.mirror, _state.value.backups, _state.value.kitNames, session?.info?.sku, activeKit())
+
+    /** The kit a share names ([deviceKit]): the Claude page's glass says it too. */
+    fun shareKit(): FactoryKit = deviceKit().kit
 
     /**
      * Live without a device follows the library: it shows the factory sounds
@@ -5525,11 +5551,11 @@ class ArcController(
      * shows on it); null when there are no notes in it. The project's FX and the settings of the pads it uses are written
      * as the card's effect and `pad` lines, the used pads with no sound as a comment, and the kit Live plays before the card when it isn't the EP-133's ([activeKit], [ClaudeText.kitLine]). With "With my sound list" on, the sounds Arc knows follow the card ([soundSetOf]). The patterns are the project's as they stand, a pattern still recording included.
      */
-    fun beatShare(group: Int?, prompt: String = ClaudeText.SHARE_PROMPT, kit: FactoryKit = activeKit()): BeatShare? {
+    fun beatShare(group: Int?, prompt: String = ClaudeText.SHARE_PROMPT, kit: FactoryKit = shareKit()): BeatShare? {
         if (group != null && group !in 0..3) return null
         val bpm = patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)
         val m = mirror
-        val set = soundSetOf(_state.value.mirror, _state.value.factoryNames)
+        val set = soundSetOf(_state.value.mirror, deviceKit().names)
         // The pad's sound as the list names it, the factory pack's name standing in for an unnamed "200.pcm".
         val sounds = { pad: dev.arc.ep133.features.PhysicalPad ->
             m?.slotOf(pad)?.let { slot -> dev.arc.ep133.features.CardSound(slot, set?.names?.get(slot) ?: m.nameOf(pad)) }
@@ -5548,11 +5574,11 @@ class ArcController(
      * pads with no sound in a comment and, with "With my sound list" on, the sounds Arc knows, as [beatShare] has them. Null when the
      * chain has no steps.
      */
-    fun beatShareChain(prompt: String = ClaudeText.SHARE_CHAIN_PROMPT, kit: FactoryKit = activeKit()): BeatShare? {
+    fun beatShareChain(prompt: String = ClaudeText.SHARE_CHAIN_PROMPT, kit: FactoryKit = shareKit()): BeatShare? {
         if (projectSeq.chain.isBlank) return null
         val bpm = patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)
         val m = mirror
-        val set = soundSetOf(_state.value.mirror, _state.value.factoryNames)
+        val set = soundSetOf(_state.value.mirror, deviceKit().names)
         val sounds = { pad: dev.arc.ep133.features.PhysicalPad ->
             m?.slotOf(pad)?.let { slot -> dev.arc.ep133.features.CardSound(slot, set?.names?.get(slot) ?: m.nameOf(pad)) }
         }
@@ -5570,8 +5596,8 @@ class ArcController(
      * nothing in it.
      */
     fun promptShare(prompt: dev.arc.ep133.features.ClaudePrompt, pick: dev.arc.ep133.features.SharePick, group: Int): BeatShare? {
-        val kit = prompt.kit ?: activeKit()
-        val set = soundSetOf(_state.value.mirror, _state.value.factoryNames)
+        val kit = prompt.kit ?: shareKit()
+        val set = soundSetOf(_state.value.mirror, deviceKit().names)
         val learn = prompt.task == dev.arc.ep133.features.PromptTask.LEARN
         val list = if (settings.value.shareSounds && !learn) set else null
         val words = PromptText.prompt(prompt, pick, list != null)
@@ -5583,7 +5609,7 @@ class ArcController(
             }
         }
         val what = if (prompt.task == dev.arc.ep133.features.PromptTask.TRACK) PromptText.TRACK_IDEA else PromptText.NEW_BEAT
-        return promptShare(if (learn) PromptText.task(prompt.task) else what, words, if (learn) FactoryKit.EP133 else kit, list)
+        return promptShare(if (learn) PromptText.task(prompt.task) else what, words, if (learn) null else kit, list)
     }
 
     /** The Claude page's prompt as built ([AppSettings.claudePrompt]), and kept as it changes. */
@@ -5665,12 +5691,12 @@ class ArcController(
     // The sheet for [read], planned into the project's patterns as they are now.
     private fun showBeat(read: dev.arc.ep133.features.CardRead) {
         val m = mirror
-        val set = soundSetOf(_state.value.mirror, _state.value.factoryNames)
+        val set = soundSetOf(_state.value.mirror, deviceKit().names)
         val offline = _state.value.device == null
         val project = m?.snapshot(System.nanoTime())?.activeProject
         _beatImport.value = beatImportUi(
             read, projectSeq, patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo), ::mirrorName,
-            sounds = { card -> soundsUi(card, set, { pad -> m?.slotOf(pad) }, ::mirrorName, offline, project) },
+            sounds = { card -> soundsUi(card, set, { pad -> m?.slotOf(pad) }, ::mirrorName, offline, project, _state.value.kitNames, deviceKit().kit) },
             fx = { card -> beatFxUi(card, fxDesk.fx.value) },
             shaping = { card ->
                 padShapingUi(
@@ -5683,7 +5709,7 @@ class ArcController(
             },
             // The pads the card plays that have no sound (once the pads are read): PICK SOUND chooses among the sounds the SOUNDS block uses.
             silent = { card ->
-                silentUi(card, { pad -> m?.soundSlot(pad) }, m?.padsKnown() == true, soundChoicesOf(_state.value.mirror, _state.value.factoryNames), offline, project)
+                silentUi(card, { pad -> m?.soundSlot(pad) }, m?.padsKnown() == true, soundChoicesOf(_state.value.mirror, deviceKit().names), offline, project)
             },
             kit = activeKit(),
         )
@@ -5765,13 +5791,54 @@ class ArcController(
         }
         val fxApplied = entry.fxBefore != null
         val picks = importPicks(card, soundPads, pickedSounds)
+        val uploads = importUploads(card, soundPads)
         val shapes = padShapes(card, shapePads)
-        entry.writing = picks.isNotEmpty() || shapes.isNotEmpty()
+        entry.writing = picks.isNotEmpty() || uploads.isNotEmpty() || shapes.isNotEmpty()
         if (!entry.writing) {
             toast(beatImported(a, fx = fxApplied), action = dev.arc.ep133.text.MirrorText.UNDO, onAction = { undoImport(entry) })
             return
         }
-        scope.launch { putTail(a, entry, picks, shapes) }
+        scope.launch { putTail(a, entry, picks, shapes, uploads) }
+    }
+
+    /**
+     * The ticked sound lines no slot of the EP-133 holds that a saved factory pack has ([packSoundOf]): IMPORT uploads
+     * them, while connected. None offline.
+     */
+    private fun importUploads(card: dev.arc.ep133.features.BeatCard, ticked: Set<dev.arc.ep133.features.PhysicalPad>): List<Pair<dev.arc.ep133.features.PhysicalPad, PackSound>> {
+        if (ticked.isEmpty() || session == null) return emptyList()
+        val dk = deviceKit()
+        val set = soundSetOf(_state.value.mirror, dk.names)
+        val m = mirror
+        return dev.arc.ep133.features.BeatCards.resolveSounds(card, set?.names.orEmpty(), foreignTo(_state.value.kitNames, dk.kit)) { pad -> m?.slotOf(pad) }
+            .filter { it.pad in ticked && it.status == dev.arc.ep133.features.SoundStatus.MISSING }
+            .mapNotNull { p -> packSoundOf(p.wanted, _state.value.kitNames)?.let { p.pad to it } }
+    }
+
+    /**
+     * [uploads] put on: each pack's sound read from its library entry and uploaded into a free slot of the EP-133, then
+     * onto its pad ([uploadBytesToPad]); the pads done kept for UNDO, as [putSounds] keeps its. Stops at the first failure.
+     */
+    private suspend fun uploadFromPacks(entry: BeatUndo, uploads: List<Pair<dev.arc.ep133.features.PhysicalPad, PackSound>>): SoundsPut {
+        val s = session ?: return SoundsPut(emptyList(), uploads.size, 0, null)
+        val done = ArrayList<PadBack>()
+        var skipped = 0
+        var moved = 0
+        for ((pad, ps) in uploads) {
+            if (entry.undone) break
+            val t = (padTargetOrWhy(pad) as? PadTargetOrWhy.Found)?.target
+            val b = FactorySounds.inLibrary(_state.value.backups, ps.kit)
+            val wav = b?.let { runCatching { pakOf(it.id).sounds[ps.slot]?.wav }.getOrNull() }
+            if (t == null || wav == null) {
+                skipped++
+                continue
+            }
+            moved += recordingsOverwritten(t)
+            uploadBytesToPad(s, ps.name, wav, t) ?: return SoundsPut(done, skipped, moved, dev.arc.ep133.text.ClaudeText.UPLOAD_STOPPED)
+            done += PadBack(pad, t)
+            entry.pads = entry.pads + PadBack(pad, t)
+        }
+        return SoundsPut(done, skipped, moved, null)
     }
 
     /** Where the last IMPORT put the card (for IMPORT AND PRACTISE). */
@@ -5843,9 +5910,9 @@ class ArcController(
         picked: Map<dev.arc.ep133.features.PhysicalPad, Int> = emptyMap(),
     ): List<dev.arc.ep133.features.SoundPick> {
         if (ticked.isEmpty()) return emptyList()
-        val set = soundSetOf(_state.value.mirror, _state.value.factoryNames) ?: return emptyList()
+        val set = soundSetOf(_state.value.mirror, deviceKit().names) ?: return emptyList()
         val m = mirror
-        val lines = dev.arc.ep133.features.BeatCards.resolveSounds(card, set.names) { pad -> m?.slotOf(pad) }
+        val lines = dev.arc.ep133.features.BeatCards.resolveSounds(card, set.names, foreignTo(_state.value.kitNames, deviceKit().kit)) { pad -> m?.slotOf(pad) }
             .filter { it.pad in ticked && it.slot != null && (it.status == dev.arc.ep133.features.SoundStatus.CHANGE || it.status == dev.arc.ep133.features.SoundStatus.FOUND_BY_NAME) }
         // A picked pad is one the card has no sound line for; were it to have one, the card's line is the one that goes on.
         val own = lines.mapTo(HashSet()) { it.pad }
@@ -5878,8 +5945,13 @@ class ArcController(
         entry: BeatUndo,
         picks: List<dev.arc.ep133.features.SoundPick>,
         shapes: List<Pair<dev.arc.ep133.features.PhysicalPad, dev.arc.ep133.features.CardPad>>,
+        uploads: List<Pair<dev.arc.ep133.features.PhysicalPad, PackSound>> = emptyList(),
     ) {
-        val s = if (picks.isEmpty()) SoundsPut(emptyList(), 0, 0, null) else putSounds(entry, picks)
+        // The packs' sounds first, uploaded into free slots; then the slots the EP-133 has.
+        val up = if (uploads.isEmpty()) SoundsPut(emptyList(), 0, 0, null) else uploadFromPacks(entry, uploads)
+        val put = if (picks.isEmpty() || up.failure != null) SoundsPut(emptyList(), 0, 0, null) else putSounds(entry, picks)
+        if (up.done.isNotEmpty()) entry.pads = up.done + put.done
+        val s = SoundsPut(up.done + put.done, up.skipped + put.skipped, up.moved + put.moved, up.failure ?: put.failure)
         val missed = picks.mapTo(HashSet()) { it.pad } - s.done.mapTo(HashSet()) { it.pad }
         val toShape = shapes.filter { it.first !in missed }
         val sh = if (s.failure == null && !entry.undone && toShape.isNotEmpty()) shapePads(entry, toShape) else ShapingPut(emptyList(), 0, null)
