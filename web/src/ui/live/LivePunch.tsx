@@ -89,6 +89,7 @@ export function PunchPad(props: { slot: number; punch: PunchUi; class?: string; 
       type="button"
       class={`${props.place ? 'ep-a ep-pad ep-punch' : 'live-pad cap-3d live-pad--big live-pad--press'} live-punch${lit ? ' is-held' : ''}${props.class ? ` ${props.class}` : ''}`}
       style={{ ...props.place, '--glow': lit ? 1 : 0 }}
+      data-lit={lit ? '' : undefined}
       aria-label={MirrorText.punchDescription(slot)}
       aria-description={lit ? `${MirrorText.PUNCHED_IN}. ${MirrorText.PUNCH_OUT}` : MirrorText.PUNCH_IN}
       aria-pressed={lit}

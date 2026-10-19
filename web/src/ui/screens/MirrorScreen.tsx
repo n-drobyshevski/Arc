@@ -146,6 +146,7 @@ import {
   glowCss,
   groupGlow,
   keysLayout,
+  litAttr,
   showNoPushes,
   showOffline,
   transportText,
@@ -384,10 +385,12 @@ class GlowEls {
     this.stale = false
   }
 
-  /** Sets [el]'s --glow to [value] unless it already has it. */
-  private set(el: HTMLElement, value: string): void {
+  /** Sets [el]'s --glow to [value] unless it already has it; [lit]: a pad's data-lit follows it (its halo). */
+  private set(el: HTMLElement, value: string, lit = false): void {
     const was = this.written.get(el) ?? el.style.getPropertyValue('--glow')
     if (was !== value) el.style.setProperty('--glow', value)
+    // Apart from --glow: a render can write --glow and not data-lit (Preact diffs its last render, not the DOM).
+    if (lit) el.toggleAttribute('data-lit', value !== '0')
     this.written.set(el, value)
   }
 
@@ -403,14 +406,14 @@ class GlowEls {
     if (this.stale) this.rebuild()
     for (const [el, pad] of this.pads) {
       const l = pads.get(pad)
-      this.set(el, glowCss(l ? glow(l, now) : 0))
+      this.set(el, glowCss(l ? glow(l, now) : 0), true)
     }
     for (const [el, group, scale] of this.groups) {
       this.set(el, glowCss(groupGlow(pads, group, now) * scale))
     }
     if (keyNotes) {
       const lit = keysLit(notes, keyNotes, now)
-      for (const [el, key] of this.keys) this.set(el, glowCss(lit.get(key) ?? 0))
+      for (const [el, key] of this.keys) this.set(el, glowCss(lit.get(key) ?? 0), true)
       // The piano: each key by its own note.
       for (const [el, note] of this.notes) {
         const l = notes.get(note)
@@ -2421,7 +2424,7 @@ function PadCap(props: PadProps): JSX.Element {
   const open = ui.edit
   if (press === null && !(ui.editing && open)) {
     return (
-      <div class={cls} role="img" aria-label={label} data-pad={key} style={{ ...props.place, '--glow': glowCss(g) }} {...dropHandlers}>
+      <div class={cls} role="img" aria-label={label} data-pad={key} data-lit={litAttr(g)} style={{ ...props.place, '--glow': glowCss(g) }} {...dropHandlers}>
         {content}
       </div>
     )
@@ -2441,6 +2444,7 @@ function PadCap(props: PadProps): JSX.Element {
       aria-description={describe(clickSays, second?.name ?? null)}
       aria-keyshortcuts={shortcuts(props.keyHint ? (pad.label === 'ENTER' ? 'Enter' : pad.label) : undefined, second !== null)}
       data-pad={key}
+      data-lit={litAttr(g)}
       style={{ ...props.place, '--glow': glowCss(g) }}
       {...handlers}
       {...dropHandlers}
@@ -3121,6 +3125,7 @@ function KeyCapView(props: KeyCapProps): JSX.Element {
       aria-description={describe(MirrorText.PLAY, stepMark !== null ? MirrorText.PICK : null)}
       aria-keyshortcuts={shortcuts(undefined, stepMark !== null)}
       data-key={k}
+      data-lit={litAttr(props.lit)}
       style={{ ...props.place, '--glow': glowCss(props.lit) }}
       {...handlers}
       onPointerDown={(e) => {
