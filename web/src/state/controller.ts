@@ -85,6 +85,7 @@ import { decodeWav } from '../core/formats/wav'
 import { REC_IDLE, type RecState } from '../core/features/takeRecorder'
 import type { RecordedTake } from '../platform/audio/liveAudio'
 import type { TakeInfo } from '../platform/storage/takeStore'
+import type { TakeTrim } from '../core/features/takeTrim'
 import { assignPad as writePadSound, type SoundEntry } from '../core/protocol/device'
 import { CancelledError } from '../core/protocol/errors'
 import { download } from '../core/protocol/fs'
@@ -2855,29 +2856,98 @@ export class ArcController {
     return 'take:' + t.name
   }
 
+  /** The player's key for a take's part played while trimming. */
+  takeTrimKey(t: TakeInfo): string {
+    return 'take-trim:' + t.name
+  }
+
   private async takeBytes(t: TakeInfo): Promise<Uint8Array> {
     const wav = await this.deps.takes?.read(t.name)
     if (!wav) throw new Error(`${t.name}: not found`)
     return new Uint8Array(await wav.arrayBuffer())
   }
 
-  /** Plays a take here (a list's single sound: it stops the one before). Call from a tap. */
+  /** A take's whole sound, decoded (kept for playing again); null with a toast when it can't be read. */
+  async takeSound(t: TakeInfo): Promise<DecodedSound | null> {
+    const key = this.takeKey(t)
+    const hit = this.previews.get(key)
+    if (hit !== null) return hit
+    try {
+      const w = decodeWav(await this.takeBytes(t))
+      const d: DecodedSound = { pcm: w.pcm, channels: w.channels, sampleRate: Math.trunc(w.sampleRate) }
+      this.previews.put(key, d)
+      return d
+    } catch (e) {
+      this.toast(errorText(e), true)
+      return null
+    }
+  }
+
+  /** Plays frames [from] to [to] of [sound] under [key] (a list's single sound: it stops the one before). */
+  private async playPart(key: string, sound: DecodedSound, from: number, to: number, token: number): Promise<void> {
+    const block = 2 * sound.channels
+    const n = sound.pcm.length
+    const clamp = (v: number): number => Math.min(Math.max(v, 0), n)
+    const pcm = from === 0 && to * block >= n ? sound.pcm : sound.pcm.subarray(clamp(from * block), clamp(to * block))
+    if (token !== this.playToken) return
+    await this.startSound(key, pcm, sound.channels, sound.sampleRate)
+  }
+
+  /** Plays a take here, its trimmed part if it has one (a list's single sound: it stops the one before). Call from a tap. */
   async playTake(t: TakeInfo): Promise<void> {
     this.deps.player.resumeInGesture()
     const token = ++this.playToken
-    let w
+    const sound = await this.takeSound(t)
+    if (sound === null || token !== this.playToken) return
+    await this.playPart(this.takeKey(t), sound, t.trim?.start ?? 0, t.trim?.end ?? t.frames, token)
+  }
+
+  /** TRIM's PLAY: frames [from] to [to] of the take, under [takeTrimKey]. Call from a tap. */
+  async playTakeTrim(t: TakeInfo, from: number, to: number): Promise<void> {
+    this.deps.player.resumeInGesture()
+    const token = ++this.playToken
+    const sound = await this.takeSound(t)
+    if (sound === null || token !== this.playToken) return
+    await this.playPart(this.takeTrimKey(t), sound, from, to, token)
+  }
+
+  /** TRIM's DONE: keeps [trim] with the take (null: the whole take again). */
+  async setTakeTrim(t: TakeInfo, trim: TakeTrim | null): Promise<void> {
     try {
-      w = decodeWav(await this.takeBytes(t))
+      await this.deps.takes?.setTrim(t.name, trim)
+    } catch (e) {
+      this.toast(errorText(e), true)
+    }
+    await this.loadTakes()
+  }
+
+  /** DUP: a copy of the take, its trim with it, made the newest (so it is lit). */
+  async duplicateTake(t: TakeInfo): Promise<void> {
+    const store = this.deps.takes
+    if (!store) return
+    const list = this.store.get().takes
+    const of = list.length - list.findIndex((x) => x.name === t.name)
+    try {
+      await store.duplicate(t.name, this.deps.now())
     } catch (e) {
       this.toast(errorText(e), true)
       return
     }
-    if (token !== this.playToken) return
-    await this.startSound(this.takeKey(t), w.pcm, w.channels, w.sampleRate)
+    await this.loadTakes()
+    this.toast(MirrorText.takeDuplicated(this.store.get().takes.length, of))
+  }
+
+  /** The WAV SHARE, SAVE and EP send: the take's trimmed part, else all of it. */
+  async takeWav(t: TakeInfo): Promise<Uint8Array> {
+    const wav = await this.deps.takes?.readKept(t)
+    if (!wav) throw new Error(`${t.name}: not found`)
+    return wav
   }
 
   async deleteTake(t: TakeInfo): Promise<void> {
-    if (this.deps.player.playing.peek() === this.takeKey(t)) this.stopPlayback()
+    const playing = this.deps.player.playing.peek()
+    if (playing === this.takeKey(t) || playing === this.takeTrimKey(t)) this.stopPlayback()
+    this.previews.clear(this.takeKey(t))
     try {
       await this.deps.takes?.delete(t.name)
     } catch (e) {
@@ -2886,26 +2956,26 @@ export class ArcController {
     await this.loadTakes()
   }
 
-  /** Saves a take's WAV. Call from a tap. */
+  /** Saves a take's WAV, its trimmed part if it has one. Call from a tap. */
   saveTake(t: TakeInfo): Promise<void> {
-    return this.saveFile(t.name, () => this.takeBytes(t), WAV_MIME)
+    return this.saveFile(t.name, () => this.takeWav(t), WAV_MIME)
   }
 
-  /** Shares a take's WAV. Call from a tap. */
+  /** Shares a take's WAV, its trimmed part if it has one. Call from a tap. */
   async shareTake(t: TakeInfo): Promise<void> {
     try {
-      const r = await this.deps.share.share(t.name, () => this.takeBytes(t), WAV_MIME, t.name)
+      const r = await this.deps.share.share(t.name, () => this.takeWav(t), WAV_MIME, t.name)
       if (r === 'saved') this.toast(WebText.savedInstead(t.name))
     } catch {
       this.toast(MirrorText.SHARE_TAKE_FAILED, true)
     }
   }
 
-  /** A take as a voice message (Ogg Opus, mono): the bytes VOICE shares. Rejects when it can't be made. */
+  /** A take as a voice message (Ogg Opus, mono), its trimmed part if it has one: the bytes VOICE shares. Rejects when it can't be made. */
   async takeVoice(t: TakeInfo): Promise<Uint8Array> {
     const voice = this.deps.voice
     if (!voice) throw new Error(MirrorText.NO_VOICE_ENCODER)
-    const w = decodeWav(await this.takeBytes(t))
+    const w = decodeWav(await this.takeWav(t))
     const pcm = voicePcm(w.pcm, w.channels, w.sampleRate)
     let made: { packets: Uint8Array[]; config: Uint8Array | null }
     try {
@@ -2930,7 +3000,7 @@ export class ArcController {
 
   /**
    * Proposes a take for upload to a free slot: the Device tab's upload sheet,
-   * with its trim. The UI switches to Device, which reads the device as it
+   * the take's trim set as its trim. The UI switches to Device, which reads the device as it
    * opens; the free slot is picked once that read is in (10 s at most).
    */
   async takeToDevice(t: TakeInfo): Promise<void> {
@@ -2950,7 +3020,7 @@ export class ArcController {
     }
     const w = decodeWav(bytes)
     const slot = nextFree(contents?.occupiedSlots ?? new Set<number>(), new Set<number>())
-    const item: UploadDraftItem = { fileName: t.name, name: nameFor(t.name), slot, wav: bytes, error: null, trim: null, sampleRate: w.sampleRate }
+    const item: UploadDraftItem = { fileName: t.name, name: nameFor(t.name), slot, wav: bytes, error: null, trim: t.trim?.range() ?? null, sampleRate: w.sampleRate }
     this.store.update((st) => ({ ...st, browser: { ...st.browser, draft: [item] } }))
   }
 

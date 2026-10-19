@@ -3,9 +3,11 @@
 //
 // The Takes page as the device's display (an addition): the takes numbered on
 // the glass, T01 the oldest, and under it one strip of keys (DeckKeys.tsx). A
-// tap on a take lights it; PLAY, SHARE, SAVE, EP and DEL act on the lit one,
-// and DEL asks again on the glass. TAKE starts and stops a take, its time on
-// the glass while it records. How recording works is folded at the foot.
+// tap on a take lights it; PLAY, SHARE, TRIM, DUP, SAVE, EP and DEL act on
+// the lit one, and DEL asks again on the glass. TRIM turns the glass into the
+// take's wave (TakeTrim.tsx); DUP copies the take, lit as the newest. TAKE
+// starts and stops a take, its time on the glass while it records. How
+// recording works is folded at the foot.
 // While a take is armed or recorded, a badge on the display shows it and
 // stops it.
 //
@@ -21,7 +23,6 @@
 //   voice message, which Android's SHARE gives Telegram itself.
 // - The lit take follows the one playing through a computed, so only a change
 //   of which take that is renders the section again.
-// - TRIM and DUP come with the takes' trim (TakeTrimDeck.kt).
 import type { JSX } from 'preact'
 import { useMemo, useRef, useState } from 'preact/hooks'
 import { computed, type ReadonlySignal } from '@preact/signals'
@@ -31,18 +32,27 @@ import { bytes } from '../../core/text/format'
 import { MirrorText } from '../../core/text/mirrorText'
 import { Strings } from '../../core/text/strings'
 import { WebText } from '../../core/text/webText'
+import type { TakeTrim } from '../../core/features/takeTrim'
 import type { TakeInfo } from '../../platform/storage/takeStore'
 import { Caption } from '../components/Caption'
 import { handleRovingKey } from '../components/Segmented'
 import { Disclosure } from '../components/SettingRow'
 import { DeckKey, DeckStrip, Glyph } from './DeckKeys'
 import { useIs } from './memo'
+import { TakeTrimDeck } from './TakeTrim'
 import './Takes.css'
 
 /** The TAKE key's state and what a tap does (Kotlin TakeUi). */
 export interface TakeUi {
   readonly state: RecState
   readonly onTake: () => void
+}
+
+/** A take's whole sound, decoded (Kotlin's PcmSound as TRIM reads it). */
+export interface TakeSound {
+  /** Signed 16-bit little-endian, interleaved. */
+  readonly pcm: Uint8Array
+  readonly channels: number
 }
 
 /** Live tools' takes (Kotlin TakesUi). */
@@ -65,6 +75,16 @@ export interface TakesUi {
   readonly onSave: (t: TakeInfo) => void
   readonly onToDevice: (t: TakeInfo) => void
   readonly onDelete: (t: TakeInfo) => void
+  /** DUP: a copy of the take, its trim with it. */
+  readonly onDuplicate: (t: TakeInfo) => void
+  /** TRIM: the player's key for the part played while trimming. */
+  readonly trimKeyOf: (t: TakeInfo) => string
+  /** TRIM's PLAY: frames from the first to the second. */
+  readonly onTrimPlay: (t: TakeInfo, from: number, to: number) => void
+  /** TRIM's DONE: the part kept, or null for the whole take. */
+  readonly onSetTrim: (t: TakeInfo, trim: TakeTrim | null) => void
+  /** A take's whole sound for TRIM's wave; null when it can't be read. */
+  readonly loadSound: (t: TakeInfo) => Promise<TakeSound | null>
 }
 
 /**
@@ -101,6 +121,7 @@ export function TakesSection(props: { takes: TakesUi; take: TakeUi; still?: bool
   const list = t.list
   const [litName, setLitName] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<string | null>(null)
+  const [trimName, setTrimName] = useState<string | null>(null)
   const litKey = useMemo(
     () =>
       computed(() => {
@@ -113,6 +134,7 @@ export function TakesSection(props: { takes: TakesUi; take: TakeUi; still?: bool
   ).value
   const lit = list.find((x) => x.name === litKey) ?? null
   const number = (info: TakeInfo): number => list.length - list.indexOf(info)
+  const trimming = trimName !== null ? list.find((x) => x.name === trimName) : undefined
   const confirming = lit !== null && confirm === lit.name
   const n = lit !== null ? number(lit) : 0
   const s = take.state
@@ -156,6 +178,26 @@ export function TakesSection(props: { takes: TakesUi; take: TakeUi; still?: bool
     )
   }
   keys.push(
+    <DeckKey
+      key="trim"
+      glyph="trim"
+      label={MirrorText.TAKE_TRIM}
+      description={MirrorText.litTake(MirrorText.TRIM_HEAD, n)}
+      onClick={act((info) => setTrimName(info.name))}
+      enabled={lit !== null}
+    />,
+    <DeckKey
+      key="dup"
+      glyph="dup"
+      label={MirrorText.TAKE_DUP}
+      description={MirrorText.litTake(MirrorText.DUPLICATE, n)}
+      onClick={act((info) => {
+        t.onDuplicate(info)
+        // The copy is the newest: it lights.
+        setLitName(null)
+      })}
+      enabled={lit !== null}
+    />,
     <DeckKey key="save" glyph="save" label={MirrorText.TAKE_SAVE} description={MirrorText.litTake(FeatureText.SAVE_WAV, n)} onClick={act(t.onSave)} enabled={lit !== null} />,
     <DeckKey
       key="send"
@@ -182,21 +224,29 @@ export function TakesSection(props: { takes: TakesUi; take: TakeUi; still?: bool
   return (
     <section class="takes" aria-label={MirrorText.TAKES}>
       <Caption text={MirrorText.TAKES} align="start" as="h3" />
-      <TakesGlass
-        t={t}
-        take={take}
-        lit={lit}
-        number={number}
-        confirming={confirming}
-        still={props.still === true}
-        onLight={(info) => {
-          setLitName(info.name)
-          setConfirm(null)
-        }}
-        onConfirm={del}
-      />
-      {list.length > 0 && <p class="t-tiny takes__hint">{MirrorText.TAKES_LIT_HINT}</p>}
-      <DeckStrip keys={keys} />
+      {trimming !== undefined ? (
+        <TakeTrimDeck key={trimming.name} t={t} info={trimming} n={number(trimming)} onClose={() => setTrimName(null)} />
+      ) : (
+        <>
+          <TakesGlass
+            t={t}
+            take={take}
+            lit={lit}
+            number={number}
+            confirming={confirming}
+            still={props.still === true}
+            onLight={(info) => {
+              setLitName(info.name)
+              setConfirm(null)
+            }}
+            onConfirm={del}
+          />
+          {list.length > 0 && (
+            <p class="t-tiny takes__hint">{lit?.trim != null ? MirrorText.trimmedHint(n, lit.keptSeconds) : MirrorText.TAKES_LIT_HINT}</p>
+          )}
+          <DeckStrip keys={keys} />
+        </>
+      )}
       <Disclosure title={MirrorText.ABOUT_TAKES}>
         <p>{MirrorText.TAKES_HINT}</p>
         <p>{t.canShare ? WebText.TAKES_NOTE : WebText.TAKES_NOTE_SAVE_ONLY}</p>
@@ -300,7 +350,7 @@ function TakesGlass(props: {
   )
 }
 
-/** A take on the glass: its number, length and date, ▶ while it plays (read per line). */
+/** A take on the glass: its number, length (its part's, trimmed) and date, ▶ while it plays (read per line), else scissors on a trimmed one. */
 function TakeLine(props: { t: TakesUi; info: TakeInfo; n: number; on: boolean; onLight: (info: TakeInfo) => void }): JSX.Element {
   const { t, info, n, on } = props
   const playing = useIs(t.playing, t.keyOf(info))
@@ -311,7 +361,7 @@ function TakeLine(props: { t: TakesUi; info: TakeInfo; n: number; on: boolean; o
       class={`take-line${on ? ' is-lit' : ''}`}
       role="radio"
       aria-checked={on}
-      aria-label={MirrorText.takeRow(n, info.seconds, made, playing)}
+      aria-label={MirrorText.takeRow(n, info.keptSeconds, made, playing, info.trim !== null)}
       tabIndex={on ? 0 : -1}
       data-roving=""
       onClick={() => props.onLight(info)}
@@ -320,13 +370,13 @@ function TakeLine(props: { t: TakesUi; info: TakeInfo; n: number; on: boolean; o
         {MirrorText.takeNumber(n)}
       </span>
       <span class="take-line__row" aria-hidden="true">
-        {MirrorText.takeLength(info.seconds)}
+        {MirrorText.takeLength(info.keptSeconds)}
       </span>
       <span class="takes-glass__sub take-line__when" aria-hidden="true">
         {made.replace(/,/g, '')}
       </span>
       <span class="take-line__mark" aria-hidden="true">
-        {playing && <Glyph glyph="play" size={14} />}
+        {playing ? <Glyph glyph="play" size={14} /> : info.trim !== null ? <Glyph glyph="trim" size={14} /> : null}
       </span>
     </button>
   )

@@ -1,7 +1,7 @@
 // TAKE and takes end to end, on the simulated EP-133 of ?demo: TAKE in Live
 // tools arms a take, a pad played starts it, the display's badge stops it, the
-// take is numbered on the glass and the keys under it act on it, and the
-// device's PLAY starts an armed take.
+// take is numbered on the glass and the keys under it act on it (TRIM keeps a
+// part of it, DUP copies it), and the device's PLAY starts an armed take.
 import type { Page } from '@playwright/test'
 import { demo, expect, test } from './fixtures'
 
@@ -57,6 +57,11 @@ test('TAKE records a pad into a take that Live tools lists', async ({ page }) =>
   }
   await expect(badge).toHaveAccessibleName(/^Recording a take, \d+:\d\d\. Tap to stop\.$/)
   await expect(badge).toContainText(/^TAKE \d+:\d\d$/)
+  // A second hit a moment later: the take holds both, long enough to trim.
+  await page.waitForTimeout(500)
+  await page.mouse.down()
+  await page.waitForTimeout(200)
+  await page.mouse.up()
   await badge.click()
   await expect(page.getByRole('status').filter({ hasText: /^Take saved \(\d+:\d\d\)\. It's in Live tools\.$/ })).toBeVisible()
   await expect(badge).toHaveCount(0)
@@ -73,6 +78,26 @@ test('TAKE records a pad into a take that Live tools lists', async ({ page }) =>
   await expect(takes.getByRole('button', { name: 'Share WAV, T01' })).toHaveCount(0)
   await expect(takes.getByRole('button', { name: 'To EP-133, T01' })).toBeEnabled()
   await expect(takes.getByRole('button', { name: 'Play, T01' })).toBeEnabled()
+  // TRIM: the glass shows the wave; the start handle steps later with the arrow keys, DONE keeps the part.
+  await takes.getByRole('button', { name: 'Trim, T01' }).click()
+  await expect(takes).toContainText('✂ TRIM')
+  const startHandle = takes.getByRole('slider', { name: 'Start' })
+  await expect(startHandle).toHaveAttribute('aria-valuetext', '0:00.0')
+  await startHandle.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(startHandle).not.toHaveAttribute('aria-valuetext', '0:00.0')
+  await expect(takes.getByRole('button', { name: 'Reset' })).toBeEnabled()
+  await takes.getByRole('button', { name: 'Done' }).click()
+  await expect(glass.getByRole('radio', { name: /^T01, \d+:\d\d trimmed, / })).toBeVisible()
+  await expect(takes).toContainText(/✂ T01 is trimmed to \d+:\d\d: SHARE, SAVE and EP send that part/)
+  // DUP: a copy, its trim with it, lit as the newest.
+  await takes.getByRole('button', { name: 'Duplicate, T01' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'T02, a copy of T01' })).toBeVisible()
+  await expect(glass.getByRole('radio')).toHaveCount(2)
+  await expect(glass.getByRole('radio', { name: /^T02, \d+:\d\d trimmed, / })).toHaveAttribute('aria-checked', 'true')
+  await takes.getByRole('button', { name: 'Delete, T02' }).click()
+  await takes.locator('.deck-key').filter({ hasText: 'DEL' }).click()
+  await expect(glass.getByRole('radio')).toHaveCount(1)
   // DEL asks again on the glass; DEL again deletes.
   await takes.getByRole('button', { name: 'Delete, T01' }).click()
   await expect(takes.getByRole('button', { name: 'Delete T01? Press DEL again' })).toHaveCount(2)

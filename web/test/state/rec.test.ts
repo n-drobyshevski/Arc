@@ -1,8 +1,10 @@
 // REC and takes in the controller (ArcController.kt toggleRec, takeDone, playTake,
-// deleteTake, takeToDevice; and the mirror passing the device's PLAY and STOP on).
+// deleteTake, takeToDevice; TRIM and DUP: playTakeTrim, setTakeTrim, duplicateTake,
+// takeWav; and the mirror passing the device's PLAY and STOP on).
 import 'fake-indexeddb/auto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { encodeWav } from '../../src/core/formats/wav'
+import { TakeTrim } from '../../src/core/features/takeTrim'
+import { decodeWav, encodeWav } from '../../src/core/formats/wav'
 import { MirrorText } from '../../src/core/text/mirrorText'
 import type { RecordedTake } from '../../src/platform/audio/liveAudio'
 import { disposeAll, liveHarness, until, type LiveHarness } from './liveHarness'
@@ -123,6 +125,63 @@ describe('REC', () => {
     expect(d).toHaveLength(1)
     expect(d![0]).toMatchObject({ fileName: t.name, name: 'take-20261005-142301', error: null, trim: null, sampleRate: 48000 })
     expect(d![0]!.slot).not.toBeNull()
+  })
+
+  it('TRIM: its PLAY plays the part under its own key; DONE keeps it, and PLAY, SAVE, SHARE and EP use it', async () => {
+    const h = await liveOn()
+    h.liveAudio.endTake(recorded(48000))
+    let t = (await until(h, (s) => s.takes.length === 1)).takes[0]!
+    const play = vi.spyOn(h.deps.player, 'play')
+    await h.c.playTakeTrim(t, 12000, 36000)
+    expect(play.mock.calls[0]?.[0]).toBe('take-trim:' + t.name)
+    expect((play.mock.calls[0]?.[1] as Uint8Array).length).toBe(24000 * 4)
+
+    await h.c.setTakeTrim(t, TakeTrim.of(12000, 36000, t.frames, t.rate))
+    t = (await until(h, (s) => s.takes[0]?.trim != null)).takes[0]!
+    expect(t.trim).toEqual(new TakeTrim(12000, 36000))
+    expect(t.keptSeconds).toBe(0.5)
+    await h.c.playTake(t)
+    expect(play.mock.calls[1]?.[0]).toBe('take:' + t.name)
+    expect((play.mock.calls[1]?.[1] as Uint8Array).length).toBe(24000 * 4)
+
+    const save = vi.spyOn(h.deps.files, 'save')
+    await h.c.saveTake(t)
+    expect(decodeWav(save.mock.calls[0]![1] as Uint8Array).pcm.length).toBe(24000 * 4)
+    const share = vi.spyOn(h.deps.share, 'share')
+    await h.c.shareTake(t)
+    const shared = await (share.mock.calls[0]![1] as () => Promise<Uint8Array>)()
+    expect(decodeWav(shared).pcm.length).toBe(24000 * 4)
+
+    // EP: the whole take, its trim set as the upload's.
+    await h.c.refreshBrowser()
+    await until(h, (s) => s.browser.contents !== null && !s.busy)
+    await h.c.takeToDevice(t)
+    expect(h.c.state.value.browser.draft![0]).toMatchObject({ trim: { start: 12000, end: 36000 }, sampleRate: 48000 })
+
+    // RESET then DONE: the whole take again.
+    await h.c.setTakeTrim(t, TakeTrim.of(0, t.frames, t.frames, t.rate))
+    await until(h, (s) => s.takes[0]?.trim === null)
+  })
+
+  it('DUP: a copy, its trim with it, the newest, and a toast names it; DEL stops its part playing', async () => {
+    let now = AT
+    const h = await liveHarness({ now: () => now })
+    h.liveAudio.endTake(recorded(48000))
+    const t = (await until(h, (s) => s.takes.length === 1)).takes[0]!
+    await h.c.setTakeTrim(t, new TakeTrim(12000, 36000))
+    now = AT + 60_000
+    await h.c.duplicateTake(t)
+    const st = await until(h, (s) => s.takes.length === 2)
+    expect(st.takes.map((x) => x.name)).toEqual(['take-20261005-142401.wav', t.name])
+    expect(st.takes[0]!.trim).toEqual(new TakeTrim(12000, 36000))
+    expect(h.toasts.at(-1)?.text).toBe(MirrorText.takeDuplicated(2, 1))
+    expect(MirrorText.takeDuplicated(2, 1)).toBe('T02, a copy of T01')
+
+    await h.c.playTakeTrim(t, 0, 48000)
+    expect(h.deps.player.playing.peek()).toBe('take-trim:' + t.name)
+    await h.c.deleteTake(t)
+    expect(h.deps.player.playing.peek()).toBeNull()
+    expect(h.c.state.value.takes.map((x) => x.name)).toEqual(['take-20261005-142401.wav'])
   })
 
   it("passes the device's PLAY and STOP on", async () => {

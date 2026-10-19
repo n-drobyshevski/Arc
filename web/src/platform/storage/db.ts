@@ -81,6 +81,8 @@ export interface TakeRow {
   frames: number
   rate: number
   wav: Blob
+  /** Its trim, as Takes.kt's .trim file beside the take says it ("start end", TakeTrim.text); absent, the whole take. */
+  trim?: string
 }
 
 /** A row in "samples": a SAMPLE recording's WAV (SampleFiles' smp-yyyyMMdd-HHmmss.wav) and when it was written. */

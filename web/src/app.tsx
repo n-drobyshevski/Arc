@@ -1769,6 +1769,11 @@ function LiveTab(props: TabProps): JSX.Element {
           nav.selectTab('device')
         },
         onDelete: (t) => void c.deleteTake(t),
+        onDuplicate: (t) => void c.duplicateTake(t),
+        trimKeyOf: (t) => c.takeTrimKey(t),
+        onTrimPlay: (t, from, to) => void c.playTakeTrim(t, from, to),
+        onSetTrim: (t, trim) => void c.setTakeTrim(t, trim),
+        loadSound: (t) => c.takeSound(t),
       }}
       onGetFactory={c.canGetFactory && FactorySounds.inLibrary(state.backups, FactoryKit.EP133) === null ? () => void c.getFactorySounds() : null}
       factoryKit={
