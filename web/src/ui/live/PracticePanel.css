@@ -1,0 +1,92 @@
+/* LivePractice.kt's look: the panel on the display's dark screen (STEP's, StepPanel.css: its chips and ✕), its
+ * header (▶ / ■, PRACTICE A · 01, how it goes, ✕), the lane or the result, and the keys' row. */
+
+.practice-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 12px 10px;
+  border-radius: 14px;
+  background: var(--display);
+  color: var(--display-ink);
+  min-width: 0;
+}
+
+.practice-panel__head { display: flex; align-items: center; gap: 10px; min-height: 40px; }
+.practice-chip.is-on { background: none; border-color: var(--signal); color: var(--signal); }
+.practice-chip__stop { width: 10px; height: 10px; background: var(--signal); }
+.practice-panel__place {
+  flex: none;
+  font-size: var(--size-display-sub);
+  font-weight: 600;
+  color: var(--signal);
+  white-space: nowrap;
+}
+.practice-panel__status {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: end;
+  font-size: var(--size-display-head);
+  font-weight: 700;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.practice-panel__deck { display: flex; flex-direction: column; gap: 6px; }
+.practice-panel__lane { height: 96px; min-width: 0; }
+
+.practice-lane { display: flex; height: 100%; min-width: 0; }
+.practice-lane__names { flex: none; width: 52px; display: flex; flex-direction: column; }
+.practice-lane__name {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--display-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.practice-lane__marks { flex: 1 1 auto; min-width: 0; width: 100%; height: 100%; display: block; }
+
+.practice-result { display: flex; align-items: center; gap: 6px; height: 100%; min-width: 0; }
+.practice-result__text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px; }
+.practice-result__percent { font-size: 22px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
+.practice-result__counts {
+  font-size: 11px;
+  color: var(--display-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.practice-result__worst { font-size: 11px; color: var(--signal); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.practice-panel__keys { display: flex; gap: 6px; height: 40px; }
+.practice-key {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, var(--display-dim) 50%, transparent);
+  border-radius: 7px;
+  background: none;
+  color: var(--display-ink);
+  font: inherit;
+  cursor: pointer;
+}
+.practice-key.is-on { background: var(--signal); border-color: var(--signal); color: var(--on-signal); }
+.practice-key--wide { flex: none; width: 76px; height: 40px; }
+.practice-key__word { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; line-height: 1.1; white-space: nowrap; }
+.practice-key__sub { font-size: 9px; line-height: 1.1; color: var(--display-dim); }
+.practice-key.is-on .practice-key__sub { color: var(--on-signal); }
+.practice-key:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
+@media (max-width: 340px) { .practice-key__word { font-size: 10px; letter-spacing: 0.02em; } }

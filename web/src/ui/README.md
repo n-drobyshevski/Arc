@@ -70,7 +70,12 @@ KEYS's pad, so the shell reads neither:
 - Settings, Debug, Compare, Contents, Search and the beat import, keyboard keys
   and font licence sheets are `lazy` (`lazy.ts`): chunks of their own, fetched
   once the app is idle. So is the Claude page's deck, with the prompt
-  builder's genres and words (`state/promptPlan.ts`).
+  builder's genres and words (`state/promptPlan.ts`), and the PRACTICE panel
+  (`live/practice.tsx`'s slot).
+- PRACTICE's frames stay out of every state: the lane is a canvas drawn on
+  the frame clock, and the pads' cues are a signal of their own
+  (`PracticeActions.cues`), set by Live's frame loop only when a cue changes
+  (at most once a beat), each pad reading its own (`usePracticePadCue`).
 
 The `?demo` render counter (`dev/perf.ts`, `window.__arcPerf`) and
 `test/e2e/perf.spec.ts` (`PERF=1`) show what a change does to these.

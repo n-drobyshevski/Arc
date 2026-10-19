@@ -789,12 +789,16 @@
 .ep-pad.is-sample-empty,
 .ep-pad.is-sample-filled { outline: 5px solid #FF4C00; outline-offset: -14px; }
 .ep-pad.is-step-picked,
+.ep-pad.is-cue,
+.ep-pad.is-cue-now,
 .ep-pad.is-sample-waiting,
 .ep-pad.is-sample-recording { outline: 8px solid #FF4C00; outline-offset: -16px; }
 .ep-pad.is-step-lit .ep-pad__num,
 .ep-pad.is-step-picked .ep-pad__num { color: #FF4C00; }
 .ep-pad.is-step-picked { filter: drop-shadow(0 0 10px rgb(255 76 0 / 0.45)); }
 .ep-pad.is-sample-recording { --cap: #FF4C00; --cap-hi: #FF5A1E; --lip: #A33000; }
+/* PRACTICE: the beats to its next hit, in orange at the digit's right. */
+.ep-pad__cue { position: absolute; right: 22px; top: 14px; font-size: 28px; line-height: 1; color: #FF4C00; pointer-events: none; }
 .ep-pad__nudge {
   position: absolute;
   left: 14px;

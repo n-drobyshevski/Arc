@@ -117,6 +117,7 @@ import { ClipMode } from './state/scenePlan'
 import { chainSceneCount } from './state/beatPlan'
 import { PunchContext, type PunchUi } from './ui/live/LivePunch'
 import { StepContext, type StepActions } from './ui/live/StepPanel'
+import { PracticeContext, preloadPracticePanel, type PadCue, type PracticeActions } from './ui/live/practice'
 import { SceneContext, type SceneActions } from './ui/live/ScenePanel'
 import { ArpContext, type ArpActions } from './ui/live/ArpWords'
 import { ClaudeContext, preloadClaudeDeck, type ClaudeActions } from './ui/live/ClaudeSection'
@@ -143,7 +144,7 @@ const SearchScreen = lazy('SearchScreen', () => import('./ui/screens/SearchScree
 const BeatImportSheet = lazy('BeatImportSheet', () => import('./ui/sheets/BeatImportSheet').then((m) => m.BeatImportSheet))
 const KeyboardKeysSheet = lazy('KeyboardKeysSheet', () => import('./ui/sheets/KeyboardKeysSheet').then((m) => m.KeyboardKeysSheet))
 const FontLicenceSheet = lazy('FontLicenceSheet', () => import('./ui/sheets/FontLicenceSheet').then((m) => m.FontLicenceSheet))
-const LAZY = [SettingsScreen, DebugScreen, CompareScreen, ContentsScreen, SearchScreen, BeatImportSheet, KeyboardKeysSheet, FontLicenceSheet, { preload: preloadClaudeDeck }]
+const LAZY = [SettingsScreen, DebugScreen, CompareScreen, ContentsScreen, SearchScreen, BeatImportSheet, KeyboardKeysSheet, FontLicenceSheet, { preload: preloadClaudeDeck }, { preload: preloadPracticePanel }]
 
 /** The progress sheet's layer id. */
 const PROGRESS = 'progress'
@@ -264,6 +265,7 @@ function Root(): JSX.Element {
   const controls = useMemo(() => deviceControlsUi(c), [c])
   const step = useMemo(() => stepUi(c), [c])
   const scenes = useMemo(() => sceneUi(c), [c])
+  const practice = useMemo(() => practiceUi(c), [c])
   const arp = useMemo(() => arpUi(c), [c])
   const claude = useMemo(() => claudeUi(c), [c])
   const sample = useMemo(() => sampleUi(c), [c])
@@ -556,6 +558,7 @@ function Root(): JSX.Element {
     <TransportContext.Provider value={transport}>
     <StepContext.Provider value={step}>
     <SceneContext.Provider value={scenes}>
+    <PracticeContext.Provider value={practice}>
     <SampleContext.Provider value={sample}>
     <ArpContext.Provider value={arp}>
     <ClaudeContext.Provider value={claude}>
@@ -626,6 +629,7 @@ function Root(): JSX.Element {
     </ClaudeContext.Provider>
     </ArpContext.Provider>
     </SampleContext.Provider>
+    </PracticeContext.Provider>
     </SceneContext.Provider>
     </StepContext.Provider>
     </TransportContext.Provider>
@@ -1481,6 +1485,7 @@ function claudeUi(c: ArcController): ClaudeActions | null {
     onPrompt: (prompt) => void c.setClaudePrompt(prompt),
     onShare: (pick, g) => void c.shareClaudePrompt(pick, g),
     onCopy: (pick, g) => void c.shareClaudePrompt(pick, g, true),
+    onPractice: (pick, g) => c.practisePick(pick, g),
     onSavePrompt: (prompt) => void c.saveClaudePrompt(prompt),
     onDeletePrompt: (i) => void c.deleteClaudePrompt(i),
     onPaste: () => void c.pasteBeat(),
@@ -1534,6 +1539,31 @@ function stepUi(c: ArcController): StepActions | null {
     onPadPick: (pad) => c.stepPadPick(pad),
     onNotePick: (note) => c.stepNotePick(note),
     onGroup: (g) => p.setStepGroup(g),
+  }
+}
+
+/**
+ * PRACTICE for Live (Kotlin LivePractice, as MainActivity builds it): its state read from the controller's signal as
+ * each part renders, running while the transport plays; the pads' cues a signal of its own (live/practice.tsx).
+ */
+function practiceUi(c: ArcController): PracticeActions | null {
+  const p = c.pattern
+  if (!p.available) return null
+  return {
+    get ui() {
+      return p.practice.value
+    },
+    get running() {
+      const phase = p.ui.value.phase
+      return phase === 'PLAYING' || phase === 'COUNT_IN'
+    },
+    frame: (now) => p.practiceFrame(now),
+    cues: signal<ReadonlyMap<number, PadCue>>(new Map()),
+    onPlay: () => p.practicePlay(),
+    onStop: () => p.practiceStop(),
+    onClose: () => p.endPractice(),
+    onChange: (change) => p.changePractice(change),
+    onCopy: () => void c.copyPracticeReport(),
   }
 }
 

@@ -124,6 +124,7 @@ import { LABELS as PAD_LABELS, ROWS, noteName, padKey, physicalPad, type Physica
 import { CoachText } from '../../core/text/coachText'
 import { CLOSE as GUIDE_CLOSE, LED_ROWS } from '../../core/text/guideText'
 import { MirrorText } from '../../core/text/mirrorText'
+import { PracticeText } from '../../core/text/practiceText'
 import { FactoryKit, FactorySounds } from '../../core/features/factorySounds'
 import { FeatureText } from '../../core/text/featureText'
 import { WebText } from '../../core/text/webText'
@@ -176,6 +177,7 @@ import { useDeviceKeys } from '../live/DeviceKeys'
 import { groupKey } from '../live/deviceKeys'
 import { PunchPad, usePunch } from '../live/LivePunch'
 import { StepPanel, useStep, useStepNoteMark, useStepPadMark, useStepPiano } from '../live/StepPanel'
+import { PracticeSlot, usePractice, usePracticeCueLoop, usePracticePadCue } from '../live/practice'
 import { ArpWords, arpHeldNotes, useArp, useArpLine, useArpNote, useArpPad } from '../live/ArpWords'
 import { ClaudeSection } from '../live/ClaudeSection'
 import { PatternGridOver, ScenePanel, useScene, worthSaying } from '../live/ScenePanel'
@@ -653,6 +655,20 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // SAMPLE: the panel open (its pads light as the K.O. II's do).
   const sampleCtx = useSample()
   const sampleOpen = useComputed(() => sampleCtx?.ui.on ?? false).value
+  // PRACTICE: its panel instead of STEP's or SCENE's, on the group practised, one group's pads, which light ahead of each
+  // hit (Kotlin practiceShown); SAMPLE over it. The pads' cues follow the frames while it shows (live/practice.tsx).
+  const practiceCtx = usePractice()
+  const practiceOn = useComputed(() => practiceCtx?.ui != null).value
+  const practiceGroup = useComputed(() => practiceCtx?.ui?.spec.group ?? null).value
+  const practiceShown = practiceOn && !sampleOpen && !keys.on && (oneGroup || device)
+  usePracticeCueLoop(practiceCtx, practiceShown)
+  useEffect(() => {
+    if (practiceGroup !== null) setGroup(practiceGroup)
+  }, [practiceGroup])
+  // A practice starting (from Claude's page) closes Live tools: its pads are the point.
+  useEffect(() => {
+    if (practiceOn && props.toolsOpen) props.onTools(false)
+  }, [practiceOn])
   // The count-ins' ticks and SAMPLE's takes felt (Kotlin PatternHaptics, SampleHaptics).
   const tempoCtx = useContext(TempoContext)
   const feel = useHaptic()
@@ -1068,11 +1084,16 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     escape: () => {
       // The drawn device's page first: back to MAIN.
       if (deviceLayer.current?.toMain() === true) return true
-      // The open panel first, one a press (Android's Back): SAMPLE, STEP, SCENE. Read as they are
+      // The open panel first, one a press (Android's Back): SAMPLE, PRACTICE, STEP, SCENE. Read as they are
       // now, not as at the last render (a key can come before the panel's render lands).
       // A panel rolls up with a tick (Kotlin closePanel).
       if (sampleCtx !== null && sampleCtx.ui.on) {
         sampleCtx.onClose()
+        feel('tick')
+        return true
+      }
+      if (practiceCtx !== null && practiceCtx.ui !== null && practiceShown) {
+        practiceCtx.onClose()
         feel('tick')
         return true
       }
@@ -1105,7 +1126,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // has gone PANEL_SWIPE_AT of the page's width or is flung; the pad under it sounds at once and is cut once it is a
   // swipe. Not while STEP's or SCENE's panel has the place, nor in the Device view.
   const swiping = useRef<{ id: number; x: number; y: number; width: number; opening: boolean; claimed: boolean; fired: boolean; last: [number, number][] } | null>(null)
-  const swipeOffered = sampleCtx !== null && !device && !stepOpen && !sceneOpen
+  const swipeOffered = sampleCtx !== null && !device && !stepOpen && !sceneOpen && !practiceShown
   const swipeFire = (opening: boolean): void => {
     if (opening !== !(sampleCtx?.ui.on ?? false)) return
     sampleCtx?.onToggle()
@@ -1190,7 +1211,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // STEP's panel takes the function keys' place while it is open (on a phone on its side, the tools' column).
   // So does SCENE's (the two never open together).
   // A panel just closed: the function keys come back (MirrorScreen.css fn-return), for as long as that takes.
-  const panelShown = sampleOpen || stepOpen || sceneOpen
+  const panelShown = sampleOpen || practiceShown || stepOpen || sceneOpen
   const panelWas = useRef(panelShown)
   const [keysReturn, setKeysReturn] = useState(false)
   useLayoutEffect(() => {
@@ -1221,6 +1242,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   }, [panelShown])
   const fnRow = sampleOpen ? (
     <SamplePanel class="live__fn" />
+  ) : practiceShown ? (
+    <PracticeSlot class="live__fn" />
   ) : stepOpen ? (
     <StepPanel class="live__fn" />
   ) : sceneOpen ? (
@@ -1235,10 +1258,12 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // open panel in the function keys' column's place.
   const sideRow =
     sideways && !desk && !oneGroup && !keys.on && !device ? sidewaysRowPad(live.width, live.height, !inBar, panelShown) : null
-  const rowPanel = sampleOpen ? <SamplePanel class="live__fn" /> : stepOpen ? <StepPanel class="live__fn" /> : sceneOpen ? <ScenePanel class="live__fn" /> : null
+  const rowPanel = sampleOpen ? <SamplePanel class="live__fn" /> : practiceShown ? <PracticeSlot class="live__fn" /> : stepOpen ? <StepPanel class="live__fn" /> : sceneOpen ? <ScenePanel class="live__fn" /> : null
   const fnRowAll = inBar && !panelShown ? <FunctionRow class={`live__fn${keysReturn ? ' fn-return' : ''}`} /> : fnRow
   const sideStep = sampleOpen ? (
     <SamplePanel class="live__fn live__side-step" />
+  ) : practiceShown ? (
+    <PracticeSlot class="live__fn live__side-step" />
   ) : stepOpen ? (
     <StepPanel class="live__fn live__side-step" />
   ) : sceneOpen ? (
@@ -2346,13 +2371,16 @@ function PadCap(props: PadProps): JSX.Element {
   const arpHeld = useArpPad(pad)
   // SAMPLE on: empty pads blink, those with a sound ringed, the take's pad lit.
   const sampleLight = useSamplePadLed(pad, name !== null)
+  // PRACTICE: its next hit coming, ringed with the beats to go, lit when it is time.
+  const cue = usePracticePadCue(pad)
   const label =
     `${pad.groupLetter} ${pad.label}` +
     (name !== null ? `, ${name}` : '') +
     (mark === true ? MirrorText.PAD_HAS_NOTES : '') +
     (stepMark === 'picked' ? MirrorText.PICKED : stepMark === 'lit' ? MirrorText.ON_STEP : '') +
     (arpHeld ? WebText.ARP_HELD : '') +
-    (sampleLight === 'RECORDING' ? ', ' + MirrorText.REC : sampleLight === 'WAITING' ? ', ' + MirrorText.SAMPLE_WAITING : '')
+    (sampleLight === 'RECORDING' ? ', ' + MirrorText.REC : sampleLight === 'WAITING' ? ', ' + MirrorText.SAMPLE_WAITING : '') +
+    (cue === null ? '' : cue.now ? PracticeText.PLAY_NEXT : PracticeText.inBeats(cue.beats))
   const dropping = ui.drop !== null && ui.drop.at === key
   const placed = props.place !== undefined
   // What a click does (Kotlin's onClick label), and the second action (its custom action) on Shift+Enter.
@@ -2383,7 +2411,8 @@ function PadCap(props: PadProps): JSX.Element {
     (mark === true ? ' is-erase-dot' : mark === false ? ' is-erase-dim' : '') +
     (stepMark === 'picked' ? ' is-step-picked' : stepMark === 'lit' ? ' is-step-lit' : '') +
     (arpHeld ? ' is-arp-held' : '') +
-    (sampleLight !== null ? ` is-sample-${sampleLight.toLowerCase()}` : '')
+    (sampleLight !== null ? ` is-sample-${sampleLight.toLowerCase()}` : '') +
+    (cue === null ? '' : cue.now ? ' is-cue-now' : ' is-cue')
   // Over a pad, a dragged sound shows what it would replace: "snare 2 → vox chop".
   const shown = dropping && ui.drop?.name != null ? MirrorText.dropPreview(name ?? ui.drop.nameNow(pad), ui.drop.name) : name
   const content = placed ? (
@@ -2397,6 +2426,7 @@ function PadCap(props: PadProps): JSX.Element {
         </span>
       )}
       {stepMark === 'picked' ? <span class="ep-pad__nudge" aria-hidden="true">{MirrorText.NUDGE.toUpperCase()}</span> : shown !== null && <span class="ep-pad__name">{shown}</span>}
+      {cue !== null && !cue.now && <span class="ep-pad__cue" aria-hidden="true">{cue.beats}</span>}
       {ui.editing && !dropping && <span class="ep-pad__swap" aria-hidden="true">{'\u21C4'}</span>}
       {dropping && <span class="ep-pad__drop" aria-hidden="true">{WebText.DROP}</span>}
     </>
@@ -2407,6 +2437,8 @@ function PadCap(props: PadProps): JSX.Element {
         {/* The dot key's label is a dot, drawn as the K.O. II prints it. */}
         {pad.label === '.' ? <span class="live-pad__dot" /> : pad.label}
       </span>
+      {/* PRACTICE: the beats to its next hit, in orange at the label's right. */}
+      {cue !== null && !cue.now && <span class="live-pad__cue" aria-hidden="true">{cue.beats}</span>}
       {/* Picked for − / + in STEP: NUDGE at its foot in the name's place (Kotlin NudgeTag). */}
       {stepMark === 'picked' ? (
         <span class="live-pad__nudge" aria-hidden="true">{MirrorText.NUDGE.toUpperCase()}</span>

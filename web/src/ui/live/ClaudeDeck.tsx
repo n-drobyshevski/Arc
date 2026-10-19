@@ -18,8 +18,6 @@
 // - A chunk of its own (ClaudeSection's lazy deck), with the prompt builder's
 //   genres and words: the prompt comes as kept (AppSettings.claudePrompt) and
 //   is decoded here, as MainActivity decodes it for ClaudeUi.
-// - PLAY's PRACTICE key comes with PRACTICE on Live (not ported yet): PLAY
-//   builds and shares the prompt only.
 // - The tabs are a tablist: the arrow keys, Home and End move along them.
 //   Each takes the width its word needs from an equal share, so the lit
 //   ● IMPROVE fits a narrow sheet.
@@ -52,6 +50,7 @@ import {
 import { FactoryKit } from '../../core/features/factorySounds'
 import { ClaudeText } from '../../core/text/claudeText'
 import { CoachText } from '../../core/text/coachText'
+import { PracticeText } from '../../core/text/practiceText'
 import { PromptText } from '../../core/text/promptText'
 import { WebText } from '../../core/text/webText'
 import type { Weight } from '../../state/beatPlan'
@@ -252,6 +251,20 @@ export function ClaudeDeck(props: { claude: ClaudeActions; group: number }): JSX
           enabled={claude.sounds > 0}
           glyphColor={soundsOn ? 'var(--signal)' : 'var(--key-edge)'}
           checked={soundsOn}
+        />,
+      )
+    }
+    // PLAY: practise it here too, on Live's pads, the rest of the beat underneath.
+    if (prompt.task === PromptTask.PLAY) {
+      keys.push(
+        <DeckKey
+          key="practice"
+          glyph="play"
+          label={PracticeText.PRACTICE}
+          description={PracticeText.PRACTICE_NAME}
+          onClick={() => claude.onPractice(pick, g)}
+          style="navy"
+          enabled={!empty}
         />,
       )
     }

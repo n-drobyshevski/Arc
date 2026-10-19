@@ -64,6 +64,8 @@ export interface ClaudeActions {
   onShare(pick: SharePick, group: number): void
   /** COPY: as SHARE, onto the clipboard. */
   onCopy(pick: SharePick, group: number): void
+  /** PRACTICE (the PLAY tab): play along with [pick] on Live's pads ([group]'s pattern for PATTERN). */
+  onPractice(pick: SharePick, group: number): void
   onSavePrompt(p: ClaudePrompt): void
   onDeletePrompt(index: number): void
   onPaste(): void

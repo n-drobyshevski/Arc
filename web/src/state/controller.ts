@@ -141,12 +141,17 @@ import {
   type ShareParts,
 } from './beatPlan'
 import type { ClaudePrompt, SharePick } from '../core/features/claudePrompt'
+import { practiceSpec, type PracticeSpec } from '../core/features/practice'
+import { practiceGroup } from './practicePlan'
 import { patternBpm } from './patternPlan'
 import { MirrorController } from './mirror'
 import { PreviewCache, type DecodedSound } from './previewCache'
 import { createStore, type Store } from './store'
 import { errorText, isCancelled, Tasks, type OnProgress } from './tasks'
 import { initialState, type MirrorUi, type OfflineSounds, type Tab, type UiState, type UploadDraftItem } from './types'
+
+/** PRACTICE from Claude's page starts at this percent of the tempo. */
+const PRACTICE_START_SPEED = 75
 
 /** MainActivity COPY_LIMIT: the clipboard gets the latest part of a long log. */
 export const COPY_LIMIT = 200_000
@@ -1543,6 +1548,8 @@ export class ArcController {
       return Promise.resolve()
     }
     const done = this.live.playPad(pad, hold, unsure, at)
+    // PRACTICE scores the press (not one a scroll may yet take: Kotlin's unsure press returns before).
+    if (!(hold && unsure)) this.pattern.practicePress(pad, pressedAt)
     this.pattern.press(pad, null, padVoice(pad), pressedAt, hold)
     return done
   }
@@ -3276,6 +3283,38 @@ export class ArcController {
       return
     }
     await this.sharePrompt(prompt, pick, group, copy)
+  }
+
+  // ---------- PRACTICE: play along with a pattern, Live's pads lit ahead of each hit (an addition) ----------
+
+  /**
+   * PRACTICE on [spec] (PatternDesk.practise): once it starts, Live shows that
+   * group's pads (one group, PADS), as Kotlin's startPractice sets them.
+   */
+  practise(spec: PracticeSpec): void {
+    if (!this.pattern.practise(spec)) return
+    const s = this.settingsSignal.peek()
+    if (!s.liveOneGroup || s.liveKeys) this.changeSettings((x) => ({ ...x, liveOneGroup: true, liveKeys: false }))
+  }
+
+  /** Practice from Claude's page: [pick]'s group ([group] for a pattern; for the scene or the chain, the scene's first group with pad hits). */
+  practisePick(pick: SharePick, group: number): void {
+    const g = pick === 'PATTERN' ? group : practiceGroup(this.pattern.patternsNow, group)
+    this.practise(practiceSpec(g, { speed: PRACTICE_START_SPEED }))
+  }
+
+  /** PRACTICE's COPY: how it went on the clipboard, for Claude (MainActivity's copyText of practiceReport). */
+  async copyPracticeReport(): Promise<void> {
+    const report = this.pattern.practiceReport()
+    if (report === null) return
+    let copied: string
+    try {
+      copied = (await this.prompts()).PromptText.COPIED
+    } catch (e) {
+      this.toast(errorText(e), true)
+      return
+    }
+    await this.copyText(report, copied)
   }
 
   /** COPY: [text] on the clipboard, [said]; whether it went (MainActivity's copyText). */
