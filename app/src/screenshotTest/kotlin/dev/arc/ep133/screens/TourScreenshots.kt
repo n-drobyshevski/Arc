@@ -9,17 +9,20 @@ import dev.arc.ep133.features.Tour
 import dev.arc.ep133.features.TourStep
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.ui.components.ArcShell
+import dev.arc.ep133.ui.components.SampleKey
 import dev.arc.ep133.ui.components.Tab
 import dev.arc.ep133.ui.components.TourActions
 import dev.arc.ep133.ui.components.TourHost
 import dev.arc.ep133.ui.components.TourUi
 import dev.arc.ep133.ui.screens.GuideScreen
+import dev.arc.ep133.ui.screens.MainScreen
 import dev.arc.ep133.ui.screens.MirrorScreen
 import dev.arc.ep133.ui.theme.ArcTheme
 
 /*
  * "Try arc" on Live, a card per step, as a new install sees it: one group,
- * the veil cut away around what the step is about.
+ * the veil cut away around what the step is about. Back up is on Backups,
+ * where its key is.
  *
  * These render one frame. The spotlit control reports where it is only after
  * that frame's layout, so a card next to a control (CONNECT, PAD, HEAR, BACKUP)
@@ -27,26 +30,38 @@ import dev.arc.ep133.ui.theme.ArcTheme
  * next frame, under the overlay's fade. Where it lands is TourPlaceTest's.
  */
 
-/** Live under the tour; [connected] false shows it as before the EP-133 is connected. */
+/**
+ * Live (or [tab]) under the tour; [connected] false shows it as before the
+ * EP-133 is connected.
+ */
 @Composable
-private fun TourOnLive(ui: TourUi, connected: Boolean = true, state: MirrorState = lastRead, dark: Boolean = false) {
+private fun TourOnLive(ui: TourUi, connected: Boolean = true, state: MirrorState = lastRead, dark: Boolean = false, tab: Tab = Tab.LIVE) {
     ArcTheme(dark = dark) {
         TourHost(tour = ui, actions = TourActions(), onBack = {}, coach = false, onCoachDismiss = {}) {
             ArcShell(
-                tab = Tab.LIVE, onTab = {},
-                connected = connected, canConnect = true, canBackup = connected,
-                onBackup = {}, onConnect = {}, onDebug = {}, onSettings = {}, onHelp = {},
+                tab = tab, onTab = {},
+                connected = connected, canConnect = true,
+                onConnect = {}, onDisconnect = {}, onHint = {}, haptics = false, onDebug = {}, onSettings = {}, onHelp = {},
                 guideOpen = false, onGuide = {},
                 guide = { GuideScreen(onBack = {}) },
+                // Live's mic key, as MainActivity has it on Live.
+                sample = if (tab == Tab.LIVE) SampleKey(false) {} else null,
             ) {
-                MirrorScreen(
-                    mirror = if (connected) MirrorUi(state) else MirrorUi(loading = false, error = MirrorText.NOT_CONNECTED),
-                    nameOf = { names[it] },
-                    onPadOrder = {},
-                    fixedNow = NOW,
-                    oneGroup = true,
-                    onPad = { _, _ -> },
-                )
+                if (tab == Tab.BACKUPS) {
+                    MainScreen(
+                        state = if (connected) connectedState else connectedState.copy(connected = false, device = null),
+                        fmtDay = { if (it > 1_790_900_000_000L) "Oct 4, 2026" else if (it > 1_790_500_000_000L) "Oct 2, 2026" else "Sep 25, 2026" },
+                        onBackup = {}, onImport = {}, onOpen = {},
+                    )
+                } else {
+                    MirrorScreen(
+                        mirror = if (connected) MirrorUi(state) else MirrorUi(loading = false, error = MirrorText.NOT_CONNECTED),
+                        nameOf = { names[it] },
+                        fixedNow = NOW,
+                        oneGroup = true,
+                        onPad = { _, _, _, _ -> },
+                    )
+                }
             }
         }
     }
@@ -81,7 +96,7 @@ fun TourConnectTickedPreview() = TourOnLive(TourUi(TourStep.CONNECT, plugged = t
 @PreviewTest
 @Preview(name = "Tour needs device", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
-fun TourNeedsDevicePreview() = TourOnLive(TourUi(TourStep.BACKUP, needsConnect = true), connected = false)
+fun TourNeedsDevicePreview() = TourOnLive(TourUi(TourStep.BACKUP, needsConnect = true), connected = false, tab = Tab.BACKUPS)
 
 @PreviewTest
 @Preview(name = "Tour pad", widthDp = 393, heightDp = 852, showBackground = true)
@@ -102,7 +117,7 @@ fun TourHearPreview() = TourOnLive(TourUi(TourStep.HEAR, connected = true, canPl
 @PreviewTest
 @Preview(name = "Tour backup", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
-fun TourBackupPreview() = TourOnLive(TourUi(TourStep.BACKUP, connected = true, canBackup = true))
+fun TourBackupPreview() = TourOnLive(TourUi(TourStep.BACKUP, connected = true, canBackup = true), tab = Tab.BACKUPS)
 
 @PreviewTest
 @Preview(name = "Tour done", widthDp = 393, heightDp = 852, showBackground = true)

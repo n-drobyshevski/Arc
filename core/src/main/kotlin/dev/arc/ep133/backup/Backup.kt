@@ -106,7 +106,7 @@ object Backup {
         // Some firmware lists no projects; then try the first nine directly and
         // keep whatever downloads.
         val probing = projects.isEmpty()
-        if (probing) projects = (1..9).map { ProjectEntry(it, Device.projectNode(it), "", 0) }
+        if (probing) projects = (1..Device.PROJECT_COUNT).map { ProjectEntry(it, Device.projectNode(it), "", 0) }
 
         val totalWeight = (sounds.sumOf { maxOf(it.size, 1024L) } + projects.size.toLong() * PROJECT_WEIGHT)
             .toDouble().let { if (it == 0.0) 1.0 else it }

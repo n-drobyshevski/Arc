@@ -7,13 +7,19 @@
 // database opens here), the controller, and the app. ?demo keeps its settings
 // in memory and its library in its own database ("arc-demo"), so it never
 // touches the real ones (boot/browserDeps).
+//
+// Web only: desk.css, the desktop page's tokens (the app's desktop layout from
+// 1024px wide, see ui/useDesk.ts).
 import { effect } from '@preact/signals'
 import { render } from 'preact'
 import './ui/theme/fonts'
 import './ui/theme/tokens.css'
+import './ui/theme/cap.css'
 import './ui/theme/base.css'
+import './ui/theme/desk.css'
 import { App, CrashMessage } from './app'
 import { createBrowserDeps, pageStorage } from './boot/browserDeps'
+import { followStorage, initKeyPrefs } from './ui/keyPrefs'
 import { SettingsStore } from './platform/storage/settings'
 import { createController, type ArcController } from './state/controller'
 import { whenIdle } from './ui/components/UpdatePrompt'
@@ -49,7 +55,11 @@ function reloadWhenIdle(): void {
 async function boot(): Promise<void> {
   const demo = new URLSearchParams(location.search).has('demo')
   const storage = pageStorage(demo)
-  applyTheme(new SettingsStore(storage).settings.theme)
+  const stored = new SettingsStore(storage).settings
+  applyTheme(stored.theme, undefined, stored.skin)
+  // Settings → Computer keyboard: this page's storage, and another tab's change (not for ?demo).
+  initKeyPrefs(storage)
+  if (!demo) followStorage(window)
   if (demo) {
     const { installDemo } = await import('./dev/demo')
     installDemo(window)
@@ -62,9 +72,10 @@ async function boot(): Promise<void> {
   })
   const c = createController(deps)
   controller = c
-  // Settings → Theme, and another tab's change.
+  // Settings → Theme and Skin, and another tab's change.
   effect(() => {
-    applyTheme(c.settings.value.theme)
+    const s = c.settings.value
+    applyTheme(s.theme, undefined, s.skin)
   })
   root.textContent = ''
   render(<App controller={c} />, root)

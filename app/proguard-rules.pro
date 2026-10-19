@@ -4,3 +4,8 @@
     *** Companion;
     kotlinx.serialization.KSerializer serializer(...);
 }
+
+# Live's native engine (libarc_live.so) binds these by name.
+-keep class dev.arc.ep133.audio.NativeAudio {
+    native <methods>;
+}

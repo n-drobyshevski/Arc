@@ -1,0 +1,165 @@
+/* LiveScene.kt's look: the panel on the display's dark screen (StepPanel.css's chips and keys), the
+ * groups' columns, COMMIT / CLR / CHANGE, the CLIP row, the 1–99 grid; the line's S01 chip. */
+
+.scene-chip { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.scene-chip__readout { display: inline-flex; gap: 6px; }
+.scene-chip__readout .is-queued { color: var(--signal); animation: scene-blink 700ms ease-in-out infinite alternate; }
+.scene-chip__stop { width: 8px; height: 8px; background: currentColor; }
+@keyframes scene-blink { to { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) {
+  .scene-chip__readout .is-queued,
+  .scene-col__value.is-queued { animation: none; }
+}
+
+.scene-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 12px 10px;
+  border-radius: 14px;
+  background: var(--display);
+  color: var(--display-ink);
+  min-width: 0;
+}
+.scene-panel__head { display: flex; align-items: center; gap: 6px; min-height: 40px; }
+.scene-panel__label { font-size: var(--size-display-head); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.step-panel__status.is-dim { color: var(--display-dim); }
+
+.scene-key {
+  position: relative;
+  flex: none;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: color-mix(in oklab, var(--display) 60%, var(--display-dim));
+  box-shadow: 1px 2px 0 color-mix(in oklab, var(--display) 40%, black);
+  color: var(--display-ink);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  cursor: pointer;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.scene-key:active { transform: translate(1px, 2px); box-shadow: none; }
+.scene-key--step { padding: 0; width: 32px; font-size: 18px; font-weight: 400; letter-spacing: 0; }
+.scene-key.is-on { background: var(--signal); color: var(--on-signal); }
+.scene-key:focus-visible,
+.scene-col__number:focus-visible,
+.scene-col__free:focus-visible,
+.scene-cell:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
+.scene-key__fill {
+  position: absolute;
+  inset: 0;
+  background: var(--signal);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+.scene-key--erase.is-holding .scene-key__fill { transform: scaleX(1); transition: transform 2000ms linear; }
+.scene-key__word { position: relative; }
+
+.scene-panel__deck { display: flex; flex-direction: column; gap: 6px; }
+.scene-columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.scene-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--display) 85%, var(--display-dim));
+  min-width: 0;
+}
+.scene-col.is-focused { box-shadow: inset 0 0 0 1px var(--display-dim); }
+.scene-col__number {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  color: var(--display-ink);
+  font: inherit;
+  cursor: pointer;
+  min-width: 0;
+}
+.scene-col__number.is-on { color: var(--signal); }
+.scene-col__letter { font-size: 13px; font-weight: 800; }
+.scene-col__value { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scene-col__value.is-queued { color: var(--signal); animation: scene-blink 700ms ease-in-out infinite alternate; }
+.scene-col__keys { display: flex; gap: 4px; }
+.scene-col__keys .scene-key { flex: 1 1 0; width: auto; min-width: 0; height: 30px; min-height: 30px; }
+.scene-col__free {
+  min-height: 24px;
+  border: 1px solid color-mix(in srgb, var(--display-dim) 50%, transparent);
+  border-radius: 6px;
+  background: none;
+  color: var(--display-ink);
+  font: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.scene-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.scene-word { font-size: 9px; font-weight: 700; letter-spacing: 0.1em; color: var(--display-dim); white-space: nowrap; }
+.scene-word--held { margin-left: auto; color: var(--display-ink); }
+.scene-modes { display: flex; gap: 4px; }
+.scene-row--bar { min-height: 36px; }
+
+/* The grid over the pads (Kotlin PatternGrid over matchParentSize): the display's face on top of them.
+ * Its hosts (MirrorScreen's one group, KEYS' grid, the groups' rows) hold it. */
+.live-group:has(> .scene-grid-over),
+.live-kgrid:has(> .scene-grid-over),
+.live__groups:has(> .scene-grid-over),
+.live-row__groups:has(> .scene-grid-over) { position: relative; }
+.scene-grid-over {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: 14px;
+  background: var(--display);
+  color: var(--display-ink);
+  box-shadow: var(--display-shadow);
+}
+.scene-grid { display: flex; flex-direction: column; gap: 8px; }
+.scene-grid-over .scene-grid__cells { gap: 4px; }
+.scene-grid-over .scene-cell { min-height: 26px; }
+.scene-grid__head { display: flex; align-items: center; gap: 10px; }
+.scene-grid__title { font-size: 12px; font-weight: 800; letter-spacing: 0.12em; }
+.scene-grid__detail { flex: 1 1 auto; font-size: 10px; color: var(--display-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scene-grid__cells { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 3px; }
+.scene-cell {
+  min-width: 0;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--display) 80%, var(--display-dim));
+  color: var(--display-dim);
+  font: inherit;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.scene-cell.has-notes { background: var(--display-ink); color: var(--display); }
+.scene-cell.is-free { border-color: var(--display-ink); }
+.scene-cell.is-playing { background: var(--signal); color: var(--on-signal); }
+.scene-grid__legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 10px; color: var(--display-dim); }
+.scene-legend::before { content: ''; display: inline-block; width: 9px; height: 9px; margin-right: 4px; border-radius: 2px; vertical-align: -1px; border: 1px solid transparent; }
+.scene-legend--notes::before { background: var(--display-ink); }
+.scene-legend--empty::before { background: color-mix(in oklab, var(--display) 80%, var(--display-dim)); }
+.scene-legend--playing::before { background: var(--signal); }
+.scene-legend--free::before { border-color: var(--display-ink); }

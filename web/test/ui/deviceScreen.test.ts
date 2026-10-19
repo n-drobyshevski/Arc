@@ -2,7 +2,16 @@
 // (ports of app/src/main/kotlin/dev/arc/ep133/ui/screens/DeviceScreen.kt,
 // PadsSheet.kt and TrimSheet.kt).
 import { describe, expect, it } from 'vitest'
-import { chunked, crcHex, detailRows, soundNames } from '../../src/ui/screens/DeviceScreen'
+import {
+  PROJECT_ORDER,
+  chunked,
+  crcHex,
+  detailChips,
+  detailRows,
+  soundBlocks,
+  soundNames,
+  storageSegments,
+} from '../../src/ui/screens/DeviceScreen'
 import { padCell, padsProject } from '../../src/ui/sheets/PadsSheet'
 import { clampTrim, trimResult } from '../../src/ui/sheets/TrimSheet'
 import { slotDigits, slotNote, slotOf, trimIndexOf, uploadCheck } from '../../src/ui/sheets/UploadSheet'
@@ -36,6 +45,38 @@ describe('DeviceScreen helpers', () => {
   it('maps slots to names', () => {
     expect(soundNames([{ slot: 3, name: 'snare', size: 1 }]).get(3)).toBe('snare')
     expect(soundNames(undefined).size).toBe(0)
+  })
+
+  it('gives the details as chips: channels and rate alone, then labelled values', () => {
+    const chips = detailChips({
+      slot: 2, name: 'kick 2', channels: 1, sampleRate: 46875,
+      settings: { 'sound.playmode': 'oneshot' }, crc: 0x1a2b3c4d,
+    })
+    expect(chips).toEqual([[null, 'Mono'], [null, '46875 Hz'], ['Play mode', 'oneshot'], ['CRC32', '1A2B3C4D']])
+  })
+
+  it('lays the projects out as the K.O. II pads', () => {
+    expect(PROJECT_ORDER).toEqual([7, 8, 9, 4, 5, 6, 1, 2, 3])
+  })
+
+  it('splits the storage meter into sounds, projects and free', () => {
+    expect(storageSegments(0, 0)).toEqual({ lit: 0, orange: 0 })
+    expect(storageSegments(0.5, 0.125)).toEqual({ lit: 12, orange: 3 })
+    // Anything at all lights one segment; the projects never outgrow what is used.
+    expect(storageSegments(0.001, 0.0001)).toEqual({ lit: 1, orange: 1 })
+    expect(storageSegments(0.25, 0.9)).toEqual({ lit: 6, orange: 6 })
+    expect(storageSegments(2, 0)).toEqual({ lit: 24, orange: 0 })
+  })
+
+  it('lists the sounds found, only the ones a project uses when asked', () => {
+    const sounds = [
+      { slot: 1, name: 'kick', size: 1 },
+      { slot: 3, name: 'snare', size: 1 },
+      { slot: 140, name: 'vox chop', size: 1 },
+    ]
+    expect(soundBlocks(sounds, '').map((g) => [g.from, g.sounds.length])).toEqual([[1, 2], [100, 1]])
+    expect(soundBlocks(sounds, '', new Set([3])).map((g) => [g.from, g.sounds.map((s) => s.slot)])).toEqual([[1, [3]]])
+    expect(soundBlocks(sounds, 'vox')).toHaveLength(1)
   })
 })
 

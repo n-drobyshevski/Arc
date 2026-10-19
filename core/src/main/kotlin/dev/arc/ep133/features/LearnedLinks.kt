@@ -17,6 +17,22 @@ object LearnedLinks {
     fun format(learned: Map<Int, Int>): String = learned.entries.joinToString(",") { "${it.key}:${it.value}" }
 
     /**
+     * Live's pad links offline, where nothing can be learned (no device): the
+     * [learned] ones, the rest numbered from the top row as arc writes pads
+     * before any press (PadPush.topNumber), never over a learned number. So
+     * the last read (or the factory sounds, whose kicks then sit on '.' and
+     * '0') shows names and plays with none learned. Never saved as learned.
+     */
+    fun offline(learned: Map<Int, Int>): Map<Int, Int> {
+        val out = LinkedHashMap(learned)
+        for (offset in 0..11) {
+            val n = PadPush.topNumber(offset)
+            if (offset !in out && n !in out.values) out[offset] = n
+        }
+        return out
+    }
+
+    /**
      * Links brought back from the folder, with the ones learned here on top.
      * A pad number belongs to one key only, so a restored link to a number
      * learned here for another key is dropped.

@@ -5,7 +5,10 @@
 // (sound_names, indexed_backups) plus a small key/value store for what Android
 // keeps in SharedPreferences "external" (picked folder, file overrides).
 // Version 3 adds "padSounds", Live's copies of the device's pad sounds
-// (Android's files/pad-sounds folder, PadSoundCache). The upgrades never
+// (Android's files/pad-sounds folder, PadSoundCache). Version 4 adds "takes",
+// Live's recorded takes (Android's files/takes folder, Takes.kt). Version 5 adds
+// "samples", SAMPLE's recordings kept and not yet on the EP-133 (Android's
+// files/samples folder, SampleFiles.kt). The upgrades never
 // touch existing stores, like MIGRATION_1_2 (no destructive fallback): a
 // reference library on the same origin carries over.
 //
@@ -17,6 +20,8 @@
 // | indexed  | backupId            |           | indexed_backups             |
 // | kv       | key                 |           | prefs "external"            |
 // | padSounds| name                |           | files/pad-sounds/*          |
+// | takes    | name                |           | files/takes/*.wav           |
+// | samples  | name                |           | files/samples/*.wav         |
 //
 // Web deltas:
 // - Converters.kt (JSON text columns) is not needed: IndexedDB stores arrays
@@ -29,7 +34,7 @@ import { BackupDevice, type BackupRecord } from '../../core/text/libraryRules'
 export const DB_NAME = 'arc'
 /** ?demo's own database, so the demo never touches the real library. */
 export const DEMO_DB_NAME = 'arc-demo'
-export const DB_VERSION = 3
+export const DB_VERSION = 5
 
 export const STORE = {
   backups: 'backups',
@@ -38,6 +43,8 @@ export const STORE = {
   indexed: 'indexed',
   kv: 'kv',
   padSounds: 'padSounds',
+  takes: 'takes',
+  samples: 'samples',
 } as const
 export type StoreName = (typeof STORE)[keyof typeof STORE]
 
@@ -63,6 +70,23 @@ export interface IndexedRow {
 export interface PadSoundRow {
   name: string
   bytes: Uint8Array
+}
+
+/** A row in "takes": one take's WAV and what its file name and header would say. */
+export interface TakeRow {
+  /** take-20261005-142301.wav (Takes.kt's file name). */
+  name: string
+  createdAt: number
+  frames: number
+  rate: number
+  wav: Blob
+}
+
+/** A row in "samples": a SAMPLE recording's WAV (SampleFiles' smp-yyyyMMdd-HHmmss.wav) and when it was written. */
+export interface SampleRow {
+  name: string
+  createdAt: number
+  wav: Uint8Array
 }
 
 /** A row in "kv". */
@@ -92,7 +116,7 @@ export interface OpenOptions {
 /**
  * Creates whatever stores are missing for [oldVersion]. Version 0 to 1 is
  * the reference's own upgrade; 1 to 2 only adds stores (MIGRATION_1_2), and
- * 2 to 3 only adds "padSounds".
+ * 2 to 3 only adds "padSounds", 3 to 4 only "takes".
  */
 export function upgrade(db: IDBDatabase, oldVersion: number, tx: IDBTransaction): void {
   if (oldVersion < 1) {
@@ -115,6 +139,12 @@ export function upgrade(db: IDBDatabase, oldVersion: number, tx: IDBTransaction)
   }
   if (oldVersion < 3) {
     if (!db.objectStoreNames.contains(STORE.padSounds)) db.createObjectStore(STORE.padSounds, { keyPath: 'name' })
+  }
+  if (oldVersion < 4) {
+    if (!db.objectStoreNames.contains(STORE.takes)) db.createObjectStore(STORE.takes, { keyPath: 'name' })
+  }
+  if (oldVersion < 5) {
+    if (!db.objectStoreNames.contains(STORE.samples)) db.createObjectStore(STORE.samples, { keyPath: 'name' })
   }
 }
 

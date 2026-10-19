@@ -11,7 +11,7 @@ data class BackupRecord(
     val title: String,
     val notes: String,
     val createdAt: Long,
-    /** "device" or "import". */
+    /** "device", "import", or a factory kit's ("factory", FactorySounds.SOURCE, "factory-ep1320" or "factory-ep40": FactoryKit.source). */
     val source: String,
     val fileName: String?,
     val device: BackupDevice,
@@ -28,13 +28,21 @@ data class RestoreSelection(val slots: List<Int>, val projects: List<Int>)
 
 /** The small rules app.js applies around the library and restore sheet. */
 object LibraryRules {
+    /** Where the factory sounds came from, in the detail sheet. */
+    const val FACTORY_FROM = "teenage engineering, factory sounds"
+
+    /** The same for the EP-1320's, a copy of the user's own backup. */
+    const val FACTORY_1320_FROM = "Your backup, used as EP-1320 factory sounds"
+
     /**
      * The backups to delete so only the newest [keep] remain (an addition to
-     * the web version); none when [keep] is null (keep all).
+     * the web version); none when [keep] is null (keep all). The factory
+     * sounds (any kit's) are neither counted nor deleted.
      */
     fun toPrune(backups: List<BackupRecord>, keep: Int?): List<BackupRecord> {
-        if (keep == null || backups.size <= keep) return emptyList()
-        return backups.sortedWith(compareByDescending<BackupRecord> { it.createdAt }.thenByDescending { it.id }).drop(keep)
+        val own = backups.filterNot { dev.arc.ep133.features.FactorySounds.isFactorySource(it.source) }
+        if (keep == null || own.size <= keep) return emptyList()
+        return own.sortedWith(compareByDescending<BackupRecord> { it.createdAt }.thenByDescending { it.id }).drop(keep)
     }
 
     /** `fileNameFor(b)`: "my-backup.pak". JS \w is ASCII only, spelled out here. */
@@ -101,7 +109,11 @@ object LibraryRules {
         fact(
             "From",
             if (b.source == "import") "Imported file" + (if (!b.fileName.isNullOrEmpty()) ", ${b.fileName}" else "")
-            else listOf(b.device.product, b.device.serial).filter { it.isNotEmpty() }.joinToString(", "),
+            else when (dev.arc.ep133.features.FactoryKit.ofSource(b.source)) {
+                dev.arc.ep133.features.FactoryKit.EP133, dev.arc.ep133.features.FactoryKit.EP40 -> FACTORY_FROM
+                dev.arc.ep133.features.FactoryKit.EP1320 -> FACTORY_1320_FROM
+                null -> listOf(b.device.product, b.device.serial).filter { it.isNotEmpty() }.joinToString(", ")
+            },
         )
         fact("OS", b.device.osVersion)
         fact("Contents", "${plural(b.soundCount, "sound")}, ${plural(b.projectCount, "project")}")

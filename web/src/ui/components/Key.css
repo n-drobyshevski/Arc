@@ -1,9 +1,10 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (ArcKey) */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (ArcKey)
+ * A hardware cap (theme/cap.css, Cap.kt). */
 
 .key {
-  --key-face: var(--key);
-  --key-ink: var(--ink);
-  --key-edge-color: var(--key-edge);
+  --cap-face: var(--key);
+  --cap-ink: var(--ink);
+  --cap-edge: var(--key-edge);
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -13,16 +14,9 @@
   min-height: 48px;
   padding: 15px 18px;
   border-radius: var(--radius-key);
-  background: var(--key-face);
-  color: var(--key-ink);
-  /* box-shadow: 0 2px 0 edge, the strip below the face. */
-  box-shadow: 0 var(--key-travel) 0 var(--key-edge-color);
   text-align: center;
   user-select: none;
   -webkit-user-select: none;
-  transition:
-    transform var(--key-press-ms) var(--key-ease),
-    box-shadow var(--key-press-ms) var(--key-ease);
   /* capsKey */
   font-size: var(--size-caps-key);
   font-weight: 700;
@@ -43,9 +37,11 @@
 .key--block { display: flex; width: 100%; }
 
 /* ---- KeyStyle ---- */
-.key--signal { --key-face: var(--signal); --key-ink: var(--on-signal); --key-edge-color: var(--signal-edge); }
-.key--navy { --key-face: var(--navy); --key-ink: var(--on-navy); --key-edge-color: var(--navy-edge); }
-.key--quiet { --key-face: transparent; --key-ink: var(--graphite); box-shadow: none; }
+.key--signal { --cap-face: var(--signal); --cap-ink: var(--on-signal); --cap-edge: var(--signal-edge); }
+/* The navy edge: the face 35% darker (capEdge), opaque so the page doesn't show through it. */
+.key--navy { --cap-face: var(--navy); --cap-ink: var(--on-navy); --cap-edge: color-mix(in oklab, var(--navy) 65%, black); }
+/* Quiet keys are flat text, no cap (Key.tsx leaves cap-3d off). */
+.key--quiet { background: transparent; color: var(--graphite); }
 
 /* ---- KeySize ---- */
 .key--small {
@@ -59,12 +55,7 @@
   font-size: var(--size-caps-key-wide);
 }
 
-/* Pressed: the face travels down onto its edge (the strip disappears under it). */
-.key:not(.key--quiet):not(:disabled):active,
-.key:not(.key--quiet):not(:disabled).is-pressed {
-  transform: translateY(var(--key-travel));
-  box-shadow: 0 0 0 var(--key-edge-color);
-}
+/* Pressed: theme/cap.css (the face travels onto its edge). */
 
 /* opacity .45 fades the face, label and edge together. */
 .key:disabled { opacity: var(--key-disabled); }

@@ -6,7 +6,9 @@ import {
   applyTheme,
   disposeTheme,
   resolveTheme,
+  resolvedSkin,
   resolvedTheme,
+  SKIN_THEME_COLOR,
   THEME_COLOR,
   type ThemeDocument,
   type ThemeElement,
@@ -130,6 +132,24 @@ describe('applyTheme', () => {
     expect(doc.documentElement.getAttribute('data-theme')).toBe('light')
   })
 
+  it('sets data-skin (the EP-133 by default) and the skin\'s page colour', () => {
+    const t = setup(true)
+    applyTheme('LIGHT', t.env)
+    expect(t.html.getAttribute('data-skin')).toBe('EP133')
+    applyTheme('DARK', t.env, 'EP40')
+    expect(t.html.getAttribute('data-skin')).toBe('EP40')
+    expect(t.contents()).toEqual(['#0E1813', '#0E1813'])
+    expect(resolvedSkin.value).toBe('EP40')
+    // SYSTEM: each tag its own scheme's colour, in the skin.
+    applyTheme('SYSTEM', t.env, 'EP1320')
+    expect(t.contents()).toEqual(['#D0B97E', '#121714'])
+    t.media.flip(false)
+    expect(t.html.getAttribute('data-theme')).toBe('light')
+    expect(t.html.getAttribute('data-skin')).toBe('EP1320')
+    applyTheme('LIGHT', t.env)
+    expect(resolvedSkin.value).toBe('EP133')
+  })
+
   it('without a document only resolves', () => {
     expect(applyTheme('DARK', null)).toBe('dark')
     expect(resolveTheme('SYSTEM', true)).toBe('dark')
@@ -174,7 +194,7 @@ describe('tokens.css', () => {
   const darkDelta = kotlinColors('val DarkArcColors = LightArcColors.copy(')
 
   it('has every light colour of ArcTheme.kt with the exact value', () => {
-    expect(light.size).toBe(21)
+    expect(light.size).toBe(34)
     const root = cssBlock(':root')
     for (const [name, hex] of light) expect(root.get(name), name).toBe(hex)
   })
@@ -197,4 +217,98 @@ describe('tokens.css', () => {
     expect(THEME_COLOR.light).toBe(light.get('shell'))
     expect(THEME_COLOR.dark).toBe(darkDelta.get('shell'))
   })
+})
+
+// ---- the skins: tokens.css and cap.css against ArcTheme.kt and Cap.kt ----
+
+const capKt = readFileSync(new URL('../../../app/src/main/kotlin/dev/arc/ep133/ui/components/Cap.kt', import.meta.url), 'utf8')
+const capCss = readFileSync(new URL('../../src/ui/theme/cap.css', import.meta.url), 'utf8')
+
+function ktBlock(src: string, head: string): string {
+  const start = src.indexOf(head)
+  expect(start, head).toBeGreaterThanOrEqual(0)
+  return src.slice(start + head.length, src.indexOf('\n)', start))
+}
+
+function ktColors(body: string): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const m of body.matchAll(/(\w+) = Color\(0xFF([0-9A-Fa-f]{6})\)/g)) out.set(kebab(m[1]!), `#${m[2]!.toUpperCase()}`)
+  return out
+}
+
+function cssVars(src: string, selector: string): Map<string, string> {
+  const start = src.indexOf(`${selector} {`)
+  expect(start, selector).toBeGreaterThanOrEqual(0)
+  const body = src.slice(start, src.indexOf('}', start))
+  const out = new Map<string, string>()
+  for (const m of body.matchAll(/--([\w-]+):\s*(#[0-9A-Fa-f]{6});/g)) out.set(m[1]!, m[2]!.toUpperCase())
+  return out
+}
+
+/** An ArcColors palette made as a copy of another, every colour resolved. */
+function palette(name: string, base: string, of: Map<string, string>): Map<string, string> {
+  return new Map([...of, ...ktColors(ktBlock(kotlin, `val ${name}ArcColors = ${base}ArcColors.copy(`))])
+}
+
+/** KoColors' defaults, then [name]'s, with its knobs as four colours each (skirt, edge, cap, cap edge). */
+function koColors(name: string): Map<string, string> {
+  const knobs = (body: string): Map<string, string> => {
+    const out = new Map<string, string>()
+    for (const m of body.matchAll(/(knob\w+)(?::\s*List<Color>)? = listOf\(((?:Color\(0xFF[0-9A-Fa-f]{6}\),?\s*){4})\)/g)) {
+      const hex = [...m[2]!.matchAll(/0xFF([0-9A-Fa-f]{6})/g)].map((h) => `#${h[1]!.toUpperCase()}`)
+      ;['', '-edge', '-cap', '-cap-edge'].forEach((suf, i) => out.set(`${kebab(m[1]!)}${suf}`, hex[i]!))
+    }
+    return out
+  }
+  const cls = ktBlock(capKt, 'data class KoColors(')
+  const defaults = new Map<string, string>()
+  for (const m of cls.matchAll(/val (\w+): Color = Color\(0xFF([0-9A-Fa-f]{6})\)/g)) defaults.set(kebab(m[1]!), `#${m[2]!.toUpperCase()}`)
+  const body = ktBlock(capKt, `val ${name}KoColors = KoColors(`)
+  return new Map([...defaults, ...knobs(cls), ...ktColors(body), ...knobs(body)])
+}
+
+/** A skin's HwColors, made as a copy of another: its own colours and those it takes from its KoColors. */
+function hwColors(name: string, base: string, of: Map<string, string>, ko: Map<string, string>): Map<string, string> {
+  const body = ktBlock(capKt, `val ${name}HwColors = ${base}HwColors.copy(`)
+  const out = new Map([...of, ...ktColors(body)])
+  for (const m of body.matchAll(/(\w+) = \w+KoColors\.(\w+),/g)) out.set(kebab(m[1]!), ko.get(kebab(m[2]!))!)
+  return out
+}
+
+const HW = ['dark-face', 'dark-edge', 'dark-ink', 'dark-dim', 'light-face', 'light-edge', 'light-ink', 'body', 'led-off']
+
+describe('the skins', () => {
+  const lightKt = kotlinColors('val LightArcColors = ArcColors(')
+  const lightHw = ktColors(ktBlock(capKt, 'val LightHwColors = HwColors('))
+
+  for (const [skin, kt] of [['EP40', 'Ep40'], ['EP1320', 'Ep1320']] as const) {
+    const light = palette(`${kt}Light`, 'Light', lightKt)
+    const dark = palette(`${kt}Dark`, `${kt}Light`, light)
+    const ko = koColors(kt)
+    const hwLight = hwColors(`${kt}Light`, 'Light', lightHw, ko)
+    const hwDark = hwColors(`${kt}Dark`, `${kt}Light`, hwLight, ko)
+
+    it(`${skin}: tokens.css has every colour of its ArcColors, light and dark, and its hatching`, () => {
+      expect(light.size).toBe(34)
+      for (const [sel, pal] of [[`:root[data-skin=${skin}]`, light], [`:root[data-skin=${skin}][data-theme=dark]`, dark]] as const) {
+        const block = cssBlock(sel)
+        expect(new Map([...block].filter(([k]) => !k.startsWith('hatch'))), sel).toEqual(pal)
+        expect(cssHatch(sel), sel).toEqual([pal.get('key-edge'), pal.get('key-edge')])
+      }
+    })
+
+    it(`${skin}: cap.css has its keys and drawn device, and the dark body, LED and edge`, () => {
+      const light = cssVars(capCss, `:root[data-skin=${skin}]`)
+      for (const k of HW) expect(light.get(`hw-${k}`), k).toBe(hwLight.get(k))
+      for (const [k, v] of ko) expect(light.get(`ko-${k}`), k).toBe(v)
+      const dark = cssVars(capCss, `:root[data-skin=${skin}][data-theme=dark]`)
+      for (const k of HW) expect(dark.get(`hw-${k}`), k).toBe(hwDark.get(k))
+      const edge = /ko = \w+KoColors\.copy\(edge = Color\(0xFF([0-9A-Fa-f]{6})\)\)/.exec(ktBlock(capKt, `val ${kt}DarkHwColors = `))
+      expect(dark.get('ko-edge')).toBe(`#${edge![1]!.toUpperCase()}`)
+    })
+
+    it(`${skin}: the browser bar takes its shell`, () => {
+      expect(SKIN_THEME_COLOR[skin]).toEqual({ light: light.get('shell'), dark: dark.get('shell') })
+    })
+  }
 })

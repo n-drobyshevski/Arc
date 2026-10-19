@@ -12,7 +12,8 @@
 // - PickWord's Compose Popup is an absolutely placed listbox anchored to the
 //   word (bottom edge on the word's bottom, so it opens upward over the grid).
 //   Escape, a tap outside or Tab away closes it; arrow keys move through the
-//   choices. Like the focusable Popup, Back closes it: the screen passes
+//   choices ([columns]: a grid, the arrows moving across and down; [down]: it
+//   opens downward, from a row over the piano). Like the focusable Popup, Back closes it: the screen passes
 //   [open] / [onOpen] backed by a navigation layer (dialog 'pick:<what>');
 //   without them it keeps its own state.
 import type { JSX, Ref, TargetedKeyboardEvent } from 'preact'
@@ -77,7 +78,8 @@ export function WordButton(props: WordButtonProps): JSX.Element {
       onKeyDown={props.onKeyDown}
       onClick={onClick}
     >
-      <span class="word__row">
+      {/* What the guide overlay points at: the word, not its whole touch area. */}
+      <span class="word__row" data-coach-box={props['data-coach'] ? '' : undefined}>
         {mark && <SwapMark />}
         <span class="word__text">{label}</span>
       </span>
@@ -98,11 +100,17 @@ export interface PickWordProps<T> {
   /** Whether the list is open, when the caller keeps it (a navigation layer, so Back closes it). */
   open?: boolean
   onOpen?: (open: boolean) => void
+  /** A grid this many choices wide, filled row by row (the keys' two rows of six). */
+  columns?: number
+  /** The list opens downward (a row over the keys); else upward, over the grid above the word. */
+  down?: boolean
+  /** The word in the middle of its touch area (a row over the keys) rather than at its top. */
+  middle?: boolean
 }
 
 /** A word showing a choice ("MAJOR ▾"); a tap lists the choices over the grid, the chosen one marked. */
 export function PickWord<T>(props: PickWordProps<T>): JSX.Element {
-  const { label, options, selected, name, onPick, description, alignEnd = false, coach } = props
+  const { label, options, selected, name, onPick, description, alignEnd = false, coach, columns } = props
   const [own, setOwn] = useState(false)
   const open = props.open ?? own
   const onOpen = useRef(props.onOpen)
@@ -149,8 +157,11 @@ export function PickWord<T>(props: PickWordProps<T>): JSX.Element {
     const items = [...(list.current?.querySelectorAll<HTMLElement>('[role=option]') ?? [])]
     const at = items.indexOf(document.activeElement as HTMLElement)
     let next: number | null = null
-    if (e.key === 'ArrowDown') next = Math.min(items.length - 1, at + 1)
-    else if (e.key === 'ArrowUp') next = Math.max(0, at - 1)
+    const row = columns ?? 1
+    if (e.key === 'ArrowDown') next = Math.min(items.length - 1, at + row)
+    else if (e.key === 'ArrowUp') next = Math.max(0, at - row)
+    else if (columns && e.key === 'ArrowRight') next = Math.min(items.length - 1, at + 1)
+    else if (columns && e.key === 'ArrowLeft') next = Math.max(0, at - 1)
     else if (e.key === 'Home') next = 0
     else if (e.key === 'End') next = items.length - 1
     else if (e.key === 'Escape') {
@@ -174,7 +185,7 @@ export function PickWord<T>(props: PickWordProps<T>): JSX.Element {
         label={`${label} ▾`}
         onClick={() => setOpen(!open)}
         description={description}
-        top
+        top={!props.middle}
         aria-haspopup="listbox"
         aria-expanded={open}
         data-coach={coach?.id}
@@ -185,7 +196,8 @@ export function PickWord<T>(props: PickWordProps<T>): JSX.Element {
       {open && (
         <div
           ref={list}
-          class={`pick__list${alignEnd ? ' pick__list--end' : ''}`}
+          class={`pick__list${alignEnd ? ' pick__list--end' : ''}${props.down ? ' pick__list--down' : ''}${columns ? ' pick__list--grid' : ''}`}
+          style={columns ? { gridTemplateColumns: `repeat(${columns}, minmax(52px, auto))` } : undefined}
           role="listbox"
           aria-label={description}
           onKeyDown={onListKey}

@@ -1,4 +1,7 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (ArcToast) */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (ArcToast)
+ *
+ * Web only, from 1024px wide (the desk): the host spans the page column (right
+ * of the nav rail, inside the ruled edges), so the toast centres over the page. */
 
 .toast-host {
   position: fixed;
@@ -78,6 +81,13 @@
   text-transform: uppercase;
 }
 
+@media (min-width: 1024px) {
+  .toast-host {
+    left: calc(var(--desk-gutter) + var(--rail-width));
+    right: var(--desk-gutter);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .toast.is-returning, .toast.is-leaving { transition: none; }
 }
@@ -97,9 +107,57 @@
 
 /* ArcType.body15 at SemiBold */
 .toast__text {
+  flex: 1 1 auto;
   min-width: 0;
   padding: 14px 16px;
   font-size: var(--size-body15);
   font-weight: 600;
   line-height: 1.5;
+}
+
+/* Web: the toast's key (Live's UNDO): capsKey in signal orange, the toast's height to tap. */
+.toast__action {
+  flex: none;
+  align-self: stretch;
+  min-width: var(--tap-min);
+  padding: 0 var(--space-16);
+  border: 0;
+  background: none;
+  color: var(--signal);
+  font: inherit;
+  font-size: var(--size-caps-key);
+  font-weight: 700;
+  letter-spacing: var(--track-caps-key);
+  text-transform: uppercase;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.toast__action:focus-visible { outline: var(--focus-ring); outline-offset: -3px; }
+
+/* A short window (under 480 high, Kotlin Window.kt's short) with a top bar whose middle is at
+ * least 200 wide (TopBar's data-bar-slot): the toast sits over that middle, between the tag and the
+ * keys, centred on the bar (Kotlin: the slot's middle less 22), as wide as it. Two lines at most
+ * there, a size down; a tap unfolds the rest. Elsewhere, at the bottom as ever. */
+@media (max-height: 479.98px) {
+  :root[data-bar-slot] .toast-host {
+    top: max(0px, calc(var(--bar-slot-mid) - 22px));
+    bottom: auto;
+    left: var(--bar-slot-left);
+    right: auto;
+    width: var(--bar-slot-width);
+    padding: 0;
+  }
+  :root[data-bar-slot] .toast-live { padding: 0; }
+  :root[data-bar-slot] .toast-frame { max-width: none; }
+  :root[data-bar-slot] .toast__text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    padding-block: 12px;
+    font-size: 13px;
+  }
+  :root[data-bar-slot] .toast.is-unfolded .toast__text { display: block; -webkit-line-clamp: unset; }
+  /* One line is as tall as the display line beside it (44). */
+  :root[data-bar-slot] .toast { min-height: 44px; }
 }

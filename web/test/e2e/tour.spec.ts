@@ -8,7 +8,7 @@
 // Screenshots are attached to the report for a look next to the Android
 // TourScreenshots (no pixel diff).
 import type { Page, TestInfo } from '@playwright/test'
-import { demo, expect, notAutomated, test } from './fixtures'
+import { demo, expect, notAutomated, openSettings, test } from './fixtures'
 
 const tourOf = (page: Page) => page.getByRole('dialog', { name: 'Try arc' })
 /** The step card on screen (the overlay also keeps an unseen copy it measures, hidden from screen readers). */
@@ -41,6 +41,9 @@ async function shot(page: Page, testInfo: TestInfo, what: string): Promise<void>
 for (const size of [
   { width: 393, height: 852 },
   { width: 360, height: 780 },
+  // The desktop layout (from 1024 wide: the nav rail, the desk) and a phone on its side.
+  { width: 1280, height: 800 },
+  { width: 852, height: 393 },
 ]) {
   test.describe(`${size.width}x${size.height}`, () => {
     test.use({ viewport: size })
@@ -101,8 +104,15 @@ for (const size of [
         await expect(tour.getByRole('heading', { name: 'Back up your EP-133' })).toBeVisible()
       })
 
-      await test.step('Back up: the progress sheet, then the toast', async () => {
+      await test.step('Back up: on Backups, the key ringed; the progress sheet, then the toast', async () => {
         await expect(card.getByText('Step 4 of 4')).toBeVisible()
+        // The step shows on Backups, its spotlight on the Back up key (the big one before the first backup).
+        await expect(page).toHaveURL(/#\/backups$/)
+        await expect(page.locator('.coach__hole')).toBeVisible()
+        const key = page.locator('[data-coach="backups.backup"]')
+        const [hole, box] = [await page.locator('.coach__hole').boundingBox(), await key.boundingBox()]
+        if (hole === null || box === null) throw new Error('no hole or no Back up key')
+        expect(hole.x <= box.x + 1 && hole.y <= box.y + 1 && hole.x + hole.width >= box.x + box.width - 1 && hole.y + hole.height >= box.y + box.height - 1).toBe(true)
         await expect(card.getByText('arc saves every sound and project on the EP-133 in this browser. Nothing on it is changed.')).toBeVisible()
         await shot(page, testInfo, '5-backup')
         await tour.getByRole('button', { name: 'Back up device' }).click()
@@ -112,11 +122,14 @@ for (const size of [
         await expect(page.getByRole('status').filter({ hasText: 'Saved 12 sounds and 3 projects.' })).toBeVisible()
       })
 
-      await test.step('Done: the three tags, then Done closes it', async () => {
+      await test.step('Done, back on Live: the three tags, then Done closes it', async () => {
         await expect(tour.getByRole('heading', { name: "That's the basics" })).toBeVisible()
+        await expect(page).toHaveURL(/#\/live$/)
         await expect(card.getByText('Settings has Try arc again for the steps you skipped.')).toHaveCount(0)
-        for (const id of ['top.help', 'edge.guide', 'side.more']) await expect(page.locator(`[data-coach-tag="${id}"]`)).toBeVisible()
-        await expect(page.locator('[data-coach-tag]')).toHaveCount(3)
+        // The desk docks Live tools in a column: no strip to tag there.
+        const tags = size.width >= 1024 ? ['top.help', 'edge.guide'] : ['top.help', 'edge.guide', 'side.more']
+        for (const id of tags) await expect(page.locator(`[data-coach-tag="${id}"]`)).toBeVisible()
+        await expect(page.locator('[data-coach-tag]')).toHaveCount(tags.length)
         await shot(page, testInfo, '6-done')
         await tour.getByRole('button', { name: 'Done', exact: true }).click()
         await expect(tour).toBeHidden()
@@ -160,7 +173,7 @@ test('the cable pulled during Pad turns the card into Connect; Back pauses; Sett
   await expect(page).toHaveURL(/#\/live$/)
 
   // Settings → Help → Try arc again starts over on Live.
-  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click()
+  await openSettings(page)
   await expect(page.getByRole('heading', { name: 'Help' })).toBeVisible()
   await expect(page.getByText('A few short steps on the real screen: connect, play a pad, back up.')).toBeVisible()
   await page.getByRole('button', { name: 'Try arc again' }).click()
@@ -170,7 +183,7 @@ test('the cable pulled during Pad turns the card into Connect; Back pauses; Sett
   await expect(tour).toBeHidden()
 
   // Settings → Help → What's what: Show opens the guide overlay.
-  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click()
+  await openSettings(page)
   await page.getByRole('button', { name: "What's what: Show" }).click()
   const coach = page.getByRole('dialog', { name: "What's what" })
   await expect(coach).toBeVisible()

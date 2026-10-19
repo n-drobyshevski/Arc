@@ -11,13 +11,14 @@
 //
 // Web deltas:
 // - SharedPreferences "settings" becomes the JSON object under "arc.settings"
-//   (same field names; keepLast stored as 0 for "keep all", as Android stores
-//   it). Like the preferences, it holds only the fields ever changed.
+//   (same field names; keepLast stored as 0 for "keep all" and pianoWhites as
+//   0 for Auto, as Android stores them). Like the preferences, it holds only the fields ever changed.
 //   SharedPreferences "mirror" (learned, order, keysPad) becomes
 //   "arc.mirror.learned", "arc.mirror.order" and "arc.mirror.keysPad"; the
 //   activity's old coach_seen becomes "arc.coachSeen" (read once, as Android
 //   reads it, to carry over into guideSeen). Live's last read (Android's
-//   files/live-last.json) is "arc.live". asked_notifications has no web
+//   files/live-last.json) is "arc.live", its pad changes made offline
+//   (files/live-pads.json) "arc.live.pads". asked_notifications has no web
 //   equivalent and is dropped.
 // - Reads are synchronous (before the first render, so the theme never
 //   flashes). The Storage is injectable; tests (and ?demo) use [memoryStorage].
@@ -28,11 +29,20 @@ import { LearnedLinks } from '../../core/features/learnedLinks'
 import { physicalPad, type PhysicalPad } from '../../core/features/padNotes'
 import { PadOrder } from '../../core/features/padPush'
 import { Tour } from '../../core/features/tour'
-import { ThemeChoice } from '../../core/text/settingsText'
+import { KeysView, choiceOf as pianoChoiceOf, keysViewOf } from '../../core/features/piano'
+import { ArpOrder, ArpSettings } from '../../core/features/arp'
+import { FactoryKit, type FactoryKitId } from '../../core/features/factorySounds'
+import { SampleSource } from '../../core/features/sampleSource'
+import { Timing, TimingSettings } from '../../core/features/pattern'
+import { SwitchTime } from '../../core/features/scenes'
+import { Tempo } from '../../core/features/tempo'
+import { SkinChoice, ThemeChoice } from '../../core/text/settingsText'
 
 /** The settings page's choices (an addition to the web version). */
 export interface AppSettings {
   readonly theme: ThemeChoice
+  /** The EP the app is dressed as, light or dark as [theme] says. */
+  readonly skin: SkinChoice
   readonly autoConnect: boolean
   readonly keepScreenOn: boolean
   /** How many backups to keep; null keeps all. */
@@ -51,14 +61,94 @@ export interface AppSettings {
   readonly keysOctave: number
   /** KEYS names notes in solfège (DO RE MI) or letters (C D E). */
   readonly keysNames: NoteNames
+  /** KEYS writes each key's note name in its ring (off: rings and octave numbers only). */
+  readonly keysShowNames: boolean
+  /** KEYS on the grid or the piano, remembered once for a wide window and once for a tall one. */
+  readonly keysViewWide: KeysView
+  readonly keysViewTall: KeysView
+  /** The piano's white keys (Piano.WHITES); null is Auto, the widest that fits. */
+  readonly pianoWhites: number | null
+  /** A light tick (navigator.vibrate) when a pad or key goes down under a finger. */
+  readonly haptics: boolean
+  /** Make up for Bluetooth delay: the playhead, a press's place and the click on the EP-133's clock follow what is heard. */
+  readonly makeUpDelay: boolean
+  /** SAMPLE's input (an addition): its source and whether it records in stereo. */
+  readonly sampleSource: SampleSource
+  readonly sampleStereo: boolean
+  /** SAMPLE's LEVEL per source, in dB: the mic is quiet, so it starts higher. */
+  readonly sampleGainMic: number
+  readonly sampleGainRsp: number
+  readonly sampleGainUsb: number
+  /** SAMPLE's threshold in dBFS; null records from the press. */
+  readonly sampleThreshold: number | null
+  /** The bars a hands-free take lasts, after a bar's count-in; null (Free) runs until STOP. */
+  readonly sampleBars: number | null
+  /** A take opens the review sheet before it goes on its pad (off: straight on, as on the EP-133). */
+  readonly reviewSamples: boolean
+  /** The review's switches, kept for the next take. */
+  readonly sampleNormalize: boolean
+  readonly sampleTrimSilence: boolean
+  /** BARS on PTN: a hands-free take lasts the pattern's length, from its next loop start. */
+  readonly samplePattern: boolean
+  /** The factory kit Live plays offline (FactoryKit.id): the EP-133's, or the EP-40's or the EP-1320's once saved. */
+  readonly factoryKit: FactoryKitId
   /** "Try arc": the steps done and skipped (Tour.encode), so a tour left half way resumes. */
   readonly tourSteps: string
   /** "Try arc" was finished (Done or Not now): it never starts by itself again. */
   readonly tourDone: boolean
 }
 
+/** SAMPLE's LEVEL for the mic until one is chosen, in dB. */
+export const SAMPLE_GAIN_MIC = 12
+
+/** The LEVEL knob's range, in dB. */
+export const SAMPLE_GAINS = { min: -12, max: 30 } as const
+
+/** The threshold knob's range in dBFS, below Off. */
+export const SAMPLE_THRESHOLDS = { min: -60, max: 0 } as const
+
+/** BARS' choices for a hands-free take: Free (null), then these. */
+export const SAMPLE_BARS: readonly number[] = [1, 2, 4, 8, 16]
+
+/** [s]'s LEVEL for [source], in dB (AppSettings.sampleGain). */
+export function sampleGain(s: AppSettings, source: SampleSource): number {
+  return source === 'mic' ? s.sampleGainMic : source === 'rsp' ? s.sampleGainRsp : s.sampleGainUsb
+}
+
+/** [s] with [source]'s LEVEL at [db] (AppSettings.withSampleGain). */
+export function withSampleGain(s: AppSettings, source: SampleSource, db: number): AppSettings {
+  return source === 'mic' ? { ...s, sampleGainMic: db } : source === 'rsp' ? { ...s, sampleGainRsp: db } : { ...s, sampleGainUsb: db }
+}
+
+const inRange = (v: number, r: { readonly min: number; readonly max: number }): boolean => v >= r.min && v <= r.max
+
+/** A stored LEVEL in range, else null (sampleGainOf). */
+export function sampleGainOf(db: number | null | undefined): number | null {
+  return typeof db === 'number' && Number.isFinite(db) && inRange(db, SAMPLE_GAINS) ? db : null
+}
+
+/** A stored threshold: "off" (or anything unreadable or out of range) is none (sampleThresholdOf). */
+export function sampleThresholdOf(stored: string | null | undefined): number | null {
+  if (stored == null) return null
+  const v = ktToFloatOrNull(stored)
+  return v !== null && inRange(v, SAMPLE_THRESHOLDS) ? v : null
+}
+
+/** Kotlin's String.toFloatOrNull, for the numbers Float.toString writes ("12.0", "-6.5"). */
+function ktToFloatOrNull(s: string): number | null {
+  if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?[fFdD]?$/.test(s)) return null
+  const v = Number.parseFloat(s)
+  return Number.isFinite(v) ? Math.fround(v) : null
+}
+
+/** A Float as Kotlin's toString writes it: "12.0", "-6.5". */
+function ktFloat(v: number): string {
+  return Number.isInteger(v) ? `${v}.0` : String(v)
+}
+
 export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   theme: ThemeChoice.SYSTEM,
+  skin: SkinChoice.EP133,
   autoConnect: true,
   keepScreenOn: true,
   keepLast: null,
@@ -71,6 +161,24 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   keysScale: Scale.CHROMATIC,
   keysOctave: 4,
   keysNames: NoteNames.SOLFEGE,
+  keysShowNames: true,
+  keysViewWide: KeysView.AUTO,
+  keysViewTall: KeysView.AUTO,
+  pianoWhites: null,
+  haptics: true,
+  makeUpDelay: true,
+  sampleSource: 'mic',
+  sampleStereo: false,
+  sampleGainMic: SAMPLE_GAIN_MIC,
+  sampleGainRsp: 0,
+  sampleGainUsb: 0,
+  sampleThreshold: null,
+  sampleBars: null,
+  reviewSamples: true,
+  sampleNormalize: false,
+  sampleTrimSilence: false,
+  samplePattern: false,
+  factoryKit: FactoryKit.EP133.id,
   tourSteps: '',
   tourDone: false,
 })
@@ -78,6 +186,7 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
 /** Every setting's key, in Android's order (SettingsStore.values()). */
 export const SETTING_KEYS = Object.freeze([
   'theme',
+  'skin',
   'autoConnect',
   'keepScreenOn',
   'keepLast',
@@ -89,6 +198,24 @@ export const SETTING_KEYS = Object.freeze([
   'keysScale',
   'keysOctave',
   'keysNames',
+  'keysShowNames',
+  'keysViewWide',
+  'keysViewTall',
+  'pianoWhites',
+  'haptics',
+  'makeUpDelay',
+  'sampleSource',
+  'sampleStereo',
+  'sampleGainMic',
+  'sampleGainRsp',
+  'sampleGainUsb',
+  'sampleThreshold',
+  'sampleBars',
+  'reviewSamples',
+  'sampleNormalize',
+  'sampleTrimSilence',
+  'samplePattern',
+  'factoryKit',
   'tourSteps',
   'tourDone',
 ] as const)
@@ -100,6 +227,9 @@ export const ORDER_KEY = 'arc.mirror.order'
 export const KEYS_PAD_KEY = 'arc.mirror.keysPad'
 export const COACH_KEY = 'arc.coachSeen'
 export const LIVE_KEY = 'arc.live'
+export const LIVE_PADS_KEY = 'arc.live.pads'
+/** EDIT's pad settings turned offline (OfflinePadSettings JSON; Android's files/live-pad-settings.json). */
+export const LIVE_PAD_SETTINGS_KEY = 'arc.live.padSettings'
 
 /** The DOM Storage calls used here. */
 export interface KeyValueStorage {
@@ -207,6 +337,11 @@ export function ktToBooleanStrictOrNull(s: string): boolean | null {
   return s === 'true' ? true : s === 'false' ? false : null
 }
 
+/** SkinChoice.valueOf, or null. */
+function skinOf(v: unknown): SkinChoice | null {
+  return v === SkinChoice.EP133 || v === SkinChoice.EP40 || v === SkinChoice.EP1320 ? v : null
+}
+
 /** ThemeChoice.valueOf, or null. */
 function themeOf(v: unknown): ThemeChoice | null {
   return v === ThemeChoice.SYSTEM || v === ThemeChoice.LIGHT || v === ThemeChoice.DARK ? v : null
@@ -236,6 +371,7 @@ export function readSettings(raw: string | null): AppSettings {
   const keep = o.keepLast
   return {
     theme: themeOf(o.theme) ?? ThemeChoice.SYSTEM,
+    skin: skinOf(o.skin) ?? SkinChoice.EP133,
     autoConnect: bool('autoConnect', true),
     keepScreenOn: bool('keepScreenOn', true),
     // getInt("keepLast", 0).takeIf { it > 0 }
@@ -248,14 +384,38 @@ export function readSettings(raw: string | null): AppSettings {
     keysScale: scaleOf(typeof o.keysScale === 'string' ? o.keysScale : null) ?? Scale.CHROMATIC,
     keysOctave: coerceIn(int('keysOctave', 4), MIN_OCTAVE, MAX_OCTAVE),
     keysNames: noteNamesOf(typeof o.keysNames === 'string' ? o.keysNames : null) ?? NoteNames.SOLFEGE,
+    keysShowNames: bool('keysShowNames', true),
+    keysViewWide: keysViewOf(typeof o.keysViewWide === 'string' ? o.keysViewWide : null) ?? KeysView.AUTO,
+    keysViewTall: keysViewOf(typeof o.keysViewTall === 'string' ? o.keysViewTall : null) ?? KeysView.AUTO,
+    // getInt("pianoWhites", 0): 0 (or any size arc doesn't offer) is Auto.
+    pianoWhites: pianoChoiceOf(int('pianoWhites', 0)),
+    haptics: bool('haptics', true),
+    makeUpDelay: bool('makeUpDelay', true),
+    sampleSource: (typeof o.sampleSource === 'string' ? SampleSource.of(o.sampleSource) : null) ?? 'mic',
+    sampleStereo: bool('sampleStereo', false),
+    sampleGainMic: sampleGainOf(o.sampleGainMic as number) ?? SAMPLE_GAIN_MIC,
+    sampleGainRsp: sampleGainOf(o.sampleGainRsp as number) ?? 0,
+    sampleGainUsb: sampleGainOf(o.sampleGainUsb as number) ?? 0,
+    sampleThreshold: typeof o.sampleThreshold === 'number' ? sampleThresholdOf(ktFloat(o.sampleThreshold)) : null,
+    sampleBars: SAMPLE_BARS.includes(int('sampleBars', 0)) ? int('sampleBars', 0) : null,
+    reviewSamples: bool('reviewSamples', true),
+    sampleNormalize: bool('sampleNormalize', false),
+    sampleTrimSilence: bool('sampleTrimSilence', false),
+    samplePattern: bool('samplePattern', false),
+    factoryKit: FactoryKit.ofId(typeof o.factoryKit === 'string' ? o.factoryKit : null)?.id ?? FactoryKit.EP133.id,
     tourSteps: str('tourSteps', ''),
     tourDone: bool('tourDone', false),
   }
 }
 
-/** One setting as it is stored under "arc.settings" (booleans and numbers as JSON, keepLast 0 for keep all). */
+/** One setting as it is stored under "arc.settings" (booleans and numbers as JSON, keepLast and pianoWhites 0 for keep all / Auto). */
 function storedValue(s: AppSettings, k: SettingKey): string | number | boolean {
-  return k === 'keepLast' ? (s.keepLast ?? 0) : s[k]
+  if (k === 'keepLast') return s.keepLast ?? 0
+  if (k === 'pianoWhites') return s.pianoWhites ?? 0
+  // Off and Free: "off" and 0, as on Android.
+  if (k === 'sampleThreshold') return s.sampleThreshold ?? 'off'
+  if (k === 'sampleBars') return s.sampleBars ?? 0
+  return s[k]
 }
 
 /**
@@ -273,6 +433,7 @@ export function writeSettings(s: AppSettings, keys: Iterable<SettingKey> = SETTI
 export function settingValues(s: AppSettings): Record<SettingKey, string> {
   return {
     theme: s.theme,
+    skin: s.skin,
     autoConnect: String(s.autoConnect),
     keepScreenOn: String(s.keepScreenOn),
     keepLast: String(s.keepLast ?? 0),
@@ -284,6 +445,25 @@ export function settingValues(s: AppSettings): Record<SettingKey, string> {
     keysScale: s.keysScale,
     keysOctave: String(s.keysOctave),
     keysNames: s.keysNames,
+    keysShowNames: String(s.keysShowNames),
+    keysViewWide: s.keysViewWide,
+    keysViewTall: s.keysViewTall,
+    // Stored like keepLast: 0 for Auto.
+    pianoWhites: String(s.pianoWhites ?? 0),
+    haptics: String(s.haptics),
+    makeUpDelay: String(s.makeUpDelay),
+    sampleSource: s.sampleSource,
+    sampleStereo: String(s.sampleStereo),
+    sampleGainMic: ktFloat(s.sampleGainMic),
+    sampleGainRsp: ktFloat(s.sampleGainRsp),
+    sampleGainUsb: ktFloat(s.sampleGainUsb),
+    sampleThreshold: s.sampleThreshold === null ? 'off' : ktFloat(s.sampleThreshold),
+    sampleBars: String(s.sampleBars ?? 0),
+    reviewSamples: String(s.reviewSamples),
+    sampleNormalize: String(s.sampleNormalize),
+    sampleTrimSilence: String(s.sampleTrimSilence),
+    samplePattern: String(s.samplePattern),
+    factoryKit: s.factoryKit,
     tourSteps: s.tourSteps,
     tourDone: String(s.tourDone),
   }
@@ -322,8 +502,15 @@ export function settingsFromIndex(map: Readonly<Record<string, string>>, cur: Ap
   const keep = keepN !== null && keepN > 0 ? keepN : null
   const root = n('app.keysRoot')
   const octave = n('app.keysOctave')
+  // 0 is Auto; a size arc doesn't offer leaves the choice as it is.
+  const whites = n('app.pianoWhites')
+  const floatOf = (k: string): number | null => {
+    const v = get(map, k)
+    return v === undefined ? null : ktToFloatOrNull(v)
+  }
   return {
     theme: themeOf(get(map, 'app.theme')) ?? cur.theme,
+    skin: skinOf(get(map, 'app.skin')) ?? cur.skin,
     autoConnect: b('app.autoConnect') ?? cur.autoConnect,
     keepScreenOn: b('app.keepScreenOn') ?? cur.keepScreenOn,
     keepLast: keep ?? (has(map, 'app.keepLast') ? null : cur.keepLast),
@@ -335,6 +522,24 @@ export function settingsFromIndex(map: Readonly<Record<string, string>>, cur: Ap
     keysScale: scaleOf(get(map, 'app.keysScale')) ?? cur.keysScale,
     keysOctave: octave !== null && octave >= MIN_OCTAVE && octave <= MAX_OCTAVE ? octave : cur.keysOctave,
     keysNames: noteNamesOf(get(map, 'app.keysNames')) ?? cur.keysNames,
+    keysShowNames: b('app.keysShowNames') ?? cur.keysShowNames,
+    keysViewWide: keysViewOf(get(map, 'app.keysViewWide')) ?? cur.keysViewWide,
+    keysViewTall: keysViewOf(get(map, 'app.keysViewTall')) ?? cur.keysViewTall,
+    pianoWhites: whites === null ? cur.pianoWhites : whites === 0 ? null : (pianoChoiceOf(whites) ?? cur.pianoWhites),
+    haptics: b('app.haptics') ?? cur.haptics,
+    makeUpDelay: b('app.makeUpDelay') ?? cur.makeUpDelay,
+    sampleSource: SampleSource.of(get(map, 'app.sampleSource') ?? '') ?? cur.sampleSource,
+    sampleStereo: b('app.sampleStereo') ?? cur.sampleStereo,
+    sampleGainMic: sampleGainOf(floatOf('app.sampleGainMic')) ?? cur.sampleGainMic,
+    sampleGainRsp: sampleGainOf(floatOf('app.sampleGainRsp')) ?? cur.sampleGainRsp,
+    sampleGainUsb: sampleGainOf(floatOf('app.sampleGainUsb')) ?? cur.sampleGainUsb,
+    sampleThreshold: ((v) => (v === undefined ? cur.sampleThreshold : v === 'off' ? null : (sampleThresholdOf(v) ?? cur.sampleThreshold)))(get(map, 'app.sampleThreshold')),
+    sampleBars: ((v) => (v === null ? cur.sampleBars : v === 0 ? null : SAMPLE_BARS.includes(v) ? v : cur.sampleBars))(n('app.sampleBars')),
+    reviewSamples: b('app.reviewSamples') ?? cur.reviewSamples,
+    sampleNormalize: b('app.sampleNormalize') ?? cur.sampleNormalize,
+    sampleTrimSilence: b('app.sampleTrimSilence') ?? cur.sampleTrimSilence,
+    samplePattern: b('app.samplePattern') ?? cur.samplePattern,
+    factoryKit: FactoryKit.ofId(get(map, 'app.factoryKit'))?.id ?? cur.factoryKit,
     // Taken as it is when it reads as the tour's progress (LibraryIndex.merge joined the folder's copies).
     tourSteps: tourStepsOf(get(map, 'app.tourSteps')) ?? cur.tourSteps,
     tourDone: b('app.tourDone') ?? cur.tourDone,
@@ -629,6 +834,136 @@ export class LastReadPrefs {
       this.storage.setItem(LIVE_KEY, json)
     } catch {
       // Kept in memory for this session (the controller holds it).
+    }
+  }
+}
+
+/**
+ * Live's pad changes made offline (the OfflinePads JSON), kept until the
+ * EP-133 connects and they are written or discarded, or until Reset pads
+ * (Android's files/live-pads.json). Not copied to the library folder.
+ */
+export class OfflinePadsPrefs {
+  /** [key]: LIVE_PAD_SETTINGS_KEY keeps EDIT's pad settings turned offline the same way. */
+  constructor(
+    private readonly storage: KeyValueStorage = browserStorage(),
+    private readonly key: string = LIVE_PADS_KEY,
+  ) {}
+
+  load(): string | null {
+    try {
+      return this.storage.getItem(this.key)
+    } catch {
+      return null
+    }
+  }
+
+  /** Null removes them. */
+  save(json: string | null): void {
+    try {
+      if (json === null) this.storage.removeItem(this.key)
+      else this.storage.setItem(this.key, json)
+    } catch {
+      // Kept in memory for this session (the controller holds them).
+    }
+  }
+}
+
+/**
+ * PATTERN's settings (AppSettings.kt's timingInterval, timingSwing,
+ * timingQuantize, patternCountIn, patternAutoLength, liveTempo, sceneSwitch
+ * and the arp's), under
+ * Android's names. Web delta: kept apart from AppSettings, in their own
+ * localStorage key, and not written into library.json.
+ */
+export interface PatternSettings {
+  readonly timing: TimingSettings
+  /** RECORD then PLAY counts a bar in first. */
+  readonly countIn: boolean
+  /** An empty group recorded from stop ends where recording stops. */
+  readonly autoLength: boolean
+  /** The pattern's tempo while the EP-133 sends no clock. */
+  readonly liveTempo: number
+  /** When a pattern or scene picked while playing takes over (SCENE's CHANGE; Kotlin sceneSwitch). */
+  readonly sceneSwitch: SwitchTime
+  /** ARP (KEYS) / RPT (PADS) on. */
+  readonly arpOn: boolean
+  /** The arp's order, octaves, gate and LATCH (Kotlin arpOrder, arpOctaves, arpGate, arpLatch). */
+  readonly arp: ArpSettings
+}
+
+export const DEFAULT_PATTERN_SETTINGS: PatternSettings = Object.freeze({
+  timing: TimingSettings.DEFAULT,
+  countIn: true,
+  autoLength: false,
+  liveTempo: Tempo.DEFAULT,
+  sceneSwitch: SwitchTime.DEFAULT,
+  arpOn: false,
+  arp: ArpSettings.DEFAULT,
+})
+
+export const PATTERN_KEY = 'arc.pattern'
+
+// A whole number in [lo]..[hi], else null.
+function intIn(v: unknown, lo: number, hi: number): number | null {
+  return typeof v === 'number' && Number.isInteger(v) && v >= lo && v <= hi ? v : null
+}
+
+export class PatternPrefs {
+  constructor(private readonly storage: KeyValueStorage = browserStorage()) {}
+
+  load(): PatternSettings {
+    let o: Record<string, unknown>
+    try {
+      const raw = this.storage.getItem(PATTERN_KEY)
+      const v: unknown = raw === null ? null : JSON.parse(raw)
+      if (typeof v !== 'object' || v === null || Array.isArray(v)) return DEFAULT_PATTERN_SETTINGS
+      o = v as Record<string, unknown>
+    } catch {
+      return DEFAULT_PATTERN_SETTINGS
+    }
+    const d = DEFAULT_PATTERN_SETTINGS
+    const interval = typeof o.timingInterval === 'string' ? Timing.of(o.timingInterval) : null
+    const swing = typeof o.timingSwing === 'number' && Number.isInteger(o.timingSwing) ? o.timingSwing : null
+    return {
+      timing: TimingSettings.of({
+        interval: interval ?? d.timing.interval,
+        swing: swing !== null && swing >= TimingSettings.SWING_MIN && swing <= TimingSettings.SWING_MAX ? swing : d.timing.swing,
+        quantize: typeof o.timingQuantize === 'boolean' ? o.timingQuantize : d.timing.quantize,
+      }),
+      countIn: typeof o.patternCountIn === 'boolean' ? o.patternCountIn : d.countIn,
+      autoLength: typeof o.patternAutoLength === 'boolean' ? o.patternAutoLength : d.autoLength,
+      liveTempo: typeof o.liveTempo === 'number' && Number.isFinite(o.liveTempo) ? Tempo.clamp(Math.round(o.liveTempo)) : d.liveTempo,
+      sceneSwitch: (typeof o.sceneSwitch === 'string' ? SwitchTime.of(o.sceneSwitch) : null) ?? d.sceneSwitch,
+      arpOn: typeof o.arpOn === 'boolean' ? o.arpOn : d.arpOn,
+      arp: ArpSettings.of({
+        order: (typeof o.arpOrder === 'string' ? ArpOrder.of(o.arpOrder) : null) ?? d.arp.order,
+        octaves: intIn(o.arpOctaves, ArpSettings.MIN_OCTAVES, ArpSettings.MAX_OCTAVES) ?? d.arp.octaves,
+        gate: intIn(o.arpGate, ArpSettings.MIN_GATE, ArpSettings.MAX_GATE) ?? d.arp.gate,
+        latch: typeof o.arpLatch === 'boolean' ? o.arpLatch : d.arp.latch,
+      }),
+    }
+  }
+
+  save(p: PatternSettings): void {
+    const o = {
+      timingInterval: p.timing.interval,
+      timingSwing: p.timing.swing,
+      timingQuantize: p.timing.quantize,
+      patternCountIn: p.countIn,
+      patternAutoLength: p.autoLength,
+      liveTempo: p.liveTempo,
+      sceneSwitch: p.sceneSwitch,
+      arpOn: p.arpOn,
+      arpOrder: p.arp.order,
+      arpOctaves: p.arp.octaves,
+      arpGate: p.arp.gate,
+      arpLatch: p.arp.latch,
+    }
+    try {
+      this.storage.setItem(PATTERN_KEY, JSON.stringify(o))
+    } catch {
+      // Kept in memory for this session (the controller holds them).
     }
   }
 }

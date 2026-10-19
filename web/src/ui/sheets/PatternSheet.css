@@ -1,0 +1,62 @@
+/* Port of PatternSheet.kt's look: the four groups' lengths as caps, − the
+ * length +, the lengths offered and ×2, TIMING's two rows, the switches. */
+
+.pattern-sheet__title { margin: 0; color: var(--ink); }
+.pattern-sheet__groups { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.pattern-group {
+  min-height: 52px;
+  padding: 7px 4px;
+  border-radius: 10px;
+  border: 1px solid var(--key-edge);
+  background: var(--key);
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font: inherit;
+  cursor: pointer;
+}
+.pattern-group.is-picked { background: var(--navy); border-color: var(--navy); color: var(--on-navy); }
+.pattern-group__head { display: inline-flex; align-items: center; gap: 5px; }
+.pattern-group__dot { width: 5px; height: 5px; border-radius: 50%; background: var(--signal); }
+.pattern-group__bars { color: var(--graphite); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pattern-group.is-picked .pattern-group__bars { color: var(--on-navy); opacity: 0.8; }
+
+.pattern-sheet__length { display: flex; align-items: center; justify-content: center; gap: 14px; }
+.pattern-sheet__bars {
+  width: 150px;
+  max-width: 50%;
+  text-align: center;
+  font-size: 24px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.pattern-step {
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  border: 1px solid var(--key-edge);
+  background: var(--key);
+  color: var(--ink);
+  font: inherit;
+  font-size: 26px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  touch-action: none;
+}
+.pattern-step:disabled { opacity: 0.45; cursor: default; }
+.pattern-sheet__lengths { display: flex; align-items: center; gap: 8px; }
+.pattern-sheet__seg { flex: 1 1 auto; min-width: 0; }
+.pattern-sheet__keys { display: flex; gap: 10px; }
+.pattern-sheet__keys > * { flex: 1 1 0; min-width: 0; }
+.pattern-sheet__note { margin: 0; color: var(--graphite); }
+.pattern-sheet__ask { margin: 0; color: var(--ink); }
+/* The panel scrolls: nothing in it shrinks to fit (the plate would cut its last row). */
+.pattern-sheet .sheet__panel > * { flex-shrink: 0; }
+.pattern-sheet__double { flex: none; white-space: nowrap; }

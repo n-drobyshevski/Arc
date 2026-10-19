@@ -1,0 +1,346 @@
+// SAMPLE in the controller (ArcController.kt's SAMPLE section, state/sample.ts):
+// the mode opens RSP on Live's mix, a held pad records into it, a tap plays
+// it instead, LATCH records hands-free; a take goes onto the review sheet and
+// KEEP puts it on its pad: connected it uploads, offline it waits as a recorded
+// change for Write (or goes to Takes when the changes are discarded).
+import 'fake-indexeddb/auto'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { physicalPad } from '../../src/core/features/padNotes'
+import { SampleCapture } from '../../src/core/features/sampleCapture'
+import { SoundSource } from '../../src/core/features/offlinePads'
+import { MirrorText } from '../../src/core/text/mirrorText'
+import { WebText } from '../../src/core/text/webText'
+import type { TapTake } from '../../src/platform/audio/sampleTap'
+import { memoryStorage } from '../../src/platform/storage/settings'
+import { disposeAll, liveHarness, until, type LiveHarness } from './liveHarness'
+
+// A worker's clock starts near 0: a press 400 ms ago must still be a real time (pressTime).
+let clockSpy: { mockRestore(): void } | null = null
+beforeEach(() => {
+  const real = performance.now.bind(performance)
+  clockSpy = vi.spyOn(performance, 'now').mockImplementation(() => real() + 100_000)
+})
+
+afterEach(() => {
+  disposeAll()
+  clockSpy?.mockRestore()
+})
+
+// With pad numbers counted from the bottom, pad offset k of group A is a/p(k+1):
+// project 1 holds clap (slot 5) on a/p05.
+const ORDER = { 'arc.mirror.order': 'FROM_BOTTOM' }
+const A5 = physicalPad(0, 4)
+const A1 = physicalPad(0, 0)
+const PAD_SLOTS = [1, 2, 3, 4, 5]
+
+async function liveOn(): Promise<LiveHarness> {
+  const h = await liveHarness({ storage: memoryStorage(ORDER) })
+  await h.c.connect()
+  h.c.setLive(true)
+  await until(h, (s) => s.mirror !== null && !s.mirror.loading && !s.busy && s.mirror.offline == null)
+  return h
+}
+
+async function copied(h: LiveHarness): Promise<void> {
+  await vi.waitFor(
+    async () => {
+      for (const slot of PAD_SLOTS) expect(await h.padSounds.has(`s${slot}.wav`)).toBe(true)
+      expect(h.c.state.value.backgroundRead).toBe(false)
+    },
+    { timeout: 5000 },
+  )
+}
+
+async function onDevice(h: LiveHarness, n: number): Promise<number | null | undefined> {
+  await h.c.loadProjectSounds(1)
+  return h.c.state.value.browser.projectPads.get(1)?.find((g) => g.name === 'a')?.pads.get(n)
+}
+
+/** Half a second of a 480 Hz tone at 48 kHz, mono. */
+function tone(): Int16Array {
+  return Int16Array.from({ length: 24000 }, (_, i) => Math.round(8000 * Math.sin((2 * Math.PI * 480 * i) / 48000)))
+}
+
+function take(pad = A5, latched = false): TapTake {
+  return { pad: pad.group * 12 + pad.offset, pcm: tone(), channels: 1, rate: 48000, end: SampleCapture.End.STOPPED, latched }
+}
+
+const now = (): number => performance.now()
+
+/** SAMPLE on, [pad] held for [ms] and let go. */
+async function hold(h: LiveHarness, pad = A5, ms = 400): Promise<void> {
+  // Pressed [ms] ago (an event's own time), let go now.
+  await h.c.playPad(pad, true, false, now() - ms)
+  h.c.releasePad(pad, now())
+}
+
+describe('SAMPLE', () => {
+  it('opens RSP on the mix; a held pad records into it, and the take goes on the review sheet', async () => {
+    const h = await liveOn()
+    const s = h.c.sample
+    s.enter()
+    expect(s.open).toBe(true)
+    expect(s.ui.value.on).toBe(true)
+    expect(s.ui.value.input).toEqual({ source: 'rsp', stereo: false })
+    expect(h.liveAudio.sampleLog).toEqual(['open:false:0:null'])
+    const presses = h.liveAudio.presses.length
+    await hold(h)
+    expect(h.liveAudio.sampleLog.slice(1)).toEqual([expect.stringMatching(/^arm:4:false:\d+$/), 'stop'])
+    // Not played: recorded.
+    expect(h.liveAudio.presses.length).toBe(presses)
+    expect(s.ui.value.phase).toEqual({ type: 'Waiting', pad: A5, latched: false })
+    h.liveAudio.sampleTake(take())
+    await vi.waitFor(() => expect(s.review.value).not.toBeNull())
+    const r = s.review.value!
+    expect(r.pad).toEqual(A5)
+    expect(r.frames).toBe(24000)
+    // Connected: the slot is the next free one on the device.
+    expect(r.offline).toBe(false)
+    expect(r.slot).not.toBeNull()
+    // Backed in the samples store until KEEP.
+    expect(r.file).not.toBeNull()
+    expect(await h.samples.read(r.file!)).not.toBeNull()
+    s.exit()
+    expect(h.liveAudio.sampleLog.at(-1)).toBe('close')
+  })
+
+  it('a tap records nothing: the take is thrown away and the pad plays', async () => {
+    const h = await liveOn()
+    h.c.sample.enter()
+    const presses = h.liveAudio.presses.length
+    await hold(h, A5, 50)
+    expect(h.liveAudio.sampleLog.at(-1)).toBe('cancel')
+    await vi.waitFor(() => expect(h.liveAudio.presses.length).toBe(presses + 1))
+  })
+
+  it('KEEP while connected uploads the take onto its pad', async () => {
+    const h = await liveOn()
+    await copied(h)
+    const s = h.c.sample
+    s.enter()
+    await hold(h)
+    h.liveAudio.sampleTake(take())
+    await vi.waitFor(() => expect(s.review.value?.file).toBeTruthy())
+    const slot = s.review.value!.slot
+    s.keepSample()
+    await vi.waitFor(() => expect(h.toasts.at(-1)?.text).toBe(MirrorText.sampleSaved(A5)), { timeout: 5000 })
+    expect(await onDevice(h, 5)).toBe(slot)
+    // Up: the recording's change and its file go.
+    await vi.waitFor(async () => expect(await h.samples.strays(new Set(), Number.MAX_SAFE_INTEGER)).toEqual([]))
+    expect(h.c.state.value.offlinePads).toBe(0)
+  })
+
+  it('LATCH: a tap records hands-free until its pad is tapped again', async () => {
+    const h = await liveOn()
+    const s = h.c.sample
+    s.enter()
+    s.setLatch(true)
+    await h.c.playPad(A5, true, false, now())
+    h.c.releasePad(A5, now())
+    expect(h.liveAudio.sampleLog.at(-1)).toMatch(/^arm:4:true:\d+$/)
+    // Another pad plays beside it.
+    const presses = h.liveAudio.presses.length
+    await h.c.playPad(A1, true, false, now())
+    await vi.waitFor(() => expect(h.liveAudio.presses.length).toBe(presses + 1))
+    h.c.releasePad(A1, now())
+    await h.c.playPad(A5, true, false, now())
+    h.c.releasePad(A5, now())
+    expect(h.liveAudio.sampleLog.at(-1)).toBe('stop')
+  })
+
+  it('offline, KEEP puts the take on its pad in arc; Write uploads it once the EP-133 is back', async () => {
+    const h = await liveOn()
+    await copied(h)
+    h.ep.access.unplug(h.ep.input, h.ep.output)
+    await until(h, (st) => st.mirror?.offlineSounds != null)
+    const s = h.c.sample
+    s.enter()
+    await hold(h)
+    h.liveAudio.sampleTake(take())
+    await vi.waitFor(() => expect(s.review.value?.file).toBeTruthy())
+    expect(s.review.value!.offline).toBe(true)
+    s.keepSample()
+    await vi.waitFor(() => expect(h.toasts.at(-1)?.text).toBe(MirrorText.sampleQueued(A5)))
+    expect(h.c.state.value.offlinePads).toBe(1)
+    expect(h.storage.getItem('arc.live.pads')).toContain(SoundSource.RECORDED)
+    // The pad plays the take, from memory.
+    expect([...h.liveAudio.loaded.keys()].some((k) => k.startsWith('rec:'))).toBe(true)
+    s.exit()
+    h.ep.access.plug(h.ep.input, h.ep.output)
+    await until(h, (st) => st.offlinePrompt !== null && st.mirror !== null && !st.mirror.loading && !st.busy)
+    // A recording is a new sample, not a pad change (ArcController's samples).
+    expect(h.c.state.value.offlinePrompt).toEqual({ changes: 0, samples: 1 })
+    expect(MirrorText.putOffline(0, 1)).toBe('Put 1 new sample on the EP-133?')
+    await h.c.writeOfflinePads()
+    expect(h.toasts.at(-1)?.text).toBe(MirrorText.offlineWritten(1, 0))
+    const slot = await onDevice(h, 5)
+    expect(slot).not.toBe(5)
+    expect(slot).not.toBeNull()
+    expect(h.c.state.value.offlinePads).toBe(0)
+    expect(await h.samples.strays(new Set(), Number.MAX_SAFE_INTEGER)).toEqual([])
+  })
+
+  it('Discard sends the recordings to Takes, never away', async () => {
+    const h = await liveOn()
+    await copied(h)
+    h.ep.access.unplug(h.ep.input, h.ep.output)
+    await until(h, (st) => st.mirror?.offlineSounds != null)
+    const s = h.c.sample
+    s.enter()
+    await hold(h)
+    h.liveAudio.sampleTake(take())
+    await vi.waitFor(() => expect(s.review.value?.file).toBeTruthy())
+    s.keepSample()
+    await vi.waitFor(() => expect(h.c.state.value.offlinePads).toBe(1))
+    s.exit()
+    h.ep.access.plug(h.ep.input, h.ep.output)
+    await until(h, (st) => st.offlinePrompt !== null && st.mirror !== null && !st.mirror.loading && !st.busy)
+    await h.c.discardOfflinePads()
+    expect(h.toasts.at(-1)?.text).toBe(`${MirrorText.OFFLINE_DISCARDED} ${MirrorText.samplesToTakes(1)}`)
+    expect(h.c.state.value.offlinePads).toBe(0)
+    await vi.waitFor(() => expect(h.c.state.value.takes.length).toBe(1))
+    expect(await onDevice(h, 5)).toBe(5)
+  })
+
+  it('DISCARD on the review sheet lets the take go, and UNDO brings it back', async () => {
+    const h = await liveOn()
+    const s = h.c.sample
+    s.enter()
+    await hold(h)
+    h.liveAudio.sampleTake(take())
+    await vi.waitFor(() => expect(s.review.value?.file).toBeTruthy())
+    const file = s.review.value!.file!
+    s.discardSample()
+    expect(s.review.value).toBeNull()
+    const t = h.c.state.value.toast
+    expect(t?.text).toBe(MirrorText.SAMPLE_DISCARDED)
+    await vi.waitFor(async () => expect(await h.samples.read(file)).toBeNull())
+    h.c.runToastAction(t!.id)
+    await vi.waitFor(() => expect(s.review.value?.file).toBeTruthy())
+    expect(s.review.value!.frames).toBe(24000)
+  })
+
+  it('the mic: asked for on opening, then recorded from, at its own level; a take from it is named for it', async () => {
+    const h = await liveOn()
+    h.liveAudio.micSupported = true
+    const s = h.c.sample
+    s.setInput({ source: 'mic', stereo: false })
+    s.enter()
+    await vi.waitFor(() => expect(h.liveAudio.sampleLog).toEqual(['mic:true', 'open:false:12:null:mic']))
+    expect(s.ui.value.input).toEqual({ source: 'mic', stereo: false })
+    // A mono mic: no MIC ST.
+    expect(s.ui.value.inputs.map((i) => `${i.source}${i.stereo ? ' st' : ''}`)).toEqual(['mic', 'rsp', 'rsp st'])
+    await hold(h)
+    h.liveAudio.sampleTake(take())
+    await vi.waitFor(() => expect(s.review.value).not.toBeNull())
+    expect(s.review.value!.input.source).toBe('mic')
+    expect(s.review.value!.name).toMatch(/^mic /)
+    // Back to RSP: the mic is let go of (RSP opens on the mix).
+    s.stepInput(1)
+    expect(h.liveAudio.sampleLog.at(-1)).toBe('open:false:0:null')
+    expect(s.ui.value.input).toEqual({ source: 'rsp', stereo: false })
+  })
+
+  it('the mic refused: RSP stands in with a toast, and the mic is no longer offered', async () => {
+    const h = await liveOn()
+    h.liveAudio.micSupported = true
+    h.liveAudio.micAnswer = { ok: false, why: 'denied' }
+    const s = h.c.sample
+    s.setInput({ source: 'mic', stereo: false })
+    s.enter()
+    await vi.waitFor(() => expect(h.liveAudio.sampleLog).toEqual(['mic:true', 'open:false:0:null']))
+    expect(h.toasts.at(-1)?.text).toBe(WebText.NO_MIC)
+    expect(s.ui.value.input).toEqual({ source: 'rsp', stereo: false })
+    expect(s.ui.value.inputs.some((i) => i.source === 'mic')).toBe(false)
+  })
+
+  it('a pad held while the mic is still being asked for records nothing', async () => {
+    const h = await liveOn()
+    h.liveAudio.micSupported = true
+    let answer: (r: { ok: true; channels: number }) => void = () => {}
+    h.liveAudio.sampleMic = (stereo) => {
+      h.liveAudio.sampleLog.push(`mic:${stereo}`)
+      return new Promise((r) => (answer = r))
+    }
+    const s = h.c.sample
+    s.setInput({ source: 'mic', stereo: false })
+    s.enter()
+    await h.c.playPad(A5, true, false, now() - 400)
+    expect(h.liveAudio.sampleLog.some((l) => l.startsWith('arm:'))).toBe(false)
+    h.c.releasePad(A5, now())
+    // Closed before the answer: the mic opened late is let go of.
+    s.exit()
+    answer({ ok: true, channels: 2 })
+    await vi.waitFor(() => expect(h.liveAudio.sampleLog.filter((l) => l === 'close').length).toBe(2))
+  })
+
+  it('BARS: a tap counts a bar in on the click, then a take of that many bars is scheduled for the downbeat', async () => {
+    const h = await liveOn()
+    const s = h.c.sample
+    s.enter()
+    s.setLatch(true)
+    s.setBars(2)
+    expect(h.c.pattern.clickOn).toBe(false)
+    await h.c.playPad(A5, true, false, now())
+    h.c.releasePad(A5, now())
+    // The click comes on for the count, and the pad waits.
+    expect(h.c.pattern.clickOn).toBe(true)
+    expect(s.ui.value.phase).toEqual({ type: 'Waiting', pad: A5, latched: true })
+    // A bar's beats at 120 BPM (500 ms apart), the downbeat accented; they were heard a moment ago.
+    const t0 = now() - 2100
+    for (let i = 0; i < 3; i++) h.liveAudio.beat({ index: i, at: t0 + 500 * i, accent: i === 0 })
+    await vi.waitFor(() => expect(s.ui.value.phase).toEqual({ type: 'CountIn', pad: A5, beat: 3 }))
+    expect(h.liveAudio.sampleLog.some((l) => l.startsWith('schedule'))).toBe(false)
+    h.liveAudio.beat({ index: 3, at: t0 + 1500, accent: false })
+    // Two bars at 120 BPM and 48 kHz from the beat after the fourth.
+    await vi.waitFor(() => expect(h.liveAudio.sampleLog.at(-1)).toBe(`scheduleAt:4:${Math.round(t0 + 2000)}:192000`))
+    // The count over, the click goes back off.
+    await vi.waitFor(() => expect(h.c.pattern.clickOn).toBe(false))
+    expect(s.ui.value.phase).toEqual({ type: 'Waiting', pad: A5, latched: true })
+  })
+
+  it('BARS: a tap on the pad while it counts in stops it, with nothing recorded', async () => {
+    const h = await liveOn()
+    const s = h.c.sample
+    s.enter()
+    s.setLatch(true)
+    s.setBars(1)
+    await h.c.playPad(A5, true, false, now())
+    h.c.releasePad(A5, now())
+    h.liveAudio.beat({ index: 0, at: now() - 10, accent: true })
+    await h.c.playPad(A5, true, false, now())
+    h.c.releasePad(A5, now())
+    expect(s.ui.value.phase).toEqual({ type: 'Ready' })
+    expect(h.c.pattern.clickOn).toBe(false)
+    h.liveAudio.beat({ index: 1, at: now(), accent: false })
+    expect(h.liveAudio.sampleLog.some((l) => l.startsWith('schedule'))).toBe(false)
+  })
+
+  it('BARS while the pattern plays: the take is scheduled from its next bar, on the mix frames (RSP)', async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    p.setCountIn(false)
+    p.play()
+    // Tick 0 heard 700 ms ago at 120 BPM: the next bar starts 1300 ms on.
+    const zero = now() - 700
+    h.liveAudio.runAt(zero)
+    await vi.waitFor(() => expect(p.ui.value.phase).toBe('PLAYING'))
+    const s = h.c.sample
+    s.enter()
+    s.setLatch(true)
+    s.setBars(1)
+    await h.c.playPad(A5, true, false, now())
+    h.c.releasePad(A5, now())
+    // A bar at 120 BPM, 48 kHz: 96000 frames, from the frame of the next bar's tick.
+    const at = Math.round(zero * 48) + 96000
+    await vi.waitFor(() => expect(h.liveAudio.sampleLog.at(-1)).toBe(`schedule:4:${at}:96000`))
+  })
+
+  it('leaving Live closes SAMPLE', async () => {
+    const h = await liveOn()
+    h.c.sample.enter()
+    h.c.setLive(false)
+    expect(h.c.sample.open).toBe(false)
+    expect(h.liveAudio.sampleLog.at(-1)).toBe('close')
+  })
+})

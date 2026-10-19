@@ -17,6 +17,7 @@
 //   invisible sheet.
 import type { JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { FactorySounds } from '../../core/features/factorySounds'
 import type { BackupRecord } from '../../core/text/libraryRules'
 import { useController, useNav } from '../AppContext'
 import { dialogLayer, screenLayer, sheetLayer, type NavView } from '../nav'
@@ -144,6 +145,14 @@ export function BackupsSheets(props: { view: NavView }): JSX.Element {
             onShare={() => void c.sharePak(shownDetail)}
             onSave={() => void c.savePak(shownDetail)}
             onContents={() => fromDetail(screenLayer({ kind: 'contents', id: shownDetail.id }))}
+            onUseAsFactory={
+              FactorySounds.canUseAsFactory(shownDetail)
+                ? () => {
+                    closeDetail()
+                    void c.useAsFactory(shownDetail)
+                  }
+                : null
+            }
             onCompareBackups={state.backups.length >= 2 ? () => fromDetail(sheetLayer(`comparePick:${shownDetail.id}`)) : null}
             onDelete={() => nav.open(dialogLayer('delete'))}
             onDone={closeDetail}

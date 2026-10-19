@@ -1,0 +1,52 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Rows.kt (MiniPiano: the KEYS tools' key picker)
+ * One octave of piano caps, 92 high: whites full height, blacks 58% over them;
+ * the chosen key navy. The name sits at each key's foot. */
+
+.mini-piano {
+  position: relative;
+  width: 100%;
+  height: 92px;
+  /* Room for the caps' edges (2 right, 3 down). */
+  margin-bottom: var(--space-3);
+}
+
+.mini-piano__key {
+  position: absolute;
+  top: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 0 var(--space-6);
+  border-radius: 0 0 6px 6px;
+  font-weight: var(--weight-extra);
+  line-height: 1;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.mini-piano__key--white {
+  bottom: 0;
+  --cap-face: var(--piano-white);
+  --cap-edge: var(--key-out);
+  --cap-ink: var(--ink);
+  font-size: 11px;
+}
+.mini-piano__key--black {
+  z-index: 1;
+  height: 58%;
+  --cap-face: var(--piano-black);
+  --cap-edge: var(--key-out-black);
+  --cap-ink: var(--on-piano-black);
+  font-size: 10px;
+}
+.mini-piano__key.is-on {
+  --cap-face: var(--navy);
+  --cap-ink: var(--on-navy);
+  --cap-edge: color-mix(in oklab, var(--navy) 65%, black);
+}
+.mini-piano__key:focus-visible { z-index: 2; }
+
+.mini-piano__name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}

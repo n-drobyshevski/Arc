@@ -7,6 +7,8 @@ import {
   TOO_LARGE,
   attachDrop,
   describeFile,
+  dragMayHaveAudio,
+  isAudioFile,
   isPakName,
   pickFiles,
   readFile,
@@ -81,6 +83,21 @@ describe('file names', () => {
     expect(isPakName('a.pak')).toBe(true)
     expect(isPakName('a.ZIP')).toBe(true)
     expect(isPakName('a.wav')).toBe(false)
+  })
+
+  it('a sample drop takes audio, never a backup', () => {
+    expect(isAudioFile({ name: 'kick.wav', type: '' })).toBe(true)
+    expect(isAudioFile({ name: 'kick', type: 'audio/x-wav' })).toBe(true)
+    expect(isAudioFile({ name: 'backup.pak', type: '' })).toBe(false)
+    expect(isAudioFile({ name: 'backup.zip', type: 'application/zip' })).toBe(false)
+    expect(isAudioFile({ name: 'notes.txt', type: 'text/plain' })).toBe(false)
+    const file = (type: string) => ({ kind: 'file', type })
+    expect(dragMayHaveAudio({ types: ['Files'], items: [file('audio/wav')] })).toBe(true)
+    // No type while dragging (a .pak): the drop decides by name.
+    expect(dragMayHaveAudio({ types: ['Files'], items: [file('')] })).toBe(true)
+    expect(dragMayHaveAudio({ types: ['Files'], items: [file('application/zip')] })).toBe(false)
+    expect(dragMayHaveAudio({ types: ['text/plain'], items: [] })).toBe(false)
+    expect(dragMayHaveAudio(null)).toBe(false)
   })
 })
 
@@ -428,9 +445,9 @@ describe('shareFile', () => {
     expect(d.title).toBe('My')
     expect(d.text).toBe('EP-133 backup: My')
     expect(d.files).toHaveLength(1)
-    expect(d.files[0]?.name).toBe('my.pak')
-    expect(d.files[0]?.type).toBe('application/zip')
-    expect(new Uint8Array(await (d.files[0] as File).arrayBuffer())).toEqual(bytes(1, 2))
+    expect(d.files?.[0]?.name).toBe('my.pak')
+    expect(d.files?.[0]?.type).toBe('application/zip')
+    expect(new Uint8Array(await (d.files?.[0] as File).arrayBuffer())).toEqual(bytes(1, 2))
     expect(s.save.downloads).toEqual([])
   })
 
@@ -657,7 +674,8 @@ describe('webText', () => {
       WebText.copyFailed('m'),
     )
     for (const s of all) {
-      expect(s).not.toMatch(/phone|share sheet/i)
+      // "phone" the word ("microphone" is fine).
+      expect(s).not.toMatch(/\bphones?\b|share sheet/i)
       if (s !== WebText.FOLDER_NOTE_OFF) expect(s).not.toMatch(/Documents/)
     }
   })

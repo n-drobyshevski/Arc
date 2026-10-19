@@ -63,3 +63,15 @@
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
 }
+
+/* The single-line input's box: holds the icon over the input's start. */
+.field__box { position: relative; }
+.field__icon {
+  position: absolute;
+  inset-inline-start: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+/* The text starts after the icon: 14 + 20 + 10 apart (Kotlin's Row spacedBy(10)). */
+.field--icon .field__input { padding-inline-start: 44px; }

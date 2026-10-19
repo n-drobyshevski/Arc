@@ -1,0 +1,47 @@
+/* SampleReviewSheet.kt's look: the title and its line, the take's waveform, START / LENGTH and the
+ * play key, the switches, the slot's − and +, KEEP over RETAKE and DISCARD. */
+.sample-review__head { display: flex; flex-direction: column; gap: 2px; }
+.sample-review__head h2 { margin: 0; }
+.sample-review__line,
+.sample-review__dim { margin: 0; color: var(--graphite); }
+.sample-review__trim { display: flex; align-items: center; gap: 16px; }
+.sample-review__trim .play-key { flex: none; }
+.sample-review__slot { display: flex; align-items: center; gap: 10px; }
+.sample-review__slot-key {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--key);
+  color: var(--ink);
+  font: inherit;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.sample-review__slot-key:disabled { opacity: 0.45; cursor: default; }
+.sample-review__slot-key:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+.sample-review__slot-line { flex: 1 1 auto; min-width: 0; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sample-review__slot-line.is-dim { color: var(--graphite); }
+.sample-review__keys { display: flex; flex-direction: column; gap: 10px; }
+.sample-review__pair { display: flex; gap: 10px; }
+.sample-review__pair > * { flex: 1 1 0; min-width: 0; }
+
+/* The columns: nothing of their own on a phone (the sheet's column holds every part), two side by
+ * side on a short window (Kotlin's short layout: the take left, the rest right, small keys). */
+.sample-review__split,
+.sample-review__main,
+.sample-review__side { display: contents; }
+@media (max-height: 479.98px) {
+  .sample-review__split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+  }
+  .sample-review__main,
+  .sample-review__side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .sample-review__side .key { min-height: 40px; }
+  .sample-review__side .sample-review__keys { gap: 8px; }
+}

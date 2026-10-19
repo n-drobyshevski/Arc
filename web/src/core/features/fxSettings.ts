@@ -1,0 +1,829 @@
+// Port of core/src/main/kotlin/dev/arc/ep133/features/FxSettings.kt
+//
+// A project's FX: the master effect with its two knobs, each group's send to
+// it, the master compressor and the sidechain (an addition), kept in arc by
+// project; how each effect hears its knobs (FxKnobs), what the display says
+// about them, and the book of every project's settings as JSON.
+//
+// Web deltas:
+// - The data classes are plain readonly interfaces built by `comp()`,
+//   `sidechain()` and `FxSettings.of()` (by named fields over the Kotlin
+//   defaults); their methods are functions taking the value first, on the
+//   `FxSettings` object (`s.withSend(g, v)` is `FxSettings.withSend(s, g, v)`).
+// - The enum class FxType is a const object plus a string-union type of the
+//   same name (the values are the enum names); `FX_TYPES` is
+//   `FxType.entries` and `fxTypeIndex(t)` its ordinal.
+// - Knob values are floats kept with Math.fround (the builders round them),
+//   so the mappings and readouts work out as Kotlin's Float math does, and
+//   JSON.stringify writes the same exact numbers Kotlin does.
+// - FxBook's map is a ReadonlyMap; fromJson reads through JSON.parse, with
+//   kotlinx's intOrNull as in pattern.ts.
+// - Each group also has a level ([FxSettings.levels], the drawn EP-133's
+//   fader, web only), 1 by default: the book writes "levels" only when one
+//   isn't 1, so its text stays the Kotlin twin's otherwise, and settings
+//   written without them read at 1. [levelGain] is how a level is heard.
+// - And the drawn EP-133's fader parameters (web only): the labels printed
+//   over the pads ([FADER_PARAMS], FaderParam), each group's position of
+//   each (0..1, [FADER_DEFAULTS] where never moved) and the one its fader
+//   is assigned to ([FxSettings.assign], LEVEL by default). LEVEL is the
+//   group's level and FX its send (one value each, as above); PITCH, TUNE,
+//   LPF, HPF, ATK, REL and PAN are kept in [FxSettings.faders]; TIME, VEL
+//   and MOD aren't in arc ([faderParamSupported]). The book writes "faders"
+//   (each group's moved ones only) and "assign" only when one is off its
+//   default, so its text stays the Kotlin twin's otherwise, and settings
+//   written without them read at the defaults. [groupSemitones],
+//   [groupPan], [groupAttackMs], [groupReleaseMs] and [faderReadout] are how
+//   they are heard and shown.
+
+import { FxBus } from '../formats/fx/fxBus'
+import { clamp01, knobHz, lerp } from '../formats/fx/fxMath'
+import { DEFAULT as DEFAULT_BPM } from './tempo'
+
+const f = Math.fround
+
+/**
+ * The master effect, as the EP-133's FX offers them (its index in FX_TYPES
+ * is the mixer's control index): one at a time on the send bus, with two
+ * knobs, X and Y. COMPRESSOR is the FX slot's own compressor, apart from the
+ * master one (Comp).
+ */
+export const FxType = {
+  NONE: 'NONE',
+  DELAY: 'DELAY',
+  REVERB: 'REVERB',
+  DISTORTION: 'DISTORTION',
+  CHORUS: 'CHORUS',
+  FILTER: 'FILTER',
+  COMPRESSOR: 'COMPRESSOR',
+} as const
+export type FxType = (typeof FxType)[keyof typeof FxType]
+
+/** FxType.entries, in declaration order. */
+export const FX_TYPES: readonly FxType[] = [
+  FxType.NONE,
+  FxType.DELAY,
+  FxType.REVERB,
+  FxType.DISTORTION,
+  FxType.CHORUS,
+  FxType.FILTER,
+  FxType.COMPRESSOR,
+]
+
+/** The Kotlin ordinal: the mixer's control index. */
+export function fxTypeIndex(t: FxType): number {
+  return FX_TYPES.indexOf(t)
+}
+
+/** The master compressor, after everything: [on], its drive [x] and its speed [y] (0..1). */
+export interface Comp {
+  readonly on: boolean
+  readonly x: number
+  readonly y: number
+}
+
+export function comp(fields: Partial<Comp> = {}): Comp {
+  const c = { on: false, x: 0.5, y: 0.5, ...fields }
+  return { on: c.on, x: f(c.x), y: f(c.y) }
+}
+
+/**
+ * The sidechain (an addition to the EP-133's FX page): while [on], the pad
+ * at [pad] (0..11) of [group] (0..3) ducks the groups in [dests] (a bitmask,
+ * bit g for group g); [x] is how long the duck lasts and [y] its shape (0..1).
+ */
+export interface Sidechain {
+  readonly on: boolean
+  readonly group: number
+  readonly pad: number
+  readonly dests: number
+  readonly x: number
+  readonly y: number
+}
+
+export function sidechain(fields: Partial<Sidechain> = {}): Sidechain {
+  const s = { on: false, group: 0, pad: 0, dests: 0, x: 0.3, y: 0.5, ...fields }
+  return { on: s.on, group: s.group, pad: s.pad, dests: s.dests, x: f(s.x), y: f(s.y) }
+}
+
+/**
+ * A project's FX: the master effect [type] with its knobs [x] and [y] (0..1),
+ * each group's send to it ([sends], A..D, 0..1), the master compressor and
+ * the sidechain. They stay in arc (the EP-133's own FX settings aren't read
+ * or written); the mixer plays them (FxKnobs says how each knob is heard).
+ * DEFAULT is no effect, no sends, nothing on: the mixer as it was before FX.
+ */
+export interface FxSettings {
+  readonly type: FxType
+  readonly x: number
+  readonly y: number
+  readonly sends: readonly number[]
+  readonly comp: Comp
+  readonly sidechain: Sidechain
+  /** Each group's level (A..D, 0..1; web only: the drawn EP-133's fader), 1 by default. */
+  readonly levels: readonly number[]
+  /** Each group's fader parameters besides LEVEL and FX (A..D; web only), FADER_DEFAULTS where never moved. */
+  readonly faders: readonly GroupFaders[]
+  /** The parameter each group's fader is assigned to (A..D; web only), LEVEL by default; never one arc hasn't. */
+  readonly assign: readonly FaderParam[]
+}
+
+/**
+ * The drawn EP-133's fader parameters (web only): the labels printed over
+ * the pads, in pad order 7 8 9 / 4 5 6 / 1 2 3 / . 0 ENTER.
+ */
+export type FaderParam = 'LEVEL' | 'PITCH' | 'TIME' | 'LPF' | 'HPF' | 'FX' | 'ATK' | 'REL' | 'PAN' | 'TUNE' | 'VEL' | 'MOD'
+
+/** Every FaderParam, in pad order (7 8 9 / 4 5 6 / 1 2 3 / . 0 ENTER). */
+export const FADER_PARAMS: readonly FaderParam[] = ['LEVEL', 'PITCH', 'TIME', 'LPF', 'HPF', 'FX', 'ATK', 'REL', 'PAN', 'TUNE', 'VEL', 'MOD']
+
+/**
+ * Each parameter's fader position where it was never moved (0..1): LEVEL
+ * full, FX no send, the filters open, PITCH, TUNE and PAN centred, nothing
+ * added to the envelopes. TIME, VEL and MOD aren't in arc; theirs are what
+ * the fader would show.
+ */
+export const FADER_DEFAULTS: Readonly<Record<FaderParam, number>> = {
+  LEVEL: 1,
+  PITCH: 0.5,
+  TIME: 0.5,
+  LPF: 1,
+  HPF: 0,
+  FX: 0,
+  ATK: 0,
+  REL: 0,
+  PAN: 0.5,
+  TUNE: 0.5,
+  VEL: 1,
+  MOD: 0,
+}
+
+/** The parameters arc plays: all but TIME (time stretch), VEL (velocity) and MOD (modulation). */
+export function faderParamSupported(p: FaderParam): boolean {
+  return p !== 'TIME' && p !== 'VEL' && p !== 'MOD'
+}
+
+/** The parameters FxSettings.faders keeps (LEVEL is [levels], FX [sends]). */
+export type GroupFaderParam = 'PITCH' | 'LPF' | 'HPF' | 'ATK' | 'REL' | 'PAN' | 'TUNE'
+
+/** A group's fader positions (0..1) for the parameters [faders] keeps. */
+export type GroupFaders = Readonly<Record<GroupFaderParam, number>>
+
+const GROUP_FADER_PARAMS: readonly GroupFaderParam[] = ['PITCH', 'LPF', 'HPF', 'ATK', 'REL', 'PAN', 'TUNE']
+
+const isGroupFader = (p: FaderParam): p is GroupFaderParam => (GROUP_FADER_PARAMS as readonly string[]).includes(p)
+
+const DEFAULT_FADERS: GroupFaders = Object.freeze({ PITCH: 0.5, LPF: 1, HPF: 0, ATK: 0, REL: 0, PAN: 0.5, TUNE: 0.5 })
+
+/** The longest ATK or REL adds to a group's voices, in ms (the pads' own envelope's reach, about). */
+export const FADER_ENV_MS = 2550
+
+/** The semitones a group's voices are read higher for its PITCH (whole, ±12) and TUNE (±1, fine). */
+export function groupSemitones(g: GroupFaders): number {
+  return Math.round((g.PITCH - 0.5) * 24) + (g.TUNE - 0.5) * 2
+}
+
+/** A group's balance for its PAN: -1 (left) to 1 (right), 0 centred. */
+export function groupPan(g: GroupFaders): number {
+  return clamp01(g.PAN) * 2 - 1
+}
+
+/** What a group's ATK adds to its voices' attack, in ms: FADER_ENV_MS v², 0 at the bottom. */
+export function groupAttackMs(g: GroupFaders): number {
+  const v = clamp01(g.ATK)
+  return v * v * FADER_ENV_MS
+}
+
+/** What a group's REL adds to its voices' release, in ms. */
+export function groupReleaseMs(g: GroupFaders): number {
+  const v = clamp01(g.REL)
+  return v * v * FADER_ENV_MS
+}
+
+/** Group [g]'s position of [p] in [s] (0..1): its level, its send, a fader kept, or the default of one arc hasn't. */
+function faderOf(s: FxSettings, g: number, p: FaderParam): number {
+  if (p === 'LEVEL') return s.levels[g] ?? 1
+  if (p === 'FX') return s.sends[g] ?? 0
+  if (isGroupFader(p)) return s.faders[g]?.[p] ?? FADER_DEFAULTS[p]
+  return FADER_DEFAULTS[p]
+}
+
+/**
+ * What the display says for [p] at [v]: LEVEL, FX, TIME, VEL and MOD in
+ * percent ('72'); PITCH in semitones ('+3', '0'); TUNE in cents ('-25');
+ * the filters' cutoff ('1.2k', 'OPEN' at their open end); PAN ('L40', 'C',
+ * 'R40'); ATK and REL in ms ('120', '1.2s').
+ */
+export function faderReadout(p: FaderParam, v: number): string {
+  const k = clamp01(f(v))
+  const signed = (n: number): string => (n > 0 ? `+${n}` : `${n}`)
+  const g: GroupFaders = { ...DEFAULT_FADERS, [p]: k }
+  switch (p) {
+    case 'PITCH':
+      return signed(Math.round((k - 0.5) * 24))
+    case 'TUNE':
+      return signed(Math.round((k - 0.5) * 200))
+    case 'LPF':
+      return k === 1 ? 'OPEN' : hz(FxBus.lpfHz(k))
+    case 'HPF':
+      return k === 0 ? 'OPEN' : hz(FxBus.hpfHz(k))
+    case 'PAN': {
+      const pan = Math.round((k - 0.5) * 200)
+      return pan < 0 ? `L${-pan}` : pan > 0 ? `R${pan}` : 'C'
+    }
+    case 'ATK':
+    case 'REL': {
+      const ms = Math.round(p === 'ATK' ? groupAttackMs(g) : groupReleaseMs(g))
+      return ms < 1000 ? `${ms}` : `${tenths(ms / 1000)}s`
+    }
+    default:
+      return `${Math.round(k * 100)}`
+  }
+}
+
+/** The send groups, A..D. */
+const GROUPS = 4
+/** Sidechain.dests with every group. */
+const ALL_GROUPS = (1 << GROUPS) - 1
+
+/** [g] with every position a float (missing ones at their defaults). */
+function faders(g: Partial<GroupFaders> | undefined): GroupFaders {
+  const out = {} as Record<GroupFaderParam, number>
+  for (const p of GROUP_FADER_PARAMS) out[p] = f(g?.[p] ?? DEFAULT_FADERS[p])
+  return out
+}
+
+/** Settings: [fields] over the defaults (Kotlin's FxSettings constructor). */
+function of(fields: Partial<FxSettings> = {}): FxSettings {
+  const s = {
+    type: FxType.NONE as FxType,
+    x: 0.5,
+    y: 0.5,
+    sends: [0, 0, 0, 0],
+    comp: comp(),
+    sidechain: sidechain(),
+    levels: [1, 1, 1, 1],
+    faders: [DEFAULT_FADERS, DEFAULT_FADERS, DEFAULT_FADERS, DEFAULT_FADERS],
+    assign: ['LEVEL', 'LEVEL', 'LEVEL', 'LEVEL'] as readonly FaderParam[],
+    ...fields,
+  }
+  return {
+    type: s.type,
+    x: f(s.x),
+    y: f(s.y),
+    sends: s.sends.map(f),
+    comp: s.comp,
+    sidechain: s.sidechain,
+    levels: s.levels.map(f),
+    faders: s.faders.map(faders),
+    assign: s.assign,
+  }
+}
+
+const DEFAULT: FxSettings = of()
+
+const coerceIn = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
+
+/** A fader assignment arc plays: [p] when it is one, else LEVEL. */
+const assignable = (p: unknown): FaderParam =>
+  typeof p === 'string' && (FADER_PARAMS as readonly string[]).includes(p) && faderParamSupported(p as FaderParam) ? (p as FaderParam) : 'LEVEL'
+
+/** Every knob, send, level and fader held to 0..1 (NaN to 0), four of each, the sidechain's pad, group and groups in range. */
+function clamped(s: FxSettings): FxSettings {
+  const sc = s.sidechain
+  return {
+    type: s.type,
+    x: clamp01(f(s.x)),
+    y: clamp01(f(s.y)),
+    sends: Array.from({ length: GROUPS }, (_, g) => clamp01(f(s.sends[g] ?? 0))),
+    comp: { on: s.comp.on, x: clamp01(f(s.comp.x)), y: clamp01(f(s.comp.y)) },
+    sidechain: {
+      on: sc.on,
+      group: coerceIn(sc.group, 0, GROUPS - 1),
+      pad: coerceIn(sc.pad, 0, 11),
+      dests: sc.dests & ALL_GROUPS,
+      x: clamp01(f(sc.x)),
+      y: clamp01(f(sc.y)),
+    },
+    levels: Array.from({ length: GROUPS }, (_, g) => clamp01(f(s.levels[g] ?? 1))),
+    faders: Array.from({ length: GROUPS }, (_, g) => {
+      const out = {} as Record<GroupFaderParam, number>
+      for (const p of GROUP_FADER_PARAMS) out[p] = clamp01(f(s.faders[g]?.[p] ?? DEFAULT_FADERS[p]))
+      return out
+    }),
+    assign: Array.from({ length: GROUPS }, (_, g) => assignable(s.assign[g])),
+  }
+}
+
+/**
+ * Group [g]'s [p] at [v] (0..1): LEVEL its level, FX its send, the rest
+ * kept in faders; one arc hasn't (TIME, VEL, MOD) leaves [s] as it is.
+ */
+function withFader(s: FxSettings, g: number, p: FaderParam, v: number): FxSettings {
+  if (g < 0 || g >= GROUPS) return s
+  if (p === 'LEVEL') return withLevel(s, g, v)
+  if (p === 'FX') return withSend(s, g, v)
+  if (!isGroupFader(p)) return s
+  return { ...s, faders: s.faders.map((old, i) => (i === g ? { ...old, [p]: clamp01(f(v)) } : old)) }
+}
+
+/** Group [g]'s fader assigned to [p]; one arc hasn't leaves [s] as it is. */
+function withAssign(s: FxSettings, g: number, p: FaderParam): FxSettings {
+  if (g < 0 || g >= GROUPS || !faderParamSupported(p)) return s
+  return { ...s, assign: s.assign.map((old, i) => (i === g ? p : old)) }
+}
+
+/** Another effect; the knobs stay where they are. */
+function withType(s: FxSettings, t: FxType): FxSettings {
+  return { ...s, type: t }
+}
+
+function withXY(s: FxSettings, x: number, y: number): FxSettings {
+  return { ...s, x: clamp01(f(x)), y: clamp01(f(y)) }
+}
+
+/** Group [g]'s send at [v] (0..1). */
+function withSend(s: FxSettings, g: number, v: number): FxSettings {
+  return { ...s, sends: s.sends.map((old, i) => (i === g ? clamp01(f(v)) : old)) }
+}
+
+/** Group [g]'s level at [v] (0..1). */
+function withLevel(s: FxSettings, g: number, v: number): FxSettings {
+  return { ...s, levels: s.levels.map((old, i) => (i === g ? clamp01(f(v)) : old)) }
+}
+
+/**
+ * The gain a level (0..1: a group's, or Live's VOLUME) is heard at: its
+ * square, so the fader and the knob turn evenly to the ear (half way is
+ * about -12 dB), and 0 is silence.
+ */
+export function levelGain(level: number): number {
+  const v = clamp01(f(level))
+  return f(v * v)
+}
+
+function withComp(s: FxSettings, c: Comp): FxSettings {
+  return { ...s, comp: c }
+}
+
+function withSidechain(s: FxSettings, c: Sidechain): FxSettings {
+  return { ...s, sidechain: c }
+}
+
+const X_LABELS: Readonly<Record<FxType, string>> = {
+  NONE: '',
+  DELAY: 'LENGTH',
+  REVERB: 'SIZE',
+  DISTORTION: 'DRIVE',
+  CHORUS: 'RATE',
+  FILTER: 'CUTOFF',
+  COMPRESSOR: 'DRIVE',
+}
+
+const Y_LABELS: Readonly<Record<FxType, string>> = {
+  NONE: '',
+  DELAY: 'FEEDBACK',
+  REVERB: 'COLOR',
+  DISTORTION: 'COLOR',
+  CHORUS: 'FEEDBACK',
+  FILTER: 'RESO',
+  COMPRESSOR: 'SPEED',
+}
+
+/** The name over the X knob for [type] ('' for none). */
+function xLabel(type: FxType): string {
+  return X_LABELS[type]
+}
+
+/** The name over the Y knob for [type] ('' for none). */
+function yLabel(type: FxType): string {
+  return Y_LABELS[type]
+}
+
+/**
+ * What the X knob at [x] does to [type], as the display shows it: the
+ * delay's division ('1/8D'), the filter's cutoff ('LPF 1.2k', 'OPEN',
+ * 'HPF 400'), the drive ('12.3x'), the reverb's size ('64%'), the chorus's
+ * rate ('0.42 Hz'). [bpm] is the tempo the delay follows; its division reads
+ * the same at any tempo.
+ */
+function xReadout(type: FxType, x: number, bpm: number = DEFAULT_BPM): string {
+  const k = clamp01(f(x))
+  switch (type) {
+    case FxType.NONE:
+      return ''
+    case FxType.DELAY:
+      return (DELAY_DIVISIONS[delayDivision(k)] as Division).name
+    case FxType.REVERB:
+      return `${Math.round(f(k * 100))}%`
+    case FxType.DISTORTION:
+      return times(distortionDrive(k))
+    case FxType.CHORUS:
+      return `${hundredths(chorusRateHz(k))} Hz`
+    case FxType.FILTER: {
+      const zone = filterZone(k)
+      if (zone === LPF) return `LPF ${hz(filterLpfHz(k))}`
+      if (zone === HPF) return `HPF ${hz(filterHpfHz(k))}`
+      return 'OPEN'
+    }
+    case FxType.COMPRESSOR:
+      return times(compDrive(k))
+  }
+}
+
+/**
+ * What the Y knob at [y] does to [type]: the feedback ('45%'), the reverb's
+ * tilt ('DARK 40', 'FLAT', 'BRIGHT 20'), the distortion's colour ('LP 40',
+ * 'OPEN', 'HP 20'), the filter's Q ('Q 2.3'), the compressor's attack and
+ * release in ms ('0.5/40').
+ */
+function yReadout(type: FxType, y: number): string {
+  const k = clamp01(f(y))
+  // From the centre: -100 (all the way down) to 100 (all the way up).
+  const tilt = Math.round(f(f(k - 0.5) * 200))
+  switch (type) {
+    case FxType.NONE:
+      return ''
+    case FxType.DELAY:
+      return `${Math.round(f(delayFeedback(k) * 100))}%`
+    case FxType.REVERB:
+      return tilt < 0 ? `DARK ${-tilt}` : tilt > 0 ? `BRIGHT ${tilt}` : 'FLAT'
+    case FxType.DISTORTION:
+      return tilt < 0 ? `LP ${-tilt}` : tilt > 0 ? `HP ${tilt}` : 'OPEN'
+    case FxType.CHORUS:
+      return `${Math.round(f(chorusDepth(k) * 100))}%`
+    case FxType.FILTER:
+      return `Q ${tenths(filterQ(k))}`
+    case FxType.COMPRESSOR:
+      return (COMP_SPEEDS[compSpeed(k)] as Speed).name
+  }
+}
+
+/** [v] (0 or more) to one decimal: '2.5'. */
+function tenths(v: number): string {
+  const t = Math.round(f(v * 10))
+  return `${Math.trunc(t / 10)}.${t % 10}`
+}
+
+/** [v] (0 or more) to two decimals: '0.42'. */
+function hundredths(v: number): string {
+  const h = Math.round(f(v * 100))
+  return `${Math.trunc(h / 100)}.${String(h % 100).padStart(2, '0')}`
+}
+
+/** A gain as '2.5x', whole from 10 up ('40x'). */
+function times(v: number): string {
+  return Math.round(f(v * 10)) < 100 ? `${tenths(v)}x` : `${Math.round(v)}x`
+}
+
+/** A frequency as '400', '1.2k', whole kHz from 10k up ('12k'). */
+function hz(v: number): string {
+  const r = Math.round(v)
+  if (r < 1000) return `${r}`
+  const t = Math.round(f(v / 100))
+  return t < 100 ? `${Math.trunc(t / 10)}.${t % 10}k` : `${Math.round(f(v / 1000))}k`
+}
+
+/** The Kotlin `FxSettings` (with its companion). */
+export const FxSettings = {
+  GROUPS,
+  ALL_GROUPS,
+  DEFAULT,
+  of,
+  clamped,
+  withType,
+  withXY,
+  withSend,
+  withLevel,
+  withFader,
+  withAssign,
+  faderOf,
+  withComp,
+  withSidechain,
+  xLabel,
+  yLabel,
+  xReadout,
+  yReadout,
+} as const
+
+// ---------- FxKnobs ----------
+
+/** A delay length: [num]/[den] of a beat (a quarter note). */
+export interface Division {
+  readonly name: string
+  readonly num: number
+  readonly den: number
+}
+
+const division = (name: string, num: number, den: number): Division => ({ name, num, den })
+
+/** The delay's tempo-synced lengths, shortest first: X picks one of twelve. */
+const DELAY_DIVISIONS: readonly Division[] = [
+  division('1/32', 1, 8),
+  division('1/16T', 1, 6),
+  division('1/16', 1, 4),
+  division('1/8T', 1, 3),
+  division('1/16D', 3, 8),
+  division('1/8', 1, 2),
+  division('1/4T', 2, 3),
+  division('1/8D', 3, 4),
+  division('1/4', 1, 1),
+  division('1/2T', 4, 3),
+  division('1/4D', 3, 2),
+  division('1/2', 2, 1),
+]
+
+/** The compressor's attack and release, in ms: Y picks one of eight, fast to slow. */
+export interface Speed {
+  readonly name: string
+  readonly attackMs: number
+  readonly releaseMs: number
+}
+
+const speed = (name: string, attackMs: number, releaseMs: number): Speed => ({ name, attackMs, releaseMs })
+
+const COMP_SPEEDS: readonly Speed[] = [
+  speed('0.5/40', 0.5, 40),
+  speed('1/60', 1, 60),
+  speed('2/100', 2, 100),
+  speed('5/150', 5, 150),
+  speed('10/200', 10, 200),
+  speed('15/300', 15, 300),
+  speed('20/400', 20, 400),
+  speed('30/600', 30, 600),
+]
+
+/** filterZone's answers: low-pass below LPF_TOP, high-pass above HPF_BOTTOM, open between. */
+const LPF = -1
+const OPEN = 0
+const HPF = 1
+const LPF_TOP = f(0.47)
+const HPF_BOTTOM = f(0.53)
+
+/** The delay's DELAY_DIVISIONS index for X. */
+function delayDivision(x: number): number {
+  return Math.min(11, Math.trunc(f(clamp01(x) * 12)))
+}
+
+/** The delay's feedback for Y: 0..0.95. */
+function delayFeedback(y: number): number {
+  return f(f(0.95) * y)
+}
+
+/** The reverb's comb feedback for X: 0.70..0.98. */
+function reverbFeedback(x: number): number {
+  return lerp(f(0.7), f(0.98), x)
+}
+
+/** The distortion's drive for X: 1 + 39x², 1..40. */
+function distortionDrive(x: number): number {
+  return f(1 + f(f(39 * x) * x))
+}
+
+/** The chorus's LFO rate for X, in Hz: 0.05..5 on the knob's cubic curve. */
+function chorusRateHz(x: number): number {
+  return knobHz(x, f(0.05), 5)
+}
+
+/** The chorus's depth and feedback for Y: 0..0.7. */
+function chorusDepth(y: number): number {
+  return f(f(0.7) * y)
+}
+
+/** Which way the filter goes at X: LPF, OPEN or HPF. */
+function filterZone(x: number): number {
+  return x < LPF_TOP ? LPF : x > HPF_BOTTOM ? HPF : OPEN
+}
+
+/** The low-pass cutoff in the LPF zone: 60 Hz at X = 0 up to 20 kHz at LPF_TOP. */
+function filterLpfHz(x: number): number {
+  return knobHz(f(x / LPF_TOP), 60, 20000)
+}
+
+/** The high-pass cutoff in the HPF zone: 20 Hz at HPF_BOTTOM up to 8 kHz at X = 1. */
+function filterHpfHz(x: number): number {
+  return knobHz(f(f(x - HPF_BOTTOM) / f(1 - HPF_BOTTOM)), 20, 8000)
+}
+
+/** The filter's Q for Y: 0.5..8. */
+function filterQ(y: number): number {
+  return lerp(0.5, 8, y)
+}
+
+/** The compressor's input drive for X: 1 + 7x², 1..8. */
+function compDrive(x: number): number {
+  return f(1 + f(f(7 * x) * x))
+}
+
+/** The compressor's COMP_SPEEDS index for Y. */
+function compSpeed(y: number): number {
+  return Math.min(7, Math.trunc(f(clamp01(y) * 8)))
+}
+
+/**
+ * How each effect hears its knobs (0..1), shared by the readouts above and
+ * the effects themselves, so what the display says is what plays. Float
+ * arithmetic in Kotlin's order, each step through Math.fround.
+ */
+export const FxKnobs = {
+  DELAY_DIVISIONS,
+  COMP_SPEEDS,
+  LPF,
+  OPEN,
+  HPF,
+  LPF_TOP,
+  HPF_BOTTOM,
+  delayDivision,
+  delayFeedback,
+  reverbFeedback,
+  distortionDrive,
+  chorusRateHz,
+  chorusDepth,
+  filterZone,
+  filterLpfHz,
+  filterHpfHz,
+  filterQ,
+  compDrive,
+  compSpeed,
+} as const
+
+// ---------- FxBook ----------
+
+/**
+ * Every project's FxSettings, by project number (0..99), kept in arc's
+ * settings as JSON: {"v":1,"projects":[{"project":n,"type":"DELAY",...}]}.
+ * Knob values are written as the exact numbers their floats are, so this
+ * writes the same text as the Kotlin twin.
+ */
+function toJson(map: ReadonlyMap<number, FxSettings>): string {
+  const projects = [...map.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([project, raw]) => {
+      const s = clamped(raw)
+      const sc = s.sidechain
+      return {
+        project,
+        type: s.type,
+        x: s.x,
+        y: s.y,
+        sends: s.sends,
+        comp: { on: s.comp.on, x: s.comp.x, y: s.comp.y },
+        sidechain: { on: sc.on, group: sc.group, pad: sc.pad, dests: sc.dests, x: sc.x, y: sc.y },
+        // The levels only where one isn't 1 (web only): otherwise the Kotlin twin's text.
+        ...(s.levels.some((v) => v !== 1) ? { levels: s.levels } : {}),
+        // The faders likewise (web only): each group's moved ones, by their lower-case names.
+        ...(s.faders.some(movedFaders) ? { faders: s.faders.map(fadersJson) } : {}),
+        ...(s.assign.some((p) => p !== 'LEVEL') ? { assign: s.assign } : {}),
+      }
+    })
+  return JSON.stringify({ v: 1, projects })
+}
+
+/** Whether any of [g]'s positions is off its default. */
+function movedFaders(g: GroupFaders): boolean {
+  return GROUP_FADER_PARAMS.some((p) => g[p] !== DEFAULT_FADERS[p])
+}
+
+/** [g]'s moved positions, as the book writes them: {"lpf":0.25}. */
+function fadersJson(g: GroupFaders): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const p of GROUP_FADER_PARAMS) if (g[p] !== DEFAULT_FADERS[p]) out[p.toLowerCase()] = g[p]
+  return out
+}
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+/** A whole number written as a number (not a string), in the Int range (kotlinx intOrNull). */
+function intOrNull(v: unknown): number | null {
+  return typeof v === 'number' && Number.isInteger(v) && v >= -(2 ** 31) && v <= 2 ** 31 - 1 ? v : null
+}
+
+const floatOrNull = (v: unknown): number | null => (typeof v === 'number' ? f(v) : null)
+
+/** [k] read by [read]: [fallback] when it's left out, null when it can't be read. */
+function field<T>(o: Record<string, unknown>, k: string, read: (v: unknown) => T | null, fallback: T): T | null {
+  return k in o ? read(o[k]) : fallback
+}
+
+const boolOrNull = (v: unknown): boolean | null => (typeof v === 'boolean' ? v : null)
+
+/** One project's settings, or null when a field present can't be read. */
+function entry(o: Record<string, unknown>): FxSettings | null {
+  const d = DEFAULT
+  const type = field(o, 'type', (v) => (FX_TYPES as readonly unknown[]).includes(v) ? (v as FxType) : null, d.type)
+  if (type === null) return null
+  const x = field(o, 'x', floatOrNull, d.x)
+  const y = field(o, 'y', floatOrNull, d.y)
+  if (x === null || y === null) return null
+  let sends: readonly number[] = d.sends
+  if ('sends' in o) {
+    const list = o['sends']
+    if (!Array.isArray(list)) return null
+    const read: number[] = []
+    for (let g = 0; g < GROUPS; g++) {
+      const v = g < list.length ? floatOrNull(list[g]) : 0
+      if (v === null) return null
+      read.push(v)
+    }
+    sends = read
+  }
+  let c = d.comp
+  if ('comp' in o) {
+    const co = o['comp']
+    if (!isObject(co)) return null
+    const on = field(co, 'on', boolOrNull, d.comp.on)
+    const cx = field(co, 'x', floatOrNull, d.comp.x)
+    const cy = field(co, 'y', floatOrNull, d.comp.y)
+    if (on === null || cx === null || cy === null) return null
+    c = { on, x: cx, y: cy }
+  }
+  let sc = d.sidechain
+  if ('sidechain' in o) {
+    const so = o['sidechain']
+    if (!isObject(so)) return null
+    const ds = d.sidechain
+    const on = field(so, 'on', boolOrNull, ds.on)
+    const group = field(so, 'group', intOrNull, ds.group)
+    const pad = field(so, 'pad', intOrNull, ds.pad)
+    const dests = field(so, 'dests', intOrNull, ds.dests)
+    const sx = field(so, 'x', floatOrNull, ds.x)
+    const sy = field(so, 'y', floatOrNull, ds.y)
+    if (on === null || group === null || pad === null || dests === null || sx === null || sy === null) return null
+    sc = { on, group, pad, dests, x: sx, y: sy }
+  }
+  let levels: readonly number[] = d.levels
+  if ('levels' in o) {
+    const list = o['levels']
+    if (!Array.isArray(list)) return null
+    const read: number[] = []
+    for (let g = 0; g < GROUPS; g++) {
+      const v = g < list.length ? floatOrNull(list[g]) : 1
+      if (v === null) return null
+      read.push(v)
+    }
+    levels = read
+  }
+  let fs: readonly GroupFaders[] = d.faders
+  if ('faders' in o) {
+    const list = o['faders']
+    if (!Array.isArray(list)) return null
+    const read: GroupFaders[] = []
+    for (let g = 0; g < GROUPS; g++) {
+      const go: unknown = g < list.length ? list[g] : {}
+      if (!isObject(go)) return null
+      const one = {} as Record<GroupFaderParam, number>
+      for (const p of GROUP_FADER_PARAMS) {
+        const v = field(go, p.toLowerCase(), floatOrNull, DEFAULT_FADERS[p])
+        if (v === null) return null
+        one[p] = v
+      }
+      read.push(one)
+    }
+    fs = read
+  }
+  let assign: readonly FaderParam[] = d.assign
+  if ('assign' in o) {
+    const list = o['assign']
+    if (!Array.isArray(list)) return null
+    const read: FaderParam[] = []
+    for (let g = 0; g < GROUPS; g++) {
+      const v: unknown = g < list.length ? list[g] : 'LEVEL'
+      if (typeof v !== 'string') return null
+      // A name this one doesn't play (a later one's, say): LEVEL.
+      read.push(assignable(v))
+    }
+    assign = read
+  }
+  return clamped({ type, x, y, sends, comp: c, sidechain: sc, levels, faders: fs, assign })
+}
+
+/**
+ * Null when the text is not a version this one can read. A project entry it
+ * can't read (no project number in 0..99, an unknown type, a field of the
+ * wrong kind) is skipped; a field left out is its default, and numbers out
+ * of range are held in it (FxSettings.clamped). A later entry for the same
+ * project wins.
+ */
+function fromJson(text: string): Map<number, FxSettings> | null {
+  let o: unknown
+  try {
+    o = JSON.parse(text)
+  } catch {
+    return null
+  }
+  if (!isObject(o)) return null
+  if (intOrNull(o['v']) !== 1) return null
+  const out = new Map<number, FxSettings>()
+  const list = o['projects']
+  for (const e of Array.isArray(list) ? (list as unknown[]) : []) {
+    if (!isObject(e)) continue
+    const project = intOrNull(e['project'])
+    if (project === null || project < 0 || project > 99) continue
+    const s = entry(e)
+    if (s === null) continue
+    out.set(project, s)
+  }
+  return out
+}
+
+/** The Kotlin `FxBook`. */
+export const FxBook = { toJson, fromJson } as const

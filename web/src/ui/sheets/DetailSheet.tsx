@@ -29,6 +29,8 @@ export interface DetailSheetProps {
   onDelete: () => void
   onDone: () => void
   onContents: () => void
+  /** An EP-1320 backup (FactorySounds.canUseAsFactory): copy it as the EP-1320's factory sounds; null hides the key. */
+  onUseAsFactory: (() => void) | null
   /** Only with two or more backups. */
   onCompareBackups: (() => void) | null
 }
@@ -87,6 +89,10 @@ export function DetailSheet(props: DetailSheetProps): JSX.Element {
           { wide: false, key: <Key text={Strings.SAVE_PAK} block onClick={props.onSave} /> },
           // Addition to the web version: play and export what is inside.
           { wide: true, key: <Key text={FeatureText.CONTENTS} block onClick={props.onContents} /> },
+          props.onUseAsFactory !== null && {
+            wide: true,
+            key: <Key text={FeatureText.USE_AS_FACTORY} block onClick={props.onUseAsFactory} />,
+          },
           props.onCompareBackups !== null && {
             wide: true,
             key: <Key text={FeatureText.COMPARE_BACKUPS} block onClick={props.onCompareBackups} />,

@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Status bar icon: the display panel and the two keys of the launcher icon. -->
+<!-- Status bar icon: the launcher icon's cassette, enlarged to the 24dp icon's live area (viewport 320 around its centre).
+     The hub holes would be under 1dp here, so both reels are solid. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="512"
-    android:viewportHeight="512">
-    <path android:fillColor="#FFFFFF" android:pathData="M96,124a28,28 0 0 1 28,-28h264a28,28 0 0 1 28,28v84a28,28 0 0 1 -28,28h-264a28,28 0 0 1 -28,-28z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M96,304a28,28 0 0 1 28,-28h90a28,28 0 0 1 28,28v84a28,28 0 0 1 -28,28h-90a28,28 0 0 1 -28,-28z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M270,304a28,28 0 0 1 28,-28h90a28,28 0 0 1 28,28v84a28,28 0 0 1 -28,28h-90a28,28 0 0 1 -28,-28z" />
+    android:viewportWidth="320"
+    android:viewportHeight="320">
+    <group android:translateX="-96" android:translateY="-92">
+        <path android:fillColor="#FFFFFF" android:fillType="evenOdd" android:pathData="M148 168H364A24 24 0 0 1 388 192V312A24 24 0 0 1 364 336H320L301.5 304H210.5L192 336H148A24 24 0 0 1 124 312V192A24 24 0 0 1 148 168Z M168 196H344A12 12 0 0 1 356 208V268A12 12 0 0 1 344 280H168A12 12 0 0 1 156 268V208A12 12 0 0 1 168 196Z" />
+        <path android:fillColor="#FFFFFF" android:pathData="M186 238A20 20 0 1 1 226 238A20 20 0 1 1 186 238Z" />
+        <path android:fillColor="#FFFFFF" android:pathData="M276 238A30 30 0 1 1 336 238A30 30 0 1 1 276 238Z" />
+    </group>
 </vector>

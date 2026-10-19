@@ -1,0 +1,51 @@
+# Synth renders: what each synth line makes, written by Arc (SynthVoiceTest, ./gradlew :core:test -Parc.updateGolden=true).
+# scripts/test_beatcard.py renders every case and checks it against this file.
+# One case a line: body, frames, PCM CRC-32 and device name. The card read is ARC BEAT 1, [A], then synth A1 and the body.
+kick | 26437 | 42dcd75d | kick 08bcfa
+snare | 39468 | 7b408291 | snare e7896e
+clap | 21931 | 9283bb06 | clap 333cb7
+hat | 3873 | 886107ad | hat 2fc2a8
+openhat | 31054 | 2933cc7b | openhat 497b86
+tom | 35906 | a22cc795 | tom 38e062
+rim | 2344 | 00ebaf7d | rim b34b17
+cowbell | 13183 | 681e29a6 | cowbell 1f59e7
+sub | 84609 | 169a2197 | sub 33f81a
+bass | 52851 | 994b406f | bass 9ac725
+pluck | 38039 | a08f0545 | pluck 2ec061
+stab | 28564 | 2cdc6c9b | stab c1d3bd
+bell | 106699 | ff017691 | bell ea8e05
+zap | 13183 | 19231231 | zap 109a9c
+lead | 46875 | 2f5a949f | lead 415a1d
+pad | 140625 | 518f4a35 | pad ccd2ff
+riser | 93750 | 9e3a822e | riser 3508a2
+kick note F1 decay 70 bend 40 click 10 drive 20 name 808_kick | 71296 | 16bef971 | 808 kick 29f789
+kick note A1 decay 25 bend 60 click 50 drive 30 name punch_kick | 13183 | a140f5c5 | punch kick c9e74b
+kick note G1 decay 45 tone 25 bend 45 click 25 name house_kick | 32214 | b7cbe239 | house kick a93d15
+snare note G3 decay 30 tone 70 click 20 noise 70 name snare | 39468 | 1ee574ad | snare b01eb9
+snare note A3 decay 20 tone 85 bend 30 noise 85 snap 30 name trap_snare | 23226 | 6e61b75b | trap snare 701f64
+clap decay 35 tone 55 reso 20 name clap | 21931 | 9283bb06 | clap 333cb7
+hat decay 10 tone 75 name closed_hat | 3023 | 7f1b6fd9 | closed hat 1bf6ad
+openhat decay 45 tone 70 name open_hat | 25599 | c8bc2340 | open hat 6e71c4
+hat wave none decay 12 tone 60 noise 100 name shaker | 3322 | eb650f1e | shaker 7ca911
+rim name rim | 2344 | 00ebaf7d | rim b34b17
+tom note D2 decay 45 bend 35 name low_tom | 43576 | 9c965271 | low tom af7fe1
+cowbell name cowbell | 13183 | 681e29a6 | cowbell 1f59e7
+sub note C2 decay 35 drive 25 name sub | 106699 | b49c79af | sub 2ebcc6
+bass note C2 decay 90 length 2 tone 30 detune 55 name reese | 93750 | 550fa700 | reese f6cdd9
+bass note C2 wave square decay 25 tone 25 reso 75 sweep 70 drive 40 name acid | 40283 | 2464916f | acid d74042
+pluck note C4 decay 30 tone 40 sweep 60 name pluck | 38039 | aedfe5fb | pluck 8a0715
+stab note C4 chord min7 decay 20 tone 50 sweep 50 name house_stab | 20812 | 58db1d9f | house stab 11be13
+stab note C4 chord min decay 35 tone 35 detune 30 name dub_chord | 49236 | 3b898c27 | dub chord 8fdfdf
+pad note C3 chord min7 attack 60 decay 60 length 3 tone 40 name dark_pad | 140625 | 13946713 | dark pad f4a4f6
+lead note C4 tone 70 detune 20 name lead | 46875 | 9855df63 | lead 0d7726
+bell note C5 decay 30 tone 40 name bell | 84609 | b84198a3 | bell ea5670
+zap note C3 decay 25 bend 100 name dub_zap | 13183 | 19231231 | dub zap 109a9c
+riser length 2 tone 80 reso 40 name riser | 93750 | 4b48e5bf | riser 4861b7
+pad note C7 chord maj7 bend 100 detune 100 length 4 | 187500 | 272b3912 | pad d33dcf
+hat chord min7 detune 100 length 4 | 187500 | 7b8a450b | hat 5cc1cf
+bell note C0 wave saw tone 100 | 106699 | 2621d790 | bell 003f26
+kick seed 1 | 26437 | 0f3a981d | kick 7fbbca
+clap snap 50 | 61757 | 8d80943b | clap 86c590
+lead wave none | 46875 | c296a771 | lead f85d37
+snare attack 100 decay 100 snap 100 | 187500 | dbfcd165 | snare 1f8913
+zap note C7 tone 100 reso 100 sweep 100 bend 100 drive 100 | 13183 | fbcd83ce | zap a4a0e8

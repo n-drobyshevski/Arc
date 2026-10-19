@@ -38,6 +38,35 @@ export async function notAutomated(page: Page): Promise<void> {
   })
 }
 
+/**
+ * What the open guide overlay hides, as words: a tag off the screen, a tag on
+ * another, or a tag over a quarter or more of a marked control (what it points
+ * at: a word's letters, not its touch area) or of an untagged one (data-coach-clear).
+ * Empty when every tag is in view and clear. Tall areas (the pads, the piano) hold
+ * their own tag and don't count.
+ */
+export function coachHides(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const tags = [...document.querySelectorAll('.coach__tag')].map((t) => ({ id: t.getAttribute('data-coach-tag') ?? '', r: t.getBoundingClientRect() }))
+    const vw = innerWidth
+    const vh = innerHeight
+    const shown = (el: Element): DOMRect => (el.querySelector('[data-coach-box]') ?? el).getBoundingClientRect()
+    const controls = [
+      ...[...document.querySelectorAll('.coach-host [data-coach]')].map((el) => ({ id: el.getAttribute('data-coach') ?? '', r: shown(el) })),
+      ...[...document.querySelectorAll('.coach-host [data-coach-clear]')].map((el) => ({ id: el.getAttribute('aria-label') ?? 'untagged', r: el.getBoundingClientRect() })),
+    ].filter((c) => c.r.width > 0 && c.r.height > 0 && c.r.height <= vh / 4 && c.r.bottom > 0 && c.r.top < vh)
+    const shared = (a: DOMRect, b: DOMRect): number =>
+      Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top))
+    const out: string[] = []
+    tags.forEach((t, i) => {
+      if (t.r.left < -0.5 || t.r.top < -0.5 || t.r.right > vw + 0.5 || t.r.bottom > vh + 0.5) out.push(`${t.id} off the screen`)
+      for (const u of tags.slice(i + 1)) if (shared(t.r, u.r) > 0) out.push(`${t.id} on ${u.id}`)
+      for (const c of controls) if (c.id !== t.id && shared(t.r, c.r) >= 0.25 * c.r.width * c.r.height) out.push(`${t.id} hides ${c.id}`)
+    })
+    return out
+  })
+}
+
 /** The section switch in the top bar: opens the Sections menu and picks [name]. */
 export async function selectTab(page: Page, name: 'Backups' | 'Live' | 'Device'): Promise<void> {
   await page.getByRole('banner').getByRole('button', { name: /, Sections$/ }).click()
@@ -46,13 +75,44 @@ export async function selectTab(page: Page, name: 'Backups' | 'Live' | 'Device')
 }
 
 /**
+ * Opens Settings: the nav rail's Settings key on the desktop layout (from
+ * 1024px wide), the last entry of the section list the tag opens below it
+ * (Live's tools have a Settings row too).
+ */
+export async function openSettings(page: Page): Promise<void> {
+  const desk = (page.viewportSize()?.width ?? 0) >= 1024
+  if (desk) {
+    await page.locator('.nav-rail').getByRole('button', { name: 'Settings', exact: true }).click()
+  } else {
+    await page.getByRole('banner').getByRole('button', { name: /, Sections$/ }).click()
+    await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: 'Settings', exact: true }).click()
+  }
+  await expect(page.locator('.app__screen[data-view="settings"]')).toBeVisible()
+}
+
+/**
  * Imports a .pak through the Import key. The app makes a hidden <input type=file>
  * per pick and clicks it; Playwright intercepts that picker (FileChooser) and
  * sets the input's files, which fires its change event like a real choice.
+ * [file] is a path, or a file made in the test.
  */
-export async function importPak(page: Page, file: string): Promise<void> {
+export async function importPak(page: Page, file: string | { name: string; mimeType: string; buffer: Buffer }): Promise<void> {
   const chooser = page.waitForEvent('filechooser')
   await page.getByRole('button', { name: 'Import a .pak' }).click()
   const fc = await chooser
   await fc.element().setInputFiles(file)
+}
+
+/**
+ * Live's grid on the desk (One group or All groups) instead of the drawn EP-133, the desk's
+ * default: for tests of the grid's own layout. Set before each load, as a person who chose it.
+ */
+export async function gridOnDesk(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('arc.liveDeviceView', '0')
+    } catch {
+      // No storage: the test sees the default.
+    }
+  })
 }

@@ -1,0 +1,8 @@
+/* KnobSlider: the label, the slider in its knob's colour, the readout. */
+.knob-slider { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 4px; color: var(--ink); }
+.knob-slider__label { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.knob-slider input { width: 100%; margin: 0; accent-color: var(--signal); }
+.knob-slider--white input { accent-color: var(--graphite); }
+.knob-slider--black input { accent-color: var(--ink); }
+.knob-slider__value { font-size: var(--size-small); color: var(--graphite); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.knob-slider.is-disabled { opacity: 0.45; }

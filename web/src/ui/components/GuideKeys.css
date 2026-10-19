@@ -1,192 +1,120 @@
 /* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/GuideKeys.kt */
 
-/* ComboView: context, then the options separated by "or"; gap 6. */
-.combo {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-6);
-}
-.combo__note { color: var(--graphite); }
-
-/* FlowRow: steps joined by "then", gap 8 / 6, aligned at the bottom. */
-.combo__row {
+/* ComboLine: a flow row, gap 5 / 6, items centred on the line. */
+.combo-line {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
-  column-gap: var(--space-8);
+  align-items: center;
+  column-gap: 5px;
   row-gap: var(--space-6);
 }
-
-/* Step: keys joined by + or /, aligned at the bottom, gap 8. */
-.combo__step {
-  display: inline-flex;
-  align-items: flex-end;
-  gap: var(--space-8);
-}
-
-/* Joiner: centred in a box as tall as a dark key (35). */
-.combo__joiner {
+/* A tag with its key (and the joiner before it): gap 4, 5 after a joiner. */
+.combo-line__key {
   display: inline-flex;
   align-items: center;
-  height: 35px;
-  color: var(--ink);
-  font-size: 28px;
-  font-weight: 400;
+  gap: var(--space-4);
+}
+.combo-line__key > .combo-line__word { margin-inline-end: 1px; }
+/* "or", "+", "/": tiny graphite. */
+.combo-line__word {
+  color: var(--graphite);
+  font-size: var(--size-tiny);
+  font-weight: 500;
   line-height: 1.5;
 }
-.combo__joiner--small {
-  color: var(--graphite);
-  font-size: var(--size-small);
-  font-weight: 500;
-}
-
-/* ---- Cap ---- */
-.cap {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
+.combo-line__arrow {
   flex: none;
-}
-
-/* Text on a cap: FontFamily.Monospace 12/500, no line height of its own
- * (CapText is not BaseText): the font's own metrics, as `normal`. */
-.cap__text {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: normal;
-  letter-spacing: 0;
-  white-space: nowrap;
-}
-
-/* Key: the face, with its edge 2px right and 3px down (radius 6). */
-.cap__key {
-  position: relative;
-  display: block;
-  flex: none;
-}
-.cap__key--light { --cap-face: var(--guide-light-face); --cap-edge: var(--guide-light-edge); --cap-ink: var(--guide-light-ink); }
-.cap__key--dark { --cap-face: var(--guide-dark-face); --cap-edge: var(--guide-dark-edge); --cap-ink: var(--guide-dark-ink); }
-.cap__face {
-  position: absolute;
-  left: 0;
-  top: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  background: var(--cap-face);
-  color: var(--cap-ink);
-  box-shadow: 2px 3px 0 var(--cap-edge);
-}
-/* Pads: the label in the top-left corner, padding 7 / 5. */
-.cap__face--corner {
-  align-items: flex-start;
-  justify-content: flex-start;
-}
-.cap__pad-label {
-  padding: 5px 0 0 7px;
-  font-size: 13px;
-}
-.cap__pad-label--small { font-size: 10px; }
-
-.cap__glyph {
   fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  overflow: visible;
-}
-
-/* Knob: a 38 circle in a 42 box, its edge 1 right and 2 down. */
-.cap__knob {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 42px;
-  height: 42px;
-}
-.cap__knob-face {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  background: var(--guide-dark-face);
-  box-shadow: 1px 2px 0 var(--guide-dark-edge);
-  color: var(--guide-dark-ink);
-}
-.cap__knob-label {
-  font-size: 14px;
-  font-weight: 700;
-}
-
-/* Fader: "FADER" above a 22×50 track with an 18×10 cap; gap 3. */
-.cap__fader {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-3);
-}
-.cap__fader-label {
-  color: var(--graphite);
-  font-size: 10px;
-}
-.cap__fader-track {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 50px;
-  border-radius: 11px;
-  background: var(--guide-dark-edge);
-}
-.cap__fader-cap {
-  display: block;
-  width: 18px;
-  height: 10px;
-  border-radius: 3px;
-  background: var(--guide-light-face);
-}
-
-/* ---- Badge: a 26-high slot above the cap, the badge at its top ---- */
-.cap__badge-slot {
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  height: 26px;
-}
-.cap__badge {
-  --badge-face: var(--guide-light-face);
-  --badge-ink: var(--guide-light-ink);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-.cap__badge--hold { --badge-face: var(--guide-hold-face); --badge-ink: var(--guide-hold-ink); }
-.cap__badge--dial { --badge-face: var(--signal); --badge-ink: var(--on-signal); }
-.cap__badge-text {
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: var(--badge-face);
-  color: var(--badge-ink);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  line-height: normal;
-  letter-spacing: 0;
-  white-space: nowrap;
-}
-.cap__badge-arrow {
-  fill: none;
-  stroke: var(--badge-face);
-  stroke-width: 1.5;
+  stroke: var(--graphite);
+  stroke-width: 1.4;
   stroke-linecap: round;
   stroke-linejoin: round;
-  overflow: visible;
 }
+
+/* MiniCap: radius 5, its edge 1 right and 2 down (RoundCapDx / Dy), at least
+ * 22 wide, padding 3 / 7; 11/700, 0.04em, line height 1.2. */
+.mini-cap {
+  --mini-face: var(--guide-dark-face);
+  --mini-edge: var(--guide-dark-edge);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: 22px;
+  margin: 0 1px 2px 0;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: var(--mini-face);
+  box-shadow: 1px 2px 0 var(--mini-edge);
+  color: var(--guide-dark-ink);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.mini-cap--light { --mini-face: var(--guide-light-face); --mini-edge: var(--guide-light-edge); color: var(--guide-light-ink); }
+.mini-cap--signal { --mini-face: var(--signal); --mini-edge: var(--signal-edge); color: var(--on-signal); }
+
+/* Tag: 10/800, 0.06em, padding 2 / 5, radius 4. */
+.guide-tag {
+  flex: none;
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.guide-tag--mode { background: color-mix(in srgb, var(--navy) 12%, transparent); color: var(--navy); }
+.guide-tag--context { background: color-mix(in srgb, var(--graphite) 12%, transparent); color: var(--graphite); }
+.guide-tag--hold { background: var(--guide-hold-face); color: var(--guide-hold-ink); }
+.guide-tag--dial { background: var(--signal); color: var(--on-signal); }
+.guide-tag--plain { background: var(--guide-light-face); color: var(--guide-light-ink); }
+
+/* KeymapSteps: a flow row, gap 8, an arrow between steps. */
+.keymap-steps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.keymap-steps__step,
+.keymap-steps__body {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+.keymap-steps__body { gap: var(--space-6); }
+.keymap-steps__word {
+  color: var(--graphite);
+  font-size: var(--size-tiny);
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+/* StepBadge: a pill at least 22 across, padding 0 / 6; 11/800. */
+.step-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--signal);
+  color: var(--on-signal);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+.step-badge--hold { background: var(--guide-hold-face); color: var(--guide-hold-ink); }
 
 /* ---- CloseKey: 46×49, the face drops 3px onto its edge while pressed ---- */
 .close-key {

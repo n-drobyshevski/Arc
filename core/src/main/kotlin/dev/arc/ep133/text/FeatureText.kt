@@ -37,6 +37,49 @@ object FeatureText {
     const val PROJECT = "Project"
     const val PICK_PROJECT = "Tap a project to see its sounds and pads."
 
+    // The Device tab, redesigned: storage as a split meter, the factory layout per range, projects as pads.
+    /** "free of 61 MB", under the free space in large type. */
+    fun freeOf(total: Double) = "free of ${Format.bytes(total)}"
+    const val FREE = "Free"
+
+    /** The factory layout's blocks of slots, in order (the guide's): kicks, snares, hi-hats, percussion, bass and melodic. */
+    val FACTORY_BLOCKS: List<IntRange> = listOf(1..99, 100..199, 200..299, 300..399, 400..499, 500..599)
+
+    private val FACTORY_KINDS = listOf("Kicks", "Snares", "Hats", "Perc", "Bass", "Melodic")
+
+    /**
+     * The factory layout's kind of sound for the range of slots starting at
+     * [first] (from the official guide's note on SOUND mode: kicks 1-99,
+     * snares 100-199, hi-hats 200-299, percussion 300-399, bass 400-499,
+     * melodic 500-599; [FACTORY_BLOCKS]). From 600 up the guide leaves the
+     * slots free, so null, except with the EP-40 Riddim's kit ([kit]), whose
+     * pack fills them ([EP40_BLOCKS]): chord stabs, shouts and dub FX, loops.
+     */
+    fun factoryCategory(first: Int, kit: dev.arc.ep133.features.FactoryKit = dev.arc.ep133.features.FactoryKit.EP133): String? =
+        FACTORY_BLOCKS.indexOfFirst { first in it }.takeIf { it >= 0 }?.let { FACTORY_KINDS[it] }
+            ?: EP40_BLOCKS.indexOfFirst { first in it }.takeIf { it >= 0 && kit == dev.arc.ep133.features.FactoryKit.EP40 }?.let { EP40_KINDS[it] }
+
+    /** The EP-40 Riddim pack's blocks past the guide's: chord stabs 600-628, vocal shouts and dub FX 700-754, loops 800-898. */
+    val EP40_BLOCKS: List<IntRange> = listOf(600..699, 700..799, 800..899)
+
+    private val EP40_KINDS = listOf("Chords", "Vox \u00B7 FX", "Loops")
+
+    /** "12 \u00B7 2.1 MB", the sounds binder's bar after "Sounds". */
+    fun soundsTotal(n: Int, bytes: Double) = "$n \u00B7 ${Format.bytes(bytes)}"
+
+    const val ALL = "All"
+    /** "In P3 \u00B7 7", the filter for the sounds the selected project uses. */
+    fun inProject(project: Int, n: Int) = "In ${projectBadge(project)} \u00B7 $n"
+
+    /** "P3", on a sound the selected project uses. */
+    fun projectBadge(project: Int) = "P$project"
+
+    /** A project slot with nothing in it, on its pad key. */
+    const val EMPTY_PROJECT = "empty"
+
+    /** "352 KB \u00B7 7 sounds", beside the selected project's name. */
+    fun projectSummary(size: Long, sounds: Int) = "${Format.bytes(size.toDouble())} \u00B7 ${plural(sounds, "sound")}"
+
     /** "001–099". */
     fun range(r: IntRange) = slot(r.first) + "\u2013" + slot(r.last)
 
@@ -258,4 +301,61 @@ object FeatureText {
     fun restored(n: Int) = "Restored ${plural(n, "backup")}"
 
     fun copyFailed(message: String) = "Could not copy to Documents/arc: $message"
+
+    // ---------- factory sounds (FactorySounds) ----------
+    const val FACTORY_SOUNDS = "Factory sounds"
+    const val FACTORY_TITLE = "EP-133 factory sounds"
+    const val FACTORY_NOTE = "The EP-133's factory sounds, from teenage engineering's EP Sample Tool. Live plays them until it has read your EP-133."
+    const val FACTORY_SAVED = "In your backups. Live plays them until it has read your EP-133."
+    const val GET = "Get"
+    const val SAVED = "Saved"
+    const val GETTING_FACTORY = "Getting factory sounds"
+    /** The progress sheet's note while they download (no cable involved). */
+    const val FACTORY_KEEP_OPEN = "Keep arc open until they're saved."
+    const val NOT_FACTORY = "teenage engineering's file isn't an EP-133 factory pack."
+    const val FACTORY_UNREACHABLE = "teenage engineering's site couldn't be reached. Check the connection and try again."
+
+    /** The download's progress: "12.3 MB of 27.4 MB". */
+    fun factoryProgress(done: Long, total: Long) = "${Format.bytes(done)} of ${Format.bytes(total)}"
+
+    fun factorySaved(sounds: Int) = "Factory sounds saved: ${plural(sounds, "sound")}. Live plays them until it has read your EP-133."
+
+    fun factoryFailed(message: String) = "Couldn't get the factory sounds: $message"
+
+    // The EP-1320 Medieval's kit (FactoryKit.EP1320): a copy of the user's own backup, as there is no download.
+    const val FACTORY_TITLE_1320 = "EP-1320 Medieval factory sounds"
+    const val FACTORY_1320 = "EP-1320 Medieval"
+    const val FACTORY_1320_NOTE = "teenage engineering offers no download for the EP-1320. Open a backup of your Medieval (best made right after a factory reset) in Backups and choose Use as factory sounds."
+    const val FACTORY_1320_SAVED = "In your backups, copied from your own Medieval backup."
+    /** The detail sheet's key on a Medieval's backup (FactorySounds.canUseAsFactory). */
+    const val USE_AS_FACTORY = "Use as factory sounds"
+    const val SAVING_FACTORY = "Saving factory sounds"
+    const val NOT_MEDIEVAL = "This backup isn't from an EP-1320 Medieval, or it has no sounds."
+    /** Which kit Live plays offline, when two or more are saved: Settings' row and Live's switch. */
+    const val FACTORY_KIT = "Factory kit"
+
+    fun factory1320Saved(sounds: Int) = "EP-1320 factory sounds saved: ${plural(sounds, "sound")}. Live plays them until it has read your EP-1320."
+
+    // The EP-40 Riddim's kit (FactoryKit.EP40): downloaded like the EP-133's, from beside it.
+    const val FACTORY_TITLE_40 = "EP-40 Riddim factory sounds"
+    const val FACTORY_40 = "EP-40 Riddim"
+    const val FACTORY_40_NOTE = "The EP-40's factory sounds (471 sounds, about 69 MB), from teenage engineering's EP Sample Tool. Live plays them when you pick the EP-40 kit."
+    const val FACTORY_40_SAVED = "In your backups. Live plays them when you pick the EP-40 kit."
+    const val NOT_FACTORY_40 = "teenage engineering's file isn't an EP-40 factory pack."
+
+    fun factory40Saved(sounds: Int) = "EP-40 factory sounds saved: ${plural(sounds, "sound")}. Live plays them until it has read your EP-40."
+
+    /** [kit]'s library title. */
+    fun factoryTitle(kit: dev.arc.ep133.features.FactoryKit) = when (kit) {
+        dev.arc.ep133.features.FactoryKit.EP133 -> FACTORY_TITLE
+        dev.arc.ep133.features.FactoryKit.EP1320 -> FACTORY_TITLE_1320
+        dev.arc.ep133.features.FactoryKit.EP40 -> FACTORY_TITLE_40
+    }
+
+    /** What saving [kit]'s pack says. */
+    fun factorySaved(kit: dev.arc.ep133.features.FactoryKit, sounds: Int) = when (kit) {
+        dev.arc.ep133.features.FactoryKit.EP133 -> factorySaved(sounds)
+        dev.arc.ep133.features.FactoryKit.EP1320 -> factory1320Saved(sounds)
+        dev.arc.ep133.features.FactoryKit.EP40 -> factory40Saved(sounds)
+    }
 }

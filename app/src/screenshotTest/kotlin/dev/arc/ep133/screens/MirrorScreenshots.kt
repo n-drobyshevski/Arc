@@ -1,8 +1,23 @@
 package dev.arc.ep133.screens
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.DpRect
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.tooling.preview.Preview
 import com.android.tools.screenshot.PreviewTest
+import dev.arc.ep133.controller.DeviceSummary
 import dev.arc.ep133.controller.MirrorUi
 import dev.arc.ep133.controller.UiState
 import dev.arc.ep133.features.Hit
@@ -10,14 +25,35 @@ import dev.arc.ep133.features.MirrorState
 import dev.arc.ep133.features.PadLight
 import dev.arc.ep133.features.PadOrder
 import dev.arc.ep133.features.PhysicalPad
+import dev.arc.ep133.features.SoundSource
+import dev.arc.ep133.protocol.DeviceInfo
 import dev.arc.ep133.protocol.Storage
+import dev.arc.ep133.text.BackupDevice
+import dev.arc.ep133.text.BackupRecord
 import dev.arc.ep133.ui.screens.MainScreen
 import dev.arc.ep133.ui.screens.SettingsScreen
 import dev.arc.ep133.data.AppSettings
 import dev.arc.ep133.ui.screens.DeviceScreen
 import dev.arc.ep133.ui.screens.PadsSheetContent
+import dev.arc.ep133.ui.screens.PadSheetContent
+import dev.arc.ep133.ui.components.ArcFrame
+import dev.arc.ep133.ui.components.CoachHost
 import dev.arc.ep133.ui.components.ArcSheet
 import dev.arc.ep133.ui.components.Tab
+import dev.arc.ep133.ui.components.ArcShell
+import dev.arc.ep133.ui.components.ArcToast
+import dev.arc.ep133.ui.components.LateKey
+import dev.arc.ep133.ui.components.SampleKey
+import dev.arc.ep133.ui.components.BarSlot
+import dev.arc.ep133.ui.components.LocalArcWindow
+import dev.arc.ep133.ui.components.LocalBarSlot
+import dev.arc.ep133.controller.UploadDraftItem
+import dev.arc.ep133.text.MirrorText
+import dev.arc.ep133.text.SkinChoice
+import dev.arc.ep133.ui.screens.LivePill
+import dev.arc.ep133.ui.screens.TrimSheetContent
+import dev.arc.ep133.ui.screens.liveInBar
+import dev.arc.ep133.ui.screens.GuideScreen
 import dev.arc.ep133.controller.BrowserUi
 import dev.arc.ep133.features.DeviceContents
 import dev.arc.ep133.features.PadGroup
@@ -28,6 +64,76 @@ import dev.arc.ep133.protocol.ProjectEntry
 import dev.arc.ep133.protocol.SoundEntry
 import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.ui.screens.MirrorScreen
+import dev.arc.ep133.ui.screens.KeysSheetContent
+import dev.arc.ep133.ui.screens.FunctionKeysUi
+import dev.arc.ep133.ui.screens.SampleUi
+import dev.arc.ep133.controller.SampleUiState
+import dev.arc.ep133.features.SampleInput
+import dev.arc.ep133.features.SamplePhase
+import dev.arc.ep133.features.SampleSource
+import dev.arc.ep133.ui.screens.ProjectSheetContent
+import dev.arc.ep133.ui.screens.SampleReviewSheetContent
+import dev.arc.ep133.ui.screens.TempoSheetContent
+import dev.arc.ep133.ui.screens.TempoPage
+import dev.arc.ep133.ui.screens.TimingUi
+import dev.arc.ep133.ui.screens.LiveArp
+import dev.arc.ep133.ui.screens.LiveScene
+import dev.arc.ep133.ui.screens.LiveStep
+import dev.arc.ep133.controller.ClipMode
+import dev.arc.ep133.controller.ClipUi
+import dev.arc.ep133.controller.PadStage
+import dev.arc.ep133.controller.ChainUi
+import dev.arc.ep133.controller.SceneGroupUi
+import dev.arc.ep133.controller.SceneUi
+import dev.arc.ep133.features.SwitchTime
+import dev.arc.ep133.controller.StepNote
+import dev.arc.ep133.controller.StepUi
+import dev.arc.ep133.controller.ArpUi
+import dev.arc.ep133.features.ArpNote
+import dev.arc.ep133.features.ArpOrder
+import dev.arc.ep133.features.ArpSettings
+import dev.arc.ep133.features.TimingSettings
+import dev.arc.ep133.ui.screens.PatternSheetContent
+import dev.arc.ep133.ui.screens.BeatImportSheetContent
+import dev.arc.ep133.ui.screens.ClaudeUi
+import dev.arc.ep133.ui.screens.ToolsPage
+import dev.arc.ep133.controller.BeatFxUi
+import dev.arc.ep133.controller.beatFxUi
+import dev.arc.ep133.controller.padShapingUi
+import dev.arc.ep133.features.PadSettings
+import dev.arc.ep133.features.PlayMode
+import dev.arc.ep133.controller.PadShapingUi
+import dev.arc.ep133.controller.SilentUi
+import dev.arc.ep133.controller.SoundChoices
+import dev.arc.ep133.controller.SoundSet
+import dev.arc.ep133.controller.SoundsUi
+import dev.arc.ep133.controller.beatImportUi
+import dev.arc.ep133.controller.silentUi
+import dev.arc.ep133.controller.soundsUi
+import dev.arc.ep133.features.BeatCard
+import dev.arc.ep133.features.Chain
+import dev.arc.ep133.features.ChainPlay
+import dev.arc.ep133.features.ChainStep
+import dev.arc.ep133.text.ClaudeText
+import dev.arc.ep133.features.BeatCards
+import dev.arc.ep133.features.Pattern
+import dev.arc.ep133.features.PatternNote
+import dev.arc.ep133.features.ProjectSeq
+import dev.arc.ep133.ui.screens.FxPage
+import dev.arc.ep133.ui.screens.FxSheetContent
+import dev.arc.ep133.ui.screens.FxUi
+import dev.arc.ep133.ui.screens.PunchUi
+import dev.arc.ep133.features.Comp
+import dev.arc.ep133.features.FxSettings
+import dev.arc.ep133.features.FxType
+import dev.arc.ep133.features.Sidechain
+import dev.arc.ep133.ui.screens.TakeUi
+import dev.arc.ep133.ui.screens.TransportUi
+import dev.arc.ep133.features.PatternPosition
+import dev.arc.ep133.features.Timing
+import dev.arc.ep133.features.TransportPhase
+import dev.arc.ep133.ui.screens.projectChoicesOf
+import dev.arc.ep133.ui.screens.projectKeyOf
 import dev.arc.ep133.ui.theme.ArcTheme
 
 /*
@@ -36,28 +142,76 @@ import dev.arc.ep133.ui.theme.ArcTheme
  */
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList()) {
-    Framed(Tab.LIVE, connected = offline == null, dark = dark, guide = guide) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, skin: SkinChoice = SkinChoice.EP133, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f, claude: ClaudeUi? = null, trimming: String? = null, toolsPage: ToolsPage? = null, factoryKit: dev.arc.ep133.features.FactoryKit? = null, factoryKits: List<dev.arc.ep133.features.FactoryKit> = listOf(dev.arc.ep133.features.FactoryKit.EP133, dev.arc.ep133.features.FactoryKit.EP1320), practice: dev.arc.ep133.ui.screens.LivePractice? = null) {
+    // As the controller has it: the last read's day alone for a short line ("Seen Oct 5").
+    val offlineShort = offline?.takeIf { it.startsWith("Last seen ") }?.let { MirrorText.seen(it.removePrefix("Last seen ").substringBefore(",")) }
+    // [factoryKit]: [factoryKits] saved (two or more), that one shown (its switch on the factory line).
+    val mirror = MirrorUi(state, loading = loading, error = error, offline = offline, offlineShort = offlineShort, offlineProjects = offlineProjects, kit = factoryKit ?: dev.arc.ep133.features.FactoryKit.EP133)
+    // PROJECT as MainActivity works it out; TEMPO's light caught on a beat while the click is on; FX named on its light,
+    // held while [punch] gives the punch-ins.
+    val functions = FunctionKeysUi(project = projectKeyOf(mirror, busy = false), clickOn = clickOn, beatLit = clickOn, fx = fx, fxHeld = punch != null)
+    // The SAMPLE panel, as MainActivity has it: the meter caught at a level, its threshold tick where the
+    // knob has it, the last take's wave where [lastTake]. Without [sample], the panel closed, as the app has it in
+    // PADS: the mic key in the top bar unlit, and nothing on the page.
+    val sampleUi = SampleUi(sample ?: SampleUiState(), level = { 0.62f }, lastTake = if (lastTake) takePeaks else null, still = true, unroll = unroll, hasPattern = ptn, pattern = ptn)
+    // TAKE in Live tools, its badge on the line while [rec] records.
+    val takeUi = TakeUi(rec) {}
+    // The piano's notes, for the display line in the bar to name a device note past them. The
+    // piano reports them a frame late, after the screenshot, so [piano] gives them up front.
+    var pianoRange by remember { mutableStateOf(piano) }
+    // The voices sounding, as the phone reports them ([voices]: the arp's steps lit); null leaves the rings as given.
+    val voiceFlow = remember(voices) { voices?.let { kotlinx.coroutines.flow.MutableStateFlow(it) } }
+    // STEP, as MainActivity always has it with the pattern's transport: its chip on the stopped line, the panel where [step] opens it.
+    val stepUi = step ?: transport?.let { LiveStep() }
+    // SCENES, as MainActivity always has it with the pattern's transport: its chip on the stopped line, the panel where [scene] opens it.
+    val sceneUi = scene ?: transport?.let { LiveScene(still = true) }
+    Framed(
+        Tab.LIVE, connected = offline == null && error == null, dark = dark, skin = skin, guide = guide,
+        pill = { LivePill(mirror, keys, transport, takeUi, still = true, pianoRange = pianoRange, editing = edit == true, sample = sampleUi, punch = punch?.held.orEmpty(), arp = arp?.ui?.line, voices = voiceFlow, step = stepUi, scene = sceneUi, sceneOpens = oneGroup && !keys.on) }, toast = toast, barMiddle = barMiddle,
+        toastAction = toastAction,
+        sample = SampleKey(sampleUi.state.on && !keys.on) {},
+        late = LateKey {}.takeIf { wireless },
+        holdProgress = holdProgress,
+    ) {
         MirrorScreen(
-            mirror = MirrorUi(state, loading = loading, offline = offline),
+            mirror = mirror,
             nameOf = { if (state.learned.isEmpty()) null else names[it] },
-            onPadOrder = {},
             fixedNow = NOW,
             oneGroup = oneGroup,
             // The last hit (A 7) is in group A; B is sounding too.
             follow = true,
             initialToolsOpen = tools,
+            initialToolsPage = toolsPage,
             initialNoteOpen = noteOpen,
-            onPad = if (playingPads.isNotEmpty()) ({ _, _ -> }) else null,
+            onGetFactory = if (getFactory) ({}) else null,
+            factoryKit = factoryKit,
+            factoryKits = factoryKits,
+            onPad = if (playingPads.isNotEmpty()) ({ _, _, _, _ -> }) else null,
             playingPads = playingPads,
             keys = keys,
-            rec = dev.arc.ep133.ui.screens.RecUi(rec) {},
+            onPianoRange = { pianoRange = it },
+            transport = transport,
+            take = takeUi,
             takes = dev.arc.ep133.ui.screens.TakesUi(
                 list = takes,
                 playing = takes.firstOrNull()?.name,
                 fmtWhen = { if (it == TAKE_AT) "Oct 5, 2:23 PM" else "Oct 4, 9:41 PM" },
                 connected = offline == null,
+                trimming = trimming,
+                trimSound = if (trimming != null) beatSound else null,
             ),
+            // EDIT, SOUND's key, as on the Live tab: on where [edit] says so.
+            edit = dev.arc.ep133.ui.screens.EditUi(on = edit == true, onEdit = {}),
+            functions = functions,
+            punch = punch ?: PunchUi(),
+            sample = sampleUi,
+            voices = voiceFlow,
+            arp = arp,
+            step = stepUi,
+            scene = sceneUi,
+            onSettings = {},
+            claude = claude,
+            practice = practice,
         )
     }
 }
@@ -73,10 +227,28 @@ fun LiveOneGroupPreview() = Live(playing, oneGroup = true)
 @Composable
 fun LiveOneGroupDarkPreview() = Live(playing, dark = true, oneGroup = true)
 
+// The EP-40's group keys: the picked one's letter in the pads' green, not their cream.
+@PreviewTest
+@Preview(name = "Live one group EP-40", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveOneGroupEp40Preview() = Live(playing, skin = SkinChoice.EP40, oneGroup = true)
+
 @PreviewTest
 @Preview(name = "Live tools open", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
-fun LiveToolsOpenPreview() = Live(playing, oneGroup = true, tools = true)
+fun LiveToolsOpenPreview() = Live(playing, oneGroup = true, tools = true, claude = claudeShares, takes = someTakes)
+
+// All four groups, the tools' front page: what was played last on the display, and the Play row saying PADS.
+@PreviewTest
+@Preview(name = "Live all groups tools", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveAllGroupsToolsPreview() = Live(playing, tools = true)
+
+// All four groups have no plate to print KEYS / PADS on, nor RPT and LATCH: the Play page holds View, Mode and note repeat (on, so LATCH shows).
+@PreviewTest
+@Preview(name = "Live all groups play page", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveAllGroupsPlayPagePreview() = Live(playing, tools = true, toolsPage = ToolsPage.PLAY, arp = LiveArp(ArpUi(on = true)))
 
 // A smaller phone (360 x 740 dp, less the bars): still one screen, the pads just get shorter.
 @PreviewTest
@@ -95,13 +267,124 @@ fun LiveOfflinePreview() = Live(lastRead, oneGroup = true, offline = "Last seen 
 fun LiveOfflineAllPreview() = Live(lastRead, offline = "Last seen Oct 5, 2:02 PM")
 
 // Offline, a tapped pad plays its sample on the phone: ringed while it plays.
+// Never read, not connected: the factory sounds to get, on the display and first in the tools.
+@PreviewTest
+@Preview(name = "Live get factory sounds", widthDp = 393, heightDp = 1180, showBackground = true)
+@Composable
+fun LiveGetFactoryPreview() = Live(MirrorState(), error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED, getFactory = true)
+
+@PreviewTest
+@Preview(name = "Live get factory sounds tools", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveGetFactoryToolsPreview() = Live(MirrorState(), oneGroup = true, tools = true, error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED, getFactory = true)
+
+// The factory sounds' project 1, shown before any read, its note unfolded.
+@PreviewTest
+@Preview(name = "Live factory sounds", widthDp = 393, heightDp = 1180, showBackground = true)
+@Composable
+fun LiveFactoryPreview() = Live(lastRead.copy(activeProject = 1), offline = dev.arc.ep133.text.MirrorText.FACTORY, noteOpen = true)
+
+// Both factory kits saved: the EP-133 / EP-1320 switch on the factory line, the EP-1320's shown.
+@PreviewTest
+@Preview(name = "Live factory kit switch", widthDp = 393, heightDp = 1180, showBackground = true)
+@Composable
+fun LiveFactoryKitPreview() =
+    Live(lastRead.copy(activeProject = 1), offline = dev.arc.ep133.text.MirrorText.FACTORY, noteOpen = true, factoryKit = dev.arc.ep133.features.FactoryKit.EP1320)
+
+// All three kits saved, the EP-40's shown: the switch's three keys under the factory line, at a small phone's width.
+@PreviewTest
+@Preview(name = "Live factory three kits", widthDp = 360, heightDp = 1180, showBackground = true)
+@Composable
+fun LiveFactoryThreeKitsPreview() =
+    Live(lastRead.copy(activeProject = 1), offline = dev.arc.ep133.text.MirrorText.FACTORY, noteOpen = true, factoryKit = dev.arc.ep133.features.FactoryKit.EP40, factoryKits = dev.arc.ep133.features.FactoryKit.SHOWN)
+
+// The three in Live tools, for the one-group view.
+@PreviewTest
+@Preview(name = "Live factory three kits tools", widthDp = 360, heightDp = 843, showBackground = true)
+@Composable
+fun LiveFactoryThreeKitsToolsPreview() =
+    Live(lastRead.copy(activeProject = 1), oneGroup = true, tools = true, offline = dev.arc.ep133.text.MirrorText.FACTORY, factoryKit = dev.arc.ep133.features.FactoryKit.EP40, factoryKits = dev.arc.ep133.features.FactoryKit.SHOWN)
+
+// The same switch in Live tools, for the one-group view.
+@PreviewTest
+@Preview(name = "Live factory kit tools", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveFactoryKitToolsPreview() =
+    Live(lastRead.copy(activeProject = 1), oneGroup = true, tools = true, offline = dev.arc.ep133.text.MirrorText.FACTORY, factoryKit = dev.arc.ep133.features.FactoryKit.EP133)
+
 @PreviewTest
 @Preview(name = "Live offline pad playing", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
 fun LiveOfflinePlayingPreview() = Live(lastRead, oneGroup = true, offline = "Last seen Oct 5, 2:02 PM", playingPads = setOf(PhysicalPad(0, 9), PhysicalPad(0, 6), PhysicalPad(0, 3)))
 
+// Live's sound goes to Bluetooth, and no pad has been hit on the device yet: the top bar keeps the
+// Bluetooth key (the Bluetooth glyph and a clock, in amber) before the connection key; the line says "Press a pad".
+private val wirelessState = playing.copy(lastHit = null)
+
+@PreviewTest
+@Preview(name = "Live bluetooth", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveBluetoothPreview() = Live(wirelessState, oneGroup = true, wireless = true)
+
+@PreviewTest
+@Preview(name = "Live bluetooth all groups", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LiveBluetoothAllPreview() = Live(wirelessState, wireless = true)
+
+@PreviewTest
+@Preview(name = "Live bluetooth dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveBluetoothDarkPreview() = Live(playing, dark = true, oneGroup = true, wireless = true, transport = patternUi(canUndo = true))
+
+// A 360 dp phone: the tag, the four keys and what is left between them.
+@PreviewTest
+@Preview(name = "Live bluetooth 360", widthDp = 360, heightDp = 740, showBackground = true)
+@Composable
+fun LiveBluetooth360Preview() = Live(wirelessState, oneGroup = true, wireless = true, transport = patternUi(canUndo = true))
+
+// The ? overlay tags the key too.
+@PreviewTest
+@Preview(name = "Guide overlay Live bluetooth", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun GuideOverlayLiveBluetoothPreview() = Live(playing, oneGroup = true, guide = true, wireless = true)
+
+// A tap on the key: the sentence it reads, as a toast.
+@PreviewTest
+@Preview(name = "Live bluetooth toast", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveBluetoothToastPreview() = Live(playing, oneGroup = true, wireless = true, transport = patternUi(canUndo = true), toast = MirrorText.wirelessMadeUp(180))
+
+// The connection key held while connected: a ring fills round its edge over a second, then the EP-133 disconnects.
+// A tap only shows "Hold to disconnect".
+@PreviewTest
+@Preview(name = "Top bar disconnect hold", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun TopBarDisconnectHoldPreview() = Live(playing, oneGroup = true, holdProgress = 0.6f)
+
+@PreviewTest
+@Preview(name = "Top bar disconnect hold dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun TopBarDisconnectHoldDarkPreview() = Live(playing, dark = true, oneGroup = true, holdProgress = 0.6f)
+
+@PreviewTest
+@Preview(name = "Top bar disconnect hold 360 bluetooth", widthDp = 360, heightDp = 740, showBackground = true)
+@Composable
+fun TopBarDisconnectHold360Preview() = Live(wirelessState, oneGroup = true, wireless = true, holdProgress = 0.3f, toast = dev.arc.ep133.text.NavText.HOLD_TO_DISCONNECT)
+
+// On its side the line sits in the top bar beside the key, its chips glyphs alone.
+@PreviewTest
+@Preview(name = "Live bluetooth sideways small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LiveBluetoothSidewaysSmallPreview() = Live(playing, oneGroup = true, wireless = true, transport = patternUi())
+
+// KEYS: the line has its mode word and the note, the key stays in the bar.
+@PreviewTest
+@Preview(name = "Live bluetooth keys", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveBluetoothKeysPreview() = Live(keysPlaying, keys = keysUi, wireless = true, transport = patternUi(canUndo = true))
+
 // KEYS: the kick played as notes, C major from octave 4. The device holds MI4 and SO5
-// (lit); the phone plays LA4 (ringed).
+// (lit); the phone plays FA4, LA4 and DO5 (outlined).
 private val keysPlaying = playing.copy(
     notes = mapOf(64 to PadLight(110, 1, NOW - 20_000_000), 79 to PadLight(80, 1, NOW - 200_000_000, offAt = NOW - 100_000_000)),
     lastNote = 64,
@@ -111,7 +394,7 @@ private val keysUi = dev.arc.ep133.ui.screens.KeysUi(
     scale = dev.arc.ep133.features.Scale.MAJOR,
     pad = PhysicalPad(0, 9),
     padName = "kick",
-    playingKeys = linkedSetOf(3, 5, 7),
+    playingNotes = linkedSetOf(65, 69, 72),
 )
 
 @PreviewTest
@@ -125,9 +408,85 @@ fun LiveKeysPreview() = Live(keysPlaying, keys = keysUi)
 fun LiveKeysDarkPreview() = Live(keysPlaying, dark = true, keys = keysUi)
 
 @PreviewTest
+@Preview(name = "Live keys EP-40 dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveKeysEp40DarkPreview() = Live(keysPlaying, dark = true, skin = SkinChoice.EP40, keys = keysUi)
+
+@PreviewTest
+@Preview(name = "Live keys EP-1320 dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveKeysEp1320DarkPreview() = Live(keysPlaying, dark = true, skin = SkinChoice.EP1320, keys = keysUi)
+
+@PreviewTest
 @Preview(name = "Live keys small", widthDp = 360, heightDp = 668, showBackground = true)
 @Composable
 fun LiveKeysSmallPreview() = Live(keysPlaying, keys = keysUi.copy(scale = dev.arc.ep133.features.Scale.MINOR_PENTATONIC))
+
+// KEYS' scale word held (MAJOR, ringed): the scales fan out up the screen beside the thumb, toward the
+// middle, and the thumb's small move up and out lights DORIAN. The gesture can't run here, so the fan
+// is laid over the screen with the thumb on the word (where it went down is the fan's middle).
+@PreviewTest
+@Preview(name = "KEYS hold to pick", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LiveKeysHoldToPickPreview() {
+    val scales = dev.arc.ep133.features.Scale.entries
+    val density = LocalDensity.current.density
+    val fan = dev.arc.ep133.ui.screens.QuickPick.fan(scales.size, HELD_X * density, HELD_Y * density, Rect(0f, 0f, 360f * density, 668f * density), density)!!
+    val lit = scales.indexOf(dev.arc.ep133.features.Scale.DORIAN)
+    // The finger a little way toward the lit chip, past the dead zone.
+    val toward = fan.at(fan.slots[lit])
+    val way = androidx.compose.ui.geometry.Offset(toward.x - fan.x, toward.y - fan.y)
+    val finger = androidx.compose.ui.geometry.Offset(fan.x, fan.y) + way * (34f * density / way.getDistance())
+    Box(Modifier.fillMaxSize()) {
+        Live(keysPlaying, keys = keysUi)
+        ArcTheme(dark = false) {
+            dev.arc.ep133.ui.screens.QuickPickFan(
+                fan,
+                names = scales.map(MirrorText::scaleName),
+                current = scales.indexOf(keysUi.scale),
+                lit = lit,
+                finger = { finger },
+                fade = false,
+            )
+        }
+    }
+}
+
+/** A thumb on "MAJOR ▾" on KEYS at 360 x 668: the word's middle (dp from the window's top left, measured off this screen). */
+private const val HELD_X = 61f
+private const val HELD_Y = 621f
+
+// KEYS' scale word tapped: the KEYS sheet over Live, as MainActivity lays it over the frame. MINOR is the
+// scale (navy), each scale's notes as dots from the root (orange); the keys, DO picked; the octaves, 5 picked.
+@Composable
+private fun KeysSheetOver(state: MirrorState, keys: dev.arc.ep133.ui.screens.KeysUi, dark: Boolean = false, piano: IntRange? = null) {
+    Box(Modifier.fillMaxSize()) {
+        Live(state, dark = dark, keys = keys, piano = piano)
+        ArcTheme(dark = dark) {
+            ArcSheet(visible = true, onDismiss = {}, swipe = true, widest = 720.dp, title = MirrorText.KEYS_SHEET) {
+                KeysSheetContent(keys, dev.arc.ep133.ui.screens.KeysActions(), onDone = {})
+            }
+        }
+    }
+}
+
+private val sheetKeys = keysUi.copy(scale = dev.arc.ep133.features.Scale.MINOR, octave = 5)
+
+@PreviewTest
+@Preview(name = "KEYS sheet", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveKeysSheetPreview() = KeysSheetOver(keysPlaying, sheetKeys)
+
+@PreviewTest
+@Preview(name = "KEYS sheet dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveKeysSheetDarkPreview() = KeysSheetOver(keysPlaying, sheetKeys, dark = true)
+
+// On its side, from the piano row: the scales in two columns, the keys and octaves side by side under them; it scrolls.
+@PreviewTest
+@Preview(name = "KEYS sheet sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveKeysSheetSidewaysPreview() = KeysSheetOver(sideways, chord.copy(scale = dev.arc.ep133.features.Scale.MINOR, octave = 5), piano = 48..72)
 
 @PreviewTest
 @Preview(name = "Live keys tools", widthDp = 412, heightDp = 843, showBackground = true)
@@ -152,6 +511,23 @@ private val someTakes = listOf(
     dev.arc.ep133.data.TakeInfo("take-20261004-214102.wav", TAKE_AT - 60_000_000, 73.0, 14_016_044),
 )
 
+// The older take trimmed to 0:18.4-0:39.6 (at 8 kHz mono, so its wave is quick to draw).
+private val trimmedTakes = listOf(
+    someTakes[0].copy(frames = 99_200, rate = 8_000, channels = 1),
+    someTakes[1].copy(frames = 584_000, rate = 8_000, channels = 1, trim = dev.arc.ep133.features.TakeTrim(147_200, 316_800)),
+)
+
+// A beat's shape: a hit every half second, each fading, quieter ones between.
+private val beatSound = run {
+    val pcm = ShortArray(584_000) { i ->
+        val beat = i % 4_000
+        val loud = if (i / 4_000 % 2 == 0) 26_000.0 else 14_000.0
+        val decay = kotlin.math.exp(-beat / 700.0)
+        (loud * decay * kotlin.math.sin(i * 0.9) * (0.8 + 0.2 * kotlin.math.sin(i / 9_000.0))).toInt().toShort()
+    }
+    dev.arc.ep133.audio.PcmSound(pcm, 1, 8_000, false)
+}
+
 @PreviewTest
 @Preview(name = "Live rec armed", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
@@ -165,7 +541,41 @@ fun LiveRecordingKeysPreview() = Live(keysPlaying, keys = keysUi, rec = dev.arc.
 @PreviewTest
 @Preview(name = "Live tools takes", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
-fun LiveToolsTakesPreview() = Live(lastRead, oneGroup = true, tools = true, offline = "Last seen Oct 5, 2:02 PM", takes = someTakes)
+fun LiveToolsTakesPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, offline = "Last seen Oct 5, 2:02 PM", takes = someTakes)
+
+@PreviewTest
+@Preview(name = "Live tools takes dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakesDarkPreview() = Live(lastRead, dark = true, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, takes = someTakes)
+
+// T02 (lit, playing) trimmed: ✂ and its part's length on the glass, the line under it saying what the trim does.
+@PreviewTest
+@Preview(name = "Live tools takes trimmed", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakesTrimmedPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, takes = listOf(trimmedTakes[0].copy(trim = dev.arc.ep133.features.TakeTrim(8_000, 64_000)), trimmedTakes[1]))
+
+// TRIM open on T01: its wave on the glass with the two handles, the part's length large, and PLAY, START, END, RESET, DONE.
+@PreviewTest
+@Preview(name = "Live tools take trim", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakeTrimPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, takes = trimmedTakes, trimming = trimmedTakes[1].name)
+
+@PreviewTest
+@Preview(name = "Live tools take trim dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakeTrimDarkPreview() = Live(lastRead, dark = true, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, takes = trimmedTakes, trimming = trimmedTakes[1].name)
+
+// The glass while a take records: REC, its number and the time; the TAKE key orange with the time on it.
+@PreviewTest
+@Preview(name = "Live tools takes recording", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakesRecordingPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, takes = someTakes, rec = dev.arc.ep133.features.RecState.Recording(7))
+
+// No takes yet, armed: the glass says it waits for the first sound, the strip's keys for a take faded.
+@PreviewTest
+@Preview(name = "Live tools takes armed", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakesArmedPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, rec = dev.arc.ep133.features.RecState.Armed)
 
 @PreviewTest
 @Preview(name = "Live offline note open", widthDp = 393, heightDp = 852, showBackground = true)
@@ -187,14 +597,1432 @@ fun LivePlayingDarkPreview() = Live(playing, dark = true)
 @Composable
 fun LiveFirstOpenPreview() = Live(MirrorState(activeProject = 3, lastHit = Hit(PhysicalPad(0, 0), 36, 1, 96, null, null), pads = mapOf(PhysicalPad(0, 0) to PadLight(96, 1, NOW))))
 
+// The same in the skins: the EP-40's cream pads, the EP-1320's oxblood ones.
+private val firstOpen = MirrorState(activeProject = 3, lastHit = Hit(PhysicalPad(0, 0), 36, 1, 96, null, null), pads = mapOf(PhysicalPad(0, 0) to PadLight(96, 1, NOW)))
+
+@PreviewTest
+@Preview(name = "Live first open EP-40", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LiveFirstOpenEp40Preview() = Live(firstOpen, skin = SkinChoice.EP40)
+
+@PreviewTest
+@Preview(name = "Live first open EP-1320", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LiveFirstOpenEp1320Preview() = Live(firstOpen, skin = SkinChoice.EP1320)
+
 @PreviewTest
 @Preview(name = "Live tablet", widthDp = 840, heightDp = 900, showBackground = true)
 @Composable
 fun LiveTabletPreview() = Live(playing)
 
+// On its side (Pixel 7 at 915 x 412 dp, less the status bar and the three-button bar at the
+// side: 24 and 48). KEYS is a piano from DO3 to DO5 at OCT 4, 15 white keys. The device holds
+// MI4 (lit) and DO6, past the keys' right end (an orange tick there); the phone plays LA3, DO4
+// and SO4 (outlined). The display line rides in the top bar.
+private val sideways = playing.copy(
+    notes = mapOf(64 to PadLight(110, 1, NOW - 20_000_000), 84 to PadLight(96, 1, NOW - 40_000_000)),
+    lastNote = 84,
+)
+private val chord = keysUi.copy(scale = dev.arc.ep133.features.Scale.CHROMATIC, playingNotes = linkedSetOf(57, 60, 67))
+
+@PreviewTest
+@Preview(name = "Live keys sideways", widthDp = 867, heightDp = 388, showBackground = true)
 @Composable
-private fun Main(state: UiState, dark: Boolean = false, guide: Boolean = false) {
-    Framed(Tab.BACKUPS, connected = state.connected, dark = dark, guide = guide) {
+fun LiveKeysSidewaysPreview() = Live(sideways, keys = chord, piano = 48..72)
+
+// The same with the sound on Bluetooth: the key rides in the top bar beside the line.
+@PreviewTest
+@Preview(name = "Live bluetooth keys sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveBluetoothKeysSidewaysPreview() = Live(sideways, keys = chord, piano = 48..72, wireless = true, transport = patternUi(canUndo = true))
+
+// Nothing playing on the phone: the display line names the device's DO6, past the keys.
+@PreviewTest
+@Preview(name = "Live keys sideways E major", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveKeysSidewaysEMajorPreview() = Live(sideways, keys = keysUi.copy(root = 4, playingNotes = emptySet()), piano = 48..72)
+
+@PreviewTest
+@Preview(name = "Live keys sideways dark", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveKeysSidewaysDarkPreview() = Live(sideways, dark = true, keys = chord.copy(root = 9, scale = dev.arc.ep133.features.Scale.MINOR_PENTATONIC), piano = 48..72)
+
+// Settings → Key labels off: rings and octave numbers only, the display line still names the note.
+@PreviewTest
+@Preview(name = "Live keys sideways no names", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveKeysSidewaysNoNamesPreview() = Live(sideways, keys = chord.copy(showNames = false), piano = 48..72)
+
+@PreviewTest
+@Preview(name = "Live keys sideways letters", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveKeysSidewaysLettersPreview() = Live(sideways, keys = keysUi.copy(root = 9, scale = dev.arc.ep133.features.Scale.MINOR, names = dev.arc.ep133.features.NoteNames.LETTERS, playingNotes = emptySet()), piano = 48..72)
+
+@PreviewTest
+@Preview(name = "Live keys sideways tools", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveKeysSidewaysToolsPreview() = Live(sideways, keys = chord, tools = true, piano = 48..72)
+
+@PreviewTest
+@Preview(name = "Live one group sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveOneGroupSidewaysPreview() = Live(playing, oneGroup = true)
+
+@PreviewTest
+@Preview(name = "Live all groups sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveAllGroupsSidewaysPreview() = Live(playing)
+
+@PreviewTest
+@Preview(name = "Guide overlay Live sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun GuideOverlayLiveSidewaysPreview() = Live(sideways, keys = chord, guide = true, piano = 48..72)
+
+// Gesture navigation: the bar's 20 dp at the bottom instead of 48 at the side. Only the window's
+// size: previews have no system bars, so the gutters stay at their least here, as with the
+// three-button bar (the back-swipe edges are a device check, README step 22).
+@PreviewTest
+@Preview(name = "Live keys gesture nav", widthDp = 915, heightDp = 368, showBackground = true)
+@Composable
+fun LiveKeysGestureNavPreview() = Live(sideways, keys = chord, piano = 48..72)
+
+// A 360 x 740 dp phone on its side: 12 white keys, DO3 to SO4, so the device's MI4 is the
+// one lit key and DO6 is past the end.
+@PreviewTest
+@Preview(name = "Live keys sideways small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LiveKeysSidewaysSmallPreview() = Live(sideways, keys = chord.copy(scale = dev.arc.ep133.features.Scale.MAJOR), piano = 48..67)
+
+// A toast over the bar's middle, never over the keys: two lines, then an ellipsis until tapped.
+@PreviewTest
+@Preview(name = "Live toast sideways small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LiveToastSidewaysSmallPreview() = Live(
+    sideways, keys = chord.copy(scale = dev.arc.ep133.features.Scale.MAJOR), piano = 48..67,
+    toast = MirrorText.BLUETOOTH_DELAY, barMiddle = SmallBarMiddle,
+)
+
+@PreviewTest
+@Preview(name = "Live one group sideways small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LiveOneGroupSidewaysSmallPreview() = Live(playing, oneGroup = true)
+
+@PreviewTest
+@Preview(name = "Guide overlay Live sideways small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun GuideOverlayLiveSidewaysSmallPreview() = Live(sideways, keys = chord.copy(scale = dev.arc.ep133.features.Scale.MAJOR), guide = true, piano = 48..67)
+
+@PreviewTest
+@Preview(name = "Live keys sideways small font 2", widthDp = 692, heightDp = 336, fontScale = 2f, showBackground = true)
+@Composable
+fun LiveKeysSidewaysSmallFontPreview() = Live(sideways, keys = chord.copy(scale = dev.arc.ep133.features.Scale.MAJOR), piano = 48..67)
+
+// A 360 x 640 dp phone on its side (592 x 336 less the bars) at font scale 2, with a long
+// scale: one octave of keys, the display line on the page (the bar's middle is too narrow for
+// it), and the row over the keys drops the key word's KEY, then shortens the scale to its code;
+// − and + keep their size.
+@PreviewTest
+@Preview(name = "Live keys sideways narrow font 2", widthDp = 592, heightDp = 336, fontScale = 2f, showBackground = true)
+@Composable
+fun LiveKeysSidewaysNarrowFontPreview() = Live(sideways, keys = chord.copy(root = 9, scale = dev.arc.ep133.features.Scale.MINOR_PENTATONIC), piano = 48..60)
+
+// A tablet on its side is tall enough for the display line on the page and the full bar; the
+// piano stops at a hand's span.
+@PreviewTest
+@Preview(name = "Live keys tablet", widthDp = 1280, heightDp = 752, showBackground = true)
+@Composable
+fun LiveKeysTabletPreview() = Live(sideways, keys = chord)
+
+// Live tools beside the piano: the legend's piano rows (a dimmed key, the C with its octave).
+@PreviewTest
+@Preview(name = "Live keys tablet tools", widthDp = 1280, heightDp = 752, showBackground = true)
+@Composable
+fun LiveKeysTabletToolsPreview() = Live(sideways, keys = chord.copy(root = 9, scale = dev.arc.ep133.features.Scale.MINOR), tools = true)
+
+// The KEYS view switch on a portrait tablet: the piano picked for a tall window, in the
+// middle of the room under the display line.
+@PreviewTest
+@Preview(name = "Live keys tablet upright piano", widthDp = 800, heightDp = 1232, showBackground = true)
+@Composable
+fun LiveKeysTabletUprightPianoPreview() = Live(sideways, keys = chord.copy(viewTall = dev.arc.ep133.features.KeysView.PIANO))
+
+// The same tablet on Auto: the grid, with the switch after the KEYS word.
+@PreviewTest
+@Preview(name = "Live keys tablet upright grid", widthDp = 800, heightDp = 1232, showBackground = true)
+@Composable
+fun LiveKeysTabletUprightGridPreview() = Live(keysPlaying, keys = keysUi)
+
+// On its side with the grid picked: the upright row under the grid, the switch's grid key down.
+@PreviewTest
+@Preview(name = "Live keys sideways grid picked", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveKeysSidewaysGridPreview() = Live(sideways, keys = chord.copy(viewWide = dev.arc.ep133.features.KeysView.PADS))
+
+// EDIT: the tab under GUIDE, off, then on (the display line, the pads' outlines and badges).
+@PreviewTest
+@Preview(name = "Live edit tab", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveEditTabPreview() = Live(playing, oneGroup = true, edit = false)
+
+@PreviewTest
+@Preview(name = "Live edit on", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveEditOnPreview() = Live(lastRead, oneGroup = true, edit = true)
+
+@PreviewTest
+@Preview(name = "Live edit on dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveEditOnDarkPreview() = Live(lastRead, dark = true, oneGroup = true, edit = true)
+
+@PreviewTest
+@Preview(name = "Live edit on all groups", widthDp = 393, heightDp = 1180, showBackground = true)
+@Composable
+fun LiveEditAllPreview() = Live(lastRead, edit = true)
+
+@PreviewTest
+@Preview(name = "Live edit on sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveEditSidewaysPreview() = Live(lastRead, oneGroup = true, edit = true)
+
+// After a pad got another sound: the toast with UNDO.
+@PreviewTest
+@Preview(name = "Live edit undo toast", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveEditUndoPreview() = Live(lastRead, oneGroup = true, edit = true, toast = MirrorText.assigned(PhysicalPad(0, 7), "vox chop"), toastAction = MirrorText.UNDO)
+
+private val padSounds = listOf(
+    SoundEntry(1, "kick", 234_000), SoundEntry(2, "kick 2", 241_000), SoundEntry(101, "snare 2", 206_000),
+    SoundEntry(102, "rim", 207_000), SoundEntry(140, "vox chop", 240_000), SoundEntry(201, "hat closed", 98_000),
+    SoundEntry(202, "hat open", 180_000), SoundEntry(310, "clap", 120_000),
+)
+
+// EDIT's pad sheet for A 8: the sound on it (101 snare 2) marked ON PAD, a preview playing.
+@PreviewTest
+@Preview(name = "Live pad sheet", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LivePadSheetPreview() {
+    Framed(Tab.LIVE) {
+        MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
+        ArcSheet(visible = true, onDismiss = {}) {
+            PadSheetContent(
+                pad = PhysicalPad(0, 7),
+                target = dev.arc.ep133.features.PadTarget(1, 0, 2, 101),
+                sounds = padSounds,
+                playing = "device:140",
+                busy = false,
+                onPlay = { _, _ -> }, onStop = {}, onPick = { _, _ -> }, onUpload = {},
+            )
+        }
+    }
+}
+
+// EDIT's pad settings: the EP-133's SOUND EDIT pages over the sounds, folded away.
+private val editPcm = ShortArray(46875) { i -> (kotlin.math.sin(i * 0.05) * 30000 * kotlin.math.exp(-i / 9000.0)).toInt().toShort() }
+private val editState = dev.arc.ep133.controller.PadEditState(
+    pad = PhysicalPad(0, 7),
+    target = dev.arc.ep133.features.PadTarget(1, 0, 2, 101),
+    settings = dev.arc.ep133.features.PadSettings(pitch = -2.5, level = 82, pan = -6, mode = dev.arc.ep133.features.PlayMode.KEY, start = 4000, end = 30000, attack = 12, release = 40),
+    frames = editPcm.size.toLong(),
+    peaks = dev.arc.ep133.ui.screens.trimPeaks(editPcm, 1),
+)
+
+@Composable
+private fun PadSettingsSheet(page: dev.arc.ep133.ui.screens.EditPage, dark: Boolean = false, edit: dev.arc.ep133.controller.PadEditState = editState, offline: Boolean = false) {
+    Framed(Tab.LIVE, dark = dark) {
+        MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
+        ArcSheet(visible = true, onDismiss = {}) {
+            PadSheetContent(
+                pad = PhysicalPad(0, 7),
+                target = edit.target,
+                sounds = padSounds,
+                playing = null,
+                busy = false,
+                onPlay = { _, _ -> }, onStop = {}, onPick = { _, _ -> }, onUpload = if (offline) null else ({}),
+                offline = offline,
+                edit = edit,
+                editPage = page,
+            )
+        }
+    }
+}
+
+@PreviewTest
+@Preview(name = "Pad settings sound", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun PadSettingsSoundPreview() = PadSettingsSheet(dev.arc.ep133.ui.screens.EditPage.SOUND)
+
+@PreviewTest
+@Preview(name = "Pad settings trim small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun PadSettingsTrimSmallPreview() = PadSettingsSheet(dev.arc.ep133.ui.screens.EditPage.TRIM)
+
+@PreviewTest
+@Preview(name = "Pad settings env dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun PadSettingsEnvDarkPreview() = PadSettingsSheet(dev.arc.ep133.ui.screens.EditPage.ENV, dark = true)
+
+// Oneshot plays to the end: release rests, and the page says why.
+@PreviewTest
+@Preview(name = "Pad settings env oneshot", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun PadSettingsEnvOneshotPreview() = PadSettingsSheet(
+    dev.arc.ep133.ui.screens.EditPage.ENV,
+    edit = editState.copy(settings = dev.arc.ep133.features.PadSettings.DEFAULT),
+)
+
+// Offline: the settings change in arc only; the device is still being asked for nothing.
+@PreviewTest
+@Preview(name = "Pad settings offline mute", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun PadSettingsOfflineMutePreview() = PadSettingsSheet(
+    dev.arc.ep133.ui.screens.EditPage.MUTE,
+    edit = editState.copy(offline = true, settings = editState.settings.copy(muteGroup = true)),
+    offline = true,
+)
+
+// The function keys: the click on, TEMPO's light caught on a beat and its label the EP-133's
+// tempo (it sends MIDI clock, which the click follows).
+@PreviewTest
+@Preview(name = "Live click on", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveClickOnPreview() = Live(playing, oneGroup = true, clickOn = true)
+
+@PreviewTest
+@Preview(name = "Live click on dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveClickOnDarkPreview() = Live(playing, dark = true, oneGroup = true, clickOn = true)
+
+// Offline from the last read with no factory pack saved: nothing to step to, PROJECT greyed out.
+@PreviewTest
+@Preview(name = "Live offline project greyed", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LiveOfflineProjectGreyedPreview() = Live(lastRead, oneGroup = true, offline = "Last seen Oct 5, 2:02 PM")
+
+// Offline with the factory pack: PROJECT stepped on to its project 3, the note naming it.
+@PreviewTest
+@Preview(name = "Live factory project 3", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LiveFactoryProject3Preview() = Live(
+    lastRead.copy(activeProject = 3), offline = MirrorText.FACTORY, noteOpen = true, offlineProjects = listOf(1, 2, 3, 4, 5),
+)
+
+@PreviewTest
+@Preview(name = "Live click on sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveClickOnSidewaysPreview() = Live(playing, oneGroup = true, clickOn = true)
+
+@PreviewTest
+@Preview(name = "Live all groups sideways small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LiveAllGroupsSidewaysSmallPreview() = Live(playing)
+
+@PreviewTest
+@Preview(name = "Live keys sideways grid small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LiveKeysSidewaysGridSmallPreview() = Live(sideways, keys = chord.copy(viewWide = dev.arc.ep133.features.KeysView.PADS))
+
+// A short window on its side (a phone with a large display size): the function column closes
+// up its gaps and shrinks its caps; shorter still, it drops the LED lines.
+@PreviewTest
+@Preview(name = "Live one group sideways short", widthDp = 560, heightDp = 280, showBackground = true)
+@Composable
+fun LiveOneGroupSidewaysShortPreview() = Live(playing, oneGroup = true, clickOn = true)
+
+@PreviewTest
+@Preview(name = "Live one group sideways shortest", widthDp = 490, heightDp = 253, showBackground = true)
+@Composable
+fun LiveOneGroupSidewaysShortestPreview() = Live(playing, oneGroup = true)
+
+@PreviewTest
+@Preview(name = "Live keys sideways grid short", widthDp = 560, heightDp = 280, showBackground = true)
+@Composable
+fun LiveKeysSidewaysGridShortPreview() = Live(sideways, keys = chord.copy(viewWide = dev.arc.ep133.features.KeysView.PADS))
+
+// TEMPO held: the tempo sheet over Live, the click on at the phone's tempo.
+@PreviewTest
+@Preview(name = "Tempo sheet", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun TempoSheetPreview() = TempoSheet(deviceBpm = null)
+
+// While the EP-133 sends MIDI clock its tempo leads: − + and TAP rest.
+@PreviewTest
+@Preview(name = "Tempo sheet following", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun TempoSheetFollowingPreview() = TempoSheet(deviceBpm = 122.0)
+
+// TEMPO held, its TIMING tab: 1/16 swung to 56%, quantized; the arp as played over one octave, gate 50%, latched.
+@PreviewTest
+@Preview(name = "Tempo sheet timing", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun TempoSheetTimingPreview() = TempoSheet(deviceBpm = null, timing = timingUi)
+
+// At 1/8T swing rests, saying where it plays; free time, the arp up and down over two octaves.
+@PreviewTest
+@Preview(name = "Tempo sheet timing dark", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun TempoSheetTimingDarkPreview() = TempoSheet(
+    deviceBpm = null,
+    timing = TimingUi(TimingSettings(Timing.EIGHTH_T, 56, quantize = false), ArpSettings(ArpOrder.UP_DOWN, octaves = 2, gate = 80)),
+    dark = true,
+)
+
+private val timingUi = TimingUi(TimingSettings(Timing.SIXTEENTH, 56, quantize = true), ArpSettings(latch = true))
+
+@Composable
+private fun TempoSheet(deviceBpm: Double?, timing: TimingUi? = null, dark: Boolean = false) {
+    Framed(Tab.LIVE, dark = dark) {
+        MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
+        ArcSheet(visible = true, onDismiss = {}) {
+            TempoSheetContent(
+                bpm = 98, deviceBpm = deviceBpm, on = true, onOn = {}, onBpm = {}, onTap = {}, onDone = {},
+                timing = timing,
+                initialPage = if (timing != null) TempoPage.TIMING else TempoPage.TEMPO,
+            )
+        }
+    }
+}
+
+// ARP on KEYS: DO, FA and LA held in that order (outlined and numbered), FA sounding now (lit), and the
+// display line saying what plays. ARP lit on the plate under KEYS / PADS, LATCH ready under it.
+private val arpHeld = listOf(ArpNote(PhysicalPad(0, 9), 0), ArpNote(PhysicalPad(0, 9), 5), ArpNote(PhysicalPad(0, 9), 9))
+private val keysArp = LiveArp(
+    ArpUi(
+        on = true, held = arpHeld, keys = true, sounding = true,
+        line = dev.arc.ep133.text.MirrorText.arpLine(false, false, Timing.SIXTEENTH, arpHeld, dev.arc.ep133.features.NoteNames.SOLFEGE),
+    ),
+)
+private val arpState = playing.copy(notes = emptyMap())
+
+@PreviewTest
+@Preview(name = "Live keys arp", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveKeysArpPreview() = Live(arpState, keys = keysUi.copy(playingNotes = emptySet()), arp = keysArp, voices = setOf("arp:0:9:5"))
+
+// On its side, the grid picked: the plate's margin holds the switches as upright; the line rides in the top bar.
+@PreviewTest
+@Preview(name = "Live keys arp sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveKeysArpSidewaysPreview() = Live(
+    arpState, keys = keysUi.copy(playingNotes = emptySet(), viewWide = dev.arc.ep133.features.KeysView.PADS),
+    arp = keysArp, voices = setOf("arp:0:9:5"),
+)
+
+// On its side over the piano, latched: ARP and LATCH after the view words, the held notes down.
+@PreviewTest
+@Preview(name = "Live keys arp sideways piano", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveKeysArpSidewaysPianoPreview() = Live(
+    arpState, keys = chord.copy(playingNotes = emptySet()), piano = 48..72,
+    arp = LiveArp(
+        ArpUi(
+            on = true, latch = true, held = arpHeld, keys = true, sounding = true, settings = ArpSettings(latch = true),
+            line = dev.arc.ep133.text.MirrorText.arpLine(false, true, Timing.SIXTEENTH, arpHeld, dev.arc.ep133.features.NoteNames.SOLFEGE),
+        ),
+    ),
+    voices = setOf("arp:0:9:5"),
+)
+
+// RPT on PADS: A 7 and A 1 held, both sounding on the step (lit), the line saying so.
+private val rptHeld = listOf(ArpNote(PhysicalPad(0, 9), null), ArpNote(PhysicalPad(0, 3), null))
+
+@PreviewTest
+@Preview(name = "Live pads repeat", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePadsRepeatPreview() = Live(
+    arpState.copy(pads = emptyMap()), oneGroup = true,
+    arp = LiveArp(
+        ArpUi(
+            on = true, held = rptHeld, keys = false, sounding = true,
+            line = dev.arc.ep133.text.MirrorText.arpLine(true, false, Timing.SIXTEENTH, rptHeld, dev.arc.ep133.features.NoteNames.SOLFEGE),
+        ),
+    ),
+    voices = setOf("arp:0:9:n", "arp:0:3:n"),
+)
+
+// FX, the fourth function key: the effect on named on its light.
+@PreviewTest
+@Preview(name = "Live fx key", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveFxKeyPreview() = Live(playing, oneGroup = true, fx = FxType.DELAY)
+
+@PreviewTest
+@Preview(name = "Live fx key small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LiveFxKeySmallPreview() = Live(playing, oneGroup = true, clickOn = true, fx = FxType.DISTORTION)
+
+// On its side the column has four keys: FX's light gives the effect's three letters.
+@PreviewTest
+@Preview(name = "Live fx key sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveFxKeySidewaysPreview() = Live(playing, oneGroup = true, fx = FxType.REVERB)
+
+@PreviewTest
+@Preview(name = "Live fx key sideways small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LiveFxKeySidewaysSmallPreview() = Live(playing, oneGroup = true, fx = FxType.COMPRESSOR)
+
+// FX held: the pads are the punch-ins, REPEAT and then LPF held (their bars a third of the way: the finger low on
+// the pad), the display line naming them and FX's upper half lit.
+@PreviewTest
+@Preview(name = "Live punch-in held", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePunchHeldPreview() = Live(playing, oneGroup = true, fx = FxType.DELAY, punch = PunchUi(held = linkedSetOf(3, 6), depths = mapOf(3 to 0.3f, 6 to 0.35f)))
+
+// FX tapped: the FX sheet over Live. A delay on at 1/8D with its feedback at 38%, A (the pad played last's group,
+// in signal) and D sending to it; on OUTPUT the compressor and a sidechain from A 7 ducking B and C.
+private val fxDelay = FxSettings(
+    type = FxType.DELAY, x = 0.625f, y = 0.4f,
+    sends = listOf(0.62f, 0.2f, 0f, 0.35f),
+    comp = Comp(on = true, x = 0.6f, y = 0.3f),
+    sidechain = Sidechain(on = true, group = 0, pad = 9, dests = 0b0110, x = 0.26f, y = 0.7f),
+)
+
+@PreviewTest
+@Preview(name = "Fx sheet effect", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun FxSheetEffectPreview() = FxSheet(FxPage.EFFECT, fxDelay)
+
+@PreviewTest
+@Preview(name = "Fx sheet effect small dark", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun FxSheetEffectSmallDarkPreview() = FxSheet(FxPage.EFFECT, fxDelay.copy(type = FxType.FILTER, x = 0.3f, y = 0.55f), dark = true)
+
+// No effect on: the pad rests, dimmed, and says what to do.
+@PreviewTest
+@Preview(name = "Fx sheet effect off", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun FxSheetEffectOffPreview() = FxSheet(FxPage.EFFECT, FxSettings.DEFAULT)
+
+// SOURCE offers the pad played last (B 1 here).
+@PreviewTest
+@Preview(name = "Fx sheet output", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun FxSheetOutputPreview() = FxSheet(FxPage.OUTPUT, fxDelay, selected = PhysicalPad(1, 3))
+
+@PreviewTest
+@Preview(name = "Fx sheet output small dark", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun FxSheetOutputSmallDarkPreview() = FxSheet(FxPage.OUTPUT, fxDelay, dark = true, selected = PhysicalPad(1, 3))
+
+@Composable
+private fun FxSheet(page: FxPage, settings: FxSettings, dark: Boolean = false, selected: PhysicalPad = PhysicalPad(0, 9)) {
+    Framed(Tab.LIVE, dark = dark) {
+        MirrorScreen(mirror = MirrorUi(playing, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true, functions = FunctionKeysUi(fx = settings.type))
+        ArcSheet(visible = true, onDismiss = {}) {
+            FxSheetContent(FxUi(settings, bpm = 122f, selected = selected, nameOf = { names[it] }), onDone = {}, initialPage = page)
+        }
+    }
+}
+
+// The pattern's RECORD and PLAY on the display line (Variant 1, "Line"), against made-up transport states: groups A
+// and B have notes, A is 4 bars, B 2. Stopped, the line is as it was with the two chips first.
+private fun patternUi(
+    phase: TransportPhase = TransportPhase.STOPPED,
+    recording: Boolean = false,
+    countIn: Int? = null,
+    at: PatternPosition? = null,
+    erase: Boolean = false,
+    canUndo: Boolean = false,
+    missing: Int = 0,
+    switchTime: SwitchTime = SwitchTime.DEFAULT,
+) = TransportUi(
+    phase = phase,
+    recording = recording,
+    countIn = countIn,
+    timing = Timing.SIXTEENTH,
+    switchTime = switchTime,
+    bars = listOf(4, 2, 1, 1),
+    hasNotes = listOf(true, true, false, false),
+    focusGroup = 0,
+    erase = erase,
+    canUndo = canUndo,
+    missing = missing,
+    notePads = setOf(PhysicalPad(0, 9), PhysicalPad(0, 10), PhysicalPad(0, 6), PhysicalPad(0, 7), PhysicalPad(0, 3)),
+    position = { at },
+)
+
+// The pads the pattern is playing, ringed as the phone's voices are.
+private val patternPads = setOf(PhysicalPad(0, 9), PhysicalPad(0, 6))
+
+@PreviewTest
+@Preview(name = "Live pattern stopped", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePatternStoppedPreview() = Live(playing, oneGroup = true, transport = patternUi(canUndo = true))
+
+// RECORD tapped: its light blinks (caught lit), and the line says what PLAY does.
+@PreviewTest
+@Preview(name = "Live pattern armed", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePatternArmedPreview() = Live(playing, oneGroup = true, transport = patternUi(TransportPhase.ARMED))
+
+// RECORD then PLAY: the click counts a bar in, beat 3 of 4 big on the line.
+@PreviewTest
+@Preview(name = "Live pattern count-in", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePatternCountInPreview() = Live(playing, oneGroup = true, clickOn = true, transport = patternUi(TransportPhase.COUNT_IN, recording = true, countIn = 3))
+
+// Recording, bar 2 beat 3 of A's 4 bars at 1/16: RECORD lit, the line framed in signal, its hairline 3/8 along.
+@PreviewTest
+@Preview(name = "Live pattern recording", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePatternRecordingPreview() = Live(
+    playing, oneGroup = true, playingPads = patternPads,
+    transport = patternUi(TransportPhase.PLAYING, recording = true, at = PatternPosition(2, 3, 4, 0.375f), canUndo = true),
+)
+
+@PreviewTest
+@Preview(name = "Live pattern recording dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePatternRecordingDarkPreview() = Live(
+    playing, dark = true, oneGroup = true, playingPads = patternPads,
+    transport = patternUi(TransportPhase.PLAYING, recording = true, at = PatternPosition(2, 3, 4, 0.375f), canUndo = true),
+)
+
+@PreviewTest
+@Preview(name = "Live pattern recording small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LivePatternRecordingSmallPreview() = Live(
+    playing, oneGroup = true, playingPads = patternPads,
+    transport = patternUi(TransportPhase.PLAYING, recording = true, at = PatternPosition(2, 3, 4, 0.375f), canUndo = true),
+)
+
+// Playing: PLAY reads ■, ERASE and ↶ on the line, the counter and its hairline in the display's ink; a take
+// records too, its badge on the line.
+@PreviewTest
+@Preview(name = "Live pattern playing", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePatternPlayingPreview() = Live(
+    playing, oneGroup = true, playingPads = patternPads, rec = dev.arc.ep133.features.RecState.Recording(12),
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(1, 2, 4, 0.0625f), canUndo = true),
+)
+
+// ERASE latched while it plays: the pads with notes dotted, the rest dimmed.
+@PreviewTest
+@Preview(name = "Live pattern erase", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePatternErasePreview() = Live(
+    playing, oneGroup = true,
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(1, 4, 4, 0.1875f), erase = true, canUndo = true),
+)
+
+// The all-groups display: the counter in its big line, the chips at its end.
+@PreviewTest
+@Preview(name = "Live pattern all groups", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LivePatternAllGroupsPreview() = Live(
+    playing, playingPads = patternPads,
+    transport = patternUi(TransportPhase.PLAYING, recording = true, at = PatternPosition(2, 3, 4, 0.375f), canUndo = true),
+)
+
+// KEYS: the same chips before the KEYS line.
+@PreviewTest
+@Preview(name = "Live pattern keys", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePatternKeysPreview() = Live(keysPlaying, keys = keysUi, transport = patternUi(TransportPhase.ARMED))
+
+// On its side the line rides in the top bar: the chips icon-only.
+@PreviewTest
+@Preview(name = "Live pattern sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LivePatternSidewaysPreview() = Live(
+    playing, oneGroup = true, playingPads = patternPads,
+    transport = patternUi(TransportPhase.PLAYING, recording = true, at = PatternPosition(2, 3, 4, 0.375f), canUndo = true),
+)
+
+@PreviewTest
+@Preview(name = "Live pattern sideways small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LivePatternSidewaysSmallPreview() = Live(playing, oneGroup = true, rec = dev.arc.ep133.features.RecState.Recording(12), transport = patternUi(TransportPhase.ARMED))
+
+// The narrowest phone at its tightest: playing in ERASE with a take recording and something to undo. RECORD's word,
+// ↶ and TAKE's word give way; ERASE (on) and the counter stay whole.
+@PreviewTest
+@Preview(name = "Live pattern erase small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LivePatternEraseSmallPreview() = Live(
+    playing, oneGroup = true, rec = dev.arc.ep133.features.RecState.Recording(72),
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(3, 4, 4, 0.6875f), erase = true, canUndo = true),
+)
+
+// A tablet upright: the line keeps to the pads' width, so while stopped it keeps its own words whole and ERASE and ↶
+// wait for the pattern to run (or the sheet).
+@PreviewTest
+@Preview(name = "Live pattern tablet", widthDp = 840, heightDp = 900, showBackground = true)
+@Composable
+fun LivePatternTabletPreview() = Live(playing, oneGroup = true, transport = patternUi(canUndo = true))
+
+// KEYS on a tablet's piano: the chips on the KEYS line, the counter in its words' place.
+@PreviewTest
+@Preview(name = "Live pattern tablet piano", widthDp = 800, heightDp = 1232, showBackground = true)
+@Composable
+fun LivePatternTabletPianoPreview() = Live(
+    sideways, keys = chord.copy(viewTall = dev.arc.ep133.features.KeysView.PIANO),
+    transport = patternUi(TransportPhase.PLAYING, recording = true, at = PatternPosition(2, 3, 4, 0.375f), canUndo = true),
+)
+
+// KEYS on its side: the KEYS line in the top bar, the chips icon-only.
+@PreviewTest
+@Preview(name = "Live pattern keys sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LivePatternKeysSidewaysPreview() = Live(
+    sideways, keys = chord, piano = 48..72,
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(1, 2, 4, 0.0625f), canUndo = true),
+)
+
+// RECORD held: the pattern sheet over Live, group A picked; two pads not loaded yet.
+// STEP (layout A): the STEP chip on the stopped line unrolls the line into the STEP panel over the function keys, all on its
+// dark screen. A 2-bar pattern at 1/16, the cursor on 1.2.1 with the kick and the closed hat on it: RECORD held and the snare
+// tapped onto the step too ("+ SNARE"), the three pads lit on the grid, VEL and LEN at the first note's, BAR 1 of 2.
+private val stepOccupied = List(32) { it in setOf(0, 2, 4, 6, 8, 10, 11, 12, 14, 16, 20, 24, 28) }
+private val stepPanel = StepUi(
+    open = true,
+    group = 0,
+    step = 4,
+    count = 32,
+    label = "1.2.1",
+    bars = 2,
+    page = 0,
+    occupied = stepOccupied,
+    lit = setOf(9 to null, 6 to null, 11 to null),
+    velocity = 96,
+    gate = 24,
+    recordHeld = true,
+    status = MirrorText.stepPlaced("SNARE"),
+    interval = Timing.SIXTEENTH,
+)
+
+// PRACTICE on group A: the kick (7), snare (9) and hats (4) to play, lit ahead (the kick now, the hat in a beat, the
+// snare in two), the lane with their hits coming in to the orange line, and WAIT, 75%, the loop and BACKING under it.
+private val practiceTargets = listOf(
+    dev.arc.ep133.features.PracticeTarget(9, 0, 127), dev.arc.ep133.features.PracticeTarget(6, 48, 100), dev.arc.ep133.features.PracticeTarget(6, 96, 100),
+    dev.arc.ep133.features.PracticeTarget(11, 192, 127), dev.arc.ep133.features.PracticeTarget(6, 144, 100), dev.arc.ep133.features.PracticeTarget(9, 288, 100),
+    dev.arc.ep133.features.PracticeTarget(6, 240, 100), dev.arc.ep133.features.PracticeTarget(6, 336, 64),
+)
+private val practiceFrame = dev.arc.ep133.controller.PracticeFrame(0.0, practiceTargets.map { it to it.tick.toDouble() }.filter { it.second > 0 || it.first.offset == 9 }, dev.arc.ep133.features.PracticeCounts())
+private val practiceUi = dev.arc.ep133.controller.PracticeUi(
+    dev.arc.ep133.features.PracticeSpec(0, speed = 75), "A \u00B7 01", listOf(9, 11, 6), mapOf(9 to "kick", 11 to "snare", 6 to "hat"), 69, 1,
+)
+
+@PreviewTest
+@Preview(name = "Live practice", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePracticePreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(), practice = dev.arc.ep133.ui.screens.LivePractice(practiceUi, frame = { practiceFrame }),
+)
+
+// Stopped after four passes: how it went in place of the lane, the hat most often early; the dark theme.
+@PreviewTest
+@Preview(name = "Live practice result dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePracticeResultDarkPreview() = Live(
+    lastRead, dark = true, oneGroup = true, transport = patternUi(),
+    practice = dev.arc.ep133.ui.screens.LivePractice(
+        practiceUi.copy(counts = dev.arc.ep133.features.PracticeCounts(onTime = 26, early = 4, late = 1, missed = 1, passes = 4, cleanRun = 1), worst = 6 to dev.arc.ep133.features.HitMark.EARLY),
+    ),
+)
+
+// WAIT: the beat stands at the kick and the hat on 1, both lit; the header counts the steps.
+@PreviewTest
+@Preview(name = "Live practice wait", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePracticeWaitPreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(),
+    practice = dev.arc.ep133.ui.screens.LivePractice(
+        practiceUi.copy(spec = practiceUi.spec.copy(wait = true), waiting = setOf(9, 6), waitStep = 0, waitSteps = 7),
+        frame = { practiceFrame },
+    ),
+)
+
+// A card's lesson, step 2 of 4 at 360 dp, ready: the title and tip over the lane, the clean passes to go, ‹ and › for LOOP.
+@PreviewTest
+@Preview(name = "Live practice lesson", widthDp = 360, heightDp = 780, showBackground = true)
+@Composable
+fun LivePracticeLessonPreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(),
+    practice = dev.arc.ep133.ui.screens.LivePractice(
+        practiceUi.copy(
+            spec = practiceUi.spec.copy(pads = setOf(9, 11), speed = 50), pads = listOf(9, 11), bpm = 46,
+            lesson = dev.arc.ep133.controller.LessonPlace(2, 4, "Add the snare", "Snare on 2 and 4", 4, listOf(dev.arc.ep133.controller.LessonRecord(96, 5, true), null, null, null)),
+        ),
+        frame = { practiceFrame },
+    ),
+)
+
+// The lesson done, dark: how the last step went, each step's share in time, COPY for Claude.
+@PreviewTest
+@Preview(name = "Live practice lesson done dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePracticeLessonDoneDarkPreview() = Live(
+    lastRead, dark = true, oneGroup = true, transport = patternUi(),
+    practice = dev.arc.ep133.ui.screens.LivePractice(
+        practiceUi.copy(
+            counts = dev.arc.ep133.features.PracticeCounts(onTime = 40, early = 3, late = 1, passes = 6, cleanRun = 4),
+            worst = 6 to dev.arc.ep133.features.HitMark.EARLY,
+            lesson = dev.arc.ep133.controller.LessonPlace(
+                3, 3, "The whole groove", null, 0,
+                listOf(dev.arc.ep133.controller.LessonRecord(96, 5, true), dev.arc.ep133.controller.LessonRecord(88, 7, true), dev.arc.ep133.controller.LessonRecord(91, 6, true)),
+                done = true,
+            ),
+        ),
+    ),
+)
+
+@PreviewTest
+@Preview(name = "Live step panel", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepPanelPreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), step = LiveStep(stepPanel))
+
+@PreviewTest
+@Preview(name = "Live step panel dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepPanelDarkPreview() = Live(lastRead, dark = true, oneGroup = true, transport = patternUi(canUndo = true), step = LiveStep(stepPanel))
+
+// NUDGE: the kick long-pressed (ringed, NUDGE at its foot and on the chip), then +: it moved to 1.2.2 and the cursor followed.
+@PreviewTest
+@Preview(name = "Live step nudge", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepNudgePreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(canUndo = true),
+    step = LiveStep(
+        stepPanel.copy(
+            step = 5, label = "1.2.2", occupied = List(32) { it in setOf(0, 2, 5, 6, 8, 10, 11, 12, 14, 16, 20, 24, 28) }, lit = setOf(9 to null),
+            recordHeld = false, picked = StepNote(PhysicalPad(0, 9), null), status = MirrorText.stepNudged("KICK", "1.2.2"),
+        ),
+        pickedWord = "KICK",
+    ),
+)
+
+// CORRECT on: a tap on the closed hat put its notes on the grid.
+@PreviewTest
+@Preview(name = "Live step correct", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepCorrectPreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(canUndo = true),
+    step = LiveStep(stepPanel.copy(lit = setOf(9 to null, 6 to null), recordHeld = false, correct = true, status = MirrorText.correctedLine(5))),
+)
+
+// A small phone: NUDGE and CORRECT a row of their own under the knobs; nothing said last, the status is the cursor.
+@PreviewTest
+@Preview(name = "Live step panel small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LiveStepPanelSmallPreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), step = LiveStep(stepPanel.copy(recordHeld = false, status = null)))
+
+// KEYS: the KEYS sound's notes on the step light their keys (DO and SOL), the panel the same.
+@PreviewTest
+@Preview(name = "Live step keys", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepKeysPreview() = Live(
+    keysPlaying.copy(notes = emptyMap()), keys = keysUi.copy(playingNotes = emptySet()), transport = patternUi(canUndo = true),
+    step = LiveStep(stepPanel.copy(lit = setOf(9 to 0, 9 to 7), velocity = 110, gate = 48, recordHeld = false, status = null)),
+)
+
+// On its side, the line in the top bar: the panel in the function keys' column with its own header, the pads beside it.
+@PreviewTest
+@Preview(name = "Live step panel sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveStepPanelSidewaysPreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), step = LiveStep(stepPanel.copy(recordHeld = false, status = null)))
+
+// On its side, the line on the page: it grows down the column's left into the panel, the pads beside it from the top.
+@PreviewTest
+@Preview(name = "Live step panel side line", widthDp = 560, heightDp = 280, showBackground = true)
+@Composable
+fun LiveStepPanelSideLinePreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), step = LiveStep(stepPanel.copy(recordHeld = false, status = null)))
+
+// STEP on the all-groups page: its chip in the pattern's row under the big line; the display grows into the panel over the
+// function keys, the four groups under it. Group A is the one it edits (its caption in signal orange, the kick, the closed hat
+// and the snare lit on its pads).
+@PreviewTest
+@Preview(name = "Live step all groups", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepAllGroupsPreview() = Live(lastRead, transport = patternUi(canUndo = true), step = LiveStep(stepPanel.copy(recordHeld = false, status = null)))
+
+@PreviewTest
+@Preview(name = "Live step all groups dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepAllGroupsDarkPreview() = Live(lastRead, dark = true, transport = patternUi(canUndo = true), step = LiveStep(stepPanel))
+
+// A small phone: the chip among RECORD, PLAY, ERASE and undo in the row, and the panel's latches in a row of their own.
+@PreviewTest
+@Preview(name = "Live step all groups small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LiveStepAllGroupsSmallPreview() = Live(lastRead, transport = patternUi(canUndo = true), step = LiveStep(stepPanel.copy(recordHeld = false, status = null)))
+
+// The panel closed, the chip waiting in the row.
+@PreviewTest
+@Preview(name = "Live step all groups chip", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepAllGroupsChipPreview() = Live(lastRead, transport = patternUi(canUndo = true))
+
+// On its side, the four groups in a row: the line in the top bar, the panel in the function keys' column.
+@PreviewTest
+@Preview(name = "Live step all groups sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveStepAllGroupsSidewaysPreview() = Live(lastRead, transport = patternUi(canUndo = true), step = LiveStep(stepPanel.copy(recordHeld = false, status = null)))
+
+// The piano on a tablet, upright: the KEYS line grows into the panel over the function keys, the piano under it; the notes on
+// the step (DO and SOL) outlined on its keys.
+@PreviewTest
+@Preview(name = "Live step piano upright", widthDp = 800, heightDp = 1232, showBackground = true)
+@Composable
+fun LiveStepPianoUprightPreview() = Live(
+    keysPlaying.copy(notes = emptyMap()), keys = chord.copy(viewTall = dev.arc.ep133.features.KeysView.PIANO, playingNotes = emptySet()), transport = patternUi(canUndo = true),
+    step = LiveStep(stepPanel.copy(lit = setOf(9 to 0, 9 to 7), velocity = 110, gate = 48, recordHeld = false, status = null)),
+)
+
+// The piano on a phone on its side: no function keys over it, so the panel is a column left of the keys (its own header), the
+// piano narrower beside it; RECORD held, a key tapped onto the step ("+ KICK"), DO and SOL outlined, the key held lit.
+@PreviewTest
+@Preview(name = "Live step piano sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveStepPianoSidewaysPreview() = Live(
+    sideways, keys = chord.copy(playingNotes = emptySet()), piano = 48..72, transport = patternUi(canUndo = true),
+    step = LiveStep(stepPanel.copy(lit = setOf(9 to 0, 9 to 7), velocity = 110, gate = 48, status = MirrorText.stepPlaced("KICK"))),
+)
+
+@PreviewTest
+@Preview(name = "Live step piano sideways dark", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveStepPianoSidewaysDarkPreview() = Live(
+    sideways, dark = true, keys = chord.copy(playingNotes = emptySet()), piano = 48..72, transport = patternUi(canUndo = true),
+    step = LiveStep(stepPanel.copy(lit = setOf(9 to 0, 9 to 7), velocity = 110, gate = 48, recordHeld = false, status = null)),
+)
+
+// The piano on a phone on its side with a key picked for NUDGE (ringed), the line in the top bar: the panel in a column left of the keys, wide enough for BAR's pages.
+@PreviewTest
+@Preview(name = "Live step piano side line", widthDp = 640, heightDp = 360, showBackground = true)
+@Composable
+fun LiveStepPianoSideLinePreview() = Live(
+    sideways, keys = chord.copy(playingNotes = emptySet(), scale = dev.arc.ep133.features.Scale.MAJOR), piano = 48..60, transport = patternUi(canUndo = true),
+    step = LiveStep(
+        stepPanel.copy(lit = setOf(9 to 0, 9 to -5), picked = StepNote(PhysicalPad(0, 9), -5), recordHeld = false, status = MirrorText.stepNudged("SO", "1.2.2")),
+        pickedWord = "SO",
+    ),
+)
+
+// KEYS' grid on its side: the panel in the function keys' column (the view words and the picks keep theirs), the keys narrower beside it.
+@PreviewTest
+@Preview(name = "Live step keys sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveStepKeysSidewaysPreview() = Live(
+    sideways, keys = chord.copy(playingNotes = emptySet(), viewWide = dev.arc.ep133.features.KeysView.PADS), transport = patternUi(canUndo = true),
+    step = LiveStep(stepPanel.copy(lit = setOf(9 to 0, 9 to 7), velocity = 110, gate = 48, recordHeld = false, status = null)),
+)
+
+@PreviewTest
+@Preview(name = "Live step keys sideways dark", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveStepKeysSidewaysDarkPreview() = Live(
+    sideways, dark = true, keys = chord.copy(playingNotes = emptySet(), viewWide = dev.arc.ep133.features.KeysView.PADS), transport = patternUi(canUndo = true),
+    step = LiveStep(stepPanel.copy(lit = setOf(9 to 0, 9 to 7), velocity = 110, gate = 48, recordHeld = false, status = null)),
+)
+
+// PLAY folded the panel; CORRECT stays lit on the line, and the snare held as it plays has put 3 notes on the grid.
+@PreviewTest
+@Preview(name = "Live step correct playing", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepCorrectPlayingPreview() = Live(
+    playing, oneGroup = true, voices = emptySet(),
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(1, 3, 2, 0.25f), canUndo = true),
+    step = LiveStep(StepUi(correct = true, status = MirrorText.correctedLine(3))),
+)
+
+@PreviewTest
+@Preview(name = "Live step correct playing dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepCorrectPlayingDarkPreview() = Live(
+    playing, dark = true, oneGroup = true, voices = emptySet(),
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(1, 3, 2, 0.25f), canUndo = true),
+    step = LiveStep(StepUi(correct = true, status = MirrorText.correctedLine(3))),
+)
+
+// SCENES (layout B): the S02 chip after PLAY on the stopped line unrolls the line into the SCENE panel over the function keys,
+// all on its dark screen: ▶, the scene's − and + and the status in the line's own row, the four groups' columns, COMMIT, CLR,
+// CHANGE and the CLIP row. Project here: scene 2 of 3 = A01 B03 C01 D02; B has notes in 01-03, 05, 06, 09 and 12, and is 4 bars.
+private val sceneGroups = listOf(
+    SceneGroupUi(1, null, setOf(1, 2, 4), 3, 2),
+    SceneGroupUi(3, null, setOf(1, 2, 3, 5, 6, 9, 12), 4, 4),
+    SceneGroupUi(1, null, setOf(1, 3), 2, 1),
+    SceneGroupUi(2, null, setOf(1, 2), 3, 1),
+)
+private val scenePanel = SceneUi(open = true, index = 1, count = 3, label = "S02", group = 0, groups = sceneGroups, switchTime = SwitchTime.BAR, chain = ChainUi(scene = 1))
+
+// Open while stopped: nothing said yet, so the status is where the scene is.
+@PreviewTest
+@Preview(name = "Live scene panel", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveScenePanelPreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), scene = LiveScene(scenePanel, still = true))
+
+@PreviewTest
+@Preview(name = "Live scene panel dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveScenePanelDarkPreview() = Live(lastRead, dark = true, oneGroup = true, transport = patternUi(canUndo = true), scene = LiveScene(scenePanel, still = true))
+
+// The CHAIN row: S03 ×2 → S04 → S03 ×2 → S05 on, playing its first step (pass 1 of 2, caught 40% along) with S03 showing; a project of five scenes.
+private val sceneChain = Chain(listOf(ChainStep(2, 2), ChainStep(3), ChainStep(2, 2), ChainStep(4)), on = true)
+private val sceneChained = scenePanel.copy(index = 2, count = 5, label = "S03", chain = ChainUi(sceneChain, scene = 2, play = ChainPlay(0, 1)))
+
+@PreviewTest
+@Preview(name = "Live scene chain playing", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneChainPlayingPreview() = Live(
+    playing, oneGroup = true, playingPads = patternPads, voices = emptySet(),
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(1, 3, 2, 0.25f), canUndo = true),
+    scene = LiveScene(sceneChained, running = true, still = true, chainProgress = { 0.4f }),
+)
+
+// Empty chain, dark: ON dimmed (nothing to play), only ＋ S03 to add the scene shown.
+@PreviewTest
+@Preview(name = "Live scene chain empty dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneChainEmptyDarkPreview() = Live(
+    lastRead, dark = true, oneGroup = true, transport = patternUi(canUndo = true),
+    scene = LiveScene(scenePanel.copy(index = 2, count = 5, label = "S03", chain = ChainUi(Chain.EMPTY, scene = 2)), still = true),
+)
+
+// Playing with B waiting for pattern 5 at the bar's end: its number reads 03→05 (blinking, caught lit), the column and the group
+// key outlined in signal orange; ■ stops it, and the panel stays open with the pads playable under it.
+private val sceneQueued = scenePanel.copy(
+    groups = sceneGroups.mapIndexed { g, c -> if (g == 1) c.copy(queued = 5) else c },
+    status = MirrorText.queuedLine(MirrorText.groupMove(1, 5), SwitchTime.BAR),
+)
+
+@PreviewTest
+@Preview(name = "Live scene panel playing", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveScenePanelPlayingPreview() = Live(
+    playing, oneGroup = true, playingPads = patternPads, voices = emptySet(),
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(2, 3, 4, 0.375f), canUndo = true),
+    scene = LiveScene(sceneQueued.copy(group = 1), running = true, still = true),
+)
+
+// The 1–99 grid over the pads, from B's number: patterns with notes filled, the one playing orange, the next free one outlined.
+@PreviewTest
+@Preview(name = "Live scene grid", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneGridPreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(canUndo = true),
+    scene = LiveScene(scenePanel.copy(group = 1, gridGroup = 1, status = MirrorText.gridStatus(1)), still = true),
+)
+
+@PreviewTest
+@Preview(name = "Live scene grid dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneGridDarkPreview() = Live(
+    lastRead, dark = true, oneGroup = true, transport = patternUi(canUndo = true),
+    scene = LiveScene(scenePanel.copy(group = 1, gridGroup = 1, status = MirrorText.gridStatus(1)), still = true),
+)
+
+// COMMIT: S03 made after S02, with copies of the patterns in free slots (A03 B04 C02 D03).
+@PreviewTest
+@Preview(name = "Live scene commit", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneCommitPreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(canUndo = true),
+    scene = LiveScene(
+        scenePanel.copy(
+            index = 2, count = 4, label = "S03",
+            groups = listOf(3, 4, 2, 3).mapIndexed { g, n -> SceneGroupUi(n, null, sceneGroups[g].filled + n, n + 1, sceneGroups[g].bars) },
+            status = MirrorText.sceneCommitted(2),
+        ),
+        still = true,
+    ),
+)
+
+// CLR held: the key fills over its 2 s, caught a little over half way.
+@PreviewTest
+@Preview(name = "Live scene clear hold", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneClearHoldPreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), scene = LiveScene(scenePanel, holding = 0.55f, still = true))
+
+// DEL: S05 is empty (and not the only scene), so the held key reads DEL.
+@PreviewTest
+@Preview(name = "Live scene delete hold", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneDeleteHoldPreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(canUndo = true),
+    scene = LiveScene(
+        scenePanel.copy(
+            index = 4, count = 5, label = "S05", canDelete = true,
+            groups = listOf(7, 7, 2, 3).map { SceneGroupUi(it, null, emptySet(), it + 1, 1) },
+        ),
+        holding = 0.55f,
+        still = true,
+    ),
+)
+
+// CLIP · BAR: the focused group's bar pages (A is 2 bars), bar 2 copied.
+@PreviewTest
+@Preview(name = "Live scene bar copy", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneBarCopyPreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(canUndo = true),
+    scene = LiveScene(
+        scenePanel.copy(clipMode = ClipMode.BAR, bar = 1, clip = ClipUi(ClipMode.BAR, "bar 2"), status = MirrorText.clipCopied("A bar 2")),
+        still = true,
+    ),
+)
+
+// CLIP · PAD: COPY waits for a pad (the pads take the tap, none plays) ...
+@PreviewTest
+@Preview(name = "Live scene pad copy", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveScenePadCopyPreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(canUndo = true),
+    scene = LiveScene(scenePanel.copy(clipMode = ClipMode.PAD, padStage = PadStage.SOURCE, status = MirrorText.PAD_TAP_SOURCE), still = true),
+)
+
+// ... and, with the kick copied, PASTE waits for the pad to paste onto (it may be in another group: C is shown).
+@PreviewTest
+@Preview(name = "Live scene pad paste", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveScenePadPastePreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(canUndo = true),
+    scene = LiveScene(
+        scenePanel.copy(
+            group = 2, clipMode = ClipMode.PAD, padStage = PadStage.TARGET, clip = ClipUi(ClipMode.PAD, "KICK"),
+            status = MirrorText.padTapTarget("KICK"),
+        ),
+        still = true,
+    ),
+)
+
+// A small phone: the panel and the pads under it.
+@PreviewTest
+@Preview(name = "Live scene panel small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LiveScenePanelSmallPreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), scene = LiveScene(sceneQueued, still = true))
+
+// KEYS: the panel over the keys' grid, the group's keys under it.
+@PreviewTest
+@Preview(name = "Live scene keys", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneKeysPreview() = Live(
+    keysPlaying.copy(notes = emptyMap()), keys = keysUi.copy(playingNotes = emptySet()), transport = patternUi(canUndo = true),
+    scene = LiveScene(scenePanel, still = true),
+)
+
+// On its side, the line in the top bar: the panel in the function keys' column with its own header, the pads beside it.
+@PreviewTest
+@Preview(name = "Live scene panel sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveScenePanelSidewaysPreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), scene = LiveScene(scenePanel, still = true))
+
+// A small phone on its side, and a tablet.
+@PreviewTest
+@Preview(name = "Live scene panel sideways small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LiveScenePanelSidewaysSmallPreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), scene = LiveScene(sceneQueued, still = true))
+
+@PreviewTest
+@Preview(name = "Live scene panel tablet", widthDp = 840, heightDp = 900, showBackground = true)
+@Composable
+fun LiveScenePanelTabletPreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), scene = LiveScene(scenePanel, still = true))
+
+// Folded while it plays: the line reads the scene (B waiting for 5, blinking, caught lit) with the counter after it.
+@PreviewTest
+@Preview(name = "Live scene line playing", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneLinePlayingPreview() = Live(
+    playing, oneGroup = true, playingPads = patternPads, voices = emptySet(),
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(2, 3, 4, 0.375f)),
+    scene = LiveScene(sceneQueued.copy(open = false), still = true),
+)
+
+@PreviewTest
+@Preview(name = "Live scene line playing dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneLinePlayingDarkPreview() = Live(
+    playing, dark = true, oneGroup = true, playingPads = patternPads, voices = emptySet(),
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(2, 3, 4, 0.375f)),
+    scene = LiveScene(sceneQueued.copy(open = false), still = true),
+)
+
+// The same in the top bar on its side.
+@PreviewTest
+@Preview(name = "Live scene line sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveSceneLineSidewaysPreview() = Live(
+    playing, oneGroup = true, voices = emptySet(),
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(2, 3, 4, 0.375f)),
+    scene = LiveScene(sceneQueued.copy(open = false), still = true),
+)
+
+// Stopped, past the default: the S02 chip after ▶, the tempo and the hit staying.
+@PreviewTest
+@Preview(name = "Live scene line stopped", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneLineStoppedPreview() = Live(playing, oneGroup = true, transport = patternUi(canUndo = true), scene = LiveScene(scenePanel.copy(open = false), still = true))
+
+// Offline beside the keys: "Last seen Oct 5, 1:02 PM" would be cut, so the line reads "Seen Oct 5".
+@PreviewTest
+@Preview(name = "Live offline line", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveOfflineLinePreview() = Live(lastRead, oneGroup = true, offline = "Last seen Oct 5, 1:02 PM", transport = patternUi(), scene = LiveScene(scenePanel.copy(open = false), still = true))
+
+@PreviewTest
+@Preview(name = "Pattern sheet", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun PatternSheetPreview() = PatternSheet()
+
+@PreviewTest
+@Preview(name = "Pattern sheet dark", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun PatternSheetDarkPreview() = PatternSheet(dark = true)
+
+@Composable
+private fun PatternSheet(dark: Boolean = false) {
+    val t = patternUi(canUndo = true, missing = 2, switchTime = SwitchTime.BAR)
+    Framed(Tab.LIVE, dark = dark) {
+        MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true, transport = t, step = LiveStep())
+        ArcSheet(visible = true, onDismiss = {}) {
+            PatternSheetContent(t, onDone = {})
+        }
+    }
+}
+
+// Live tools' front page while a take records: the display shows its time large, with a STOP key; the Takes row says so too.
+@PreviewTest
+@Preview(name = "Live tools take recording", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakeRecordingPreview() = Live(lastRead, oneGroup = true, tools = true, offline = "Last seen Oct 5, 2:02 PM", takes = someTakes, rec = dev.arc.ep133.features.RecState.Recording(12), claude = claudeShares)
+
+// A take armed: the display waits for the first sound (the dot still), the key calls it off, and the Takes row says so.
+@PreviewTest
+@Preview(name = "Live tools take armed", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakeArmedPreview() = Live(lastRead, oneGroup = true, tools = true, offline = "Last seen Oct 5, 2:02 PM", takes = someTakes, rec = dev.arc.ep133.features.RecState.Armed, claude = claudeShares)
+
+// PROJECT held: projects 1 to 9 in the keypad's order, the one shown orange.
+@PreviewTest
+@Preview(name = "Project sheet", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun ProjectSheetPreview() = ProjectSheet(MirrorUi(lastRead, loading = false))
+
+// Offline with the factory pack: only the views arc has can be picked.
+@PreviewTest
+@Preview(name = "Project sheet offline", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun ProjectSheetOfflinePreview() = ProjectSheet(
+    MirrorUi(lastRead.copy(activeProject = 1), loading = false, offline = MirrorText.FACTORY, offlineProjects = listOf(1, 2, 3, 4, 5)),
+)
+
+@Composable
+private fun ProjectSheet(mirror: MirrorUi) {
+    Framed(Tab.LIVE) {
+        MirrorScreen(mirror = mirror, nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
+        ArcSheet(visible = true, onDismiss = {}) {
+            ProjectSheetContent(choices = projectChoicesOf(mirror, busy = false), onPick = {}, onDone = {})
+        }
+    }
+}
+
+// The display line grown into the SAMPLE panel over the function keys' place, the mic key in the top bar lit (it
+// closes the panel, as Back or a swipe back does): the line's row now SAMPLE's header (its orange light, the source,
+// the meter and what to do), the wave strip under it on the same dark screen, the controls on the pale plate below;
+// the page's pads under it at the page's own gap, the empty pads' rings blinking (caught on), those with a sound
+// ringed, the take's pad lit.
+private val mic = SampleInput(SampleSource.MIC, false)
+private val rspSt = SampleInput(SampleSource.RSP, true)
+private val inputs = listOf(mic, SampleInput(SampleSource.RSP, false), rspSt)
+private val sampleReady = SampleUiState(on = true, input = mic, inputs = inputs, gainDb = 12f, thresholdDb = -24f, maxSeconds = 40)
+
+@PreviewTest
+@Preview(name = "Live sample panel", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSamplePanelPreview() = Live(lastRead, oneGroup = true, sample = sampleReady)
+
+// The last take's wave on the display.
+@PreviewTest
+@Preview(name = "Live sample panel dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSamplePanelDarkPreview() = Live(lastRead, dark = true, oneGroup = true, sample = sampleReady, lastTake = true)
+
+// A pad held with the threshold set: the take waits for sound.
+@PreviewTest
+@Preview(name = "Live sample panel waiting", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSamplePanelWaitingPreview() = Live(lastRead, oneGroup = true, sample = sampleReady.copy(phase = SamplePhase.Waiting(PhysicalPad(0, 2))))
+
+// Resampling the phone's sound in stereo into an empty pad, 4 s of 20: a small phone's panel, the wave strip just fitting
+// over pads a finger wide (any shorter and it goes, the header still saying it all).
+@PreviewTest
+@Preview(name = "Live sample panel recording small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LiveSamplePanelRecordingSmallPreview() = Live(
+    lastRead, oneGroup = true,
+    sample = sampleReady.copy(input = rspSt, gainDb = 0f, thresholdDb = null, maxSeconds = 20, phase = SamplePhase.Recording(PhysicalPad(0, 2), 4, 20, false)),
+)
+
+// LATCH on, two bars: the click counts in, and LATCH reads STOP.
+@PreviewTest
+@Preview(name = "Live sample panel count-in", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LiveSamplePanelCountInPreview() = Live(
+    lastRead, oneGroup = true, clickOn = true,
+    sample = sampleReady.copy(latch = true, bars = 2, thresholdDb = null, phase = SamplePhase.CountIn(PhysicalPad(0, 5), 3)),
+)
+
+// The project has notes: BARS steps on from 16 to PTN, a take as long as the pattern.
+@PreviewTest
+@Preview(name = "Live sample panel bars ptn", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSamplePanelPtnPreview() = Live(lastRead, oneGroup = true, sample = sampleReady.copy(latch = true, bars = 16), ptn = true)
+
+// On the all-groups page: the panel over the four groups, which keep their size and record too.
+@PreviewTest
+@Preview(name = "Live sample panel all groups", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSamplePanelAllGroupsPreview() = Live(lastRead, sample = sampleReady)
+
+// The EP-133 over USB: the panel says it's experimental.
+@PreviewTest
+@Preview(name = "Live sample panel usb", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSamplePanelUsbPreview() = Live(
+    lastRead, oneGroup = true,
+    sample = sampleReady.copy(input = SampleInput(SampleSource.USB, true), inputs = inputs + SampleInput(SampleSource.USB, false) + SampleInput(SampleSource.USB, true), gainDb = 0f, usb = true),
+)
+
+// The EP-133 short of space: takes stop sooner, and the header says so.
+@PreviewTest
+@Preview(name = "Live sample panel low space", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LiveSamplePanelLowSpacePreview() = Live(lastRead, oneGroup = true, sample = sampleReady.copy(lowSpace = true, maxSeconds = 12))
+
+// On its side, the line in the top bar: SAMPLE's header in the pill, the panel under it in the function keys' column
+// without a header of its own (the wave strip and the controls), widened, the pads beside it.
+@PreviewTest
+@Preview(name = "Live sample panel sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveSamplePanelSidewaysPreview() = Live(lastRead, oneGroup = true, sample = sampleReady.copy(phase = SamplePhase.Recording(PhysicalPad(0, 2), 7, 40, true), latch = true))
+
+@PreviewTest
+@Preview(name = "Live sample panel bar", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LiveSamplePanelBarPreview() = Live(lastRead, oneGroup = true, sample = sampleReady, lastTake = true)
+
+// On its side, too narrow for the line in the top bar: the line grows down the column's left into the panel, the pads
+// beside it from the top.
+@PreviewTest
+@Preview(name = "Live sample panel side line", widthDp = 560, heightDp = 280, showBackground = true)
+@Composable
+fun LiveSamplePanelSideLinePreview() = Live(lastRead, oneGroup = true, sample = sampleReady, lastTake = true)
+
+@PreviewTest
+@Preview(name = "Live sample panel short", widthDp = 490, heightDp = 253, showBackground = true)
+@Composable
+fun LiveSamplePanelShortPreview() = Live(lastRead, oneGroup = true, sample = sampleReady)
+
+@PreviewTest
+@Preview(name = "Live sample panel tablet", widthDp = 840, heightDp = 900, showBackground = true)
+@Composable
+fun LiveSamplePanelTabletPreview() = Live(lastRead, sample = sampleReady, lastTake = true)
+
+// Caught 90 ms into the 300 of a tap's opening (87% of the way, Material's emphasised decelerate being quick off
+// the mark): the line's words gone and SAMPLE's header half in, in their place, the dark screen grown most of the
+// way down with the wave strip coming in, the plate unrolling from under it with its first row coming, the function
+// keys fading, the pads gliding down.
+@PreviewTest
+@Preview(name = "Live sample unroll", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSampleUnrollPreview() = Live(lastRead, oneGroup = true, sample = sampleReady, unroll = 0.867f)
+
+// On its side, the line on the page, caught growing down: narrowed to the panel's width first, the pads come aside
+// under it, now rising beside it, never under it; the header in, the function keys fading under the plate.
+@PreviewTest
+@Preview(name = "Live sample side unroll", widthDp = 560, heightDp = 280, showBackground = true)
+@Composable
+fun LiveSampleSideUnrollPreview() = Live(lastRead, oneGroup = true, sample = sampleReady, unroll = 0.95f)
+
+// SAMPLE's review sheet after a take into A 3: 4 s of RSP ST, a breath of silence before a decaying
+// chord, trimmed to where the sound starts and short of its tail; the next free slot after 1 to 213.
+private const val REVIEW_RATE = 48_000
+private val reviewPcm = ShortArray(REVIEW_RATE * 4 * 2) { i ->
+    val f = i / 2 - REVIEW_RATE * 3 / 10
+    if (f < 0) {
+        0
+    } else {
+        val t = f.toDouble() / REVIEW_RATE
+        val v = (kotlin.math.sin(t * 2 * Math.PI * 220) + 0.6 * kotlin.math.sin(t * 2 * Math.PI * (if (i % 2 == 0) 330.0 else 277.0))) * 16000 * kotlin.math.exp(-t * 1.1)
+        v.toInt()
+    }.toShort()
+}
+
+/** The take's wave, as the SAMPLE panel's display draws the last one. */
+private val takePeaks by lazy { dev.arc.ep133.features.SampleEdit.peaks(reviewPcm, 2, dev.arc.ep133.controller.REVIEW_COLUMNS) }
+
+private fun reviewOf(occupied: Set<Int>?): dev.arc.ep133.controller.SampleReview {
+    val r = dev.arc.ep133.controller.sampleReviewOf(
+        PhysicalPad(0, 2), rspSt, reviewPcm, 2, REVIEW_RATE, dev.arc.ep133.features.SampleCapture.End.STOPPED, latched = false,
+        name = "rsp 1007-142301", normalize = true, trimSilence = true, occupied = occupied,
+    )
+    return dev.arc.ep133.controller.trimReview(r, r.start, r.length - REVIEW_RATE / 2).copy(trimSilence = true)
+}
+
+@Composable
+private fun SampleSheet(review: dev.arc.ep133.controller.SampleReview, dark: Boolean = false, playing: Boolean = false) {
+    val mirror = MirrorUi(lastRead, loading = false)
+    val sample = SampleUi(sampleReady.copy(input = rspSt, gainDb = 0f), still = true)
+    // On its side the line rides in the top bar, as on Live; the mic key lit, the panel open under the sheet.
+    Framed(Tab.LIVE, dark = dark, pill = { LivePill(mirror, dev.arc.ep133.ui.screens.KeysUi(), still = true, sample = sample) }, sample = SampleKey(true) {}) {
+        MirrorScreen(
+            mirror = mirror, nameOf = { names[it] }, fixedNow = NOW, oneGroup = true,
+            sample = sample,
+        )
+        ArcSheet(visible = true, onDismiss = {}) {
+            SampleReviewSheetContent(
+                review = review, playing = playing, haptics = false,
+                onTrim = { _, _ -> }, onNormalize = {}, onTrimSilence = {}, onSlot = {},
+                onPlay = {}, onStop = {}, onRetake = {}, onKeep = {}, onDiscard = {},
+            )
+        }
+    }
+}
+
+@PreviewTest
+@Preview(name = "Sample review", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun SampleReviewPreview() = SampleSheet(reviewOf((1..213).toSet()))
+
+@PreviewTest
+@Preview(name = "Sample review dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun SampleReviewDarkPreview() = SampleSheet(reviewOf((1..213).toSet()), dark = true, playing = true)
+
+@PreviewTest
+@Preview(name = "Sample review small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun SampleReviewSmallPreview() = SampleSheet(reviewOf((1..213).toSet()))
+
+// On its side: the take on the left, the choices and keys on the right.
+@PreviewTest
+@Preview(name = "Sample review sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun SampleReviewSidewaysPreview() = SampleSheet(reviewOf((1..213).toSet()))
+
+// Offline: the slot is picked when the EP-133 connects.
+@PreviewTest
+@Preview(name = "Sample review offline", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun SampleReviewOfflinePreview() = SampleSheet(reviewOf(null))
+
+// Wider than tall but short of 8 white keys: the grid stays.
+@PreviewTest
+@Preview(name = "Live keys grid fallback", widthDp = 400, heightDp = 360, showBackground = true)
+@Composable
+fun LiveKeysGridFallbackPreview() = Live(sideways, keys = chord)
+
+/**
+ * The 692 dp bar's middle, between the LIVE tag and the icons, where the display line is:
+ * measured off a render, since the bar reports it a frame after a screenshot is taken. So the
+ * toast preview checks the toast's look and fit in that place, not that the bar reports it
+ * (a device check).
+ */
+private val SmallBarMiddle = DpRect(97.dp, 6.dp, 451.dp, 50.dp)
+
+@Composable
+private fun Main(state: UiState, dark: Boolean = false, skin: SkinChoice = SkinChoice.EP133, guide: Boolean = false) {
+    Framed(Tab.BACKUPS, connected = state.connected, dark = dark, skin = skin, guide = guide) {
         MainScreen(
             state = state,
             fmtDay = { if (it > 1_790_900_000_000L) "Oct 4, 2026" else if (it > 1_790_500_000_000L) "Oct 2, 2026" else "Sep 25, 2026" },
@@ -214,9 +2042,31 @@ fun MainConnectedPreview() = Main(connectedState)
 fun MainConnectedDarkPreview() = Main(connectedState, dark = true)
 
 @PreviewTest
+@Preview(name = "Main connected EP-40", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun MainConnectedEp40Preview() = Main(connectedState, skin = SkinChoice.EP40)
+
+@PreviewTest
+@Preview(name = "Main connected EP-1320", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun MainConnectedEp1320Preview() = Main(connectedState, skin = SkinChoice.EP1320)
+
+// A 360 dp phone: the BACKUPS caption row holds Back up, search and import.
+@PreviewTest
+@Preview(name = "Main connected narrow", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun MainConnectedNarrowPreview() = Main(connectedState)
+
+@PreviewTest
 @Preview(name = "Main empty after reinstall", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
 fun MainEmptyPreview() = Main(UiState(libraryLoaded = true))
+
+// On its side, the device is one line, so the backups show without scrolling.
+@PreviewTest
+@Preview(name = "Main connected sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun MainConnectedSidewaysPreview() = Main(connectedState)
 
 private val deviceSounds = listOf(
     1 to "kick", 2 to "kick 2", 3 to "snare", 4 to "hat closed", 5 to "hat open", 6 to "clap", 7 to "rim",
@@ -239,12 +2089,12 @@ private val deviceState = connectedState.copy(
 )
 
 @Composable
-private fun Device(section: Int = 0, open: Int? = null, playing: String? = null, connected: Boolean = true, dark: Boolean = false, guide: Boolean = false) {
+private fun Device(section: Int = 0, open: Int? = null, playing: String? = null, connected: Boolean = true, dark: Boolean = false, guide: Boolean = false, slot: Int? = null) {
     val state = if (connected) deviceState else UiState(libraryLoaded = true)
     Framed(Tab.DEVICE, connected = connected, dark = dark, guide = guide) {
         DeviceScreen(
             state = state, onRefresh = {}, onSoundDetails = {}, onProjectSounds = {}, onAddSamples = {},
-            playing = playing, initialSection = section, initialOpen = open,
+            playing = playing, initialSection = section, initialOpen = open, initialSlot = slot,
         )
     }
 }
@@ -263,6 +2113,17 @@ fun DeviceTabDarkPreview() = Device(open = 2, playing = "device:3", dark = true)
 @Preview(name = "Device projects", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
 fun DeviceProjectsPreview() = Device(section = 1, open = 3)
+
+// A tablet on its side: the projects and the sounds binder side by side, project 3's sounds badged.
+@PreviewTest
+@Preview(name = "Device wide", widthDp = 1280, heightDp = 800, showBackground = true)
+@Composable
+fun DeviceWidePreview() = Device(section = 1, open = 3, slot = 2, playing = "device:3")
+
+@PreviewTest
+@Preview(name = "Device wide dark", widthDp = 1280, heightDp = 800, showBackground = true)
+@Composable
+fun DeviceWideDarkPreview() = Device(section = 1, open = 3, slot = 2, playing = "device:3", dark = true)
 
 @PreviewTest
 @Preview(name = "Device disconnected", widthDp = 393, heightDp = 852, showBackground = true)
@@ -289,29 +2150,114 @@ fun PadsSheetPreview() {
     }
 }
 
+// Half a second of a made-up kick (a falling sine, fading out), as a picked file to trim.
+private val kickWav: ByteArray = run {
+    val rate = 46875
+    val n = rate / 2
+    val pcm = ByteArray(n * 2)
+    var phase = 0.0
+    for (i in 0 until n) {
+        val t = i.toDouble() / rate
+        phase += 2 * Math.PI * (45 + 120 * Math.exp(-t * 30)) / rate
+        val v = (Math.sin(phase) * Math.exp(-t * 7) * 30_000).toInt()
+        pcm[i * 2] = v.toByte()
+        pcm[i * 2 + 1] = (v shr 8).toByte()
+    }
+    dev.arc.ep133.formats.Wav.encode(pcm, 1, rate)
+}
+
+// On its side the trim sheet is two columns, so it fits without scrolling.
+@PreviewTest
+@Preview(name = "Trim sideways", widthDp = 867, heightDp = 388, showBackground = true)
 @Composable
-private fun Settings(dark: Boolean) {
-    ArcTheme(dark = dark) {
+fun TrimSidewaysPreview() {
+    Framed(Tab.DEVICE) {
+        DeviceScreen(state = deviceState, onRefresh = {}, onSoundDetails = {}, onProjectSounds = {}, onAddSamples = {})
+        ArcSheet(visible = true, onDismiss = {}) {
+            TrimSheetContent(
+                item = UploadDraftItem("kick 808.wav", "kick 808", 8, kickWav, null, trim = 2_000 until 18_000, sampleRate = 46875),
+                playing = null,
+                onPlay = { _, _, _ -> },
+                onStop = {},
+                onDone = {},
+                onCancel = {},
+                decoded = dev.arc.ep133.formats.Wav.decode(kickWav),
+            )
+        }
+    }
+}
+
+@Composable
+private fun Settings(dark: Boolean, state: UiState = connectedState, settings: AppSettings = AppSettings(keepLast = 10)) {
+    ArcTheme(dark = dark, skin = settings.skin) {
         SettingsScreen(
-            settings = AppSettings(keepLast = 10),
-            state = connectedState,
+            settings = settings,
+            state = state,
             padOrder = PadOrder.FROM_TOP,
             version = "1.0",
             onTheme = {}, onAutoConnect = {}, onKeepScreenOn = {}, pruneCount = { 0 }, onKeepLast = {},
             onPadOrder = {}, onForgetNames = {}, onRestoreFolder = {}, onSource = {}, onFontLicence = {}, onDebug = {}, onBack = {},
+            onGetFactory = {},
         )
     }
 }
 
+// The whole page, Help (Try arc again, What's what) and About at its end.
 @PreviewTest
-@Preview(name = "Settings", widthDp = 393, heightDp = 1700, showBackground = true)
+@Preview(name = "Settings", widthDp = 393, heightDp = 2300, showBackground = true)
 @Composable
 fun SettingsPreview() = Settings(dark = false)
 
 @PreviewTest
-@Preview(name = "Settings dark", widthDp = 393, heightDp = 1700, showBackground = true)
+@Preview(name = "Settings dark", widthDp = 393, heightDp = 2300, showBackground = true)
 @Composable
 fun SettingsDarkPreview() = Settings(dark = true)
+
+@PreviewTest
+@Preview(name = "Settings sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun SettingsSidewaysPreview() = Settings(dark = false)
+
+// The skins (Settings → Appearance → Skin): the EP-40 Riddim's and the EP-1320 Medieval's, light and dark.
+@PreviewTest
+@Preview(name = "Settings EP-40", widthDp = 393, heightDp = 1500, showBackground = true)
+@Composable
+fun SettingsEp40Preview() = Settings(dark = false, settings = AppSettings(keepLast = 10, skin = SkinChoice.EP40))
+
+@PreviewTest
+@Preview(name = "Settings EP-1320 dark", widthDp = 393, heightDp = 1500, showBackground = true)
+@Composable
+fun SettingsEp1320DarkPreview() = Settings(dark = true, settings = AppSettings(keepLast = 10, skin = SkinChoice.EP1320))
+
+// Both factory kits saved: the EP-1320's row says Saved, and the kit row switches Live between them.
+private val bothKitsState = connectedState.copy(
+    backups = connectedState.backups + listOf(
+        backup("f", dev.arc.ep133.text.FeatureText.FACTORY_TITLE, 1_700_000_000_000L, 343, 9).copy(source = dev.arc.ep133.features.FactorySounds.SOURCE),
+        backup("m", dev.arc.ep133.text.FeatureText.FACTORY_TITLE_1320, 1_791_100_000_000L, 343, 9).copy(source = dev.arc.ep133.features.FactoryKit.EP1320.source),
+    ),
+)
+
+@PreviewTest
+@Preview(name = "Settings factory kits", widthDp = 393, heightDp = 1500, showBackground = true)
+@Composable
+fun SettingsFactoryKitsPreview() = Settings(dark = false, state = bothKitsState, settings = AppSettings(keepLast = 10, factoryKit = dev.arc.ep133.features.FactoryKit.EP1320))
+
+// All three kits saved: the EP-40's row says Saved too, and the kit row offers the three, the EP-40's picked.
+private val threeKitsState = bothKitsState.copy(
+    backups = bothKitsState.backups +
+        backup("r", dev.arc.ep133.text.FeatureText.FACTORY_TITLE_40, 1_791_200_000_000L, 471, 9).copy(source = dev.arc.ep133.features.FactoryKit.EP40.source),
+)
+
+@PreviewTest
+@Preview(name = "Settings three factory kits", widthDp = 360, heightDp = 1500, showBackground = true)
+@Composable
+fun SettingsThreeFactoryKitsPreview() = Settings(dark = false, state = threeKitsState, settings = AppSettings(keepLast = 10, factoryKit = dev.arc.ep133.features.FactoryKit.EP40))
+
+// A tablet: the sections listed on the left, the plates beside them.
+@PreviewTest
+@Preview(name = "Settings tablet", widthDp = 1280, heightDp = 800, showBackground = true)
+@Composable
+fun SettingsTabletPreview() = Settings(dark = false)
 
 // The guide overlay (the ? key, and once on the first start), on each tab with tools.
 
@@ -337,7 +2283,17 @@ fun GuideOverlayDevicePreview() = Device(guide = true)
 @Composable
 fun SectionListPreview() {
     Framed(Tab.LIVE, menu = true) {
-        MirrorScreen(mirror = MirrorUi(playing), nameOf = { names[it] }, onPadOrder = {}, fixedNow = NOW, oneGroup = true)
+        MirrorScreen(mirror = MirrorUi(playing), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
+    }
+}
+
+// Settings ends the list, under a thin rule, on any section.
+@PreviewTest
+@Preview(name = "Section menu settings", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun SectionMenuSettingsPreview() {
+    Framed(Tab.BACKUPS, menu = true) {
+        MainScreen(state = connectedState, fmtDay = { "" }, onBackup = {}, onImport = {}, onOpen = {})
     }
 }
 
@@ -349,3 +2305,602 @@ fun GuideFromEdgePreview() {
         MainScreen(state = connectedState, fmtDay = { "" }, onBackup = {}, onImport = {}, onOpen = {})
     }
 }
+
+// Beat cards. Live tools' CLAUDE page, as it starts: IMPROVE, the scene S02 on the glass, SCENE, the pattern (A, 1) and
+// CHAIN to pick the card, the orange PASTE, SAVE and the skill's link.
+// "With my sound list" under the two SHARE keys, ticked, with the sounds Arc knows.
+// The scene's first bars as the glass shows them: A's kick, B's snare, D's hats (C blank).
+private val claudeLights = listOf("X.......x.o.....", "....X.......X..x", "................", "o.o.o.oxo.o.o.oo").map { row ->
+    row.map { ch -> when (ch) { 'X' -> dev.arc.ep133.controller.Weight.ACCENT; 'o' -> dev.arc.ep133.controller.Weight.NORMAL; 'x' -> dev.arc.ep133.controller.Weight.GHOST; else -> null } }
+}
+private val claudeShares = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, lights = claudeLights)
+
+@PreviewTest
+@Preview(name = "Live tools claude", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudePreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE, claude = claudeShares)
+
+// The project has a chain (S03 ×2, S04, S03 ×2, S05 over three scenes): SHARE CHAIN · 3 SCENES joins the two SHARE keys.
+@PreviewTest
+@Preview(name = "Live tools claude chain", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeChainPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE, claude = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, chainSteps = 4, chainScenes = 3, lights = claudeLights))
+
+// A reply awaited: the glass says what went and to paste the reply, STOP beside its head.
+@PreviewTest
+@Preview(name = "Live tools claude waiting", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeWaitingPreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, lights = claudeLights, waiting = "Scene S02"),
+)
+
+// Nothing in the scene and no chain: the glass says so, and SCENE, the pattern, CHAIN and SHARE are faded.
+@PreviewTest
+@Preview(name = "Live tools claude empty", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeEmptyPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE, claude = ClaudeUi(scene = "S01", hasNotes = List(4) { false }, sounds = 212, withSounds = false))
+
+// Nothing to share: both SHARE keys dimmed (and still announced), PASTE BEAT as it was; the dark theme.
+// "With my sound list" is left unticked (kept like the other Live preferences).
+@PreviewTest
+@Preview(name = "Live tools claude dark", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeDarkPreview() = Live(
+    lastRead, dark = true, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE, takes = someTakes, offline = "Last seen Oct 5, 2:02 PM",
+    claude = ClaudeUi(scene = "S01", numbers = listOf(1, 1, 1, 1), sounds = 212, withSounds = false),
+)
+
+// The prompt builder: a new dub techno beat at 122 BPM on the EP-40 kit (Live's), with bass, chords and FX, the words
+// orange under the glass; two saved prompts under the keys, the first in use.
+private val dubBeat = dev.arc.ep133.features.ClaudePrompt(
+    dev.arc.ep133.features.PromptTask.BEAT, genre = "dub-techno", tempo = 122,
+    parts = setOf(dev.arc.ep133.features.PromptPart.BASS, dev.arc.ep133.features.PromptPart.CHORDS, dev.arc.ep133.features.PromptPart.FX),
+)
+private val savedPrompts = listOf(
+    dev.arc.ep133.features.SavedPrompt("Dub techno 122", dubBeat),
+    dev.arc.ep133.features.SavedPrompt("Steppers 78", dev.arc.ep133.features.ClaudePrompt(dev.arc.ep133.features.PromptTask.BEAT).withGenre(dev.arc.ep133.features.Genres.of("steppers"))),
+)
+private val claudeBeat = ClaudeUi(
+    scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, lights = claudeLights,
+    prompt = dubBeat, kit = dev.arc.ep133.features.FactoryKit.EP40, saved = savedPrompts,
+)
+
+@PreviewTest
+@Preview(name = "Live tools claude beat", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeBeatPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE, claude = claudeBeat)
+
+// The genre word tapped: lit orange on the glass, the techno family's recipes as keys with their tempos, ANY and DONE.
+@PreviewTest
+@Preview(name = "Live tools claude genre", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeGenrePreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(sounds = 212, prompt = dubBeat, saved = savedPrompts, picking = dev.arc.ep133.features.PromptSlot.GENRE),
+)
+
+// The feel word tapped: dreamy and dark lit, the twelve words as keys, what the last one does under the glass.
+@PreviewTest
+@Preview(name = "Live tools claude feel", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeFeelPreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(
+        sounds = 212,
+        prompt = dubBeat.copy(feels = listOf(dev.arc.ep133.features.Feel.DREAMY, dev.arc.ep133.features.Feel.DARK)),
+        picking = dev.arc.ep133.features.PromptSlot.FEEL,
+    ),
+)
+
+// IMPROVE, asking for more drive toward dub techno, the scene on the glass; the dark theme.
+@PreviewTest
+@Preview(name = "Live tools claude improve dark", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeImproveDarkPreview() = Live(
+    lastRead, dark = true, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(
+        scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, lights = claudeLights,
+        prompt = dev.arc.ep133.features.ClaudePrompt(goal = dev.arc.ep133.features.PromptGoal.DRIVE, genre = "dub-techno"), saved = savedPrompts,
+    ),
+)
+
+// A prompt edited by hand: its own words on the glass, PROMPT · EDITED at its foot.
+@PreviewTest
+@Preview(name = "Live tools claude edited", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeEditedPreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(
+        sounds = 212,
+        prompt = dubBeat.copy(text = "Use the arc-beats skill. Write a new 4-bar dub techno beat at 122 BPM with a slow chord echo on C7 and a sub bass that only plays on the one. Choose the sounds from my sound list:"),
+    ),
+)
+
+// PLAY: teach me to play scene S02 by finger drumming, the way word tapped (its four ways as keys), the scene on the glass.
+@PreviewTest
+@Preview(name = "Live tools claude play", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudePlayPreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(
+        scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, lights = claudeLights,
+        prompt = dev.arc.ep133.features.ClaudePrompt(dev.arc.ep133.features.PromptTask.PLAY), picking = dev.arc.ep133.features.PromptSlot.WAY,
+    ),
+)
+
+// LEARN: the lesson word tapped, the twelve lessons as keys.
+@PreviewTest
+@Preview(name = "Live tools claude learn", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeLearnPreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(sounds = 212, prompt = dev.arc.ep133.features.ClaudePrompt(dev.arc.ep133.features.PromptTask.LEARN, lesson = 5), picking = dev.arc.ep133.features.PromptSlot.LESSON),
+)
+
+// Live tools' front page after a share: the display waits for Claude's reply, with PASTE BEAT and a dismiss.
+@PreviewTest
+@Preview(name = "Live tools waiting for card", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsWaitingPreview() = Live(
+    playing, oneGroup = true, tools = true, takes = someTakes,
+    claude = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, waiting = "Scene S02"),
+)
+
+// The front page in the dark theme, a few things to say: the display (a pad just hit), the Claude row and the takes.
+@PreviewTest
+@Preview(name = "Live tools front dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsFrontDarkPreview() = Live(playing, dark = true, oneGroup = true, tools = true, takes = someTakes, claude = claudeShares)
+
+// The Play page: one group's view switches (pads), and the key and colours (KEYS).
+@PreviewTest
+@Preview(name = "Live tools play pads", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsPlayPadsPreview() = Live(playing, oneGroup = true, tools = true, toolsPage = ToolsPage.PLAY)
+
+@PreviewTest
+@Preview(name = "Live tools play keys", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsPlayKeysPreview() = Live(keysPlaying, keys = keysUi, tools = true, toolsPage = ToolsPage.PLAY)
+
+// The Help page: how Live reads the EP-133, in the open (offline here, so its note too).
+@PreviewTest
+@Preview(name = "Live tools help", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsHelpPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.HELP, offline = "Last seen Oct 5, 2:02 PM")
+
+// The beat card sheet, as a card arrives (pasted, or Claude's reply shared to arc). A project whose A has patterns 1 to 3 with
+// notes, playing at 122 BPM: a card of one group goes into A's next free pattern, 4.
+private val beatSeq = ProjectSeq.DEFAULT
+    .withPattern(0, 1, Pattern(1, listOf(PatternNote(0, 9, 24))))
+    .withPattern(0, 2, Pattern(1, listOf(PatternNote(0, 9, 24))))
+    .withPattern(0, 3, Pattern(1, listOf(PatternNote(0, 9, 24))))
+
+private const val BOOM_BAP = """Sure! Here is a two bar lazy boom bap:
+```
+ARC BEAT 1
+name Lazy boom bap
+tempo 92
+swing 50
+
+[A] bars 2 step 1/16
+A7 kick      | X... ..x. X... .... | X... ..x. X.x. .... |
+A9 snare     | .... X... .... X..o | .... X... .... X..o |
+A4 hat       | x.x. x.x. x.x. x.xo | x.x. x.x. x.x. x.xo |
+wobble 3
+```"""
+
+private const val BOOM_BAP_LESSON = """ARC BEAT 1
+name Lazy boom bap lesson
+tempo 92
+lesson Kick alone | A7 | 50 | Count 1 e and a out loud
+lesson Add the snare | A7 A9 | 50 | Snare on 2 and 4
+lesson Hats on top | A4 | 75
+lesson The whole groove | A
+
+[A] bars 2 step 1/16
+A7 kick      | X... ..x. X... .... | X... ..x. X.x. .... |
+A9 snare     | .... X... .... X..o | .... X... .... X..o |
+A4 hat       | x.x. x.x. x.x. x.xo | x.x. x.x. x.x. x.xo |
+"""
+
+private const val NIGHT_DRIVE = """ARC BEAT 1
+name Night drive
+tempo 118
+swing 58
+
+[A] bars 1 step 1/16
+A7 kick      | X... .... X..x .... |
+A9 snare     | .... X... .... X... |
+A4 hat       | x.x. x.x. x.x. x.x. |
+
+[B] bars 2 step 1/16
+B7 bass c1   | X... ..x. .... X... | ..x. .... X... x... |
+B8 bass d1   | .... .... ..x. .... | .... X... .... .... |
+
+[C] bars 4 step 1/16
+C2 vox chop  | .... .... .... X... | .... .... .... .... | .... .... X... .... | .... .... .... X... |
+"""
+
+// A card of three scenes and a chain: Intro (A and B), Drop (A and B) and Breakdown (B only, A plays the Drop's).
+private const val TRACK = """ARC BEAT 1
+name Breakcore track
+tempo 168
+chain 1x2 2 1x2 3
+
+scene Intro
+[A] bars 1 step 1/16
+A7 kick      | X... .... X... .... |
+A4 hat       | x.x. x.x. x.x. x.x. |
+[B] bars 2 step 1/16
+B7 bass c1   | X... .... .... X... | .... .... X... .... |
+
+scene Drop
+[A] bars 1 step 1/16
+A7 kick      | X.x. X.x. X.x. X.x. |
+A9 snare     | .... X... .... X..o |
+A4 hat       | xxxx xxxx xxxx xxxx |
+[B] bars 2 step 1/16
+B7 bass c1   | X.x. ..x. X... x... | X.x. ..x. X... x... |
+
+scene Breakdown
+[B] bars 2 step 1/16
+B8 bass d1   | X... .... .... .... | .... .... .... .... |
+"""
+
+private const val BROKEN = """ARC BEAT 1
+name Half a beat
+tempo 400
+
+[A] bars 1 step 1/16
+A7 kick      | X... ..x. X... |
+A9 snare     | .... X... .... X... |
+A4 hat       | x.x. x.x. x.x. x.xo
+wobble 3
+"""
+
+@Composable
+private fun BeatSheet(
+    text: String,
+    seq: ProjectSeq = beatSeq,
+    dark: Boolean = false,
+    initialSetTempo: Boolean = false,
+    sounds: (BeatCard) -> SoundsUi? = { null },
+    fx: (BeatCard) -> BeatFxUi? = { null },
+    shaping: (BeatCard) -> PadShapingUi? = { null },
+    silent: (BeatCard) -> SilentUi? = { null },
+    initialPicked: List<Pair<PhysicalPad, Int>> = emptyList(),
+    initialPicking: PhysicalPad? = null,
+    replaceScenes: Boolean = false,
+    practise: Boolean = false,
+) {
+    val ui = beatImportUi(BeatCards.read(text), seq, 122.0, { names[it] }, fx = fx, shaping = shaping, sounds = sounds, silent = silent)
+    Framed(Tab.LIVE, dark = dark) {
+        MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
+        ArcSheet(visible = true, onDismiss = {}) {
+            BeatImportSheetContent(
+                ui, onCancel = {}, onImport = { _, _, _, _, _, _ -> }, onCopyProblems = {},
+                initialSetTempo = initialSetTempo, initialPicked = initialPicked, initialPicking = initialPicking,
+                replaceScenes = replaceScenes,
+                onPractise = if (practise) ({}) else null,
+            )
+        }
+    }
+}
+
+// One group, two bars, a warning on its line, the tempo chip (off: Arc stays at 122), on a small phone.
+@PreviewTest
+@Preview(name = "Beat sheet one group", widthDp = 360, heightDp = 780, showBackground = true)
+@Composable
+fun BeatSheetOneGroupPreview() = BeatSheet(BOOM_BAP)
+
+// Three groups: a new scene to play them, a long pattern's first two bars and "+2 bars", the swing said, the tempo chip chosen,
+// IMPORT AND PRACTISE under IMPORT.
+@PreviewTest
+@Preview(name = "Beat sheet scene dark", widthDp = 393, heightDp = 1100, showBackground = true)
+@Composable
+fun BeatSheetSceneDarkPreview() = BeatSheet(NIGHT_DRIVE, dark = true, initialSetTempo = true, practise = true)
+
+// Three scenes and a chain: each scene's grids under its title, a row for each scene ("Scene 1 · Intro" over where it goes: new S02 with
+// the patterns it takes, a group it leaves out "(same)"), and the CHAIN row with SET CHAIN on, on a small phone.
+@PreviewTest
+@Preview(name = "Beat sheet scenes chain", widthDp = 360, heightDp = 1500, showBackground = true)
+@Composable
+fun BeatSheetScenesChainPreview() = BeatSheet(TRACK)
+
+// REPLACE on, in a project of three scenes: the card's scenes become S01-S03 and the chain names them, with the line that says so.
+@PreviewTest
+@Preview(name = "Beat sheet scenes replace", widthDp = 360, heightDp = 1560, showBackground = true)
+@Composable
+fun BeatSheetScenesReplacePreview() = BeatSheet(TRACK, seq = beatSeq.withScenes(List(3) { dev.arc.ep133.features.Scene() }, 0), replaceScenes = true)
+
+// A card that can't be read: its errors and warning by line, COPY PROBLEMS, and IMPORT off with the reason.
+// A card with lesson lines: the LESSON block lists the steps, IMPORT AND PRACTISE runs them.
+@PreviewTest
+@Preview(name = "Beat sheet lesson", widthDp = 360, heightDp = 1040, showBackground = true)
+@Composable
+fun BeatSheetLessonPreview() = BeatSheet(BOOM_BAP_LESSON, practise = true)
+
+@PreviewTest
+@Preview(name = "Beat sheet errors", widthDp = 360, heightDp = 760, showBackground = true)
+@Composable
+fun BeatSheetErrorsPreview() = BeatSheet(BROKEN)
+
+// Group B full (all 99 patterns have notes): IMPORT is off, and the sheet says which group.
+@PreviewTest
+@Preview(name = "Beat sheet full group", widthDp = 393, heightDp = 1100, showBackground = true)
+@Composable
+fun BeatSheetFullGroupPreview() {
+    var full = beatSeq
+    for (n in 1..99) full = full.withPattern(1, n, Pattern(1, listOf(PatternNote(0, 9, 24))))
+    BeatSheet(NIGHT_DRIVE, seq = full)
+}
+
+// A card with sound lines: A7 and A9 change their pads' sounds (ticked, the old one struck through), A4 plays its sound
+// already, and A5's is not in the user's list (amber, the reason, no box). The sounds on the pads now, and the list:
+private val soundNow = mapOf(PhysicalPad(0, 9) to 5, PhysicalPad(0, 11) to 90, PhysicalPad(0, 6) to 200)
+private val soundWas = mapOf(PhysicalPad(0, 9) to "KICK DUSTY", PhysicalPad(0, 11) to "SNARE OLD", PhysicalPad(0, 6) to "HAT CLOSED")
+private val soundList = SoundSet(
+    ClaudeText.SOUNDS_FROM_DEVICE,
+    mapOf(5 to "KICK DUSTY", 12 to "MICRO KICK", 90 to "SNARE OLD", 105 to "SNARE TIGHT", 200 to "HAT CLOSED"),
+)
+
+private fun sheetSounds(offline: Boolean): (BeatCard) -> SoundsUi? =
+    { card -> soundsUi(card, soundList, { soundNow[it] }, { soundWas[it] }, offline, if (offline) null else 3) }
+
+private const val SOUND_BEAT = """ARC BEAT 1
+name Micro kit
+tempo 96
+
+[A] bars 1 step 1/16
+sound A7 12 MICRO KICK
+sound A9 105 SNARE TIGHT
+sound A4 200 HAT CLOSED
+sound A5 301 RIM DUSTY
+A7 | X... ..x. X... .... |
+A9 | .... X... .... X... |
+A4 | x.x. x.x. x.x. x.x. |
+A5 | .... .... ..o. .... |
+"""
+
+// The SOUNDS block (connected): PUT ON PADS on, the two changes ticked, "already there", the missing sound in amber, and
+// the note saying how many pads are written, in which project.
+@PreviewTest
+@Preview(name = "Beat sheet sounds", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetSoundsPreview() = BeatSheet(SOUND_BEAT, sounds = sheetSounds(false))
+
+// The same offline, dark: the note says the changes stay in arc until the EP-133 connects.
+@PreviewTest
+@Preview(name = "Beat sheet sounds offline dark", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetSoundsOfflineDarkPreview() = BeatSheet(SOUND_BEAT, dark = true, sounds = sheetSounds(true))
+
+// An EP-133 that lists its factory sounds without names ("012.pcm"): the card's names can't be checked, so the rows use
+// the slots, show the device's name and say what the card called it; A5's slot isn't there at all.
+private val unnamedList = SoundSet(
+    ClaudeText.SOUNDS_FROM_DEVICE,
+    mapOf(5 to "KICK DUSTY", 12 to "012.pcm", 90 to "SNARE OLD", 105 to "105.pcm", 200 to "200.pcm", 343 to "343.pcm"),
+)
+
+private const val UNNAMED_BEAT = """ARC BEAT 1
+name Factory kit
+tempo 96
+
+[A] bars 1 step 1/16
+sound A7 12 KICK DEEP
+sound A9 105 SNARE TIGHT
+sound A4 200 HH CLOSED
+sound A5 301 RIM DUSTY
+A7 | X... ..x. X... .... |
+A9 | .... X... .... X... |
+A4 | x.x. x.x. x.x. x.x. |
+A5 | .... .... ..o. .... |
+"""
+
+// The SOUNDS block with factory sounds the EP-133 keeps unnamed: ticked as any change, the device's name in bold and
+// "Card says ... name not checked" under it.
+@PreviewTest
+@Preview(name = "Beat sheet sounds unnamed", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetSoundsUnnamedPreview() =
+    BeatSheet(UNNAMED_BEAT, sounds = { card -> soundsUi(card, unnamedList, { soundNow[it] }, { soundWas[it] }, offline = false, project = 3) })
+
+// A card written for the EP-40 Riddim's sounds, on an EP-133 with its own: A5's 301 RIM DUSTY is in the EP-40 pack Arc has,
+// so it is ticked to be uploaded into a free slot; offline (dark) it says to connect. A7's KICK DEEP stays on its unnamed slot.
+private val riddimPack = mapOf(dev.arc.ep133.features.FactoryKit.EP40 to mapOf(301 to "rim dusty", 53 to "mpc kick"))
+
+@PreviewTest
+@Preview(name = "Beat sheet sounds upload", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetSoundsUploadPreview() = BeatSheet(
+    UNNAMED_BEAT,
+    sounds = { card -> soundsUi(card, unnamedList, { soundNow[it] }, { soundWas[it] }, offline = false, project = 3, packs = riddimPack, deviceKit = dev.arc.ep133.features.FactoryKit.EP133) },
+)
+
+@PreviewTest
+@Preview(name = "Beat sheet sounds upload offline dark", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetSoundsUploadOfflineDarkPreview() = BeatSheet(
+    UNNAMED_BEAT, dark = true,
+    sounds = { card -> soundsUi(card, unnamedList, { soundNow[it] }, { soundWas[it] }, offline = true, project = 3, packs = riddimPack, deviceKit = dev.arc.ep133.features.FactoryKit.EP133) },
+)
+
+// A card with synth lines: A7's sound line changes its pad as any, A9's snare is on no slot, so IMPORT makes it ("Make snare",
+// ticked, with its play key), and A4's closed hat was made by an earlier import: found on the EP-133 by its device name.
+private const val SYNTH_BEAT = """ARC BEAT 1
+name Made kit
+tempo 96
+
+[A] bars 1 step 1/16
+sound A7 12 MICRO KICK
+synth A9 snare note G3 decay 30 tone 70 click 20 noise 70 name snare
+synth A4 hat decay 10 tone 75 name closed_hat
+A7 | X... ..x. X... .... |
+A9 | .... X... .... X... |
+A4 | x.x. x.x. x.x. x.x. |
+"""
+
+private val madeHat = dev.arc.ep133.features.SynthVoice.deviceName(
+    dev.arc.ep133.features.CardSynth(dev.arc.ep133.features.SynthType.HAT, decay = 10, tone = 75, name = "closed_hat"),
+)
+
+@PreviewTest
+@Preview(name = "Beat sheet synth", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetSynthPreview() = BeatSheet(
+    SYNTH_BEAT,
+    sounds = { card -> soundsUi(card, SoundSet(soundList.source, soundList.names + (300 to madeHat)), { soundNow[it] }, { soundWas[it] }, offline = false, project = 3) },
+)
+
+// A card with FX lines: the project has a reverb on group A, the card swaps it for a distortion, sends A and B to it, turns
+// the compressor on and makes A7 duck B and C. The FX block comes after the tempo row, before the pads (no sound lines here).
+private val projectFx = FxSettings(FxType.REVERB, 0.5f, 0.5f, listOf(0.5f, 0f, 0f, 0f))
+
+private const val FX_BEAT = """ARC BEAT 1
+name Breakcore
+tempo 180
+fx distortion 55 40
+send A 80 B 20
+comp 40 30
+sidechain A7 BC 25 70
+
+[A] bars 1 step 1/16
+A7 kick      | X... ..x. X... .X.. |
+A9 snare     | .... X... .x.. X.xo |
+A4 hat       | xxxx xxxx xxxx xxxo |
+"""
+
+// The FX block (light, small phone): APPLY FX on, the effect struck through and the card's after the arrow, the sends, the
+// compressor and the duck in words, and the note saying where the FX play and that UNDO puts the old ones back.
+@PreviewTest
+@Preview(name = "Beat sheet fx", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetFxPreview() = BeatSheet(FX_BEAT, fx = { beatFxUi(it, projectFx) })
+
+// A card with pad lines and sound lines: A7 and A9 get new sounds (their shaping starts from the defaults), A4 has what
+// the card says already, A8 keeps its sound and changes, A5 has no sound at all. The settings the pads have now:
+private val padNow = mapOf(PhysicalPad(0, 6) to PadSettings.DEFAULT.withMode(PlayMode.KEY).copy(release = 20))
+
+private const val SHAPE_BEAT = """ARC BEAT 1
+name Micro kit shaped
+tempo 96
+
+[A] bars 1 step 1/16
+sound A7 12 MICRO KICK
+sound A9 105 SNARE TIGHT
+sound A4 200 HAT CLOSED
+sound A5 301 RIM DUSTY
+pad A7 pitch -2 level 90
+pad A9 pitch 2 release 40 mode key
+pad A4 mode key release 20
+pad A8 level 80 pan 4
+pad A5 pan -4
+A7 | X... ..x. X... .... |
+A9 | .... X... .... X... |
+A4 | x.x. x.x. x.x. x.x. |
+A8 | .... .... ..o. .... |
+A5 | .... .... ..o. .... |
+"""
+
+private fun sheetShaping(offline: Boolean): (BeatCard) -> PadShapingUi? = { card ->
+    padShapingUi(
+        card,
+        now = { padNow[it] },
+        hasSound = { it in setOf(PhysicalPad(0, 9), PhysicalPad(0, 10), PhysicalPad(0, 11), PhysicalPad(0, 6)) },
+        names = { names[it] },
+        offline = offline,
+    )
+}
+
+// SOUNDS and PAD SHAPING together (dark): the new sounds ticked, and the shaping rows after them: old struck through, new in
+// bold, the pad with the settings already "Already set", the pad with no sound amber, and the note about writing the pads.
+@PreviewTest
+@Preview(name = "Beat sheet pad shaping dark", widthDp = 360, heightDp = 1500, showBackground = true)
+@Composable
+fun BeatSheetPadShapingDarkPreview() = BeatSheet(SHAPE_BEAT, dark = true, sounds = sheetSounds(false), shaping = sheetShaping(false))
+
+private const val ABSENT_BEAT = """ARC BEAT 1
+name Bass line
+tempo 96
+
+[A] bars 1 step 1/16
+sound A7 301 RIM DUSTY
+sound A9 410 SUB LOW
+A7 | X... ..x. X... .... |
+A9 | .... X... .... X... |
+"""
+
+// Every sound line is nowhere in the user's list: all amber, no PUT ON PADS, and the hint to share with the sound list.
+@PreviewTest
+@Preview(name = "Beat sheet sounds none", widthDp = 360, heightDp = 860, showBackground = true)
+@Composable
+fun BeatSheetSoundsNonePreview() = BeatSheet(ABSENT_BEAT, sounds = sheetSounds(false))
+
+// A card whose melody on D7 and bass on C7 are KEYS notes on pads that have no sound on this EP-133 (groups C and D are
+// empty), and no sound lines: D7 plays 12 notes, C7 6. The pads now (A7 and A9 have a sound), and the sounds to pick from:
+private val heldNow = mapOf(PhysicalPad(0, 9) to 5, PhysicalPad(0, 11) to 90)
+private val pickable = listOf(
+    SoundEntry(5, "KICK DUSTY", 234_000), SoundEntry(90, "SNARE OLD", 206_000), SoundEntry(105, "SNARE TIGHT", 207_000),
+    SoundEntry(200, "HAT CLOSED", 98_000), SoundEntry(410, "SUB BASS", 310_000), SoundEntry(512, "PIANO", 402_000),
+    SoundEntry(515, "RHODES", 390_000), SoundEntry(530, "STRINGS", 612_000),
+)
+
+private const val SILENT_BEAT = """ARC BEAT 1
+name Moody keys
+tempo 108
+
+[A] bars 1 step 1/16
+A7 | X... ..x. X... .... |
+A9 | .... X... .... X... |
+
+[C] bars 1 step 1/16
+notes
+C7 at 1.1.1 note C2 gate 1/4
+C7 at 1.2.2 note C2 gate 1/8
+C7 at 1.3.1 note G1 gate 1/4
+C7 at 1.4.1 note A#1 gate 1/8
+C7 at 1.4.3 note C2 gate 1/8
+C7 at 1.4.4 note D2 gate 1/16
+
+[D] bars 1 step 1/16
+notes
+D7 at 1.1.1 note E4
+D7 at 1.1.3 note G4
+D7 at 1.2.1 note B4
+D7 at 1.2.3 note G4
+D7 at 1.3.1 note E4
+D7 at 1.3.3 note G4
+D7 at 1.4.1 note D4
+D7 at 1.4.2 note E4
+D7 at 1.4.3 note G4
+D7 at 1.4.4 note B4
+D7 at 1.1.2 vel 80 note B3
+D7 at 1.3.2 vel 80 note B3
+"""
+
+private fun sheetSilent(offline: Boolean = false): (BeatCard) -> SilentUi? = { card ->
+    silentUi(card, { heldNow[it] }, known = true, SoundChoices(SoundSource.DEVICE, pickable, emptySet()), offline, if (offline) null else 3)
+}
+
+// The SILENT PADS block (light, small phone): C7 and D7 play KEYS notes on pads with no sound, so they will be silent;
+// each row says how many notes and has PICK SOUND. There is no SOUNDS block (the card has no sound lines).
+@PreviewTest
+@Preview(name = "Beat sheet silent pads", widthDp = 360, heightDp = 1120, showBackground = true)
+@Composable
+fun BeatSheetSilentPadsPreview() = BeatSheet(SILENT_BEAT, silent = sheetSilent())
+
+// After picking PIANO for D7 (dark): D7's row says "\u2192 512 PIANO" with CHANGE, and a ticked row has joined a SOUNDS block
+// ("No sound" struck through, then 512 PIANO, "Picked here"): IMPORT writes it with the card's sounds. C7 is still silent.
+@PreviewTest
+@Preview(name = "Beat sheet silent pad picked dark", widthDp = 360, heightDp = 1500, showBackground = true)
+@Composable
+fun BeatSheetSilentPadPickedDarkPreview() =
+    BeatSheet(SILENT_BEAT, dark = true, silent = sheetSilent(), initialPicked = listOf(PhysicalPad(3, 9) to 512))
+
+// PICK SOUND's picker for D7 (light): the pad sheet's list, with its search, hundreds and preview keys, and a key back to the card.
+@PreviewTest
+@Preview(name = "Beat sheet silent pad picker", widthDp = 360, heightDp = 780, showBackground = true)
+@Composable
+fun BeatSheetSilentPadPickerPreview() = BeatSheet(SILENT_BEAT, silent = sheetSilent(), initialPicking = PhysicalPad(3, 9))

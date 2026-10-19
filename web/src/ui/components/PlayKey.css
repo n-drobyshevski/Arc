@@ -1,4 +1,5 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (PlayKey) */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (PlayKey)
+ * A round hardware cap (theme/cap.css). */
 
 .play-key {
   flex: none;
@@ -8,15 +9,14 @@
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: transparent;
-  color: var(--navy);
-  /* Border(1.5dp, navy 60%) drawn inside the circle, as Modifier.border does. */
-  box-shadow: inset 0 0 0 1.5px var(--navy-ring);
+  --cap-face: var(--key);
+  --cap-ink: var(--navy);
+  --cap-edge: var(--key-edge);
 }
 .play-key.is-playing {
-  background: var(--signal);
-  color: var(--on-signal);
-  box-shadow: none;
+  --cap-face: var(--signal);
+  --cap-ink: var(--on-signal);
+  --cap-edge: var(--signal-edge);
 }
 .play-key:disabled { opacity: var(--icon-disabled); }
 

@@ -7,9 +7,9 @@
 // were read from it with the JS reference under Node.
 import { describe, expect, it } from 'vitest'
 import { backupDevice, prepareSound, restorePak } from '../../../src/core/backup/backup'
-import { describePak, openPak, type PakDescription } from '../../../src/core/backup/pak'
+import { describePak, openPak, pakFiles, type PakDescription } from '../../../src/core/backup/pak'
 import { crc32 } from '../../../src/core/formats/crc32'
-import { readZip } from '../../../src/core/formats/zip'
+import { readZip, writeZip } from '../../../src/core/formats/zip'
 import { Session } from '../../../src/core/protocol/session'
 import { demoSounds, device } from '../../helpers/demoData'
 import { referenceAppVersion, samplePak } from '../../helpers/fixtures'
@@ -148,5 +148,51 @@ describe('PakCompatTest', () => {
     for (const [n, tar] of demo.projects) expect(dst.projects.get(n), `project ${n}`).toEqual(tar)
     expect(dst.dropped).toBe(0)
     s.close()
+  })
+
+  it("reads a pack zipped on a Mac in a folder of its own (the EP-40's), its __MACOSX entries ignored", async () => {
+    const enc = new TextEncoder()
+    const wav = new Uint8Array([1, 2, 3, 4])
+    const fork = new Uint8Array([0, 5, 22, 7])
+    const tar = new Uint8Array(1024)
+    // As teenage engineering's EP-40 pack is laid out (directory entries, then files, then the resource forks).
+    const bytes = await writeZip(
+      [
+        { path: 'ep-40-factory-content/meta.json', data: enc.encode(JSON.stringify({ pak_type: 'factory', device_name: 'EP-40', device_sku: 'TE032AS006' })), compress: false },
+        { path: 'ep-40-factory-content/projects/P01.tar', data: tar, compress: false },
+        { path: 'ep-40-factory-content/sounds/335 cowbell.wav', data: wav, compress: false },
+        { path: '__MACOSX/._ep-40-factory-content', data: fork, compress: false },
+        { path: '__MACOSX/ep-40-factory-content/._meta.json', data: fork, compress: false },
+        { path: '__MACOSX/ep-40-factory-content/sounds/._335 cowbell.wav', data: fork, compress: false },
+        { path: '__MACOSX/ep-40-factory-content/projects/._P01.tar', data: fork, compress: false },
+      ],
+      { date: 0, offsetMin: 0 },
+    )
+    const pak = await openPak(bytes)
+    expect(pak.meta.device_name).toBe('EP-40')
+    expect([...pak.sounds.values()].map((it) => [it.slot, it.name, it.wav])).toEqual([[335, 'cowbell', wav]])
+    expect([...pak.projects.keys()]).toEqual([1])
+    expect(describePak(pak).device).toEqual({ product: 'EP-40', sku: 'TE032AS006', osVersion: '' })
+
+    // Resource forks beside a pack at the top: dropped, the rest as is.
+    const top = new Map([
+      ['meta.json', enc.encode('{}')],
+      ['sounds/001 kick.wav', wav],
+      ['__MACOSX/sounds/._001 kick.wav', fork],
+      ['__MACOSX/._meta.json', fork],
+    ])
+    expect([...pakFiles(top).keys()]).toEqual(['meta.json', 'sounds/001 kick.wav'])
+    // Sounds alone at the top, or files outside the folder: nothing is taken off.
+    const noMeta = new Map([['sounds/001 kick.wav', wav], ['sounds/002 snare.wav', wav]])
+    expect([...pakFiles(noMeta).keys()]).toEqual(['sounds/001 kick.wav', 'sounds/002 snare.wav'])
+    expect([...pakFiles(new Map([['Projects/P01.tar', wav]])).keys()]).toEqual(['Projects/P01.tar'])
+    // A folder of a pack without meta.json is a pack too.
+    expect([...pakFiles(new Map([['pack/sounds/001 kick.wav', wav], ['pack/projects/P01.tar', wav]])).keys()]).toEqual(['sounds/001 kick.wav', 'projects/P01.tar'])
+    const outside = new Map([['pack/meta.json', wav], ['pack/sounds/001 kick.wav', wav], ['sounds/002 snare.wav', wav]])
+    expect([...pakFiles(outside).keys()]).toEqual(['pack/meta.json', 'pack/sounds/001 kick.wav', 'sounds/002 snare.wav'])
+    // Only resource forks: not a pack.
+    await expect(openPak(await writeZip([{ path: '__MACOSX/sounds/._001 kick.wav', data: fork, compress: false }], { date: 0, offsetMin: 0 }))).rejects.toThrow(
+      'This file has no sounds or projects in it',
+    )
   })
 })

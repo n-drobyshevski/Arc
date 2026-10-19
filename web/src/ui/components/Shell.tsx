@@ -1,16 +1,28 @@
 // Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (ArcFrame, ArcShell)
 //
 // The page under the top bar: TopBar, then the section's page with the GUIDE
-// tab on the left edge (centred, 80px up) and the section list over it (under
-// the top bar, so the tag stays in view). The guide slides in from the left
+// tab on the left edge (centred, 80px up; Live's EDIT is the SOUND key, as
+// on Android) and the section list over it (under
+// the top bar, so the tag stays in view; Settings is its last entry). The guide slides in from the left
 // over everything. The page box has a fixed height; [children] scroll inside
 // .shell__page (screens that fill it, like Live's one-group view, use height: 100%).
+//
+// Web only, on the desk ([desk], from 1024px wide; app.tsx puts the shell in
+// the page column right of the nav rail): no GUIDE edge tab (the rail's Guide
+// key opens the guide, and gets the focus back), the guide is a panel docked
+// on the left of the page column instead of covering it, and the top bar's row
+// widens to 1200 (Shell.css, TopBar.css), with the theme switch after the ?
+// key. The rail's Settings key opens Settings, so the section list has no
+// Settings entry there. The shell's own --shell page goes transparent, so the
+// desk shows through.
 import type { ComponentChildren, JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import type { ReadonlySignal } from '@preact/signals'
+import type { ThemeChoice } from '../../core/text/settingsText'
 import type { Tab } from '../../state/types'
 import { GuideEdgeTab } from './GuideEdgeTab'
 import { SectionMenu } from './SectionMenu'
-import { TopBar } from './TopBar'
+import { TopBar, type TopBarProps } from './TopBar'
 import './Shell.css'
 
 export interface ShellProps {
@@ -21,17 +33,31 @@ export interface ShellProps {
   onMenu: (open: boolean) => void
   connected: boolean
   canConnect: boolean
-  canBackup: boolean
-  onBackup: () => void
   onConnect: () => void
+  /** A short note in the toast (the top bar's keys explain themselves with it). */
+  onNote: (text: string) => void
+  /** Live's output delay (ms) while it is heard, for the top bar's Bluetooth key; null off Live. */
+  late?: ReadonlySignal<number | null> | null
+  /** The Bluetooth delay while it is made up for (TopBar's [madeUp]). */
+  madeUp?: ReadonlySignal<number | null> | null
+  /** Live's SAMPLE key (TopBar's [sample]); null off Live. */
+  sample?: TopBarProps['sample']
   onDebug: () => void
+  /** Settings, the last entry of the section list (the list closes with it; none on the desk). */
   onSettings: () => void
   onHelp: () => void
+  /** Settings → Theme, for the desk's theme switch in the top bar. */
+  theme: ThemeChoice
+  onTheme: (t: ThemeChoice) => void
   guideOpen: boolean
   onGuide: (open: boolean) => void
   /** The guide screen, slid in while [guideOpen]. */
   guide: ComponentChildren
+  /** The top bar's middle, between the tag and the keys (Live's display line on a phone on its side). */
+  middle?: ComponentChildren
   children?: ComponentChildren
+  /** The desktop layout (ui/useDesk.ts): the nav rail's Guide key opens the guide, not the edge tab. */
+  desk?: boolean
 }
 
 /** slideInHorizontally / slideOutHorizontally: Compose's default spring settles in about this long. */
@@ -44,7 +70,7 @@ export function Shell(props: ShellProps): JSX.Element {
   // Focus goes back to what opened a layer once it closes (the list's items
   // hide and the guide unmounts, which would drop focus onto <body>).
   useReturnFocus(root, menuOpen, '.section-tag', '.section-menu')
-  useReturnFocus(root, guideOpen, '.guide-edge-tab', '.shell__guide')
+  useReturnFocus(root, guideOpen, props.desk ? '.nav-rail__guide' : '.guide-edge-tab', '.shell__guide')
   return (
     <div class="shell" ref={root}>
       <div class="shell__top" inert={guideOpen || undefined}>
@@ -55,12 +81,15 @@ export function Shell(props: ShellProps): JSX.Element {
           sectionsId={MENU_ID}
           connected={props.connected}
           canConnect={props.canConnect}
-          canBackup={props.canBackup}
-          onBackup={props.onBackup}
           onConnect={props.onConnect}
+          onNote={props.onNote}
+          late={props.late}
+          madeUp={props.madeUp}
+          sample={props.sample}
           onDebug={props.onDebug}
-          onSettings={props.onSettings}
           onHelp={props.onHelp}
+          {...(props.desk ? { themeSwitch: { theme: props.theme, onTheme: props.onTheme } } : {})}
+          middle={props.middle}
         />
       </div>
       <div class="shell__body" inert={guideOpen || undefined}>
@@ -73,6 +102,7 @@ export function Shell(props: ShellProps): JSX.Element {
           open={menuOpen}
           current={tab}
           onPick={(t) => props.onTab(t)}
+          {...(props.desk ? {} : { onSettings: props.onSettings })}
           onDismiss={() => props.onMenu(false)}
         />
       </div>
@@ -83,7 +113,8 @@ export function Shell(props: ShellProps): JSX.Element {
 
 /**
  * When [open] turns false and focus was inside [inside] (or already dropped to
- * <body>), focuses [opener]. Both are selectors under [root].
+ * <body>), focuses [opener]. Both are selectors; [inside] under [root], [opener]
+ * under [root] or, failing that, anywhere in the document (the desk's rail is outside the shell).
  */
 function useReturnFocus(root: { current: HTMLElement | null }, open: boolean, opener: string, inside: string): void {
   const was = useRef(open)
@@ -93,7 +124,9 @@ function useReturnFocus(root: { current: HTMLElement | null }, open: boolean, op
     if (!closed || typeof document === 'undefined') return
     const active = document.activeElement
     const lost = active === null || active === document.body || (active instanceof Element && active.closest(inside) !== null)
-    if (lost) root.current?.querySelector<HTMLElement>(opener)?.focus({ preventScroll: true })
+    if (!lost) return
+    const el = root.current?.querySelector<HTMLElement>(opener) ?? document.querySelector<HTMLElement>(opener)
+    el?.focus({ preventScroll: true })
   }, [open])
 }
 

@@ -1,11 +1,24 @@
 package dev.arc.ep133.data
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.core.content.edit
+import dev.arc.ep133.features.ArpOrder
+import dev.arc.ep133.features.ArpSettings
+import dev.arc.ep133.features.FactoryKit
 import dev.arc.ep133.features.Keys
+import dev.arc.ep133.features.KeysView
 import dev.arc.ep133.features.NoteNames
+import dev.arc.ep133.features.Piano
+import dev.arc.ep133.features.SampleSource
 import dev.arc.ep133.features.Scale
+import dev.arc.ep133.features.SwitchTime
+import dev.arc.ep133.features.Tempo
+import dev.arc.ep133.features.Timing
+import dev.arc.ep133.features.TimingSettings
 import dev.arc.ep133.features.Tour
+import dev.arc.ep133.text.LiveEngine
+import dev.arc.ep133.text.SkinChoice
 import dev.arc.ep133.text.ThemeChoice
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,12 +27,16 @@ import kotlinx.coroutines.flow.asStateFlow
 /** The settings page's choices (an addition to the web version). */
 data class AppSettings(
     val theme: ThemeChoice = ThemeChoice.SYSTEM,
+    /** The EP the app is dressed as, light or dark as [theme] says. */
+    val skin: SkinChoice = SkinChoice.EP133,
     val autoConnect: Boolean = true,
     val keepScreenOn: Boolean = true,
+    /** The transport keeps playing with arc off the screen (a media notification and the lock screen stop it). */
+    val backgroundPlay: Boolean = true,
     /** How many backups to keep; null keeps all. */
     val keepLast: Int? = null,
     /** Live shows one group at a time, large, instead of all four. */
-    val liveOneGroup: Boolean = false,
+    val liveOneGroup: Boolean = true,
     /** In that view, switch to the group of the pad just played. */
     val liveFollow: Boolean = true,
     /** The guide overlay has been shown once (it opens by itself on the first start only). */
@@ -32,11 +49,138 @@ data class AppSettings(
     val keysOctave: Int = 4,
     /** KEYS names notes in solfège (DO RE MI) or letters (C D E). */
     val keysNames: NoteNames = NoteNames.SOLFEGE,
+    /** KEYS writes each key's note name in its ring (off: rings and octave numbers only). */
+    val keysShowNames: Boolean = true,
+    /** KEYS on the grid or the piano, remembered once for a wide window and once for a tall one. */
+    val keysViewWide: KeysView = KeysView.AUTO,
+    val keysViewTall: KeysView = KeysView.AUTO,
+    /** The piano's white keys (Piano.WHITES); null is Auto, the widest that fits. */
+    val pianoWhites: Int? = null,
+    /** A light tick when a pad or key is pressed in Live (the phone's own touch feedback setting still applies). */
+    val haptics: Boolean = true,
+    /**
+     * Make up for the delay of a Bluetooth or hearing-aid output (an addition): what lines up with sound
+     * outside the phone is sent earlier, and the playhead and a recorded press follow what is heard.
+     * Nothing changes on a wired output or the speaker.
+     */
+    val makeUpDelay: Boolean = true,
+    /** Live's click (TEMPO): the phone's tempo in BPM, Tempo.MIN..MAX. The click itself always starts off. */
+    val liveTempo: Int = Tempo.DEFAULT,
+    /** CLAUDE's "With my sound list": a shared beat card is followed by the sounds Arc knows, for Claude to choose from. */
+    val shareSounds: Boolean = true,
+    /** CLAUDE's prompt as built on its glass ([dev.arc.ep133.features.ClaudePrompt.encode]; empty: as it starts). */
+    val claudePrompt: String = "",
+    /** CLAUDE's saved prompts ([dev.arc.ep133.features.SavedPrompt.encodeAll]). */
+    val claudePrompts: String = "",
+    /**
+     * The beat card sheet's REPLACE (Scenes): a card's scenes take the place of the project's (S01 on), or, off,
+     * follow them. The choice is kept for the next card.
+     */
+    val replaceScenes: Boolean = false,
+    /**
+     * Which output Live plays through, a debug choice for the latency test
+     * (Debug screen): kept on this phone only, never copied into library.json.
+     */
+    val liveEngine: LiveEngine = LiveEngine.AUTO,
+    /** SAMPLE's input (an addition): its source and whether it records in stereo. */
+    val sampleSource: SampleSource = SampleSource.MIC,
+    val sampleStereo: Boolean = false,
+    /** SAMPLE's LEVEL per source, in dB: the phone's mic is quiet, so it starts higher. */
+    val sampleGainMic: Float = SAMPLE_GAIN_MIC,
+    val sampleGainRsp: Float = 0f,
+    val sampleGainUsb: Float = 0f,
+    /** SAMPLE's threshold in dBFS; null records from the press. */
+    val sampleThreshold: Float? = null,
+    /** The bars a hands-free take lasts, after a bar's count-in; null (Free) runs until STOP, or a tap on its pad. */
+    val sampleBars: Int? = null,
+    /** A take opens the review sheet before it goes on its pad (off: straight on, as on the EP-133). */
+    val reviewSamples: Boolean = true,
+    /** The review's switches, kept for the next take (and used as they are with [reviewSamples] off). */
+    val sampleNormalize: Boolean = false,
+    val sampleTrimSilence: Boolean = false,
+    /** SAMPLE's BARS on PTN: a hands-free take lasts the pattern's length, from its next loop start (with notes in the project only). */
+    val samplePattern: Boolean = false,
+    /** RECORD then PLAY counts a bar in first. */
+    val patternCountIn: Boolean = true,
+    /** AUTO length: an empty group recorded from stop ends where recording stops (1, 2, 4 or 8 bars). */
+    val patternAutoLength: Boolean = false,
+    /** TIMING's note interval (KNOB X; never OFF), 1/16 as on the device: the grid recording snaps to and the arp steps at. */
+    val timingInterval: Timing = Timing.DEFAULT,
+    /** TIMING's swing (KNOB Y), 50..75: 50 straight. */
+    val timingSwing: Int = TimingSettings.SWING_MIN,
+    /** TIMING's - and +: recording snaps to the interval, or keeps free time. */
+    val timingQuantize: Boolean = true,
+    /** The arp (KEYS) and note repeat (PADS) are on: a press holds a note for them instead of playing it. */
+    val arpOn: Boolean = false,
+    /** The arp's order, octaves (1..3), gate (10..100 % of a step) and latch. */
+    val arpOrder: ArpOrder = ArpOrder.PLAYED,
+    val arpOctaves: Int = ArpSettings.MIN_OCTAVES,
+    val arpGate: Int = ArpSettings.DEFAULT.gate,
+    val arpLatch: Boolean = false,
+    /** When a pattern or scene picked while the pattern plays takes over (the device's 410 to 412): at once, at bar end, or at pattern end. */
+    val sceneSwitch: SwitchTime = SwitchTime.DEFAULT,
+    /**
+     * The factory kit Live plays offline (an addition), when its pack is saved: chosen in Settings or on Live's
+     * factory line, and set to the kit of each EP-133 or EP-1320 connected, so Live opens on the device used last.
+     */
+    val factoryKit: FactoryKit = FactoryKit.EP133,
     /** "Try arc": the steps done and skipped so far (Tour.encode); empty before the first. */
     val tourSteps: String = "",
     /** "Try arc" was finished or put off with Not now: it no longer opens by itself. */
     val tourDone: Boolean = false,
-)
+) {
+    /** TIMING as one: interval, swing and quantize. */
+    val timing: TimingSettings get() = TimingSettings(timingInterval, timingSwing, timingQuantize)
+
+    /**
+     * PATTERN's TIMING (an addition, the device's quantize): the grid
+     * recording snaps to, [timing]'s interval or OFF for free time. Kept as
+     * its own setting too ("patternTiming"), for earlier versions.
+     */
+    val patternTiming: Timing get() = timing.record
+
+    /** The arp's settings as one. */
+    val arp: ArpSettings get() = ArpSettings(arpOrder, arpOctaves, arpGate, arpLatch)
+
+    /** These settings with TIMING at [t] (OFF read as 1/16, the swing held to 50..75). */
+    fun withTiming(t: TimingSettings): AppSettings = copy(timingInterval = t.interval, timingSwing = t.swing, timingQuantize = t.quantize)
+
+    /** PATTERN's TIMING picked at [t]: OFF records in free time (the interval stays); a grid is the interval, quantized. */
+    fun withPatternTiming(t: Timing): AppSettings =
+        withTiming(if (t == Timing.OFF) timing.withQuantize(false) else timing.withInterval(t).withQuantize(true))
+
+    /** These settings with the arp's at [a] (octaves and gate held to their ranges). */
+    fun withArp(a: ArpSettings): AppSettings {
+        val held = a.withOctaves(a.octaves).withGate(a.gate)
+        return copy(arpOrder = held.order, arpOctaves = held.octaves, arpGate = held.gate, arpLatch = held.latch)
+    }
+
+    /** SAMPLE's LEVEL for [source], in dB. */
+    fun sampleGain(source: SampleSource): Float = when (source) {
+        SampleSource.MIC -> sampleGainMic
+        SampleSource.RSP -> sampleGainRsp
+        SampleSource.USB -> sampleGainUsb
+    }
+
+    /** These settings with SAMPLE's LEVEL for [source] at [db]. */
+    fun withSampleGain(source: SampleSource, db: Float): AppSettings = when (source) {
+        SampleSource.MIC -> copy(sampleGainMic = db)
+        SampleSource.RSP -> copy(sampleGainRsp = db)
+        SampleSource.USB -> copy(sampleGainUsb = db)
+    }
+}
+
+/** SAMPLE's LEVEL for the phone's mic until one is chosen, in dB. */
+const val SAMPLE_GAIN_MIC = 12f
+
+/** The LEVEL knob's range, in dB, as the SAMPLE panel's KNOB X turns it. */
+val SAMPLE_GAINS = -12f..30f
+
+/** The threshold knob's range in dBFS, below Off. */
+val SAMPLE_THRESHOLDS = -60f..0f
+
+/** BARS' choices for a hands-free take: Free (null), then these. */
+val SAMPLE_BARS = listOf(1, 2, 4, 8, 16)
 
 /**
  * The settings, kept in the app's preferences and copied into library.json
@@ -44,19 +188,23 @@ data class AppSettings(
  *
  * Only values that were chosen are stored (and copied out): a default is
  * never written, so a fresh install's library.json can't override the
- * choices an earlier install left in the folder.
+ * choices an earlier install left in the folder. The debug screen's engine
+ * choice ([AppSettings.liveEngine]) stays in the preferences alone.
  */
-class SettingsStore(context: Context) {
-    private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+class SettingsStore internal constructor(private val prefs: SharedPreferences) {
+    constructor(context: Context) : this(context.getSharedPreferences("settings", Context.MODE_PRIVATE))
+
     private val _settings = MutableStateFlow(read())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
     private fun read() = AppSettings(
         theme = runCatching { ThemeChoice.valueOf(prefs.getString("theme", null) ?: "") }.getOrDefault(ThemeChoice.SYSTEM),
+        skin = runCatching { SkinChoice.valueOf(prefs.getString("skin", null) ?: "") }.getOrDefault(SkinChoice.EP133),
         autoConnect = prefs.getBoolean("autoConnect", true),
         keepScreenOn = prefs.getBoolean("keepScreenOn", true),
+        backgroundPlay = prefs.getBoolean("backgroundPlay", true),
         keepLast = prefs.getInt("keepLast", 0).takeIf { it > 0 },
-        liveOneGroup = prefs.getBoolean("liveOneGroup", false),
+        liveOneGroup = prefs.getBoolean("liveOneGroup", true),
         liveFollow = prefs.getBoolean("liveFollow", true),
         guideSeen = prefs.getBoolean("guideSeen", false),
         liveKeys = prefs.getBoolean("liveKeys", false),
@@ -64,22 +212,69 @@ class SettingsStore(context: Context) {
         keysScale = runCatching { Scale.valueOf(prefs.getString("keysScale", null) ?: "") }.getOrDefault(Scale.CHROMATIC),
         keysOctave = prefs.getInt("keysOctave", 4).coerceIn(Keys.MIN_OCTAVE, Keys.MAX_OCTAVE),
         keysNames = runCatching { NoteNames.valueOf(prefs.getString("keysNames", null) ?: "") }.getOrDefault(NoteNames.SOLFEGE),
+        keysShowNames = prefs.getBoolean("keysShowNames", true),
+        keysViewWide = runCatching { KeysView.valueOf(prefs.getString("keysViewWide", null) ?: "") }.getOrDefault(KeysView.AUTO),
+        keysViewTall = runCatching { KeysView.valueOf(prefs.getString("keysViewTall", null) ?: "") }.getOrDefault(KeysView.AUTO),
+        pianoWhites = Piano.choiceOf(prefs.getInt("pianoWhites", 0)),
+        haptics = prefs.getBoolean("haptics", true),
+        makeUpDelay = prefs.getBoolean("makeUpDelay", true),
+        liveTempo = Tempo.clamp(prefs.getInt("liveTempo", Tempo.DEFAULT)),
+        shareSounds = prefs.getBoolean("shareSounds", true),
+        claudePrompt = prefs.getString("claudePrompt", null) ?: "",
+        claudePrompts = prefs.getString("claudePrompts", null) ?: "",
+        replaceScenes = prefs.getBoolean("replaceScenes", false),
+        liveEngine = liveEngineOf(prefs.getString(LIVE_ENGINE, null)),
+        sampleSource = SampleSource.of(prefs.getString("sampleSource", null) ?: "") ?: SampleSource.MIC,
+        sampleStereo = prefs.getBoolean("sampleStereo", false),
+        sampleGainMic = sampleGainOf(prefs.getFloat("sampleGainMic", SAMPLE_GAIN_MIC)) ?: SAMPLE_GAIN_MIC,
+        sampleGainRsp = sampleGainOf(prefs.getFloat("sampleGainRsp", 0f)) ?: 0f,
+        sampleGainUsb = sampleGainOf(prefs.getFloat("sampleGainUsb", 0f)) ?: 0f,
+        sampleThreshold = sampleThresholdOf(prefs.getString("sampleThreshold", null)),
+        sampleBars = prefs.getInt("sampleBars", 0).takeIf { it in SAMPLE_BARS },
+        reviewSamples = prefs.getBoolean("reviewSamples", true),
+        sampleNormalize = prefs.getBoolean("sampleNormalize", false),
+        sampleTrimSilence = prefs.getBoolean("sampleTrimSilence", false),
+        samplePattern = prefs.getBoolean("samplePattern", false),
+        patternCountIn = prefs.getBoolean("patternCountIn", true),
+        patternAutoLength = prefs.getBoolean("patternAutoLength", false),
+        timingInterval = timingIntervalOf(prefs.getString("timingInterval", null), legacyTiming()) ?: Timing.DEFAULT,
+        timingSwing = timingSwingOf(prefs.getInt("timingSwing", TimingSettings.SWING_MIN)) ?: TimingSettings.SWING_MIN,
+        timingQuantize = if (prefs.contains("timingQuantize")) prefs.getBoolean("timingQuantize", true) else (legacyTiming() ?: Timing.DEFAULT) != Timing.OFF,
+        arpOn = prefs.getBoolean("arpOn", false),
+        arpOrder = ArpOrder.of(prefs.getString("arpOrder", null) ?: "") ?: ArpOrder.PLAYED,
+        arpOctaves = arpOctavesOf(prefs.getInt("arpOctaves", ArpSettings.MIN_OCTAVES)) ?: ArpSettings.MIN_OCTAVES,
+        arpGate = arpGateOf(prefs.getInt("arpGate", ArpSettings.DEFAULT.gate)) ?: ArpSettings.DEFAULT.gate,
+        arpLatch = prefs.getBoolean("arpLatch", false),
+        sceneSwitch = SwitchTime.of(prefs.getString("sceneSwitch", null) ?: "") ?: SwitchTime.DEFAULT,
+        factoryKit = FactoryKit.ofId(prefs.getString("factoryKit", null)) ?: FactoryKit.EP133,
         tourSteps = prefs.getString("tourSteps", null) ?: "",
         tourDone = prefs.getBoolean("tourDone", false),
     )
+
+    // TIMING as an earlier version kept it: one choice, OFF or a grid.
+    private fun legacyTiming(): Timing? = Timing.of(prefs.getString("patternTiming", null) ?: "")
 
     /** Saves what [change] changed; returns whether anything did. */
     fun update(change: (AppSettings) -> AppSettings): Boolean {
         val cur = _settings.value
         val next = change(cur)
-        val before = values(cur)
-        val changed = values(next).filter { (k, v) -> before[k] != v }
-        if (changed.isEmpty()) return false
+        val before = cur.values()
+        val after = next.values()
+        var changed = after.filter { (k, v) -> before[k] != v }
+        // TIMING's settings go in together: an interval left unwritten would otherwise be read back from patternTiming, which OFF loses.
+        if (changed.keys.any { it in TIMING_KEYS }) changed = changed + after.filterKeys { it in TIMING_KEYS }
+        val engine = next.liveEngine != cur.liveEngine
+        if (changed.isEmpty() && !engine) return false
         prefs.edit {
+            // Not one of [values]: not in library.json. The default isn't kept either.
+            if (engine) {
+                if (next.liveEngine == LiveEngine.AUTO) remove(LIVE_ENGINE) else putString(LIVE_ENGINE, next.liveEngine.name)
+            }
             for ((k, v) in changed) {
                 when (kind(k)) {
                     Kind.STRING -> putString(k, v)
                     Kind.INT -> putInt(k, v.toInt())
+                    Kind.FLOAT -> putFloat(k, v.toFloat())
                     Kind.BOOLEAN -> putBoolean(k, v.toBooleanStrict())
                 }
             }
@@ -100,20 +295,22 @@ class SettingsStore(context: Context) {
 
     /** As stored in library.json: only the settings that were chosen. */
     fun toIndex(): Map<String, String> =
-        values(_settings.value).filterKeys { prefs.contains(it) }.mapKeys { "app." + it.key }
+        _settings.value.values().filterKeys { prefs.contains(it) }.mapKeys { "app." + it.key }
 
     /** Takes back what library.json held; anything missing or unreadable stays as it is. */
-    fun fromIndex(map: Map<String, String>) = update { readIndex(it, map) }
+    fun fromIndex(map: Map<String, String>) = update { it.withIndex(map) }
 
     /** How each setting is stored in the preferences. */
-    enum class Kind { STRING, INT, BOOLEAN }
+    enum class Kind { STRING, INT, FLOAT, BOOLEAN }
 
     companion object {
         /** Every setting's key and how it is stored; [values] and this list the same keys. */
         val KINDS: Map<String, Kind> = linkedMapOf(
             "theme" to Kind.STRING,
+            "skin" to Kind.STRING,
             "autoConnect" to Kind.BOOLEAN,
             "keepScreenOn" to Kind.BOOLEAN,
+            "backgroundPlay" to Kind.BOOLEAN,
             "keepLast" to Kind.INT,
             "liveOneGroup" to Kind.BOOLEAN,
             "liveFollow" to Kind.BOOLEAN,
@@ -123,6 +320,41 @@ class SettingsStore(context: Context) {
             "keysScale" to Kind.STRING,
             "keysOctave" to Kind.INT,
             "keysNames" to Kind.STRING,
+            "keysShowNames" to Kind.BOOLEAN,
+            "keysViewWide" to Kind.STRING,
+            "keysViewTall" to Kind.STRING,
+            "pianoWhites" to Kind.INT,
+            "haptics" to Kind.BOOLEAN,
+            "makeUpDelay" to Kind.BOOLEAN,
+            "liveTempo" to Kind.INT,
+            "shareSounds" to Kind.BOOLEAN,
+            "claudePrompt" to Kind.STRING,
+            "claudePrompts" to Kind.STRING,
+            "replaceScenes" to Kind.BOOLEAN,
+            "sampleSource" to Kind.STRING,
+            "sampleStereo" to Kind.BOOLEAN,
+            "sampleGainMic" to Kind.FLOAT,
+            "sampleGainRsp" to Kind.FLOAT,
+            "sampleGainUsb" to Kind.FLOAT,
+            "sampleThreshold" to Kind.STRING,
+            "sampleBars" to Kind.INT,
+            "reviewSamples" to Kind.BOOLEAN,
+            "sampleNormalize" to Kind.BOOLEAN,
+            "sampleTrimSilence" to Kind.BOOLEAN,
+            "samplePattern" to Kind.BOOLEAN,
+            "patternTiming" to Kind.STRING,
+            "patternCountIn" to Kind.BOOLEAN,
+            "patternAutoLength" to Kind.BOOLEAN,
+            "timingInterval" to Kind.STRING,
+            "timingSwing" to Kind.INT,
+            "timingQuantize" to Kind.BOOLEAN,
+            "arpOn" to Kind.BOOLEAN,
+            "arpOrder" to Kind.STRING,
+            "arpOctaves" to Kind.INT,
+            "arpGate" to Kind.INT,
+            "arpLatch" to Kind.BOOLEAN,
+            "sceneSwitch" to Kind.STRING,
+            "factoryKit" to Kind.STRING,
             "tourSteps" to Kind.STRING,
             "tourDone" to Kind.BOOLEAN,
         )
@@ -131,41 +363,173 @@ class SettingsStore(context: Context) {
         fun kind(key: String): Kind = KINDS[key] ?: throw IllegalArgumentException("unknown setting: $key")
 
         /** [cur] with what library.json ([map], "app.*") held; anything missing or unreadable stays as it is. */
-        fun readIndex(cur: AppSettings, map: Map<String, String>): AppSettings =
-            cur.copy(
-                theme = map["app.theme"]?.let { v -> runCatching { ThemeChoice.valueOf(v) }.getOrNull() } ?: cur.theme,
-                autoConnect = map["app.autoConnect"]?.toBooleanStrictOrNull() ?: cur.autoConnect,
-                keepScreenOn = map["app.keepScreenOn"]?.toBooleanStrictOrNull() ?: cur.keepScreenOn,
-                keepLast = map["app.keepLast"]?.toIntOrNull()?.let { n -> n.takeIf { it > 0 } } ?: if (map.containsKey("app.keepLast")) null else cur.keepLast,
-                liveOneGroup = map["app.liveOneGroup"]?.toBooleanStrictOrNull() ?: cur.liveOneGroup,
-                liveFollow = map["app.liveFollow"]?.toBooleanStrictOrNull() ?: cur.liveFollow,
-                guideSeen = map["app.guideSeen"]?.toBooleanStrictOrNull() ?: cur.guideSeen,
-                liveKeys = map["app.liveKeys"]?.toBooleanStrictOrNull() ?: cur.liveKeys,
-                keysRoot = map["app.keysRoot"]?.toIntOrNull()?.takeIf { it in 0..11 } ?: cur.keysRoot,
-                keysScale = map["app.keysScale"]?.let { v -> runCatching { Scale.valueOf(v) }.getOrNull() } ?: cur.keysScale,
-                keysOctave = map["app.keysOctave"]?.toIntOrNull()?.takeIf { it in Keys.MIN_OCTAVE..Keys.MAX_OCTAVE } ?: cur.keysOctave,
-                keysNames = map["app.keysNames"]?.let { v -> runCatching { NoteNames.valueOf(v) }.getOrNull() } ?: cur.keysNames,
-                // Taken as it is when it reads as the tour's progress (LibraryIndex.merge joined the folder's copies).
-                tourSteps = map["app.tourSteps"]?.takeIf { v -> Tour.encode(Tour.decode(v)) == v } ?: cur.tourSteps,
-                tourDone = map["app.tourDone"]?.toBooleanStrictOrNull() ?: cur.tourDone,
-            )
+        fun readIndex(cur: AppSettings, map: Map<String, String>): AppSettings = cur.withIndex(map)
 
         /** Each setting as its key and stored text. */
-        fun values(s: AppSettings): Map<String, String> = linkedMapOf(
-            "theme" to s.theme.name,
-            "autoConnect" to s.autoConnect.toString(),
-            "keepScreenOn" to s.keepScreenOn.toString(),
-            "keepLast" to (s.keepLast ?: 0).toString(),
-            "liveOneGroup" to s.liveOneGroup.toString(),
-            "liveFollow" to s.liveFollow.toString(),
-            "guideSeen" to s.guideSeen.toString(),
-            "liveKeys" to s.liveKeys.toString(),
-            "keysRoot" to s.keysRoot.toString(),
-            "keysScale" to s.keysScale.name,
-            "keysOctave" to s.keysOctave.toString(),
-            "keysNames" to s.keysNames.name,
-            "tourSteps" to s.tourSteps,
-            "tourDone" to s.tourDone.toString(),
-        )
+        fun values(s: AppSettings): Map<String, String> = s.values()
     }
 }
+
+/** TIMING's preferences, written together whenever one of them changes. */
+private val TIMING_KEYS = setOf("patternTiming", "timingInterval", "timingSwing", "timingQuantize")
+
+/** The preference that keeps [AppSettings.liveEngine]. */
+internal const val LIVE_ENGINE = "liveEngine"
+
+/** The engine choice as kept ([LiveEngine]'s name); anything else is [LiveEngine.AUTO]. */
+internal fun liveEngineOf(stored: String?): LiveEngine = LiveEngine.entries.firstOrNull { it.name == stored } ?: LiveEngine.AUTO
+
+/** A stored LEVEL, when it is one the knob turns to (an older or edited file may hold anything). */
+internal fun sampleGainOf(db: Float?): Float? = db?.takeIf { it in SAMPLE_GAINS }
+
+/**
+ * A stored TIMING interval: one of the intervals, or else the one [legacy]
+ * (an earlier version's single TIMING choice) had when it was a grid.
+ */
+internal fun timingIntervalOf(stored: String?, legacy: Timing?): Timing? =
+    stored?.let(Timing::of)?.takeIf { it != Timing.OFF } ?: legacy?.takeIf { it != Timing.OFF }
+
+/** A stored swing, when it is one KNOB Y turns to. */
+internal fun timingSwingOf(n: Int?): Int? = n?.takeIf { it in TimingSettings.SWING_MIN..TimingSettings.SWING_MAX }
+
+/** A stored octave count or gate, when the arp offers it. */
+internal fun arpOctavesOf(n: Int?): Int? = n?.takeIf { it in ArpSettings.MIN_OCTAVES..ArpSettings.MAX_OCTAVES }
+
+internal fun arpGateOf(n: Int?): Int? = n?.takeIf { it in ArpSettings.MIN_GATE..ArpSettings.MAX_GATE }
+
+/** A stored threshold: "off" (or anything unreadable or out of range) is none. */
+internal fun sampleThresholdOf(stored: String?): Float? = stored?.toFloatOrNull()?.takeIf { it in SAMPLE_THRESHOLDS }
+
+/**
+ * Each setting as its key and stored text (library.json adds "app." to the
+ * key); all but the debug screen's [AppSettings.liveEngine].
+ */
+internal fun AppSettings.values(): Map<String, String> = linkedMapOf(
+    "theme" to theme.name,
+    "skin" to skin.name,
+    "autoConnect" to autoConnect.toString(),
+    "keepScreenOn" to keepScreenOn.toString(),
+    "backgroundPlay" to backgroundPlay.toString(),
+    "keepLast" to (keepLast ?: 0).toString(),
+    "liveOneGroup" to liveOneGroup.toString(),
+    "liveFollow" to liveFollow.toString(),
+    "guideSeen" to guideSeen.toString(),
+    "liveKeys" to liveKeys.toString(),
+    "keysRoot" to keysRoot.toString(),
+    "keysScale" to keysScale.name,
+    "keysOctave" to keysOctave.toString(),
+    "keysNames" to keysNames.name,
+    "keysShowNames" to keysShowNames.toString(),
+    "keysViewWide" to keysViewWide.name,
+    "keysViewTall" to keysViewTall.name,
+    // Stored like keepLast: 0 for Auto.
+    "pianoWhites" to (pianoWhites ?: 0).toString(),
+    "haptics" to haptics.toString(),
+    "makeUpDelay" to makeUpDelay.toString(),
+    "liveTempo" to liveTempo.toString(),
+    "shareSounds" to shareSounds.toString(),
+    "claudePrompt" to claudePrompt,
+    "claudePrompts" to claudePrompts,
+    "replaceScenes" to replaceScenes.toString(),
+    "sampleSource" to sampleSource.id,
+    "sampleStereo" to sampleStereo.toString(),
+    "sampleGainMic" to sampleGainMic.toString(),
+    "sampleGainRsp" to sampleGainRsp.toString(),
+    "sampleGainUsb" to sampleGainUsb.toString(),
+    // No threshold is "off": 0 dB is a threshold.
+    "sampleThreshold" to (sampleThreshold?.toString() ?: "off"),
+    // Stored like keepLast: 0 for Free.
+    "sampleBars" to (sampleBars ?: 0).toString(),
+    "reviewSamples" to reviewSamples.toString(),
+    "sampleNormalize" to sampleNormalize.toString(),
+    "sampleTrimSilence" to sampleTrimSilence.toString(),
+    "samplePattern" to samplePattern.toString(),
+    // TIMING's grid as one word, as earlier versions read it: "off" or the interval ("1/16", "1/8T"...).
+    "patternTiming" to patternTiming.id,
+    "patternCountIn" to patternCountIn.toString(),
+    "patternAutoLength" to patternAutoLength.toString(),
+    "timingInterval" to timingInterval.id,
+    "timingSwing" to timingSwing.toString(),
+    "timingQuantize" to timingQuantize.toString(),
+    "arpOn" to arpOn.toString(),
+    "arpOrder" to arpOrder.id,
+    "arpOctaves" to arpOctaves.toString(),
+    "arpGate" to arpGate.toString(),
+    "arpLatch" to arpLatch.toString(),
+    "sceneSwitch" to sceneSwitch.id,
+    "factoryKit" to factoryKit.id,
+    "tourSteps" to tourSteps,
+    "tourDone" to tourDone.toString(),
+)
+
+/** These settings with what library.json held ("app.*" keys) taken back; anything missing or unreadable stays as it is. */
+internal fun AppSettings.withIndex(map: Map<String, String>): AppSettings = copy(
+    theme = map["app.theme"]?.let { v -> runCatching { ThemeChoice.valueOf(v) }.getOrNull() } ?: theme,
+    skin = map["app.skin"]?.let { v -> runCatching { SkinChoice.valueOf(v) }.getOrNull() } ?: skin,
+    autoConnect = map["app.autoConnect"]?.toBooleanStrictOrNull() ?: autoConnect,
+    keepScreenOn = map["app.keepScreenOn"]?.toBooleanStrictOrNull() ?: keepScreenOn,
+    backgroundPlay = map["app.backgroundPlay"]?.toBooleanStrictOrNull() ?: backgroundPlay,
+    keepLast = map["app.keepLast"]?.toIntOrNull()?.let { n -> n.takeIf { it > 0 } } ?: if (map.containsKey("app.keepLast")) null else keepLast,
+    liveOneGroup = map["app.liveOneGroup"]?.toBooleanStrictOrNull() ?: liveOneGroup,
+    liveFollow = map["app.liveFollow"]?.toBooleanStrictOrNull() ?: liveFollow,
+    guideSeen = map["app.guideSeen"]?.toBooleanStrictOrNull() ?: guideSeen,
+    liveKeys = map["app.liveKeys"]?.toBooleanStrictOrNull() ?: liveKeys,
+    keysRoot = map["app.keysRoot"]?.toIntOrNull()?.takeIf { it in 0..11 } ?: keysRoot,
+    keysScale = map["app.keysScale"]?.let { v -> runCatching { Scale.valueOf(v) }.getOrNull() } ?: keysScale,
+    keysOctave = map["app.keysOctave"]?.toIntOrNull()?.takeIf { it in Keys.MIN_OCTAVE..Keys.MAX_OCTAVE } ?: keysOctave,
+    keysNames = map["app.keysNames"]?.let { v -> runCatching { NoteNames.valueOf(v) }.getOrNull() } ?: keysNames,
+    keysShowNames = map["app.keysShowNames"]?.toBooleanStrictOrNull() ?: keysShowNames,
+    keysViewWide = map["app.keysViewWide"]?.let { v -> runCatching { KeysView.valueOf(v) }.getOrNull() } ?: keysViewWide,
+    keysViewTall = map["app.keysViewTall"]?.let { v -> runCatching { KeysView.valueOf(v) }.getOrNull() } ?: keysViewTall,
+    // 0 is Auto; a size arc doesn't offer leaves the choice as it is.
+    pianoWhites = when (val n = map["app.pianoWhites"]?.toIntOrNull()) {
+        null -> pianoWhites
+        0 -> null
+        else -> Piano.choiceOf(n) ?: pianoWhites
+    },
+    haptics = map["app.haptics"]?.toBooleanStrictOrNull() ?: haptics,
+    makeUpDelay = map["app.makeUpDelay"]?.toBooleanStrictOrNull() ?: makeUpDelay,
+    // A tempo arc doesn't offer leaves the choice as it is.
+    liveTempo = map["app.liveTempo"]?.toIntOrNull()?.takeIf { it in Tempo.MIN..Tempo.MAX } ?: liveTempo,
+    shareSounds = map["app.shareSounds"]?.toBooleanStrictOrNull() ?: shareSounds,
+    claudePrompt = map["app.claudePrompt"] ?: claudePrompt,
+    claudePrompts = map["app.claudePrompts"] ?: claudePrompts,
+    replaceScenes = map["app.replaceScenes"]?.toBooleanStrictOrNull() ?: replaceScenes,
+    sampleSource = map["app.sampleSource"]?.let(SampleSource::of) ?: sampleSource,
+    sampleStereo = map["app.sampleStereo"]?.toBooleanStrictOrNull() ?: sampleStereo,
+    sampleGainMic = sampleGainOf(map["app.sampleGainMic"]?.toFloatOrNull()) ?: sampleGainMic,
+    sampleGainRsp = sampleGainOf(map["app.sampleGainRsp"]?.toFloatOrNull()) ?: sampleGainRsp,
+    sampleGainUsb = sampleGainOf(map["app.sampleGainUsb"]?.toFloatOrNull()) ?: sampleGainUsb,
+    sampleThreshold = when (val v = map["app.sampleThreshold"]) {
+        null -> sampleThreshold
+        "off" -> null
+        else -> sampleThresholdOf(v) ?: sampleThreshold
+    },
+    // 0 is Free; a length arc doesn't offer leaves the choice as it is.
+    sampleBars = when (val n = map["app.sampleBars"]?.toIntOrNull()) {
+        null -> sampleBars
+        0 -> null
+        else -> n.takeIf { it in SAMPLE_BARS } ?: sampleBars
+    },
+    reviewSamples = map["app.reviewSamples"]?.toBooleanStrictOrNull() ?: reviewSamples,
+    sampleNormalize = map["app.sampleNormalize"]?.toBooleanStrictOrNull() ?: sampleNormalize,
+    sampleTrimSilence = map["app.sampleTrimSilence"]?.toBooleanStrictOrNull() ?: sampleTrimSilence,
+    samplePattern = map["app.samplePattern"]?.toBooleanStrictOrNull() ?: samplePattern,
+    patternCountIn = map["app.patternCountIn"]?.toBooleanStrictOrNull() ?: patternCountIn,
+    patternAutoLength = map["app.patternAutoLength"]?.toBooleanStrictOrNull() ?: patternAutoLength,
+    // An earlier version's single TIMING choice stands in for the interval and quantize it didn't keep.
+    timingInterval = timingIntervalOf(map["app.timingInterval"], map["app.patternTiming"]?.let(Timing::of)) ?: timingInterval,
+    timingSwing = timingSwingOf(map["app.timingSwing"]?.toIntOrNull()) ?: timingSwing,
+    timingQuantize = map["app.timingQuantize"]?.toBooleanStrictOrNull()
+        ?: map["app.patternTiming"]?.let(Timing::of)?.let { it != Timing.OFF } ?: timingQuantize,
+    arpOn = map["app.arpOn"]?.toBooleanStrictOrNull() ?: arpOn,
+    arpOrder = map["app.arpOrder"]?.let(ArpOrder::of) ?: arpOrder,
+    arpOctaves = arpOctavesOf(map["app.arpOctaves"]?.toIntOrNull()) ?: arpOctaves,
+    arpGate = arpGateOf(map["app.arpGate"]?.toIntOrNull()) ?: arpGate,
+    arpLatch = map["app.arpLatch"]?.toBooleanStrictOrNull() ?: arpLatch,
+    sceneSwitch = map["app.sceneSwitch"]?.let(SwitchTime::of) ?: sceneSwitch,
+    factoryKit = FactoryKit.ofId(map["app.factoryKit"]) ?: factoryKit,
+    // Taken as it is when it reads as the tour's progress (LibraryIndex.merge joined the folder's copies).
+    tourSteps = map["app.tourSteps"]?.takeIf { v -> Tour.encode(Tour.decode(v)) == v } ?: tourSteps,
+    tourDone = map["app.tourDone"]?.toBooleanStrictOrNull() ?: tourDone,
+)

@@ -1,0 +1,58 @@
+# arc-beats: a Claude skill for the EP-133 K.O. II and Arc
+
+With this skill, Claude can:
+
+1. **Build beats** for the EP-133 K.O. II as ARC BEAT cards that you paste into Arc and play.
+2. **Analyse and improve** beats you copy out of Arc, and send back a better card.
+3. **Teach** the EP-133 and beat making, one step at a time, with the official key combos and Arc as a practice partner.
+
+The card is plain text; see [references/beat-card.md](references/beat-card.md) for the format. Cards live in Arc only: pasting one never writes to the EP-133.
+
+## Install in the Claude app
+
+1. Download the zip: **https://arc-ko.vercel.app/arc-beats-skill.zip** (or build it yourself with `npm run gen:skill` in `web/`, which writes `web/public/arc-beats-skill.zip`).
+2. In claude.ai or the Claude app open **Settings, Capabilities, Skills** and upload the zip. The folder `arc-beats/` is at the zip's root with `SKILL.md` inside.
+3. Switch the skill on. Start a chat such as *"Make me a lazy boom bap for my EP-133"*.
+
+Claude checks cards with a small Python script. That needs **code execution** (Settings, Capabilities). Without it the skill still works; Claude checks cards by hand.
+
+## Install in Claude Code
+
+Copy the folder `skill/arc-beats/` to `~/.claude/skills/arc-beats/` (for every project) or to `.claude/skills/arc-beats/` inside a project:
+
+```sh
+mkdir -p ~/.claude/skills
+cp -r skill/arc-beats ~/.claude/skills/
+```
+
+Claude Code picks it up the next time it starts, and uses it whenever you talk about the EP-133, Arc or beat cards.
+
+## Using it with Arc
+
+1. In Arc's **Live** screen open **Live tools**, find **CLAUDE**, and use **SHARE SCENE** or **SHARE** (the group shown) to send a beat to the Claude app, so Claude sees your pad names. Tick **With my sound list** first and Claude also gets the sounds on your EP-133, and can choose them for the pads with `sound` lines. Or ask Claude to make something new.
+2. Claude replies with a card in a code block. Copy it and tap **PASTE BEAT** (or share the reply to Arc), then **IMPORT** on the sheet, and play. One undo removes it. If the card picks sounds, the sheet lists each as old to new with a tick box; the ticked ones can be put on your pads (this is the one thing a card can change on the EP-133). When nothing in your sounds fits, Claude can write a `synth` line instead: Arc makes that sound, uploads it into a free slot and puts it on the pad (offline, it keeps it in Arc until you connect).
+
+[references/arc-app.md](references/arc-app.md) has the details Claude uses. On Android the Claude page builds the prompt for you: tabs for a new beat, improving one, a track or a lesson, and a sentence on the glass whose orange words (genre, tempo, kit, parts) you tap to change; EDIT changes the words by hand and prompts can be saved. On the web **Learn with Claude** starts lesson 1.
+
+## What is in the folder
+
+| Path | What it is |
+|---|---|
+| `SKILL.md` | The skill: what Claude does for each of the three jobs |
+| `references/beat-card.md` | The card format, the spec both Arc and the script follow |
+| `references/genres.md` | The assumed kit, the feel words and 56 genre recipes (a techno family among them, and seven for the EP-40 kit), each a valid card |
+| `references/factory-sounds.md` | The EP-133's and the EP-40 Riddim's factory sounds by slot, and a fresh EP-133 project's pads, for sound lines without a shared list |
+| `references/ep40-kit.md` | The EP-40 Riddim kit on an EP-133: its slots, loops and tempos, its pads, and the loop rules |
+| `references/synth-sounds.md` | Synth lines: sounds Claude describes and Arc makes, with the types, the settings and four recipe kits |
+| `references/lessons.md` | Twelve lessons from a first beat to sampling |
+| `references/analysis.md` | How to read the script's report, the checklist and the vocabulary |
+| `references/arc-app.md` | What each Arc screen does, for Claude to explain |
+| `references/ep133-guide.md` | The 100 official OS 2.5 key combinations. **Generated, do not edit** |
+| `scripts/beatcard.py` | `check` (also `--sounds` to check sound lines against your sound list, and `--kit ep40` for the EP-40 kit; `--sounds factory` or `factory-ep40` checks against a factory pack), `analyse`, `grid`, `midi` and `synth` (lists a card's synth lines and with `-o` writes them as WAV files, the same bytes Arc makes); Python 3.9+, standard library only |
+| `scripts/test_beatcard.py` | Tests; also checks every card in the references |
+
+## Working on the skill
+
+- Run the tests: `python3 skill/arc-beats/scripts/test_beatcard.py`
+- Regenerate the guide and the zip: `cd web && npm run gen:skill`. The guide comes from `core/.../text/GuideText.kt`; change the Kotlin and regenerate, never edit `ep133-guide.md`. The web tests fail when the guide or the zip is stale, so run it after any change in this folder and commit the results.
+- `references/beat-card.md` is the spec. If Arc's reader and writer change, change it first, then `scripts/beatcard.py` to match.

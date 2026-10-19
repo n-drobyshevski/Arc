@@ -4,11 +4,30 @@
     <!-- USB MIDI. Not required: without MIDI the library (import, share, save) still works. -->
     <uses-feature android:name="android.software.midi" android:required="false" />
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <!-- SAMPLE records the mic or the EP-133 over USB audio. Not required: RSP and the rest work without one. -->
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Only to download the EP-133's factory sounds from teenage engineering, when asked (FactoryDownload). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Only while SAMPLE mode is open with the mic or USB as its source (InputCapture); asked for then. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Telegram's apps (files/Telegram.kt): SHARE on a take gives them its voice message. -->
+    <queries>
+        <package android:name="org.telegram.messenger" />
+        <package android:name="org.telegram.messenger.web" />
+        <package android:name="org.telegram.messenger.beta" />
+        <package android:name="org.telegram.plus" />
+        <package android:name="tw.nekomimi.nekogram" />
+        <package android:name="xyz.nextalone.nagram" />
+        <package android:name="uz.unnarsx.cherrygram" />
+        <package android:name="it.octogram.android" />
+    </queries>
 
     <application
         android:name=".ArcApp"
@@ -20,10 +39,13 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Arc">
 
+        <!-- Turning the phone resizes the window instead of recreating the activity,
+             so Live keeps its mirror and the notes still sounding. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -53,12 +75,48 @@
                 <data android:pathPattern=".*\\..*\\.pak" />
                 <data android:pathPattern=".*\\..*\\..*\\.pak" />
             </intent-filter>
+
+            <!-- Claude's reply shared to arc: a beat card in text, or a .txt or .md file holding one (MainActivity.handleIntent reads it, and says so when there is none). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+            </intent-filter>
+
+            <!-- A card file opened with arc from Files or Downloads: .txt or .md, by type or, whatever type is reported, by name. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="text/markdown" />
+                <data android:mimeType="text/x-markdown" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:mimeType="*/*" />
+                <data android:pathPattern=".*\\.txt" />
+                <data android:pathPattern=".*\\.md" />
+                <data android:pathPattern=".*\\..*\\.txt" />
+                <data android:pathPattern=".*\\..*\\.md" />
+            </intent-filter>
         </activity>
 
         <service
             android:name=".service.TransferService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Background play: Live's transport goes on with arc off the screen, with a media notification. -->
+        <service
+            android:name=".service.PlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
 
         <provider
             android:name=".files.PakFileProvider"

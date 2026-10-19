@@ -9,7 +9,7 @@ import { emptyMirrorState, type MirrorUi } from '../../src/state/types'
 import { displayLine, displayLineSmall, glow, showOffline } from '../../src/ui/live/glow'
 import { DEFAULT_KEYS, PICK_PREFIX, keysDisplayNote, keysLit, keysPickerOf, octaves, upperOctave, type KeysUi } from '../../src/ui/live/keys'
 import { backStack, dialogLayer, initialStack, overlayLayer, push, viewOf } from '../../src/ui/nav'
-import { PRESS_DELAY_MS, PressTracker, type PressTimers } from '../../src/ui/live/press'
+import { PRESS_DELAY_MS, PressTracker, ticking, type PressTarget, type PressTimers } from '../../src/ui/live/press'
 
 const light = (velocity: number, offAt: number | null = null): PadLight => ({ velocity, channel: 1, onAt: 0, offAt })
 
@@ -43,12 +43,12 @@ describe('KEYS grid', () => {
     ])
   })
 
-  it('names the key last pressed on the phone, else the device note', () => {
-    const keys: KeysUi = { ...DEFAULT_KEYS, on: true, scale: Scale.MAJOR, playingKeys: new Set([5, 7]) }
+  it('names the note last pressed on the phone (a grid key or a piano key), else the device note', () => {
+    const keys: KeysUi = { ...DEFAULT_KEYS, on: true, scale: Scale.MAJOR, playingNotes: new Set([65, 72]) }
     expect(keysDisplayNote(keys, 40)).toBe(72)
     expect(MirrorText.noteName(72, NoteNames.SOLFEGE)).toBe('DO5')
-    expect(keysDisplayNote({ ...keys, playingKeys: new Set() }, 40)).toBe(40)
-    expect(keysDisplayNote({ ...keys, playingKeys: new Set() }, null)).toBeNull()
+    expect(keysDisplayNote({ ...keys, playingNotes: new Set() }, 40)).toBe(40)
+    expect(keysDisplayNote({ ...keys, playingNotes: new Set() }, null)).toBeNull()
   })
 
   it('offers octaves 0 to 8', () => {
@@ -97,8 +97,13 @@ function fakeTimers(): PressTimers & { run: () => void; pending: () => number } 
   }
 }
 
-function recorder(log: string[], name: string) {
-  return { press: (hold: boolean) => log.push(`${name} press ${hold}`), release: () => log.push(`${name} release`) }
+function recorder(log: string[], name: string): PressTarget {
+  return {
+    press: (hold, unsure) => log.push(`${name} press ${hold}${unsure ? ' unsure' : ''}`),
+    release: () => log.push(`${name} release`),
+    cut: () => log.push(`${name} cut`),
+    keep: () => log.push(`${name} keep`),
+  }
 }
 
 describe('hold to play', () => {
@@ -123,49 +128,132 @@ describe('hold to play', () => {
     expect(log).toEqual(['a press true', 'b press true', 'a release', 'b release'])
   })
 
-  it('waits in a scrolling page: a drag plays nothing, a hold plays after the delay', () => {
+  it('a scrolling page plays at once; a drag past the slop within the window cuts the sound', () => {
     const log: string[] = []
     const timers = fakeTimers()
     const t = new PressTracker(timers, PRESS_DELAY_MS, 8)
     t.down(1, 0, 0, recorder(log, 'a'), true)
-    expect(log).toEqual([])
-    t.move(1, 0, 12) // past the slop: a scroll
-    timers.run()
-    t.up(1)
-    expect(log).toEqual([])
+    // Optimistic: no wait before the sound, pressed unsure.
+    expect(log).toEqual(['a press true unsure'])
+    expect(timers.pending()).toBe(1)
+    t.move(1, 0, 5) // within the slop: still a press
+    expect(log).toEqual(['a press true unsure'])
+    t.move(1, 0, 12) // past the slop: a scroll, never kept
+    expect(log).toEqual(['a press true unsure', 'a cut'])
     expect(t.has(1)).toBe(false)
-
-    t.down(2, 0, 0, recorder(log, 'b'), true)
-    t.move(2, 3, 3) // within the slop
-    timers.run()
-    expect(log).toEqual(['b press true'])
-    t.cancel(2) // the browser took it for a scroll after all
-    expect(log).toEqual(['b press true', 'b release'])
+    expect(timers.pending()).toBe(0)
+    t.up(1) // the lift after the scroll: nothing more
+    expect(log).toEqual(['a press true unsure', 'a cut'])
   })
 
-  it('a quick tap in a scrolling page still plays, and ends at once', () => {
+  it('after the window a move no longer cuts; the browser taking it for a scroll still does', () => {
+    const log: string[] = []
+    const timers = fakeTimers()
+    const t = new PressTracker(timers, PRESS_DELAY_MS, 8)
+    t.down(2, 0, 0, recorder(log, 'b'), true)
+    timers.run() // PRESS_DELAY_MS passed: a hold, kept
+    t.move(2, 0, 40)
+    expect(log).toEqual(['b press true unsure', 'b keep'])
+    t.cancel(2, true) // pointercancel: the page scrolled after all
+    expect(log).toEqual(['b press true unsure', 'b keep', 'b cut'])
+  })
+
+  it('pointercancel within the window cuts; leaving the pad releases', () => {
+    const log: string[] = []
+    const t = new PressTracker(fakeTimers())
+    t.down(1, 0, 0, recorder(log, 'a'), true)
+    t.cancel(1, true)
+    t.down(2, 0, 0, recorder(log, 'b'), true)
+    t.cancel(2)
+    expect(log).toEqual(['a press true unsure', 'a cut', 'b press true unsure', 'b keep', 'b release'])
+  })
+
+  it('pointercancel outside a scrolling page releases, as before', () => {
+    const log: string[] = []
+    const t = new PressTracker(fakeTimers())
+    t.down(1, 0, 0, recorder(log, 'a'), false)
+    t.cancel(1, true)
+    expect(log).toEqual(['a press true', 'a release'])
+  })
+
+  it('raw moves (pointerrawupdate) cut as they come; that pointer\'s pointermoves are skipped', () => {
+    const log: string[] = []
+    const timers = fakeTimers()
+    const t = new PressTracker(timers, PRESS_DELAY_MS, 8)
+    t.down(1, 0, 0, recorder(log, 'a'), true)
+    t.down(2, 0, 0, recorder(log, 'b'), true)
+    t.move(1, 0, 5, true) // raw, within the slop
+    t.move(1, 0, 12) // its frame's pointermove (or a coalesced one): already seen, skipped
+    expect(log).toEqual(['a press true unsure', 'b press true unsure'])
+    t.move(1, 0, 12, true)
+    expect(log).toEqual(['a press true unsure', 'b press true unsure', 'a cut'])
+    // A pointer with no raw moves (a browser without them for its kind) still cuts on pointermove.
+    t.move(2, 0, 12)
+    expect(log).toEqual(['a press true unsure', 'b press true unsure', 'a cut', 'b cut'])
+    // A raw move of a pointer not held: nothing.
+    t.move(3, 0, 40, true)
+    expect(log).toHaveLength(4)
+    // The same id pressed again starts without raw moves seen.
+    t.down(1, 0, 0, recorder(log, 'c'), true)
+    t.move(1, 0, 12)
+    expect(log.at(-1)).toBe('c cut')
+  })
+
+  it('onWindows says when the first scroll window opens and the last one closes', () => {
+    const log: string[] = []
+    const windows: boolean[] = []
+    const timers = fakeTimers()
+    const t = new PressTracker(timers, PRESS_DELAY_MS, 8)
+    t.onWindows = (open) => windows.push(open)
+    // Outside a scrolling page there is no window to watch.
+    t.down(1, 0, 0, recorder(log, 'a'), false)
+    t.up(1)
+    expect(windows).toEqual([])
+    t.down(2, 0, 0, recorder(log, 'b'), true)
+    t.down(3, 0, 0, recorder(log, 'c'), true)
+    expect(windows).toEqual([true])
+    t.move(2, 0, 12) // b scrolls: c's window is still open
+    expect(windows).toEqual([true])
+    timers.run() // c's window closes: none open
+    expect(windows).toEqual([true, false])
+    t.up(3)
+    // Opened again, then ended by a lift inside it, or the screen going.
+    t.down(4, 0, 0, recorder(log, 'd'), true)
+    t.up(4)
+    t.down(5, 0, 0, recorder(log, 'e'), true)
+    t.releaseAll()
+    expect(windows).toEqual([true, false, true, false, true, false])
+  })
+
+  it('a target without cut is released instead', () => {
+    const log: string[] = []
+    const t = new PressTracker(fakeTimers())
+    t.down(1, 0, 0, { press: () => log.push('press'), release: () => log.push('release') }, true)
+    t.move(1, 30, 0)
+    expect(log).toEqual(['press', 'release'])
+  })
+
+  it('a quick tap in a scrolling page plays, and ends at once', () => {
     const log: string[] = []
     const timers = fakeTimers()
     const t = new PressTracker(timers)
     t.down(1, 0, 0, recorder(log, 'a'), true)
     t.up(1)
-    expect(log).toEqual(['a press true', 'a release'])
+    // Kept before it is let go of: a tap, not a scroll.
+    expect(log).toEqual(['a press true unsure', 'a keep', 'a release'])
     expect(timers.pending()).toBe(0)
   })
 
-  it('a cancelled pending press plays nothing; releaseAll ends every finger', () => {
+  it('releaseAll ends every finger', () => {
     const log: string[] = []
     const timers = fakeTimers()
     const t = new PressTracker(timers)
-    t.down(1, 0, 0, recorder(log, 'a'), true)
-    t.cancel(1)
-    timers.run()
-    expect(log).toEqual([])
     t.down(2, 0, 0, recorder(log, 'b'), false)
     t.down(3, 0, 0, recorder(log, 'c'), true)
     t.releaseAll()
     timers.run()
-    expect(log).toEqual(['b press true', 'b release'])
+    expect(log).toEqual(['b press true', 'c press true unsure', 'b release', 'c keep', 'c release'])
+    expect(timers.pending()).toBe(0)
   })
 
   it('a pointer id reused without its end finishes the old press first', () => {
@@ -177,12 +265,63 @@ describe('hold to play', () => {
   })
 })
 
+describe('press time', () => {
+  it("hands the pointerdown's timeStamp to the press, through the haptic tick too", () => {
+    const got: (number | undefined)[] = []
+    const target: PressTarget = { press: (_hold, _unsure, at) => got.push(at), release: () => undefined }
+    const t = new PressTracker(fakeTimers())
+    t.down(1, 0, 0, target, false, 1234.5)
+    t.down(2, 0, 0, ticking(target, true, () => undefined), true, 1240)
+    // A press without one (a screen reader's Play) is timed when handled.
+    t.down(3, 0, 0, target, false)
+    expect(got).toEqual([1234.5, 1240, undefined])
+  })
+})
+
+describe('haptic tick', () => {
+  it('ticks after the press is handed on, and only when on', () => {
+    const log: string[] = []
+    const t = new PressTracker(fakeTimers())
+    t.down(1, 0, 0, ticking(recorder(log, 'a'), true, () => log.push('tick')), false)
+    expect(log).toEqual(['a press true', 'tick'])
+    t.up(1)
+    // Nothing on the release.
+    expect(log).toEqual(['a press true', 'tick', 'a release'])
+    log.length = 0
+    t.down(2, 0, 0, ticking(recorder(log, 'b'), false, () => log.push('tick')), false)
+    t.up(2)
+    expect(log).toEqual(['b press true', 'b release'])
+  })
+
+  it('a press cut by a scroll keeps its tick; the keep gets none', () => {
+    const log: string[] = []
+    const timers = fakeTimers()
+    const t = new PressTracker(timers, PRESS_DELAY_MS, 8)
+    t.down(1, 0, 0, ticking(recorder(log, 'a'), true, () => log.push('tick')), true)
+    t.move(1, 0, 20)
+    expect(log).toEqual(['a press true unsure', 'tick', 'a cut'])
+    log.length = 0
+    t.down(2, 0, 0, ticking(recorder(log, 'b'), true, () => log.push('tick')), true)
+    timers.run()
+    expect(log).toEqual(['b press true unsure', 'tick', 'b keep'])
+  })
+
+  it('an EDIT long press (a press handed on later) ticks once, after it', () => {
+    const log: string[] = []
+    const target = ticking(recorder(log, 'a'), true, () => log.push('tick'))
+    target.press(true)
+    target.release()
+    expect(log).toEqual(['a press true', 'tick', 'a release'])
+  })
+})
+
 describe('KEYS lists as navigation layers', () => {
   it('reads the open list from the dialogs', () => {
     expect(keysPickerOf([])).toBeNull()
     expect(keysPickerOf(['forget'])).toBeNull()
     expect(keysPickerOf([PICK_PREFIX + 'scale'])).toBe('scale')
     expect(keysPickerOf(['delete', PICK_PREFIX + 'octave'])).toBe('octave')
+    expect(keysPickerOf([PICK_PREFIX + 'key'])).toBe('key')
     expect(keysPickerOf([PICK_PREFIX + 'tempo'])).toBeNull()
   })
 

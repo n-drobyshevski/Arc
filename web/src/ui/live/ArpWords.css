@@ -1,0 +1,58 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/LiveArp.kt (ArpRowWords) */
+
+/* ARP and LATCH side by side, 4 apart. */
+.arp-words {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* A word after its LED, 44 high to touch, as the view words are; greyed out while disabled. */
+.arp-word {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 44px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--graphite);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.arp-word[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: default;
+}
+.arp-word.is-on { color: var(--ink); }
+.arp-word:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+
+.arp-word__led {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--hw-led-off);
+}
+.arp-word.is-on .arp-word__led {
+  background: var(--signal);
+  box-shadow: 0 0 6px var(--signal);
+}
+
+/* As the words under the grid (ArcType.word). */
+.arp-word__text {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* A row hugging the grid above: the words at the top of their touch area, as the mode word's. */
+.arp-words--top { align-items: flex-start; }
+.arp-words--top .arp-word { align-items: flex-start; padding-top: 0; }
+.arp-words--top .arp-word__led { margin-top: 3px; }

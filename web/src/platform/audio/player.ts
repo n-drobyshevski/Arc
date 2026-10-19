@@ -7,15 +7,22 @@
 //
 // Web delta: Web Audio replaces AudioTrack. The whole sound goes into one
 // AudioBuffer (s16 / 32768) and plays through an AudioBufferSourceNode, whose
-// onended replaces the feeding thread's wait for the playback head. There is
+// onended replaces the output loop's report that the voice has ended. The
+// context asks for the interactive latency (Live's asks for 0, the smallest:
+// liveAudio.ts). The silence check is made once per PCM array (kept while the
+// caller keeps the array), and the buffers of the last few sounds played are kept
+// (BUILT_KEEP, within BUILT_BYTES of float data), so playing a sound again
+// only starts a new source node. There is
 // no audio focus, media volume or output route on the web: volumeOff() is
 // always false and the route is "default output". Browsers only play audio
 // after a tap, so resumeInGesture() must run synchronously in click handlers,
-// before any await (playDeviceSound downloads first).
+// before any await (playDeviceSound may download first).
 //
-// Kotlin keeps its sounds in an ordered map (voices) since Live moved to its
-// own output; play() still stops them all first, so there is only ever one,
-// which [current] is. SoundPlayer.isBluetooth has no counterpart (the web
+// Kotlin plays each sound as one VoiceMixer voice on a low-latency stream
+// (BurstOutput) kept open between sounds and let go of after 5 s idle; here
+// the context stays and a new source node per play does that job, and the
+// browser converts the rate. There is only ever one sound, which [current]
+// is. SoundPlayer.isBluetooth has no counterpart (the web
 // can't see the route); Live guesses Bluetooth from the output latency
 // (liveAudio.ts isSlowOutput).
 
@@ -150,11 +157,33 @@ export function browserAudioContext(): AudioContextLike | null {
   }
   const Ctor = g.AudioContext ?? g.webkitAudioContext
   if (!Ctor) return null
-  return new Ctor() as unknown as AudioContextLike
+  return new (Ctor as new (options?: AudioContextOptions) => AudioContext)({ latencyHint: 'interactive' }) as unknown as AudioContextLike
 }
 
 function message(e: unknown): string {
   return e instanceof Error && e.message.length !== 0 ? e.message : String(e)
+}
+
+/** How many of the last sounds played keep their built buffer, for a quick replay. */
+export const BUILT_KEEP = 4
+/** How much float data (bytes) those buffers may hold together; the newest is kept whatever its size. */
+export const BUILT_BYTES = 16 * 1024 * 1024
+
+/** A PCM array's buffer, as built for one context at one format. */
+interface Built {
+  readonly ctx: AudioContextLike
+  readonly channels: number
+  readonly sampleRate: number
+  readonly buffer: AudioBufferLike
+  /** Its float data's size. */
+  readonly bytes: number
+}
+
+/** A PCM array's checkPlayable answer at one format. */
+interface Checked {
+  readonly channels: number
+  readonly sampleRate: number
+  readonly bad: string | null
 }
 
 /** One sound being played. */
@@ -172,6 +201,10 @@ interface Playback {
 export class WebAudioPlayer implements SoundPlayer {
   private ctx: AudioContextLike | null = null
   private current: Playback | null = null
+  /** The last sounds' buffers, least recently played first (a float copy each: not kept for every sound). */
+  private readonly built = new Map<Uint8Array, Built>()
+  /** Each PCM array's silence check, made once (dropped with the array: it holds a string only). */
+  private readonly checked = new WeakMap<Uint8Array, Checked>()
   private readonly _playing = signal<string | null>(null)
   readonly playing: ReadonlySignal<string | null> = this._playing
 
@@ -215,26 +248,63 @@ export class WebAudioPlayer implements SoundPlayer {
     return false
   }
 
+  /** Keeps [b] as [pcm]'s buffer, letting the oldest go past BUILT_KEEP or BUILT_BYTES, and any from an old context. */
+  private keep(pcm: Uint8Array, b: Built): void {
+    this.built.delete(pcm)
+    for (const [k, v] of this.built) if (v.ctx !== b.ctx) this.built.delete(k)
+    this.built.set(pcm, b)
+    let bytes = 0
+    for (const v of this.built.values()) bytes += v.bytes
+    for (const [k, v] of this.built) {
+      if (this.built.size <= BUILT_KEEP && bytes <= BUILT_BYTES) break
+      if (k === pcm) break
+      this.built.delete(k)
+      bytes -= v.bytes
+    }
+  }
+
+  /** checkPlayable, once per PCM array and format (the silence check reads every sample). */
+  private check(pcm: Uint8Array, channels: number, sampleRate: number): string | null {
+    const c = this.checked.get(pcm)
+    if (c && c.channels === channels && c.sampleRate === sampleRate) return c.bad
+    const bad = checkPlayable(pcm, channels, sampleRate)
+    this.checked.set(pcm, { channels, sampleRate, bad })
+    return bad
+  }
+
   async play(key: string, pcm: Uint8Array, channels: number, sampleRate: number): Promise<PlayResult> {
     this.stop()
-    const bad = checkPlayable(pcm, channels, sampleRate)
+    const bad = this.check(pcm, channels, sampleRate)
     if (bad !== null) return { kind: 'failed', reason: bad }
     const ctx = this.context()
     if (!ctx) return { kind: 'failed', reason: FeatureText.NO_AUDIO_OUTPUT }
     this.wake(ctx)
-    const frames = Math.floor(pcm.length / (2 * channels))
+    const old = this.built.get(pcm)
     let buffer: AudioBufferLike
-    try {
-      buffer = ctx.createBuffer(channels, frames, sampleRate)
-    } catch {
-      // NotSupportedError / RangeError: the browser's sample-rate range is
-      // narrower than canPlay's (Firefox starts at 8000 Hz).
-      return { kind: 'failed', reason: WebText.unplayableHere(channels, sampleRate) }
+    if (old && old.ctx === ctx && old.channels === channels && old.sampleRate === sampleRate) {
+      buffer = old.buffer
+      // The most recently played now.
+      this.built.delete(pcm)
+      this.built.set(pcm, old)
+    } else {
+      const frames = Math.floor(pcm.length / (2 * channels))
+      try {
+        buffer = ctx.createBuffer(channels, frames, sampleRate)
+      } catch {
+        // NotSupportedError / RangeError: the browser's sample-rate range is
+        // narrower than canPlay's (Firefox starts at 8000 Hz).
+        return { kind: 'failed', reason: WebText.unplayableHere(channels, sampleRate) }
+      }
+      try {
+        // Straight into the buffer: a sample can be tens of MB, so no float copy in between.
+        fillChannels(pcm, channels, frames, (c) => buffer.getChannelData(c))
+      } catch (e) {
+        return { kind: 'failed', reason: e instanceof Error ? message(e) : FeatureText.NO_AUDIO_OUTPUT }
+      }
+      this.keep(pcm, { ctx, channels, sampleRate, buffer, bytes: frames * channels * 4 })
     }
     let source: AudioSourceLike
     try {
-      // Straight into the buffer: a sample can be tens of MB, so no float copy in between.
-      fillChannels(pcm, channels, frames, (c) => buffer.getChannelData(c))
       source = ctx.createBufferSource()
       source.buffer = buffer
       source.connect(ctx.destination)

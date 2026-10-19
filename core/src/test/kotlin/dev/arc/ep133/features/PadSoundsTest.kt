@@ -73,6 +73,29 @@ class PadSoundsTest {
         assertEquals(0, c.bytes())
     }
 
+    @Test
+    fun `copies lists each copy's name by slot, after a restart too`() {
+        val c = cache()
+        assertEquals(emptyMap<Int, String>(), c.copies())
+        c.put(5, "kick", 100, ByteArray(10))
+        c.put(7, "Snare.wav", 100, ByteArray(10))
+        assertEquals(mapOf(5 to "kick", 7 to "Snare.wav"), c.copies())
+        assertEquals(mapOf(5 to "kick", 7 to "Snare.wav"), cache().copies())
+        c.clear()
+        assertEquals(emptyMap<Int, String>(), c.copies())
+    }
+
+    @Test
+    fun `the sounds arc can't play without the device`() {
+        val names = mapOf(1 to "kick", 2 to "snare", 3 to "hat", 4 to "004.pcm", 5 to "my take")
+        val copies = mapOf(1 to "KICK", 2 to "old snare")
+        val entries = listOf(NameEntry("b", 3, "hat.wav"), NameEntry("b", 5, "other take"), NameEntry("c", 2, "clap"))
+        // 1 has a copy, 3 a backup; 2's copy and 5's backup are other sounds now; 4 needs the pack.
+        assertEquals(setOf(2, 4, 5), PadSounds.unavailable(names, copies, entries, packSaved = false))
+        assertEquals(setOf(2, 5), PadSounds.unavailable(names, copies, entries, packSaved = true))
+        assertEquals(emptySet<Int>(), PadSounds.unavailable(emptyMap(), copies, entries, packSaved = false))
+    }
+
     private fun backup(id: String, at: Long) = BackupRecord(id, id, "", at, "device", null, BackupDevice(), 0, 0, emptyList(), emptyList(), emptyMap(), 0)
 
     @Test

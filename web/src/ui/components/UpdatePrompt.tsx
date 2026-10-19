@@ -9,7 +9,8 @@
 // starts with the next visit, once every arc tab is closed.
 //
 // The first install's "works offline" message goes through the controller's
-// toast, like every other message.
+// toast, like every other message, once no other toast shows (it never takes
+// the place of one that says what was just done, or its UNDO).
 import type { JSX } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 import { WebText } from '../../core/text/webText'
@@ -59,14 +60,17 @@ export function UpdatePrompt(): JSX.Element | null {
     registerPwa({ whenIdle: (run) => whenIdle(c, run) })
   }, [c])
 
+  const state = c.state.value
+  // Only into a free toast slot, as the update prompt waits: it never takes the place of a toast
+  // that says what was just done (and may carry its UNDO).
   const ready = offlineReady.value
+  const toastFree = state.toast === null
   useEffect(() => {
-    if (!ready) return
+    if (!ready || !toastFree) return
     clearOfflineReady()
     c.toast(OFFLINE_READY)
-  }, [ready])
+  }, [ready, toastFree])
 
-  const state = c.state.value
   const shown = needRefresh.value && !later && isIdle(state) && state.toast === null
   if (!shown && !reloading) return null
   return (

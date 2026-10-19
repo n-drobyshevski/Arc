@@ -16,6 +16,7 @@
 
 import type { DiffResult, ProjectState, SoundDiff } from '../features/backupDiff'
 import type { PadChange, SoundChange } from '../features/pakCompare'
+import { FactoryKit } from '../features/factorySounds'
 import type { JsonValue } from '../protocol/fs'
 import { Format, plural } from './format'
 import { Strings } from './strings'
@@ -48,6 +49,10 @@ function roundHalfEven(x: number): number {
   if (d > 0.5) return f + 1
   return f % 2 === 0 ? f : f + 1
 }
+
+const FACTORY_KINDS = ['Kicks', 'Snares', 'Hats', 'Perc', 'Bass', 'Melodic']
+// The EP-40 Riddim pack's kinds past the guide's blocks (FeatureText.EP40_BLOCKS).
+const EP40_KINDS = ['Chords', 'Vox · FX', 'Loops']
 
 function slot(n: number): string {
   return String(n).padStart(3, '0')
@@ -96,6 +101,71 @@ export const FeatureText = {
   NO_FIND_MATCHES: 'No sounds match.',
   PROJECT: 'Project',
   PICK_PROJECT: 'Tap a project to see its sounds and pads.',
+
+  // The Device tab, redesigned: storage as a split meter, the factory layout per range, projects as pads.
+  /** "free of 61 MB", under the free space in large type. */
+  freeOf(total: number): string {
+    return `free of ${Format.bytes(total)}`
+  },
+  FREE: 'Free',
+
+  /** The factory layout's blocks of slots, in order (the guide's): kicks, snares, hi-hats, percussion, bass and melodic. */
+  FACTORY_BLOCKS: [
+    [1, 99],
+    [100, 199],
+    [200, 299],
+    [300, 399],
+    [400, 499],
+    [500, 599],
+  ] as readonly (readonly [number, number])[],
+
+  /**
+   * The factory layout's kind of sound for the range of slots starting at
+   * [first] (from the official guide's note on SOUND mode: kicks 1-99,
+   * snares 100-199, hi-hats 200-299, percussion 300-399, bass 400-499,
+   * melodic 500-599; FACTORY_BLOCKS). From 600 up the guide leaves the
+   * slots free, so null, except with the EP-40 Riddim's kit, whose pack
+   * fills them (EP40_BLOCKS): chord stabs, shouts and dub FX, loops.
+   */
+  factoryCategory(first: number, kit: FactoryKit = FactoryKit.EP133): string | null {
+    const i = FeatureText.FACTORY_BLOCKS.findIndex(([from, to]) => first >= from && first <= to)
+    if (i >= 0) return FACTORY_KINDS[i]!
+    if (kit !== FactoryKit.EP40) return null
+    const j = FeatureText.EP40_BLOCKS.findIndex(([from, to]) => first >= from && first <= to)
+    return j < 0 ? null : EP40_KINDS[j]!
+  },
+
+  /** The EP-40 Riddim pack's blocks past the guide's: chord stabs 600-628, vocal shouts and dub FX 700-754, loops 800-898. */
+  EP40_BLOCKS: [
+    [600, 699],
+    [700, 799],
+    [800, 899],
+  ] as const,
+
+
+  /** "12 · 2.1 MB", the sounds binder's bar after "Sounds". */
+  soundsTotal(n: number, bytes: number): string {
+    return `${n} · ${Format.bytes(bytes)}`
+  },
+
+  ALL: 'All',
+  /** "In P3 · 7", the filter for the sounds the selected project uses. */
+  inProject(project: number, n: number): string {
+    return `In ${FeatureText.projectBadge(project)} · ${n}`
+  },
+
+  /** "P3", on a sound the selected project uses. */
+  projectBadge(project: number): string {
+    return `P${project}`
+  },
+
+  /** A project slot with nothing in it, on its pad key. */
+  EMPTY_PROJECT: 'empty',
+
+  /** "352 KB · 7 sounds", beside the selected project's name. */
+  projectSummary(size: number, sounds: number): string {
+    return `${Format.bytes(size)} · ${plural(sounds, 'sound')}`
+  },
 
   /** "001–099" (en dash). */
   range(r: { readonly from: number; readonly to: number }): string {
@@ -375,5 +445,65 @@ export const FeatureText = {
 
   copyFailed(message: string): string {
     return `Could not copy to Documents/arc: ${message}`
+  },
+
+  // ---------- factory sounds (FactorySounds) ----------
+  FACTORY_SOUNDS: 'Factory sounds',
+  FACTORY_TITLE: 'EP-133 factory sounds',
+  FACTORY_NOTE:
+    "The EP-133's factory sounds, from teenage engineering's EP Sample Tool. Live plays them until it has read your EP-133.",
+  FACTORY_SAVED: 'In your backups. Live plays them until it has read your EP-133.',
+  GET: 'Get',
+  SAVED: 'Saved',
+  GETTING_FACTORY: 'Getting factory sounds',
+  /** The progress sheet's note while they download (no cable involved). */
+  FACTORY_KEEP_OPEN: "Keep arc open until they're saved.",
+  NOT_FACTORY: "teenage engineering's file isn't an EP-133 factory pack.",
+  FACTORY_UNREACHABLE: "teenage engineering's site couldn't be reached. Check the connection and try again.",
+
+  /** The download's progress: "12.3 MB of 27.4 MB". */
+  factoryProgress(done: number, total: number): string {
+    return `${Format.bytes(done)} of ${Format.bytes(total)}`
+  },
+
+  factorySaved(sounds: number): string {
+    return `Factory sounds saved: ${plural(sounds, 'sound')}. Live plays them until it has read your EP-133.`
+  },
+
+  factoryFailed(message: string): string {
+    return `Couldn't get the factory sounds: ${message}`
+  },
+
+  // ---------- the EP-1320 Medieval's factory sounds (FactoryKit.EP1320), from your own backup ----------
+  /** The copy's title in the library. */
+  FACTORY_TITLE_1320: 'EP-1320 Medieval factory sounds',
+  /** Settings › Live › Factory sounds: the EP-1320's row. */
+  FACTORY_1320: 'EP-1320 Medieval',
+  FACTORY_1320_NOTE:
+    'teenage engineering offers no download for the EP-1320. Open a backup of your Medieval (best made right after a factory reset) in Backups and choose Use as factory sounds.',
+  FACTORY_1320_SAVED: 'In your backups, copied from your own Medieval backup.',
+  /** The detail sheet's key on an EP-1320 backup. */
+  USE_AS_FACTORY: 'Use as factory sounds',
+  SAVING_FACTORY: 'Saving factory sounds',
+  NOT_MEDIEVAL: "This backup isn't from an EP-1320 Medieval, or it has no sounds.",
+  /** Which kit Live plays offline, when two or more are saved (Settings, and the switch on Live's factory line). */
+  FACTORY_KIT: 'Factory kit',
+
+  factory1320Saved(sounds: number): string {
+    return `EP-1320 factory sounds saved: ${plural(sounds, 'sound')}. Live plays them until it has read your EP-1320.`
+  },
+
+  // ---------- the EP-40 Riddim's factory sounds (FactoryKit.EP40), from the EP Sample Tool ----------
+  /** The pack's title in the library. */
+  FACTORY_TITLE_40: 'EP-40 Riddim factory sounds',
+  /** Settings › Live › Factory sounds: the EP-40's row. */
+  FACTORY_40: 'EP-40 Riddim',
+  FACTORY_40_NOTE:
+    "The EP-40's factory sounds (471 sounds, about 69 MB), from teenage engineering's EP Sample Tool. Live plays them when you pick the EP-40 kit.",
+  FACTORY_40_SAVED: 'In your backups. Live plays them when you pick the EP-40 kit.',
+  NOT_FACTORY_40: "teenage engineering's file isn't an EP-40 factory pack.",
+
+  factory40Saved(sounds: number): string {
+    return `EP-40 factory sounds saved: ${plural(sounds, 'sound')}. Live plays them until it has read your EP-40.`
   },
 } as const

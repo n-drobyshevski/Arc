@@ -1,0 +1,80 @@
+/* TAKE's badge on the display line (PatternLine.kt TakeBadge), only while a take goes: lit, the dot blinking while armed. */
+.take-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--signal);
+  border-radius: 8px;
+  background: none;
+  color: var(--display-ink);
+  font: inherit;
+  font-size: var(--size-display-sub);
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  /* A bigger target than it looks, as Compose's minimum touch size. */
+  position: relative;
+}
+.take-badge::before { content: ''; position: absolute; inset: -8px -4px; }
+.take-badge:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+.take-badge__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+
+.take-badge.is-armed .take-badge__dot { animation: rec-blink 450ms ease-in-out infinite alternate; }
+@keyframes rec-blink {
+  from { opacity: 1; }
+  to { opacity: 0.15; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .take-badge.is-armed .take-badge__dot { animation: none; }
+}
+.take-badge__label { white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* Live tools' takes (TakesSection). */
+.takes { display: flex; flex-direction: column; gap: var(--space-10); }
+.takes__key { width: 100%; }
+.takes__note { margin: 0; color: var(--graphite); }
+.takes__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-10); }
+.take {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-14) var(--space-16);
+  border-radius: var(--radius-plate);
+  background: var(--plate);
+}
+.take__row { display: flex; align-items: center; gap: var(--space-10); }
+.take__fold {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.take__fold:focus-visible { outline: var(--focus-ring); outline-offset: 4px; border-radius: 4px; }
+.take__when {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+.take__length { color: var(--graphite); font-variant-numeric: tabular-nums; }
+.take__more { display: flex; flex-direction: column; gap: var(--space-10); }
+.take__ask { margin: var(--space-6) 0 0; color: var(--graphite); }
+.take__keys { display: flex; gap: var(--space-10); }
+.take__keys > .key { flex: 1 1 0; min-width: 0; }

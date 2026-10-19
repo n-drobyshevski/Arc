@@ -14,11 +14,16 @@
     "test": "TZ=UTC vitest run",
     "test:watch": "TZ=UTC vitest",
     "gen:guide": "node scripts/gen-guide-data.mjs",
+    "gen:skill": "node scripts/gen-skill-guide.mjs",
+    "gen:icons": "node scripts/icons.mjs",
     "e2e": "playwright test",
     "check": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
+    "@fontsource/fredoka": "^5.3.0",
+    "@fontsource/jost": "^5.3.0",
     "@fontsource/manrope": "^5.3.0",
+    "@fontsource/unifrakturmaguntia": "^5.3.0",
     "@preact/signals": "^2.11.3",
     "preact": "^11.0.0"
   },

@@ -100,6 +100,8 @@ fun ColumnScope.DetailSheetContent(
     onDone: () -> Unit,
     onContents: () -> Unit = {},
     onCompareBackups: (() -> Unit)? = null,
+    /** Copies a Medieval's backup in as the EP-1320's factory sounds (FactorySounds.canUseAsFactory); null hides the key. */
+    onUseAsFactory: (() -> Unit)? = null,
 ) {
     val c = LocalArcColors.current
     ArcField(Strings.NAME, title, onTitle, maxLength = 80)
@@ -145,6 +147,7 @@ fun ColumnScope.DetailSheetContent(
         half { m -> ArcKey(Strings.SAVE_PAK, onSave, m) }
         // Addition to the web version: play and export what is inside.
         wide { m -> ArcKey(FeatureText.CONTENTS, onContents, m) }
+        if (onUseAsFactory != null) wide { m -> ArcKey(FeatureText.USE_AS_FACTORY, onUseAsFactory, m) }
         if (onCompareBackups != null) wide { m -> ArcKey(FeatureText.COMPARE_BACKUPS, onCompareBackups, m) }
         wide { m -> ArcKey(Strings.DELETE, onDelete, m, style = KeyStyle.Quiet, textColor = c.danger) }
     }
@@ -170,6 +173,24 @@ fun DeleteDialog(title: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
         text = { Text(Strings.deleteConfirm(title), style = ArcType.body15, color = c.ink) },
         confirmButton = { TextButton(onClick = onConfirm) { Text(Strings.DELETE, style = ArcType.bold, color = c.danger) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(Strings.CANCEL, style = ArcType.bold, color = c.graphite) } },
+    )
+}
+
+/**
+ * The EP-133 connected with Live's offline pad changes kept: put the [count]
+ * of them and the [samples] recorded in SAMPLE on it ([onWrite]), or leave
+ * the device as it is ([onDiscard], also Back or a tap outside, as the web's
+ * Esc; recordings then go to Takes).
+ */
+@Composable
+fun OfflinePadsDialog(count: Int, samples: Int = 0, onWrite: () -> Unit, onDiscard: () -> Unit) {
+    val c = LocalArcColors.current
+    AlertDialog(
+        onDismissRequest = onDiscard,
+        containerColor = c.shell,
+        text = { Text(dev.arc.ep133.text.MirrorText.putOffline(count, samples), style = ArcType.body15, color = c.ink) },
+        confirmButton = { TextButton(onClick = onWrite) { Text(dev.arc.ep133.text.MirrorText.WRITE, style = ArcType.bold, color = c.navy) } },
+        dismissButton = { TextButton(onClick = onDiscard) { Text(dev.arc.ep133.text.MirrorText.DISCARD, style = ArcType.bold, color = c.graphite) } },
     )
 }
 
@@ -274,6 +295,15 @@ fun ColumnScope.ProgressSheetContent(task: TaskUi, onCancel: () -> Unit) {
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier.heightIn(min = 24.dp),
     )
-    Text(Strings.KEEP_SCREEN_ON, style = ArcType.small, color = c.graphite)
+    Text(
+        // The factory sounds' tasks use no cable.
+        if (task.title == dev.arc.ep133.text.FeatureText.GETTING_FACTORY || task.title == dev.arc.ep133.text.FeatureText.SAVING_FACTORY) {
+            dev.arc.ep133.text.FeatureText.FACTORY_KEEP_OPEN
+        } else {
+            Strings.KEEP_SCREEN_ON
+        },
+        style = ArcType.small,
+        color = c.graphite,
+    )
     ArcKey(Strings.CANCEL, onCancel, Modifier.fillMaxWidth(), style = KeyStyle.Quiet, enabled = !task.cancelling)
 }

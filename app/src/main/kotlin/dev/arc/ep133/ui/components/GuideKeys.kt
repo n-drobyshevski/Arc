@@ -5,24 +5,19 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.semantics
-import dev.arc.ep133.ui.theme.BaseText
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,28 +27,33 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import dev.arc.ep133.text.Combo
-import dev.arc.ep133.text.ComboStep
+import dev.arc.ep133.text.GuideCombo
+import dev.arc.ep133.text.GuideKeymap
 import dev.arc.ep133.text.GuideText
 import dev.arc.ep133.text.KeyAction
-import dev.arc.ep133.text.KeyCap
-import dev.arc.ep133.text.KeyKind
+import dev.arc.ep133.text.KeymapStep
+import dev.arc.ep133.text.PanelKey
+import dev.arc.ep133.text.PanelKeymap
+import dev.arc.ep133.text.StepKind
 import dev.arc.ep133.ui.theme.ArcType
+import dev.arc.ep133.ui.theme.BaseText
 import dev.arc.ep133.ui.theme.LocalArcColors
 
 /*
- * Key caps for the shortcut guide, drawn after the device: pale keys (SHIFT,
- * - and +), dark keys, dark square pads with their label in the corner,
- * knobs and the fader. A badge above a key says what to do with it.
- * These are the device's own colours, so they stay the same in the dark theme.
+ * Key caps for the shortcut guide, drawn after the device and small enough to
+ * sit in a line of text: pale keys (SHIFT, - and +, the group keys, ERASE),
+ * dark keys and pads, and the orange ones (KNOB X, RECORD). A tag before a
+ * key says what to do with it (HOLD, TYPE, TURN). These are the device's own
+ * colours, so they stay the same in the dark theme.
  */
 private val LightFace = Color(0xFFDAD9D5)
 private val LightEdge = Color(0xFFA9A8A2)
@@ -61,180 +61,196 @@ private val LightInk = Color(0xFF55575A)
 private val DarkFace = Color(0xFF4A4B4D)
 private val DarkEdge = Color(0xFF1E1F21)
 private val DarkInk = Color(0xFFEDECE8)
-private val HoldFace = Color(0xFFB8E2EE)
-private val HoldInk = Color(0xFF1D6577)
+internal val HoldFace = Color(0xFFB8E2EE)
+internal val HoldInk = Color(0xFF1D6577)
 
-private val CapText = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-private val BadgeText = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-private val BadgeSlot = 26.dp
+private val CapText = BaseText.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.04.em, lineHeight = 1.2.em)
+private val TagText = BaseText.copy(fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.06.em, lineHeight = 1.2.em)
+private val BadgeText = BaseText.copy(fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.04.em, lineHeight = 1.em)
 
-/** A guide entry's keys as caps. Screen readers get [spoken] (the guide's own key text) instead. */
+private val LIGHT_KEYS = setOf("SHIFT", "-", "+", "A", "B", "C", "D", "A-D", "ERASE")
+private val SIGNAL_KEYS = setOf("KNOB X", "RECORD")
+
+/** A key name as its cap prints it: any pad is PAD, ranges get an en dash, minus a real minus. */
+private fun capText(label: String): String = when (label) {
+    "pad" -> "PAD"
+    "0-9" -> "0–9"
+    "1-9" -> "1–9"
+    "A-D" -> "A–D"
+    "-" -> "−"
+    else -> label
+}
+
+/**
+ * A guide entry's combo as one line of small caps: the mode it starts in (or
+ * its situation) first, keys pressed together joined by +, steps by an arrow,
+ * separate ways by "or". Screen readers get [spoken] (the guide's own key text) instead.
+ */
 @Composable
-fun ComboView(combo: Combo, spoken: String, modifier: Modifier = Modifier) {
+fun ComboLine(combo: Combo, keymap: GuideKeymap, spoken: String, modifier: Modifier = Modifier) {
     val c = LocalArcColors.current
-    Column(modifier.clearAndSetSemantics { contentDescription = spoken }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        combo.context?.let { Text(it, style = ArcType.small, color = c.graphite) }
+    FlowRow(
+        modifier.clearAndSetSemantics { contentDescription = spoken },
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        itemVerticalAlignment = Alignment.CenterVertically,
+    ) {
+        val mode = keymap.mode
+        val context = combo.context
+        if (mode != null) {
+            Tag(GuideText.modeTag(mode), c.navy.copy(alpha = 0.12f), c.navy)
+        } else if (context != null) {
+            Tag(context, c.graphite.copy(alpha = 0.12f), c.graphite)
+        }
         combo.options.forEachIndexed { i, option ->
-            if (i > 0) Text(GuideText.OR, style = ArcType.small, color = c.graphite)
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                itemVerticalAlignment = Alignment.Bottom,
-            ) {
-                option.forEachIndexed { j, step ->
-                    if (j > 0) Joiner(GuideText.THEN, small = true)
-                    Step(step)
+            if (i > 0) Text(GuideText.OR, style = ArcType.tiny, color = c.graphite)
+            option.forEachIndexed { j, step ->
+                if (j > 0) Arrow()
+                step.keys.forEachIndexed { n, k ->
+                    // "- +" sit side by side like the device's pair; other keys are joined by + or /.
+                    if (n > 0 && !(k.label == "+" && step.keys[n - 1].label == "-" && !step.alternatives)) {
+                        Joiner(if (step.alternatives) "/" else "+")
+                    }
+                    // A tag stays on the line with its key.
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        k.action?.let { ActionTag(it) }
+                        MiniCap(k.label)
+                    }
                 }
             }
         }
     }
 }
 
+/**
+ * The expanded entry's numbered steps (the combo's first way, as the K.O. II
+ * illustration numbers them): a badge, what to do, and the keys to do it on.
+ */
 @Composable
-private fun Step(step: ComboStep) {
-    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        val badges = step.keys.any { it.action != null }
-        step.keys.forEachIndexed { i, k ->
-            // "- +" sit side by side like the device's pair; other keys are joined by + or /.
-            if (i > 0 && !(k.label == "+" && step.keys[i - 1].label == "-" && !step.alternatives)) {
-                Joiner(if (step.alternatives) "/" else "+", small = false)
-            }
-            Cap(k, badgeSpace = badges)
-        }
-    }
-}
-
-@Composable
-private fun Joiner(text: String, small: Boolean) {
+fun KeymapSteps(keymap: GuideKeymap, modifier: Modifier = Modifier) {
     val c = LocalArcColors.current
-    // As tall as a dark key, so the joiner sits on its middle (rows align at the bottom).
-    Box(Modifier.height(35.dp), contentAlignment = Alignment.Center) {
-        Text(
-            text,
-            style = if (small) ArcType.small else BaseText.copy(fontSize = 28.sp, fontWeight = FontWeight.Normal),
-            color = if (small) c.graphite else c.ink,
-        )
-    }
-}
-
-@Composable
-private fun Cap(k: KeyCap, badgeSpace: Boolean) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        if (badgeSpace) {
-            Box(Modifier.height(BadgeSlot), contentAlignment = Alignment.TopCenter) {
-                k.action?.let { Badge(it) }
-            }
-        }
-        when (k.kind) {
-            KeyKind.LIGHT -> if (k.label == "-" || k.label == "+") {
-                Key(44.dp, 44.dp, LightFace, LightEdge) { Glyph(k.label, LightInk) }
-            } else {
-                Key(54.dp, 32.dp, LightFace, LightEdge) { Text(k.label, style = CapText, color = LightInk) }
-            }
-            KeyKind.DARK -> Key(if (k.label.length <= 3) 40.dp else 58.dp, 32.dp, DarkFace, DarkEdge) {
-                Text(k.label, style = CapText, color = DarkInk)
-            }
-            KeyKind.PAD -> Key(50.dp, 50.dp, DarkFace, DarkEdge, alignment = Alignment.TopStart) {
-                Text(
-                    when (k.label) {
-                        // Any pad: named, so the cap doesn't read as a blank key.
-                        "pad" -> "PAD"
-                        "0-9" -> "0\u20139"
-                        "1-9" -> "1\u20139"
-                        else -> k.label
-                    },
-                    style = CapText.copy(fontSize = if (k.label == "ENTER" || k.label == "pad") 10.sp else 13.sp),
-                    color = DarkInk,
-                    modifier = Modifier.padding(start = 7.dp, top = 5.dp),
-                )
-            }
-            KeyKind.KNOB -> Knob(k.label.removePrefix("KNOB ").trim())
-            KeyKind.FADER -> Fader()
-        }
-    }
-}
-
-/** A key face with a darker bottom edge, like ArcKey. */
-@Composable
-private fun Key(w: Dp, h: Dp, face: Color, edge: Color, alignment: Alignment = Alignment.Center, content: @Composable () -> Unit) {
-    Box(
-        Modifier
-            .size(w, h + 3.dp)
-            .drawBehind {
-                val r = CornerRadius(6.dp.toPx())
-                drawRoundRect(edge, topLeft = Offset(2.dp.toPx(), 3.dp.toPx()), size = Size(size.width - 2.dp.toPx(), size.height - 3.dp.toPx()), cornerRadius = r)
-                drawRoundRect(face, size = Size(size.width - 2.dp.toPx(), size.height - 3.dp.toPx()), cornerRadius = r)
-            },
+    FlowRow(
+        modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        itemVerticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(w - 2.dp, h), contentAlignment = alignment) { content() }
+        keymap.steps.forEachIndexed { i, step ->
+            if (i > 0) Arrow()
+            val labels = stepLabels(step)
+            val spoken = GuideText.step(i + 1) + ": " + GuideText.stepWord(step.kind) +
+                if (step.kind == StepKind.TYPE) "" else " " + labels.joinToString(if (step.either) " / " else " + ") { capText(it) }
+            Row(
+                Modifier.clearAndSetSemantics { contentDescription = spoken },
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StepBadge(i + 1, step.kind)
+                Text(GuideText.stepWord(step.kind), style = ArcType.tiny, color = c.graphite)
+                // Typing names its keys already ("on the pads").
+                if (step.kind != StepKind.TYPE) labels.forEachIndexed { n, label ->
+                    if (n > 0 && !(label == "+" && labels[n - 1] == "-" && !step.either)) Joiner(if (step.either) "/" else "+")
+                    MiniCap(label)
+                }
+            }
+        }
     }
 }
 
-/** - and + drawn as strokes, so they line up whatever the font. */
+/** The pill numbering a step, in the hold colour for a held key and signal orange otherwise. */
 @Composable
-private fun Glyph(label: String, color: Color) {
-    Canvas(Modifier.size(18.dp)) {
-        val w = 2.dp.toPx()
-        val mid = size.height / 2
-        drawLine(color, Offset(0f, mid), Offset(size.width, mid), strokeWidth = w, cap = StrokeCap.Round)
-        if (label == "+") drawLine(color, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), strokeWidth = w, cap = StrokeCap.Round)
-    }
-}
-
-@Composable
-private fun Knob(axis: String) {
+fun StepBadge(n: Int, kind: StepKind) {
+    val c = LocalArcColors.current
+    val hold = kind == StepKind.HOLD
     Box(
         Modifier
-            .size(42.dp)
-            .drawBehind {
-                drawCircle(DarkEdge, center = Offset(size.width / 2 + 1.dp.toPx(), size.height / 2 + 2.dp.toPx()), radius = size.minDimension / 2 - 2.dp.toPx())
-                drawCircle(DarkFace, radius = size.minDimension / 2 - 2.dp.toPx())
-            },
+            .heightIn(min = 22.dp)
+            .widthIn(min = 22.dp)
+            .clip(RoundedCornerShape(11.dp))
+            .background(if (hold) HoldFace else c.signal)
+            .padding(horizontal = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(axis, style = CapText.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold), color = DarkInk)
+        Text(n.toString(), style = BadgeText, color = if (hold) HoldInk else c.onSignal)
     }
 }
 
-@Composable
-private fun Fader() {
-    // Named above the drawing (rows of keys line up at the bottom).
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        Text("FADER", style = CapText.copy(fontSize = 10.sp), color = LocalArcColors.current.graphite)
-        Box(
-            Modifier.width(22.dp).height(50.dp).clip(RoundedCornerShape(11.dp)).background(DarkEdge),
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(Modifier.size(18.dp, 10.dp).clip(RoundedCornerShape(3.dp)).background(LightFace))
+/** A step's panel keys as key names: a whole set (any pad, the digits, the groups) as one. */
+private fun stepLabels(step: KeymapStep): List<String> {
+    val sets = listOf(PanelKey.PADS to "pad", PanelKey.DIGITS to "0-9", PanelKey.DIGITS.drop(1) to "1-9", PanelKey.GROUPS to "A-D")
+    var rest = step.keys
+    val named = ArrayList<Pair<Int, String>>()
+    for ((set, name) in sets) {
+        if (rest.containsAll(set)) {
+            named += step.keys.indexOf(set.first()) to name
+            rest = rest - set.toSet()
         }
     }
+    for (k in rest) named += step.keys.indexOf(k) to (KeyNames[k] ?: GuideText.panelLabel(k).uppercase())
+    return named.sortedBy { it.first }.map { it.second }
 }
 
+/** Each panel key's name in the combo notation ("KNOB X", "-"), for keys the notation names one by one. */
+private val KeyNames: Map<PanelKey, String> by lazy {
+    GuideCombo.KEY_NAMES.mapNotNull { n -> runCatching { PanelKeymap.keysFor(n) }.getOrNull()?.singleOrNull()?.let { it to n } }.toMap()
+}
+
+/** A small key cap in the device's colours, with the flat edge of every key in the app. */
 @Composable
-private fun Badge(action: KeyAction) {
+private fun MiniCap(label: String) {
+    val c = LocalArcColors.current
+    val (face, edge, ink) = when (label) {
+        in SIGNAL_KEYS -> Triple(c.signal, c.signalEdge, c.onSignal)
+        in LIGHT_KEYS -> Triple(LightFace, LightEdge, LightInk)
+        else -> Triple(DarkFace, DarkEdge, DarkInk)
+    }
+    Box(
+        Modifier
+            .padding(end = RoundCapDx, bottom = RoundCapDy)
+            .cap(face, edge, RoundedCornerShape(5.dp), 0f, dx = RoundCapDx, dy = RoundCapDy)
+            .widthIn(min = 22.dp)
+            .padding(horizontal = 7.dp, vertical = 3.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(capText(label), style = CapText, color = ink)
+    }
+}
+
+/** HOLD, TYPE, TURN, MOVE or 2× before a key. */
+@Composable
+private fun ActionTag(action: KeyAction) {
     val c = LocalArcColors.current
     val (face, ink) = when (action) {
         KeyAction.HOLD -> HoldFace to HoldInk
         KeyAction.DIAL -> c.signal to c.onSignal
         else -> LightFace to LightInk
     }
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            GuideText.badge(action),
-            style = BadgeText,
-            color = ink,
-            modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(face).padding(horizontal = 6.dp, vertical = 2.dp),
-        )
-        // The small arrow from the badge down to its key.
-        Canvas(Modifier.size(8.dp, 7.dp)) {
-            val w = 1.5.dp.toPx()
-            val x = size.width / 2
-            drawLine(face, Offset(x, 0f), Offset(x, size.height), strokeWidth = w)
-            drawLine(face, Offset(x - 3.dp.toPx(), size.height - 3.dp.toPx()), Offset(x, size.height), strokeWidth = w, cap = StrokeCap.Round)
-            drawLine(face, Offset(x + 3.dp.toPx(), size.height - 3.dp.toPx()), Offset(x, size.height), strokeWidth = w, cap = StrokeCap.Round)
-        }
+    Tag(GuideText.tag(action), face, ink)
+}
+
+@Composable
+private fun Tag(text: String, face: Color, ink: Color) {
+    Text(text, style = TagText, color = ink, modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(face).padding(horizontal = 5.dp, vertical = 2.dp))
+}
+
+@Composable
+private fun Joiner(text: String) {
+    Text(text, style = ArcType.tiny, color = LocalArcColors.current.graphite)
+}
+
+/** The arrow between steps, drawn so it lines up whatever the font. */
+@Composable
+private fun Arrow() {
+    val ink = LocalArcColors.current.graphite
+    Canvas(Modifier.size(12.dp, 10.dp)) {
+        val w = 1.4.dp.toPx()
+        val y = size.height / 2
+        drawLine(ink, Offset(0f, y), Offset(size.width, y), strokeWidth = w, cap = StrokeCap.Round)
+        drawLine(ink, Offset(size.width - 4.dp.toPx(), y - 3.5.dp.toPx()), Offset(size.width, y), strokeWidth = w, cap = StrokeCap.Round)
+        drawLine(ink, Offset(size.width - 4.dp.toPx(), y + 3.5.dp.toPx()), Offset(size.width, y), strokeWidth = w, cap = StrokeCap.Round)
     }
 }
+
 
 /** A square grey key with a cross, for closing the guide; it presses down like the other keys. */
 @Composable

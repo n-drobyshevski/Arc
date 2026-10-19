@@ -24,11 +24,32 @@ import {
   type AppSettings,
 } from '../../../src/platform/storage/settings'
 
+describe('SAMPLE settings', () => {
+  it('store and index as Android: Off and Free as "off" and 0, floats as Float.toString', async () => {
+    const { SettingsStore: Store, settingsToIndex, settingsFromIndex } = await import('../../../src/platform/storage/settings')
+    const storage = memoryStorage()
+    const s = new Store(storage)
+    s.update((c) => ({ ...c, sampleSource: 'rsp', sampleGainRsp: 6, sampleThreshold: -24.5, sampleBars: 4, reviewSamples: false }))
+    const idx = settingsToIndex(s.settings)
+    expect(idx['app.sampleSource']).toBe('rsp')
+    expect(idx['app.sampleGainRsp']).toBe('6.0')
+    expect(idx['app.sampleThreshold']).toBe('-24.5')
+    expect(idx['app.sampleBars']).toBe('4')
+    expect(idx['app.reviewSamples']).toBe('false')
+    const back = new Store(storage).settings
+    expect(back).toMatchObject({ sampleSource: 'rsp', sampleGainRsp: 6, sampleThreshold: -24.5, sampleBars: 4, reviewSamples: false })
+    // Off, Free, and a level out of range from library.json.
+    const off = settingsFromIndex({ 'app.sampleThreshold': 'off', 'app.sampleBars': '0', 'app.sampleGainMic': '99.0' }, back)
+    expect(off).toMatchObject({ sampleThreshold: null, sampleBars: null, sampleGainMic: 12 })
+  })
+})
+
 describe('SettingsStore', () => {
   it('starts with the Android defaults, except one group in Live', () => {
     const s = new SettingsStore(memoryStorage())
     expect(s.settings).toEqual({
       theme: 'SYSTEM',
+      skin: 'EP133',
       autoConnect: true,
       keepScreenOn: true,
       keepLast: null,
@@ -40,6 +61,24 @@ describe('SettingsStore', () => {
       keysScale: 'CHROMATIC',
       keysOctave: 4,
       keysNames: 'SOLFEGE',
+      keysShowNames: true,
+      keysViewWide: 'AUTO',
+      keysViewTall: 'AUTO',
+      pianoWhites: null,
+      haptics: true,
+      makeUpDelay: true,
+      sampleSource: 'mic',
+      sampleStereo: false,
+      sampleGainMic: 12,
+      sampleGainRsp: 0,
+      sampleGainUsb: 0,
+      sampleThreshold: null,
+      sampleBars: null,
+      reviewSamples: true,
+      sampleNormalize: false,
+      sampleTrimSilence: false,
+      samplePattern: false,
+      factoryKit: 'ep133',
       tourSteps: '',
       tourDone: false,
     })
@@ -90,12 +129,13 @@ describe('SettingsStore', () => {
     const s = new SettingsStore(memoryStorage())
     // A fresh install has chosen nothing: its library.json can't override an earlier install's.
     expect(s.toIndex()).toEqual({})
-    s.update((c) => ({ ...c, keepLast: 20, theme: 'LIGHT', keysScale: 'BLUES', keysNames: 'LETTERS' }))
+    s.update((c) => ({ ...c, keepLast: 20, theme: 'LIGHT', keysScale: 'BLUES', keysNames: 'LETTERS', keysShowNames: false }))
     expect(Object.entries(s.toIndex())).toEqual([
       ['app.theme', 'LIGHT'],
       ['app.keepLast', '20'],
       ['app.keysScale', 'BLUES'],
       ['app.keysNames', 'LETTERS'],
+      ['app.keysShowNames', 'false'],
     ])
     // Set back to the default it stays chosen (Android's prefs.contains).
     s.update((c) => ({ ...c, theme: 'SYSTEM' }))
@@ -104,6 +144,7 @@ describe('SettingsStore', () => {
     const all = new SettingsStore(memoryStorage({ [SETTINGS_KEY]: writeSettings(DEFAULT_SETTINGS) }))
     expect(Object.keys(all.toIndex())).toEqual([
       'app.theme',
+      'app.skin',
       'app.autoConnect',
       'app.keepScreenOn',
       'app.keepLast',
@@ -115,9 +156,89 @@ describe('SettingsStore', () => {
       'app.keysScale',
       'app.keysOctave',
       'app.keysNames',
+      'app.keysShowNames',
+      'app.keysViewWide',
+      'app.keysViewTall',
+      'app.pianoWhites',
+      'app.haptics',
+      'app.makeUpDelay',
+      'app.sampleSource',
+      'app.sampleStereo',
+      'app.sampleGainMic',
+      'app.sampleGainRsp',
+      'app.sampleGainUsb',
+      'app.sampleThreshold',
+      'app.sampleBars',
+      'app.reviewSamples',
+      'app.sampleNormalize',
+      'app.sampleTrimSilence',
+      'app.samplePattern',
+      'app.factoryKit',
       'app.tourSteps',
       'app.tourDone',
     ])
+  })
+
+  it('keeps haptics on by default, stores it only once turned off, and reads it back', () => {
+    const storage = memoryStorage()
+    const s = new SettingsStore(storage)
+    expect(s.settings.haptics).toBe(true)
+    s.update((c) => ({ ...c, haptics: false }))
+    expect(JSON.parse(storage.getItem(SETTINGS_KEY)!)).toEqual({ haptics: false })
+    expect(s.toIndex()).toEqual({ 'app.haptics': 'false' })
+    expect(new SettingsStore(storage).settings.haptics).toBe(false)
+    // Odd stored values read as on.
+    expect(readSettings(JSON.stringify({ haptics: 'no' })).haptics).toBe(true)
+    expect(settingsFromIndex({ 'app.haptics': 'true' }, s.settings).haptics).toBe(true)
+    expect(settingsFromIndex({ 'app.haptics': 'off' }, s.settings).haptics).toBe(false)
+  })
+
+  it('keeps the factory kit by its id, an unknown one read as the EP-133\'s', () => {
+    const storage = memoryStorage()
+    const s = new SettingsStore(storage)
+    expect(s.settings.factoryKit).toBe('ep133')
+    s.update((c) => ({ ...c, factoryKit: 'ep1320' }))
+    expect(JSON.parse(storage.getItem(SETTINGS_KEY)!)).toEqual({ factoryKit: 'ep1320' })
+    expect(s.toIndex()).toEqual({ 'app.factoryKit': 'ep1320' })
+    expect(new SettingsStore(storage).settings.factoryKit).toBe('ep1320')
+    expect(readSettings(JSON.stringify({ factoryKit: 'ep40' })).factoryKit).toBe('ep40')
+    expect(readSettings(JSON.stringify({ factoryKit: 'ep99' })).factoryKit).toBe('ep133')
+    expect(settingsFromIndex({ 'app.factoryKit': 'ep133' }, s.settings).factoryKit).toBe('ep133')
+    expect(settingsFromIndex({ 'app.factoryKit': 'ep40' }, s.settings).factoryKit).toBe('ep40')
+    expect(settingsFromIndex({ 'app.factoryKit': 'nope' }, s.settings).factoryKit).toBe('ep1320')
+  })
+
+  it('keeps the skin by its name, an unknown one read as the EP-133\'s', () => {
+    const storage = memoryStorage()
+    const s = new SettingsStore(storage)
+    expect(s.settings.skin).toBe('EP133')
+    s.update((c) => ({ ...c, skin: 'EP40' }))
+    expect(JSON.parse(storage.getItem(SETTINGS_KEY)!)).toEqual({ skin: 'EP40' })
+    expect(s.toIndex()).toEqual({ 'app.skin': 'EP40' })
+    expect(new SettingsStore(storage).settings.skin).toBe('EP40')
+    expect(readSettings(JSON.stringify({ skin: 'EP1320' })).skin).toBe('EP1320')
+    expect(readSettings(JSON.stringify({ skin: 'OP1' })).skin).toBe('EP133')
+    expect(settingsFromIndex({ 'app.skin': 'EP1320' }, s.settings).skin).toBe('EP1320')
+    // A skin arc doesn't know, from another version: left as it is.
+    expect(settingsFromIndex({ 'app.skin': 'OP1' }, s.settings).skin).toBe('EP40')
+  })
+
+  it('keeps the Keys view per window shape and the piano size, Auto stored as 0', () => {
+    const storage = memoryStorage()
+    const s = new SettingsStore(storage)
+    s.update((c) => ({ ...c, keysViewTall: 'PADS', pianoWhites: 15 }))
+    expect(JSON.parse(storage.getItem(SETTINGS_KEY)!)).toEqual({ keysViewTall: 'PADS', pianoWhites: 15 })
+    expect(Object.entries(s.toIndex())).toEqual([
+      ['app.keysViewTall', 'PADS'],
+      ['app.pianoWhites', '15'],
+    ])
+    s.update((c) => ({ ...c, pianoWhites: null, keysViewWide: 'PIANO' }))
+    expect(JSON.parse(storage.getItem(SETTINGS_KEY)!)).toEqual({ keysViewTall: 'PADS', pianoWhites: 0, keysViewWide: 'PIANO' })
+    expect(s.toIndex()['app.pianoWhites']).toBe('0')
+    expect(new SettingsStore(storage).settings).toEqual({ ...DEFAULT_SETTINGS, keysViewWide: 'PIANO', keysViewTall: 'PADS' })
+    // Odd stored values read as the defaults: a size arc doesn't offer is Auto.
+    expect(readSettings(JSON.stringify({ keysViewWide: 'piano', keysViewTall: 3, pianoWhites: 10 }))).toEqual(DEFAULT_SETTINGS)
+    expect(readSettings(JSON.stringify({ pianoWhites: 22 })).pianoWhites).toBe(22)
   })
 
   it("Try arc's steps and flag: a string and a boolean, stored only once chosen", () => {
@@ -225,7 +346,7 @@ describe('fromIndex', () => {
     expect(settingsFromIndex({ 'app.theme': 'LIGHT' }, cur).keepLast).toBe(5)
   })
 
-  it('takes the new settings: guide flag, KEYS mode, key, scale, octave, note names', () => {
+  it('takes the new settings: guide flag, KEYS mode, key, scale, octave, note names, names on the keys', () => {
     const map = {
       'app.guideSeen': 'true',
       'app.liveKeys': 'true',
@@ -233,6 +354,7 @@ describe('fromIndex', () => {
       'app.keysScale': 'MINOR_PENTATONIC',
       'app.keysOctave': '2',
       'app.keysNames': 'LETTERS',
+      'app.keysShowNames': 'false',
     }
     expect(settingsFromIndex(map, cur)).toEqual({
       ...cur,
@@ -242,6 +364,7 @@ describe('fromIndex', () => {
       keysScale: 'MINOR_PENTATONIC',
       keysOctave: 2,
       keysNames: 'LETTERS',
+      keysShowNames: false,
     })
     expect(settingsFromIndex({ 'app.tourSteps': 'connect,pad,~hear', 'app.tourDone': 'true' }, cur)).toEqual({
       ...cur,
@@ -255,8 +378,18 @@ describe('fromIndex', () => {
     expect(settingsFromIndex({ 'app.tourSteps': '' }, { ...cur, tourSteps: 'pad' }).tourSteps).toBe('')
     expect(settingsFromIndex({ 'app.tourDone': 'yes' }, cur).tourDone).toBe(cur.tourDone)
     // Out of range or unknown: the current value stays (Android takeIf, not coerceIn).
-    const odd = { 'app.keysRoot': '12', 'app.keysOctave': '9', 'app.keysScale': 'minor', 'app.keysNames': 'NUMBERS', 'app.liveKeys': 'TRUE' }
+    const odd = { 'app.keysRoot': '12', 'app.keysOctave': '9', 'app.keysScale': 'minor', 'app.keysNames': 'NUMBERS', 'app.liveKeys': 'TRUE', 'app.keysShowNames': 'no' }
     expect(settingsFromIndex(odd, cur)).toEqual(cur)
+  })
+
+  it('takes the Keys views and the piano size; 0 is Auto, an unknown size keeps the choice', () => {
+    const map = { 'app.keysViewWide': 'PADS', 'app.keysViewTall': 'PIANO', 'app.pianoWhites': '12' }
+    expect(settingsFromIndex(map, cur)).toEqual({ ...cur, keysViewWide: 'PADS', keysViewTall: 'PIANO', pianoWhites: 12 })
+    const chosen = { ...cur, pianoWhites: 22 }
+    expect(settingsFromIndex({ 'app.pianoWhites': '0' }, chosen).pianoWhites).toBeNull()
+    expect(settingsFromIndex({ 'app.pianoWhites': '10' }, chosen).pianoWhites).toBe(22)
+    expect(settingsFromIndex({ 'app.pianoWhites': 'auto' }, chosen).pianoWhites).toBe(22)
+    expect(settingsFromIndex({ 'app.keysViewWide': 'piano', 'app.keysViewTall': '' }, cur)).toEqual(cur)
   })
 
   it('restoring writes only what differs, so later defaults never override the folder', () => {

@@ -26,7 +26,7 @@ export function PlayKey(props: PlayKeyProps): JSX.Element {
       ref={props.ref}
       id={props.id}
       type="button"
-      class={`play-key${playing ? ' is-playing' : ''}${props.class ? ` ${props.class}` : ''}`}
+      class={`play-key cap-3d cap-3d--round${playing ? ' is-playing' : ''}${props.class ? ` ${props.class}` : ''}`}
       disabled={!live}
       aria-label={description}
       onClick={onClick}

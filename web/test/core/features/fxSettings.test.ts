@@ -1,0 +1,290 @@
+// Port of core/src/test/kotlin/dev/arc/ep133/features/FxSettingsTest.kt
+//
+// Web delta: the book is a Map; settings are built with FxSettings.of(),
+// comp() and sidechain().
+import { describe, expect, it } from 'vitest'
+import {
+  FADER_DEFAULTS,
+  FADER_ENV_MS,
+  FADER_PARAMS,
+  FX_TYPES,
+  FxBook,
+  FxKnobs,
+  FxSettings,
+  FxType,
+  comp,
+  faderReadout,
+  fxTypeIndex,
+  groupAttackMs,
+  groupPan,
+  groupReleaseMs,
+  groupSemitones,
+  sidechain,
+  type GroupFaders,
+} from '../../../src/core/features/fxSettings'
+
+const f = Math.fround
+
+const busy = FxSettings.of({
+  type: FxType.DELAY,
+  x: 0.25,
+  y: 0.75,
+  sends: [0.5, 0, 1, 0.25],
+  comp: comp({ on: true, x: 0.5, y: 1 }),
+  sidechain: sidechain({ on: true, group: 2, pad: 5, dests: 0b0011, x: 0.5, y: 0.25 }),
+})
+
+describe('FxSettingsTest', () => {
+  it('the defaults are no effect, no sends, nothing on', () => {
+    const d = FxSettings.DEFAULT
+    expect(d.type).toBe(FxType.NONE)
+    expect(d.x).toBe(0.5)
+    expect(d.y).toBe(0.5)
+    expect(d.sends).toEqual([0, 0, 0, 0])
+    expect(d.comp).toEqual(comp({ on: false, x: 0.5, y: 0.5 }))
+    expect(d.sidechain).toEqual({ on: false, group: 0, pad: 0, dests: 0, x: f(0.3), y: 0.5 })
+    // The ordinal is the mixer's control index.
+    expect(FX_TYPES).toEqual(['NONE', 'DELAY', 'REVERB', 'DISTORTION', 'CHORUS', 'FILTER', 'COMPRESSOR'])
+    expect(fxTypeIndex(FxType.COMPRESSOR)).toBe(6)
+  })
+
+  it('clamped holds every knob, send and index in range', () => {
+    const wild = FxSettings.of({
+      x: Number.NaN,
+      y: 1.5,
+      sends: [-1, 2],
+      comp: comp({ on: true, x: -0.5, y: 3 }),
+      sidechain: sidechain({ on: true, group: 9, pad: -1, dests: 0xff, x: 2, y: -2 }),
+    })
+    expect(FxSettings.clamped(wild)).toEqual(
+      FxSettings.of({
+        x: 0,
+        y: 1,
+        sends: [0, 1, 0, 0],
+        comp: comp({ on: true, x: 0, y: 1 }),
+        sidechain: sidechain({ on: true, group: 3, pad: 0, dests: 0xf, x: 1, y: 0 }),
+      }),
+    )
+    expect(FxSettings.clamped(FxSettings.DEFAULT)).toEqual(FxSettings.DEFAULT)
+    // -0 reads as 0.
+    expect(Object.is(FxSettings.clamped(FxSettings.of({ x: -0 })).x, 0)).toBe(true)
+  })
+
+  it('the with functions change one thing', () => {
+    let s = FxSettings.withType(FxSettings.DEFAULT, FxType.REVERB)
+    s = FxSettings.withXY(s, 0.2, 1.4)
+    s = FxSettings.withSend(FxSettings.withSend(s, 2, 0.6), 0, -1)
+    expect(s.type).toBe(FxType.REVERB)
+    expect(s.x).toBe(f(0.2))
+    expect(s.y).toBe(1)
+    expect(s.sends).toEqual([0, 0, f(0.6), 0])
+    expect(FxSettings.withComp(s, comp({ on: true })).comp).toEqual(comp({ on: true }))
+    expect(FxSettings.withSidechain(s, sidechain({ on: true, dests: 1 })).sidechain).toEqual(sidechain({ on: true, dests: 1 }))
+  })
+
+  it("each effect's knobs have their names", () => {
+    expect(FX_TYPES.map(FxSettings.xLabel)).toEqual(['', 'LENGTH', 'SIZE', 'DRIVE', 'RATE', 'CUTOFF', 'DRIVE'])
+    expect(FX_TYPES.map(FxSettings.yLabel)).toEqual(['', 'FEEDBACK', 'COLOR', 'COLOR', 'FEEDBACK', 'RESO', 'SPEED'])
+  })
+
+  it('readouts say what the knobs do', () => {
+    const x = (type: FxType, ...pairs: [number, string][]): void => {
+      for (const [k, want] of pairs) expect(FxSettings.xReadout(type, f(k), 120), `${type} x ${k}`).toBe(want)
+    }
+    const y = (type: FxType, ...pairs: [number, string][]): void => {
+      for (const [k, want] of pairs) expect(FxSettings.yReadout(type, f(k)), `${type} y ${k}`).toBe(want)
+    }
+    x(FxType.NONE, [0.5, ''])
+    y(FxType.NONE, [0.5, ''])
+    x(FxType.DELAY, [0, '1/32'], [0.1, '1/16T'], [0.5, '1/4T'], [0.65, '1/8D'], [0.999, '1/2'], [1, '1/2'], [2, '1/2'])
+    y(FxType.DELAY, [0, '0%'], [0.2, '19%'], [1, '95%'])
+    x(FxType.REVERB, [0, '0%'], [0.64, '64%'], [1, '100%'])
+    y(FxType.REVERB, [0, 'DARK 100'], [0.3, 'DARK 40'], [0.5, 'FLAT'], [0.6, 'BRIGHT 20'], [1, 'BRIGHT 100'])
+    x(FxType.DISTORTION, [0, '1.0x'], [0.25, '3.4x'], [0.5, '11x'], [1, '40x'])
+    y(FxType.DISTORTION, [0, 'LP 100'], [0.5, 'OPEN'], [0.75, 'HP 50'])
+    x(FxType.CHORUS, [0, '0.05 Hz'], [0.5, '0.67 Hz'], [1, '5.00 Hz'])
+    y(FxType.CHORUS, [0, '0%'], [1, '70%'])
+    x(
+      FxType.FILTER,
+      [0, 'LPF 60'],
+      [0.1, 'LPF 252'],
+      [0.2, 'LPF 1.6k'],
+      [0.4, 'LPF 12k'],
+      [0.47, 'OPEN'],
+      [0.5, 'OPEN'],
+      [0.53, 'OPEN'],
+      [0.6, 'HPF 46'],
+      [0.8, 'HPF 1.5k'],
+      [1, 'HPF 8.0k'],
+    )
+    y(FxType.FILTER, [0, 'Q 0.5'], [0.5, 'Q 4.3'], [1, 'Q 8.0'])
+    x(FxType.COMPRESSOR, [0, '1.0x'], [0.5, '2.8x'], [1, '8.0x'])
+    y(FxType.COMPRESSOR, [0, '0.5/40'], [0.5, '10/200'], [0.99, '30/600'], [1, '30/600'])
+  })
+
+  it("the knobs' mappings", () => {
+    expect(FxKnobs.DELAY_DIVISIONS.length).toBe(12)
+    expect(FxKnobs.DELAY_DIVISIONS[7]).toEqual({ name: '1/8D', num: 3, den: 4 })
+    expect([0, 0.09, 0.5, 0.95, 1].map((v) => FxKnobs.delayDivision(f(v)))).toEqual([0, 1, 6, 11, 11])
+    expect(FxKnobs.filterZone(f(0.46))).toBe(FxKnobs.LPF)
+    expect(FxKnobs.filterZone(f(0.47))).toBe(FxKnobs.OPEN)
+    expect(FxKnobs.filterZone(f(0.53))).toBe(FxKnobs.OPEN)
+    expect(FxKnobs.filterZone(f(0.54))).toBe(FxKnobs.HPF)
+    expect(FxKnobs.filterLpfHz(0)).toBe(60)
+    expect(FxKnobs.filterLpfHz(FxKnobs.LPF_TOP)).toBe(20000)
+    expect(FxKnobs.filterHpfHz(FxKnobs.HPF_BOTTOM)).toBe(20)
+    expect(FxKnobs.filterHpfHz(1)).toBe(8000)
+    expect(FxKnobs.reverbFeedback(0)).toBe(f(0.7))
+    expect(FxKnobs.reverbFeedback(1)).toBe(f(0.98))
+    expect(FxKnobs.distortionDrive(1)).toBe(40)
+    expect(FxKnobs.compDrive(1)).toBe(8)
+    expect(FxKnobs.COMP_SPEEDS[0]).toEqual({ name: '0.5/40', attackMs: 0.5, releaseMs: 40 })
+    expect(FxKnobs.COMP_SPEEDS[7]).toEqual({ name: '30/600', attackMs: 30, releaseMs: 600 })
+  })
+
+  it('a book round-trips, its floats written exactly', () => {
+    const book = new Map([
+      [7, FxSettings.DEFAULT],
+      [1, busy],
+    ])
+    const json = FxBook.toJson(book)
+    expect(json).toBe(
+      '{"v":1,"projects":[' +
+        '{"project":1,"type":"DELAY","x":0.25,"y":0.75,"sends":[0.5,0,1,0.25],"comp":{"on":true,"x":0.5,"y":1},' +
+        '"sidechain":{"on":true,"group":2,"pad":5,"dests":3,"x":0.5,"y":0.25}},' +
+        '{"project":7,"type":"NONE","x":0.5,"y":0.5,"sends":[0,0,0,0],"comp":{"on":false,"x":0.5,"y":0.5},' +
+        '"sidechain":{"on":false,"group":0,"pad":0,"dests":0,"x":0.30000001192092896,"y":0.5}}]}',
+    )
+    expect(FxBook.fromJson(json)).toEqual(book)
+    expect([...FxBook.fromJson(json)!.keys()]).toEqual([1, 7])
+    expect(FxBook.toJson(new Map())).toBe('{"v":1,"projects":[]}')
+    expect(FxBook.fromJson(FxBook.toJson(new Map()))).toEqual(new Map())
+    // Written clamped.
+    expect(FxBook.fromJson(FxBook.toJson(new Map([[2, FxSettings.of({ x: 5 })]])))).toEqual(new Map([[2, FxSettings.of({ x: 1 })]]))
+    // Any knob value comes back as the same float.
+    const odd = FxSettings.of({ x: 0.1, y: 0.437, sends: [0.3, 0.7, 0.01, 0.99] })
+    expect(FxBook.fromJson(FxBook.toJson(new Map([[3, odd]])))).toEqual(new Map([[3, odd]]))
+  })
+
+  it('(web) the groups\' levels: 1 by default, written only when one is not, read back exactly', () => {
+    expect(FxSettings.DEFAULT.levels).toEqual([1, 1, 1, 1])
+    const s = FxSettings.withLevel(FxSettings.withLevel(FxSettings.DEFAULT, 1, 0.3), 3, -2)
+    expect(s.levels).toEqual([1, f(0.3), 1, 0])
+    expect(FxSettings.clamped(FxSettings.of({ levels: [2, Number.NaN] }))).toEqual(FxSettings.of({ levels: [1, 0, 1, 1] }))
+    // At 1 the book is the Kotlin twin's text (above); otherwise it carries them.
+    const json = FxBook.toJson(new Map([[4, s]]))
+    expect(json).toContain('"levels":[1,0.30000001192092896,1,0]')
+    expect(FxBook.fromJson(json)).toEqual(new Map([[4, s]]))
+    // Settings written before them (or by Android) read at 1; short lists are filled with 1, junk skips the entry.
+    expect(FxBook.fromJson('{"v":1,"projects":[{"project":1,"type":"REVERB"}]}')?.get(1)?.levels).toEqual([1, 1, 1, 1])
+    expect(FxBook.fromJson('{"v":1,"projects":[{"project":1,"levels":[0.5]}]}')?.get(1)?.levels).toEqual([0.5, 1, 1, 1])
+    expect(FxBook.fromJson('{"v":1,"projects":[{"project":1,"levels":0.5},{"project":2,"levels":["1"]}]}')).toEqual(new Map())
+  })
+
+  it("(web) the groups' fader parameters and assignments: defaults unwritten, the moved ones written and read back exactly", () => {
+    const d = FxSettings.DEFAULT
+    expect(d.faders).toEqual([0, 1, 2, 3].map(() => ({ PITCH: 0.5, LPF: 1, HPF: 0, ATK: 0, REL: 0, PAN: 0.5, TUNE: 0.5 })))
+    expect(d.assign).toEqual(['LEVEL', 'LEVEL', 'LEVEL', 'LEVEL'])
+    expect(FADER_PARAMS.map((p) => FxSettings.faderOf(d, 2, p))).toEqual(FADER_PARAMS.map((p) => FADER_DEFAULTS[p]))
+    let s = FxSettings.withFader(d, 1, 'LPF', 0.3)
+    s = FxSettings.withFader(s, 1, 'PAN', -4)
+    s = FxSettings.withFader(s, 3, 'TUNE', 0.75)
+    // LEVEL and FX are the level and the send; not in arc, or no such group: unchanged.
+    s = FxSettings.withFader(s, 0, 'LEVEL', 0.5)
+    s = FxSettings.withFader(s, 0, 'FX', 0.25)
+    expect(FxSettings.withFader(s, 0, 'VEL', 0.1)).toBe(s)
+    expect(FxSettings.withFader(s, 4, 'LPF', 0.1)).toBe(s)
+    expect(s.levels[0]).toBe(0.5)
+    expect(s.sends[0]).toBe(0.25)
+    expect(s.faders[1]).toMatchObject({ LPF: f(0.3), PAN: 0 })
+    expect(FxSettings.faderOf(s, 3, 'TUNE')).toBe(0.75)
+    s = FxSettings.withAssign(s, 2, 'HPF')
+    expect(FxSettings.withAssign(s, 2, 'MOD')).toBe(s)
+    expect(s.assign).toEqual(['LEVEL', 'LEVEL', 'HPF', 'LEVEL'])
+    const json = FxBook.toJson(new Map([[4, s]]))
+    expect(json).toContain('"faders":[{},{"lpf":0.30000001192092896,"pan":0},{},{"tune":0.75}],"assign":["LEVEL","LEVEL","HPF","LEVEL"]')
+    expect(FxBook.fromJson(json)).toEqual(new Map([[4, s]]))
+    // Settings written before them (or by Android) read at the defaults; short lists are filled with them.
+    const old = FxBook.fromJson('{"v":1,"projects":[{"project":1,"type":"REVERB"}]}')?.get(1)
+    expect(old?.faders).toEqual(d.faders)
+    expect(old?.assign).toEqual(d.assign)
+    const short = FxBook.fromJson('{"v":1,"projects":[{"project":1,"faders":[{"hpf":2,"mod":0.3}],"assign":["PAN"]}]}')?.get(1)
+    expect(short?.faders[0]).toEqual({ ...d.faders[0], HPF: 1 })
+    expect(short?.faders[1]).toEqual(d.faders[1])
+    expect(short?.assign).toEqual(['PAN', 'LEVEL', 'LEVEL', 'LEVEL'])
+    // A name it doesn't play is LEVEL; junk skips the entry.
+    expect(FxBook.fromJson('{"v":1,"projects":[{"project":1,"assign":["VEL","WOBBLE"]}]}')?.get(1)?.assign).toEqual(['LEVEL', 'LEVEL', 'LEVEL', 'LEVEL'])
+    expect(
+      FxBook.fromJson('{"v":1,"projects":[{"project":1,"faders":{}},{"project":2,"faders":[1]},{"project":3,"faders":[{"lpf":"x"}]},{"project":4,"assign":[1]}]}'),
+    ).toEqual(new Map())
+  })
+
+  it('(web) how the fader parameters are heard and shown', () => {
+    const g = (fields: Partial<GroupFaders>): GroupFaders => ({ ...FxSettings.DEFAULT.faders[0]!, ...fields })
+    expect(groupSemitones(g({}))).toBe(0)
+    expect(groupSemitones(g({ PITCH: 1 }))).toBe(12)
+    expect(groupSemitones(g({ PITCH: 0 }))).toBe(-12)
+    // PITCH in whole semitones, TUNE a semitone either way, fine.
+    expect(groupSemitones(g({ PITCH: 0.52 }))).toBe(0)
+    expect(groupSemitones(g({ PITCH: 0.75, TUNE: 0.75 }))).toBe(6.5)
+    expect(groupPan(g({}))).toBe(0)
+    expect(groupPan(g({ PAN: 0 }))).toBe(-1)
+    expect(groupPan(g({ PAN: 1 }))).toBe(1)
+    expect(groupAttackMs(g({}))).toBe(0)
+    expect(groupAttackMs(g({ ATK: 1 }))).toBe(FADER_ENV_MS)
+    expect(groupReleaseMs(g({ REL: 0.5 }))).toBe(FADER_ENV_MS / 4)
+    expect(faderReadout('LEVEL', 0.72)).toBe('72')
+    expect(faderReadout('PITCH', 0.5)).toBe('0')
+    expect(faderReadout('PITCH', 1)).toBe('+12')
+    expect(faderReadout('TUNE', 0.375)).toBe('-25')
+    expect(faderReadout('LPF', 1)).toBe('OPEN')
+    expect(faderReadout('LPF', 0)).toBe('60')
+    expect(faderReadout('HPF', 0)).toBe('OPEN')
+    expect(faderReadout('HPF', 1)).toBe('8.0k')
+    expect(faderReadout('PAN', 0.5)).toBe('C')
+    expect(faderReadout('PAN', 0.3)).toBe('L40')
+    expect(faderReadout('PAN', 1)).toBe('R100')
+    expect(faderReadout('ATK', 0.2)).toBe('102')
+    expect(faderReadout('REL', 1)).toBe('2.6s')
+  })
+
+  it("junk reads as nothing, and entries it can't read are skipped", () => {
+    expect(FxBook.fromJson('not json')).toBeNull()
+    expect(FxBook.fromJson('[]')).toBeNull()
+    expect(FxBook.fromJson('{"v":2,"projects":[]}')).toBeNull()
+    expect(FxBook.fromJson('{"v":"1","projects":[]}')).toBeNull()
+    expect(FxBook.fromJson('{"projects":[]}')).toBeNull()
+    expect(FxBook.fromJson('{"v":1}')).toEqual(new Map())
+    const text = `{"v":1,"projects":[
+      {"project":100},
+      {"project":"1"},
+      {"project":1,"type":"FLANGER"},
+      {"project":1,"x":"0.5"},
+      {"project":1,"sends":0.5},
+      {"project":1,"sends":[0.5,"0"]},
+      {"project":1,"comp":true},
+      {"project":1,"comp":{"on":1}},
+      {"project":1,"sidechain":{"group":1.5}},
+      {"project":2,"type":"DELAY","x":0.25},
+      {"project":3,"type":"FILTER","x":2,"y":-1,"sends":[2],"comp":{"on":true},
+        "sidechain":{"on":true,"group":9,"pad":-1,"dests":255,"x":0.75}},
+      {"project":2,"type":"CHORUS"},
+      "junk"
+    ]}`
+    const want = new Map([
+      [2, FxSettings.of({ type: FxType.CHORUS })],
+      [
+        3,
+        FxSettings.of({
+          type: FxType.FILTER,
+          x: 1,
+          y: 0,
+          sends: [1, 0, 0, 0],
+          comp: comp({ on: true }),
+          sidechain: sidechain({ on: true, group: 3, pad: 0, dests: 15, x: 0.75 }),
+        }),
+      ],
+    ])
+    expect(FxBook.fromJson(text)).toEqual(want)
+  })
+})

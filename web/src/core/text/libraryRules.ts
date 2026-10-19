@@ -12,6 +12,7 @@
 // - Ids compare by UTF-16 code units (`<`), as Kotlin String.compareTo does,
 //   never with localeCompare.
 
+import { FactoryKit, isFactorySource } from '../features/factorySounds'
 import { bytes, list, plural } from './format'
 import { Strings } from './strings'
 
@@ -34,7 +35,7 @@ export interface BackupRecord {
   readonly title: string
   readonly notes: string
   readonly createdAt: number
-  /** "device" or "import". */
+  /** "device", "import", or a factory kit's (FactoryKit.source: "factory", "factory-ep1320", "factory-ep40"). */
   readonly source: string
   readonly fileName: string | null
   readonly device: BackupDevice
@@ -56,20 +57,28 @@ export function RestoreSelection(slots: readonly number[], projects: readonly nu
   return { slots, projects }
 }
 
+/** Where the factory sounds came from, in the detail sheet. */
+export const FACTORY_FROM = 'teenage engineering, factory sounds'
+
+/** Where the EP-1320's came from: a copy of the person's own backup. */
+export const FACTORY_1320_FROM = 'Your backup, used as EP-1320 factory sounds'
+
 const byCreatedDesc = (a: BackupRecord, b: BackupRecord): number =>
   a.createdAt > b.createdAt ? -1 : a.createdAt < b.createdAt ? 1 : 0
 const byIdAsc = (a: BackupRecord, b: BackupRecord): number => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 
 /**
  * The backups to delete so only the newest [keep] remain (an addition to
- * the web version); none when [keep] is null (keep all).
+ * the web version); none when [keep] is null (keep all). The factory
+ * sounds (every kit's) are neither counted nor deleted.
  * Newest first by createdAt, ties by id descending; the first [keep] stay.
  */
 export function toPrune(backups: readonly BackupRecord[], keep: number | null | undefined): BackupRecord[] {
-  if (keep == null || backups.length <= keep) return []
+  const own = backups.filter((b) => !isFactorySource(b.source))
+  if (keep == null || own.length <= keep) return []
   // Kotlin's drop(n) rejects a negative count.
   if (keep < 0) throw new RangeError(`Requested element count ${keep} is less than zero.`)
-  return [...backups].sort((a, b) => byCreatedDesc(a, b) || byIdAsc(b, a)).slice(keep)
+  return own.sort((a, b) => byCreatedDesc(a, b) || byIdAsc(b, a)).slice(keep)
 }
 
 /** `fileNameFor(b)`: "my-backup.pak". JS \w is ASCII only, spelled out here. */
@@ -147,7 +156,11 @@ export function facts(b: BackupRecord, madeText: string): Array<[string, string]
     'From',
     b.source === 'import'
       ? 'Imported file' + (b.fileName ? `, ${b.fileName}` : '')
-      : [b.device.product, b.device.serial].filter((s) => s.length !== 0).join(', '),
+      : b.source === FactoryKit.EP133.source || b.source === FactoryKit.EP40.source
+        ? FACTORY_FROM
+        : b.source === FactoryKit.EP1320.source
+          ? FACTORY_1320_FROM
+          : [b.device.product, b.device.serial].filter((s) => s.length !== 0).join(', '),
   )
   fact('OS', b.device.osVersion)
   fact('Contents', `${plural(b.soundCount, 'sound')}, ${plural(b.projectCount, 'project')}`)
@@ -173,6 +186,8 @@ export function sorted(items: readonly BackupRecord[]): BackupRecord[] {
 
 /** The Kotlin `object LibraryRules`, for call sites that read `LibraryRules.toPrune(...)`. */
 export const LibraryRules = {
+  FACTORY_FROM,
+  FACTORY_1320_FROM,
   toPrune,
   fileNameFor,
   importTitle,

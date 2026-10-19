@@ -400,8 +400,9 @@ export const Tour = {
       case TourStep.PAD:
       case TourStep.HEAR:
         return 'live.pads'
+      // Back up is the first key of the Backups caption row: the step shows on Backups.
       case TourStep.BACKUP:
-        return 'top.backup'
+        return 'backups.backup'
       case TourStep.TOOLS:
         return 'side.more'
       case TourStep.GUIDE:

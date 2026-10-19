@@ -1,0 +1,850 @@
+/* The device view (DeviceView.tsx): the EP-133 K.O. II at the unit's 176 × 240 mm
+ * (1444 × 1969 units), scaled to fit, or with a skin the EP-40 or the EP-1320 (the
+ * same chassis). The device keeps its own colours in both themes and prints in Jost;
+ * the cards and panels around it are Live's. */
+
+/* The drawing's colours, the EP-133 K.O. II's (the skins' devices are below). They sit on
+ * :root so Live's piano on the desk can stand on the same body. */
+:root {
+  --ep-body-1: #C9C8C5;
+  --ep-body-2: #C5C4C1;
+  --ep-body-3: #B2B1AE;
+  --ep-label: #2E2D2C;
+  --ep-ink: #231F20;
+  --ep-plate-ink: var(--ep-ink);
+  --ep-orange: #F15A22;
+  --ep-red: #E8461C;
+  --ep-line: #3B3A39;
+  /* The focus ring is the light theme's navy in both themes: it sits on the body, which never changes with them. */
+  --ep-focus: #1F2558;
+  --ep-jack-out-1: #F7F4F1;
+  --ep-jack-out-2: #ECE9E5;
+  --ep-jack-out-ink: #3A3837;
+  --ep-jack-out-ring: #CFCBC7;
+  --ep-jack-in-1: #F66130;
+  --ep-jack-in-2: #EE531B;
+  --ep-jack-in-ink: #FFF6F0;
+  --ep-jack-sync-1: #363636;
+  --ep-jack-sync-2: #2D2D2D;
+  --ep-jack-sync-ink: #E8E8E8;
+  --ep-jack-sync-sub: #CFCFCF;
+  --ep-jack-usb-1: #7A7A78;
+  --ep-jack-usb-2: #6E6E6C;
+  --ep-jack-usb-ink: #F2F2F2;
+  --ep-jack-pow-ink: #3A3837;
+  --ep-pow: #EE531B;
+  --ep-plate-1: #E7E6E2;
+  --ep-plate-2: #E4E3DF;
+  --ep-plate-3: #E0DFDB;
+  --ep-plate-edge: #2E2E2E;
+  --ep-screw-1: #E6E5E1;
+  --ep-screw-2: #DEDDD9;
+  --ep-glass-1: #1A1A1A;
+  --ep-glass-2: #141414;
+  --ep-glass-3: #171717;
+  --ep-pin: #0E0E0E;
+  --ep-pin-rim: #262626;
+  --ep-lcd-k: #121212;
+  --ep-lcd-w: #F1F2F2;
+  --ep-seg-off: #262626;
+  --ep-seg-on: #EEF3FF;
+  --ep-seg-glow: rgb(200 225 255 / 0.55);
+  --ep-led-on: #FF5A1A;
+  --ep-led-on-2: #E8400A;
+  --ep-led-off: #4E4C4A;
+  --ep-led-off-2: #3D3B39;
+  --ep-knob-vol: #E7E4DF; --ep-knob-vol-hi: #F2F0EC; --ep-knob-vol-lo: #D6D3CE;
+  --ep-knob-vol-cap: #ECE8E3; --ep-knob-vol-cap-hi: #F6F4F1; --ep-knob-vol-cap-lo: #DEDAD5; --ep-knob-vol-mark: #3A3836;
+  --ep-knob-x: #F8521A; --ep-knob-x-hi: #FF6B33; --ep-knob-x-lo: #E2440F;
+  --ep-knob-x-cap: #FA5820; --ep-knob-x-cap-hi: #FF7442; --ep-knob-x-cap-lo: #E84A12; --ep-knob-x-mark: #2A1408;
+  --ep-knob-y: #1E1E1E; --ep-knob-y-hi: #2A2A2A; --ep-knob-y-lo: #161616;
+  --ep-knob-y-cap: #1D1D1D; --ep-knob-y-cap-hi: #2B2B2B; --ep-knob-y-cap-lo: #151515; --ep-knob-y-mark: #D9D6D1;
+  --ep-badge-x: #EE4F1E;
+  --ep-badge-y: #1C1C1C;
+  --ep-badge-ink: #FFFFFF;
+  --ep-fader-cap: #6A6867;
+  --ep-well: #0A0908;
+  /* The keys: number keys and the slim ones (black), − / + (light), A–D (group), SHIFT,
+   * RECORD (rec), PLAY (play); the two-word keys' caps (fn …) and printed tiles; the pads. */
+  --ep-black: #262626; --ep-black-hi: #2E2E2E; --ep-black-lip: #141414; --ep-black-ink: #EDEDEC;
+  --ep-light: #DCD8D4; --ep-light-hi: #E6E3DF; --ep-light-lip: #B6B2AE; --ep-light-ink: #3A3836; --ep-sign: #2E2D2C;
+  --ep-group: #C2BEBB; --ep-group-hi: #CCC8C5; --ep-group-lip: #A29E9A; --ep-group-ink: #F7F6F4;
+  --ep-group-icon: #F4F3F1; --ep-group-num: #2E2D2C;
+  --ep-shift: #B2AEAB; --ep-shift-hi: #BBB7B4; --ep-shift-lip: #8F8B87; --ep-shift-ink: #F7F6F4;
+  --ep-rec: #EE4410; --ep-rec-hi: #F65219; --ep-rec-lip: #B83002; --ep-rec-ink: #FFF4EE;
+  --ep-play: #555352; --ep-play-hi: #5E5C5A; --ep-play-lip: #383635; --ep-play-ink: #E2E0DD;
+  --ep-play-lit: #77736F; --ep-play-lit-hi: #837F7B; --ep-play-lit-lip: #4A4745;
+  --ep-fn: #262626; --ep-fn-hi: #2F2F2F; --ep-fn-lip: #131313; --ep-fn-ink: #EDEDEC;
+  --ep-fn-orange: #F24C14; --ep-fn-orange-hi: #F95A1E; --ep-fn-orange-lip: #B83204; --ep-fn-orange-ink: #FFF4EE;
+  --ep-fn-lighter: #CDC9C6; --ep-fn-lighter-hi: #D7D3D0; --ep-fn-lighter-lip: #A29E9A; --ep-fn-lighter-ink: #3A3836;
+  --ep-tile: #DEDAD6; --ep-tile-ink: #3A3836; --ep-tile-edit: #E4E1DD;
+  --ep-tile-orange: #F7531A; --ep-tile-orange-ink: #FFF4EE;
+  --ep-tile-grey: #858583; --ep-tile-grey-ink: #F1F1F0;
+  --ep-pad: #242424; --ep-pad-hi: #2D2D2D; --ep-pad-lip: #121212;
+  --ep-pad-ink: #EEEEED; --ep-pad-dim: #8C8C8C; --ep-pad-ring: #CFCDC9;
+}
+
+/* The EP-40 Riddim (Settings → Skin): a cream body, dub green printing, the jade LCD with
+ * light digits, cream keys with green figures, the orange RECORD and X knob, a green PLAY and Y. */
+:root[data-skin=EP40] {
+  --ep-body-1: #DCD3C1; --ep-body-2: #D5CBB7; --ep-body-3: #C2B6A0;
+  --ep-label: #0B4A36; --ep-ink: #0B4A36; --ep-plate-ink: #0B4A36;
+  --ep-orange: #F05A24; --ep-red: #F05A24; --ep-line: #0B4A36;
+  --ep-focus: #00503A;
+  --ep-jack-out-1: #EFEBE2; --ep-jack-out-2: #E4DED1; --ep-jack-out-ink: #0B4A36; --ep-jack-out-ring: #CFC6B3;
+  --ep-jack-in-1: #F26B3A; --ep-jack-in-2: #F05A24; --ep-jack-in-ink: #FFF6F0;
+  --ep-jack-sync-1: #00573F; --ep-jack-sync-2: #00432F; --ep-jack-sync-ink: #F4F1E8; --ep-jack-sync-sub: #CFE3D6;
+  --ep-jack-usb-1: #E6E0D3; --ep-jack-usb-2: #DAD3C4; --ep-jack-usb-ink: #0B4A36;
+  --ep-jack-pow-ink: #0B4A36; --ep-pow: #F05A24;
+  --ep-plate-1: #EFEEE9; --ep-plate-2: #ECEBE6; --ep-plate-3: #E6E4DE; --ep-plate-edge: #2C3A33;
+  --ep-screw-1: #EDEBE5; --ep-screw-2: #E4E1DA;
+  --ep-glass-1: #2BA67D; --ep-glass-2: #23996D; --ep-glass-3: #1F9169;
+  --ep-pin: #0E2B20; --ep-pin-rim: #145C43;
+  --ep-lcd-k: #0E2B20; --ep-lcd-w: #EAF6EF;
+  --ep-seg-off: #1C8A63; --ep-seg-on: #EAF6EF; --ep-seg-glow: rgb(234 246 239 / 0.45);
+  --ep-led-off: #8C826E; --ep-led-off-2: #6F6754;
+  --ep-knob-x: #F44E0F; --ep-knob-x-hi: #FF6A30; --ep-knob-x-lo: #D2460D;
+  --ep-knob-x-cap: #F65A1C; --ep-knob-x-cap-hi: #FF7442; --ep-knob-x-cap-lo: #E04A12;
+  --ep-knob-y: #003A28; --ep-knob-y-hi: #0B4A36; --ep-knob-y-lo: #002A1C;
+  --ep-knob-y-cap: #00412D; --ep-knob-y-cap-hi: #0B5038; --ep-knob-y-cap-lo: #002A1C; --ep-knob-y-mark: #D9E8DE;
+  --ep-badge-x: #F05A24; --ep-badge-y: #003A28;
+  --ep-fader-cap: #E2DCCB;
+  --ep-well: #1A2620;
+  --ep-black: #E2DDCF; --ep-black-hi: #ECE8DD; --ep-black-lip: #B9AF9A; --ep-black-ink: #0B4A36;
+  --ep-light: #DCD5C4; --ep-light-hi: #E6E0D2; --ep-light-lip: #B3A891; --ep-light-ink: #0B4A36; --ep-sign: #0B4A36;
+  --ep-group: #DDD3C0; --ep-group-hi: #E6DECD; --ep-group-lip: #B3A891; --ep-group-ink: #F05A24;
+  --ep-group-icon: #03382A; --ep-group-num: #03382A;
+  --ep-shift: #D3C9B5; --ep-shift-hi: #DCD3C1; --ep-shift-lip: #ABA089; --ep-shift-ink: #0B4A36;
+  --ep-rec: #F5501A; --ep-rec-hi: #FF6230; --ep-rec-lip: #B83A0C; --ep-rec-ink: #FFFFFF;
+  --ep-play: #00503A; --ep-play-hi: #0B5F45; --ep-play-lip: #00301F; --ep-play-ink: #F4F1E8;
+  --ep-play-lit: #147C4B; --ep-play-lit-hi: #1F8C58; --ep-play-lit-lip: #0B4A36;
+  --ep-fn: #E2DDCF; --ep-fn-hi: #ECE8DD; --ep-fn-lip: #B9AF9A; --ep-fn-ink: #0B4A36;
+  --ep-fn-orange: #F05A24; --ep-fn-orange-hi: #F86A30; --ep-fn-orange-lip: #B83A0C; --ep-fn-orange-ink: #FFF4EE;
+  --ep-fn-lighter: #D3C9B5; --ep-fn-lighter-hi: #DCD3C1; --ep-fn-lighter-lip: #ABA089; --ep-fn-lighter-ink: #0B4A36;
+  --ep-tile: #E6E2D6; --ep-tile-ink: #0B4A36; --ep-tile-edit: #ECE8DE;
+  --ep-tile-orange: #F05A24; --ep-tile-orange-ink: #FFF4EE;
+  --ep-tile-grey: #147C4B; --ep-tile-grey-ink: #F4F1E8;
+  --ep-pad: #E6E3DA; --ep-pad-hi: #EFEDE6; --ep-pad-lip: #B8AE98;
+  --ep-pad-ink: #03382A; --ep-pad-dim: #4F6B5C; --ep-pad-ring: #4F6B5C;
+}
+
+/* The EP-1320 Medieval: an olive gold body, the bottle green plate, smoked glass with red
+ * digits, oxblood pads with parchment figures, parchment keys with red letters, the vermilion
+ * RECORD (codex) and X knob, a bottle green PLAY (fabula), KEYS and FADER, the brown Y. */
+:root[data-skin=EP1320] {
+  --ep-body-1: #B09A5E; --ep-body-2: #A8945A; --ep-body-3: #8E7B45;
+  --ep-label: #3A2418; --ep-ink: #3A2418; --ep-plate-ink: #E8DCC8;
+  --ep-orange: #F06A4A; --ep-red: #B22E20; --ep-line: #3A2418;
+  --ep-focus: #3E1E18;
+  --ep-jack-out-1: #E4DFD6; --ep-jack-out-2: #D8D2C6; --ep-jack-out-ink: #3A2418; --ep-jack-out-ring: #BFB6A6;
+  --ep-jack-in-1: #B83426; --ep-jack-in-2: #AF2E20; --ep-jack-in-ink: #F2E8D6;
+  --ep-jack-sync-1: #34463F; --ep-jack-sync-2: #2F3F3A; --ep-jack-sync-ink: #E8DCC8; --ep-jack-sync-sub: #B9C4BC;
+  --ep-jack-usb-1: #4A2E22; --ep-jack-usb-2: #3E261C; --ep-jack-usb-ink: #E8DCC8;
+  --ep-jack-pow-ink: #3A2418; --ep-pow: #B22E20;
+  --ep-plate-1: #24302B; --ep-plate-2: #202B26; --ep-plate-3: #1C2622; --ep-plate-edge: #0E1411;
+  --ep-screw-1: #8A6A40; --ep-screw-2: #6E5232;
+  --ep-glass-1: #1C1815; --ep-glass-2: #161210; --ep-glass-3: #1A1513;
+  --ep-pin: #0E0B0A; --ep-pin-rim: #2A201C;
+  --ep-lcd-k: #0E0B0A; --ep-lcd-w: #E8DCC8;
+  --ep-seg-off: #2A201C; --ep-seg-on: #F2553A; --ep-seg-glow: rgb(242 85 58 / 0.5);
+  --ep-led-on: #F2553A; --ep-led-on-2: #C8281E; --ep-led-off: #6E5E3A; --ep-led-off-2: #574A2C;
+  --ep-knob-vol: #E5DCCF; --ep-knob-vol-hi: #F0E8DC; --ep-knob-vol-lo: #CFC3B0;
+  --ep-knob-vol-cap: #EAE2D6; --ep-knob-vol-cap-hi: #F4EDE3; --ep-knob-vol-cap-lo: #D8CDBC; --ep-knob-vol-mark: #3A2418;
+  --ep-knob-x: #B80D05; --ep-knob-x-hi: #CC2016; --ep-knob-x-lo: #8E0A04;
+  --ep-knob-x-cap: #C01810; --ep-knob-x-cap-hi: #D42A1E; --ep-knob-x-cap-lo: #9A0F07; --ep-knob-x-mark: #F2E8D6;
+  --ep-knob-y: #3A211C; --ep-knob-y-hi: #4A2B24; --ep-knob-y-lo: #2A1712;
+  --ep-knob-y-cap: #3E241E; --ep-knob-y-cap-hi: #4E2E26; --ep-knob-y-cap-lo: #2A1712; --ep-knob-y-mark: #E8DCC8;
+  --ep-badge-x: #B22E20; --ep-badge-y: #3A211C;
+  --ep-fader-cap: #1D2925;
+  --ep-well: #1A120E;
+  --ep-black: #25312D; --ep-black-hi: #2F3D38; --ep-black-lip: #141C19; --ep-black-ink: #E8DCC8;
+  --ep-light: #E4D6C4; --ep-light-hi: #EDE2D3; --ep-light-lip: #B9A78A; --ep-light-ink: #3A2418; --ep-sign: #3A2418;
+  --ep-group: #E6DCCB; --ep-group-hi: #EFE6D8; --ep-group-lip: #BBAA8E; --ep-group-ink: #B8231A;
+  --ep-group-icon: #3A2418; --ep-group-num: #3A2418;
+  --ep-shift: #A18549; --ep-shift-hi: #AE9255; --ep-shift-lip: #7E6834; --ep-shift-ink: #2A1A10;
+  --ep-rec: #B5170C; --ep-rec-hi: #C8281E; --ep-rec-lip: #7E1007; --ep-rec-ink: #F2E8D6;
+  --ep-play: #1A2A25; --ep-play-hi: #24362F; --ep-play-lip: #0B1411; --ep-play-ink: #E8DCC8;
+  --ep-play-lit: #2F4A40; --ep-play-lit-hi: #3A5A4E; --ep-play-lit-lip: #1A2A25;
+  --ep-fn: #3E2420; --ep-fn-hi: #4A2D28; --ep-fn-lip: #24130F; --ep-fn-ink: #E8DCC8;
+  --ep-fn-orange: #CE2F19; --ep-fn-orange-hi: #DC3E26; --ep-fn-orange-lip: #8E1E0E; --ep-fn-orange-ink: #F2E8D6;
+  --ep-fn-lighter: #DCCBBE; --ep-fn-lighter-hi: #E6D8CC; --ep-fn-lighter-lip: #B09C84; --ep-fn-lighter-ink: #3A2418;
+  --ep-tile: #DCCBBE; --ep-tile-ink: #3A2418; --ep-tile-edit: #E4D6C4;
+  --ep-tile-orange: #CE2F19; --ep-tile-orange-ink: #F2E8D6;
+  --ep-tile-grey: #25312D; --ep-tile-grey-ink: #E8DCC8;
+  --ep-pad: #3E1E18; --ep-pad-hi: #4A2620; --ep-pad-lip: #24110D;
+  --ep-pad-ink: #E8DCC8; --ep-pad-dim: #B9A58A; --ep-pad-ring: #B9A58A;
+}
+
+.ko-device {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+.ko-device__box { position: relative; flex: none; }
+/* The open panel (SAMPLE, STEP, SCENE) over the plate and the display, the device's width. */
+.ep-area { pointer-events: none; }
+.ko-device__panel { position: absolute; z-index: 4; left: 0; right: 0; top: 0; max-height: 100%; overflow: auto; }
+.ep {
+  --ep-font: 'Jost', var(--font);
+  --ep-thin: 300;
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1444px;
+  height: 1969px;
+  transform-origin: 0 0;
+  overflow: hidden;
+  border-radius: 9px;
+  isolation: isolate;
+  /* Matte bead-blasted plastic: a neutral grey with a soft falloff. */
+  background:
+    radial-gradient(120% 70% at 45% 38%, rgb(255 255 255 / 0.1), transparent 70%),
+    linear-gradient(180deg, var(--ep-body-1) 0%, var(--ep-body-2) 55%, var(--ep-body-3) 100%);
+  box-shadow:
+    inset 1px 1px 0 rgb(255 255 255 / 0.55),
+    inset -2px -2px 0 rgb(0 0 0 / 0.16),
+    0 0 0 1.5px rgb(0 0 0 / 0.18),
+    0 34px 60px -26px rgb(0 0 0 / 0.6),
+    0 8px 18px -8px rgb(0 0 0 / 0.25);
+  color: var(--ep-label);
+  font-family: var(--ep-font);
+  font-weight: var(--ep-thin);
+  -webkit-font-smoothing: antialiased;
+}
+/* The grain: one noise tile, soft-light, under every control. */
+.ep::before,
+.ep-plate::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.95' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 1'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 256px 256px;
+  mix-blend-mode: soft-light;
+  opacity: 0.22;
+  z-index: 0;
+}
+.ep-a { position: absolute; }
+.ep button { font-family: var(--ep-font); -webkit-tap-highlight-color: transparent; }
+.ep button:focus-visible,
+.ep [role='slider']:focus-visible { outline: 8px solid var(--ep-focus); outline-offset: 6px; }
+
+/* ---- the jacks: tabs flush with the top edge ---- */
+.ep-jack {
+  top: 0;
+  height: 62px;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: 0.07em;
+  border-radius: 0 0 3px 3px;
+  box-shadow: 0 3px 3px -1px rgb(0 0 0 / 0.28), 0 1px 0 rgb(0 0 0 / 0.18), inset 0 -2px 0 rgb(0 0 0 / 0.12);
+}
+.ep-jack--out { left: 68px; width: 130px; background: linear-gradient(180deg, var(--ep-jack-out-1), var(--ep-jack-out-2)); color: var(--ep-jack-out-ink); box-shadow: 0 3px 3px -1px rgb(0 0 0 / 0.22), inset 0 0 0 1px var(--ep-jack-out-ring); }
+.ep-jack--in { left: 330px; width: 130px; background: linear-gradient(180deg, var(--ep-jack-in-1), var(--ep-jack-in-2)); color: var(--ep-jack-in-ink); }
+.ep-jack--sync { left: 527px; width: 325px; padding: 0 34px; background: linear-gradient(180deg, var(--ep-jack-sync-1), var(--ep-jack-sync-2)); color: var(--ep-jack-sync-ink); grid-template-columns: 1fr 1fr; }
+.ep-jack--sync > span { position: relative; padding-top: 12px; }
+.ep-jack--sync i { position: absolute; top: -2px; font: 400 13px/1 var(--ep-font); color: var(--ep-jack-sync-sub); }
+.ep-jack--usb { left: 1050px; width: 130px; background: linear-gradient(180deg, var(--ep-jack-usb-1), var(--ep-jack-usb-2)); color: var(--ep-jack-usb-ink); }
+.ep-jack--pow { left: 1245px; width: 130px; color: var(--ep-jack-pow-ink); box-shadow: none; background: none; }
+.ep-pow { left: 1280px; top: 0; width: 32px; height: 9px; border-radius: 0 0 2px 2px; background: var(--ep-pow); box-shadow: 0 2px 2px rgb(0 0 0 / 0.25); }
+
+/* ---- the plate (the battery cover) and the speaker ---- */
+.ep-plate {
+  left: 0;
+  top: 66px;
+  width: 985px;
+  height: 393px;
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--ep-plate-1), var(--ep-plate-2) 40%, var(--ep-plate-3));
+  box-shadow: inset 0 2px 0 rgb(0 0 0 / 0.1), inset 0 3px 0 rgb(255 255 255 / 0.5), inset -2px 0 0 var(--ep-plate-edge), inset 1px 0 0 rgb(255 255 255 / 0.6);
+}
+.ep-plate::before { opacity: 0.16; }
+.ep-screw {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, var(--ep-screw-1) 0 15px, var(--ep-screw-2) 17px);
+  box-shadow: inset 1.5px 1.5px 2px rgb(0 0 0 / 0.18), inset -1px -1px 1px rgb(255 255 255 / 0.9), 0 0 0 1px rgb(0 0 0 / 0.05);
+}
+.ep-plate__title { left: 62px; top: 120px; display: flex; align-items: flex-start; gap: 14px; font-size: 82px; font-weight: var(--ep-thin); letter-spacing: 0.03em; line-height: 1; color: var(--ep-plate-ink); }
+.ep-plate__title svg { width: 50px; height: 58px; margin-top: 14px; }
+.ep-plate__title path { fill: none; stroke: var(--ep-plate-ink); stroke-width: 3.6; }
+/* The plate's name in each skin: the K.O. II's Jost; RIDDIM's chunky rounded face with SUPERTONE
+ * in orange; Medieval's blackletter, its M a red initial. */
+.ep-plate__title--riddim { top: 104px; align-items: baseline; font-family: 'Fredoka', var(--ep-font); font-weight: 600; font-size: 96px; letter-spacing: 0.01em; }
+.ep-plate__title--riddim small { font-family: var(--ep-font); font-size: 26px; font-weight: 500; letter-spacing: 0.14em; color: var(--ep-orange); }
+.ep-plate__title--medieval { top: 98px; font-family: 'UnifrakturMaguntia', serif; font-weight: 400; font-size: 104px; letter-spacing: 0; gap: 0; }
+.ep-plate__title--medieval b { font-weight: 400; color: #C8281E; }
+/* Both lines end clear of the plate's right-hand screws. */
+.ep-plate__status,
+.ep-plate__hit {
+  left: 66px;
+  width: 840px;
+  line-height: 1.25;
+  padding-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+}
+.ep-plate__status { top: 214px; font-size: 40px; font-weight: 400; letter-spacing: 0.01em; color: var(--ep-orange); }
+/* A page's line (the key layer's SOUND, EDIT, TEMPO …): a key to arc's own sheet, smaller to hold its knobs' names. */
+/* Two lines at most, so the knobs' and − / +'s words all show. */
+.ep-plate__page {
+  z-index: 2;
+  margin: 0;
+  padding: 0 0 4px;
+  border: 0;
+  background: none;
+  text-align: start;
+  font-size: 31px;
+  letter-spacing: 0.02em;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  cursor: pointer;
+}
+.ep-plate__page:hover { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 6px; }
+.ep-plate__hit { top: 398px; font-size: 42px; color: var(--ep-plate-ink); font-variant-numeric: tabular-nums; }
+.ep-grille { left: 985px; top: 66px; width: 459px; height: 393px; }
+.ep-grille svg { display: block; width: 100%; height: 100%; }
+
+/* ---- the display: a black glass band, its icons printed faintly, the lit ones bright ---- */
+.ep-disp {
+  left: 0;
+  top: 459px;
+  width: 1444px;
+  height: 396px;
+  background:
+    linear-gradient(180deg, rgb(0 0 0 / 0.55), transparent 10px),
+    linear-gradient(180deg, var(--ep-glass-1), var(--ep-glass-2) 50%, var(--ep-glass-3));
+  box-shadow:
+    inset 22px 0 18px -14px rgb(255 255 255 / 0.08),
+    inset -22px 0 18px -14px rgb(255 255 255 / 0.08),
+    inset 0 -1px 0 rgb(255 255 255 / 0.1),
+    0 10px 14px -6px rgb(0 0 0 / 0.45),
+    0 2px 0 rgb(0 0 0 / 0.35);
+}
+/* The glass's reflection, top left: under the icons, so the lit ones stay pure. It is cut from
+ * x 838 at the top to x 693 at y 705 (120.6°), with a soft edge. */
+.ep-disp__gloss {
+  left: 0;
+  top: 459px;
+  width: 1444px;
+  height: 246px;
+  pointer-events: none;
+  z-index: 1;
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.17), rgb(255 255 255 / 0.07) 45%, rgb(255 255 255 / 0));
+  -webkit-mask-image: linear-gradient(120.6deg, #000 719px, transparent 722px);
+  mask-image: linear-gradient(120.6deg, #000 719px, transparent 722px);
+  mix-blend-mode: screen;
+}
+.ep-disp__pin { width: 14px; height: 14px; border-radius: 50%; background: var(--ep-pin); box-shadow: 0 0 0 1px var(--ep-pin-rim), inset 0 1px 1px rgb(255 255 255 / 0.06); }
+.ep-lcd { --lcd-ghost: 0.06; --lcd-ghost-w: 0.05; left: 0; top: 459px; width: 1444px; height: 396px; z-index: 1; overflow: visible; }
+.ep-lcd text { font-family: var(--ep-font); }
+.ep-lcd .ic { opacity: var(--lcd-ghost); }
+.ep-lcd .ic.w { opacity: var(--lcd-ghost-w); }
+.ep-lcd .ic.on { opacity: 1; }
+.ep-lcd .ic * { fill: var(--c); }
+.ep-lcd .ic .s { fill: none; stroke: var(--c); }
+.ep-lcd .ic .k { fill: var(--ep-lcd-k); }
+.ep-lcd .ic text.w { fill: var(--ep-lcd-w); }
+.ep-lcd .seg .off { fill: var(--ep-seg-off); }
+.ep-lcd .seg .on { fill: var(--ep-seg-on); }
+.ep-lcd .seg-lit { filter: drop-shadow(0 0 4px var(--ep-seg-glow)); }
+.ep-rec.is-armed { animation: rec-blink 450ms ease-in-out infinite alternate; }
+
+/* ---- the printing: thin capitals and lines ---- */
+.ep-lbl { font-size: 22px; font-weight: 400; letter-spacing: 0.06em; white-space: nowrap; color: var(--ep-label); line-height: 1; z-index: 1; }
+.ep-lbl--red { color: var(--ep-red); }
+.ep-lbl--up { transform: translate(-50%, -50%) rotate(-90deg); }
+/* Jost has no arrow: Live's font draws it. */
+.ep-arr { font-family: var(--font); }
+.ep-line { background: var(--ep-line); z-index: 1; }
+.ep-line--red { background: var(--ep-red); }
+
+/* ---- the LEDs: a dark lens in a rim, --glow mixing it from off to on and lighting its halo ---- */
+.ep-led {
+  --g: var(--glow, 0);
+  width: 16px;
+  height: 16px;
+  margin: 2px;
+  border-radius: 50%;
+  z-index: 1;
+  background:
+    radial-gradient(circle at 42% 36%, rgb(255 255 255 / calc(0.15 * (1 - var(--g)) + 0.55 * var(--g))) 0 2.5px, transparent 4px),
+    radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--ep-led-on) calc(var(--g) * 100%), var(--ep-led-off)) 0 5.5px, color-mix(in oklab, var(--ep-led-on-2) calc(var(--g) * 100%), var(--ep-led-off-2)) 8px);
+  box-shadow:
+    0 0 0 1.5px rgb(0 0 0 / 0.22),
+    0 1.5px 0 1px rgb(255 255 255 / 0.35),
+    inset 0 1px 2px rgb(0 0 0 / calc(0.5 * (1 - var(--g)))),
+    0 0 calc(10px * var(--g)) calc(2px * var(--g)) rgb(255 70 10 / calc(0.6 * var(--g)));
+}
+.ep-led.is-on { --g: 1; }
+/* FADER held: a parameter the fader can take, dimly lit. */
+.ep-led.is-avail { --g: 0.3; }
+/* A group the FX bus silences (another soloed, or muted): dark, whatever sounds. */
+.ep-led.is-silenced { --g: 0 !important; opacity: 0.45; }
+/* A sounding group that is not the one shown: a dim ember that breathes. */
+.ep-led.is-sounding { animation: led-pulse 1.2s ease-in-out infinite alternate; }
+@keyframes led-pulse { to { opacity: 0.55; } }
+
+/* ---- the knobs: matte two-tier cylinders, a mark on the cap where they point (--turn) ---- */
+.ep-knob {
+  width: 130px;
+  height: 130px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: grab;
+  touch-action: none;
+  z-index: 1;
+  background: radial-gradient(circle at 42% 30%, var(--k-hi), var(--k) 62%, var(--k-lo) 100%);
+  box-shadow:
+    inset 0 2px 1px rgb(255 255 255 / var(--k-rim)),
+    inset 0 -3px 5px rgb(0 0 0 / 0.14),
+    0 0 0 1px rgb(0 0 0 / 0.14),
+    0 2px 1px rgb(0 0 0 / 0.22),
+    5px 10px 14px rgb(0 0 0 / 0.3),
+    2px 3px 4px rgb(0 0 0 / 0.16);
+}
+/* The cap's soft shadow on the skirt, then the cap. */
+.ep-knob::before {
+  content: '';
+  position: absolute;
+  left: 30px;
+  top: 34px;
+  width: 74px;
+  height: 74px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(0 0 0 / 0.32), rgb(0 0 0 / 0.12) 55%, transparent 72%);
+}
+.ep-knob::after {
+  content: '';
+  position: absolute;
+  left: 32px;
+  top: 30px;
+  width: 66px;
+  height: 66px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 44% 32%, var(--c-hi), var(--c) 70%, var(--c-lo));
+  box-shadow: inset 0 2px 1px rgb(255 255 255 / var(--c-rim)), inset 0 -2px 2px rgb(0 0 0 / 0.16), 0 0 0 1px rgb(0 0 0 / 0.1), 0 3px 2px rgb(0 0 0 / 0.2);
+}
+/* The mark: a short line from the cap's middle toward its rim, over the cap, sweeping 270°. */
+.ep-knob__mark {
+  position: absolute;
+  left: 32px;
+  top: 30px;
+  width: 66px;
+  height: 66px;
+  border-radius: 50%;
+  z-index: 1;
+  transform: rotate(var(--turn, 0deg));
+  pointer-events: none;
+}
+.ep-knob__mark::before {
+  content: '';
+  position: absolute;
+  left: 30px;
+  top: 5px;
+  width: 6px;
+  height: 22px;
+  border-radius: 3px;
+  background: var(--mark);
+  box-shadow: 0 1px 0 rgb(255 255 255 / var(--mark-lip));
+}
+/* Nothing to turn here (a page with no Y, TEMPO held for Y): the mark dims. */
+.ep-knob.is-resting { cursor: pointer; }
+.ep-knob.is-resting .ep-knob__mark { opacity: 0.35; }
+.ep-knob--vol { --mark: var(--ep-knob-vol-mark); --mark-lip: 0.5; }
+.ep-knob--x { --mark: var(--ep-knob-x-mark); --mark-lip: 0.25; }
+.ep-knob--y { --mark: var(--ep-knob-y-mark); --mark-lip: 0; }
+.ep-knob--vol { --k: var(--ep-knob-vol); --k-hi: var(--ep-knob-vol-hi); --k-lo: var(--ep-knob-vol-lo); --k-rim: 0.8; --c: var(--ep-knob-vol-cap); --c-hi: var(--ep-knob-vol-cap-hi); --c-lo: var(--ep-knob-vol-cap-lo); --c-rim: 0.9; }
+.ep-knob--x { --k: var(--ep-knob-x); --k-hi: var(--ep-knob-x-hi); --k-lo: var(--ep-knob-x-lo); --k-rim: 0.35; --c: var(--ep-knob-x-cap); --c-hi: var(--ep-knob-x-cap-hi); --c-lo: var(--ep-knob-x-cap-lo); --c-rim: 0.45; }
+.ep-knob--y { --k: var(--ep-knob-y); --k-hi: var(--ep-knob-y-hi); --k-lo: var(--ep-knob-y-lo); --k-rim: 0.12; --c: var(--ep-knob-y-cap); --c-hi: var(--ep-knob-y-cap-hi); --c-lo: var(--ep-knob-y-cap-lo); --c-rim: 0.2; }
+.ep-knob--y::before { background: radial-gradient(circle, rgb(0 0 0 / 0.55), rgb(0 0 0 / 0.25) 55%, transparent 72%); }
+.ep-badge { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 3px; font-size: 21px; font-weight: 400; color: var(--ep-badge-ink); z-index: 1; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.12); }
+.ep-badge--x { background: var(--ep-badge-x); }
+.ep-badge--y { background: var(--ep-badge-y); }
+
+/* ---- the fader: a cut slot, a flat warm-grey disc ---- */
+/* The cap sits at the group's level (--level, 0 at the bottom to 1 at the top; mid-slot without one). */
+.ep-fader { left: 70px; top: 1389px; width: 126px; height: 306px; padding: 0; border: 0; background: none; cursor: grab; touch-action: none; z-index: 1; }
+.ep-fader__slot {
+  position: absolute;
+  left: 54px;
+  top: 8px;
+  width: 19px;
+  height: 290px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #2E1E13 0, #160E09 18%, #0F0A07 60%, #120D0A);
+  box-shadow: inset 0 6px 7px #000, inset 2px 0 3px rgb(0 0 0 / 0.8), 0 -1px 0 rgb(0 0 0 / 0.25), 0 1.5px 0 rgb(255 255 255 / 0.45), 1px 0 0 rgb(255 255 255 / 0.2);
+}
+.ep-fader__tick { position: absolute; left: 5px; right: 8px; top: 149px; height: 2px; background: #1A1816; opacity: 0.85; }
+.ep-fader__cap {
+  position: absolute;
+  left: 32px;
+  top: calc(8px + (1 - var(--level, 0.513)) * 228px);
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  background: var(--ep-fader-cap);
+  box-shadow: inset 1px 2px 0 rgb(255 255 255 / 0.28), inset 0 -2px 0 rgb(0 0 0 / 0.25), 0 0 0 1px rgb(0 0 0 / 0.28), 5px 7px 10px rgb(0 0 0 / 0.35);
+}
+
+/* ---- the wells: each key sits in a near-black square ---- */
+.ep-well {
+  pointer-events: none;
+  background: var(--ep-well);
+  border-radius: 3px;
+  z-index: 1;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.3), -1px -1px 0 1px rgb(0 0 0 / 0.06), 1px 1px 0 1.5px rgb(255 255 255 / 0.28), 4px 7px 10px rgb(0 0 0 / 0.26);
+}
+
+/* ---- the caps: a top face, its lit top and left rim and the shaded lower lip (--cap, --lip) ----
+ * Each key is its whole well, so a press on the rim counts: a clear border is the well showing round
+ * the cap (3 units at the top and left, 6 to 7 at the bottom and right), the cap painted inside it
+ * with corners of 9. Outlines go round the border, so the inset ones count it in. */
+.ep-key,
+.ep-pad {
+  --cap: var(--ep-black);
+  --cap-hi: var(--ep-black-hi);
+  --lip: var(--ep-black-lip);
+  --rim: 0.13;
+  --sheen: 0.07;
+  padding: 0;
+  border: solid transparent;
+  border-width: 3px 6px 7px 3px;
+  border-radius: 12px 15px 15px 12px / 12px 12px 16px 16px;
+  z-index: 2;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  background:
+    radial-gradient(140% 90% at 22% 0%, rgb(255 255 255 / var(--sheen)), transparent 65%),
+    linear-gradient(180deg, var(--cap-hi), var(--cap) 55%);
+  background-clip: padding-box;
+  box-shadow:
+    inset 0 2px 0 rgb(255 255 255 / var(--rim)),
+    inset 2px 0 0 rgb(255 255 255 / calc(var(--rim) * 0.45)),
+    inset -2px -6px 0 var(--lip),
+    inset -3px -8px 2px -1px color-mix(in srgb, var(--lip) 60%, transparent),
+    inset 0 -14px 12px -8px color-mix(in srgb, var(--lip) 35%, transparent),
+    inset 0 0 0 1px rgb(0 0 0 / 0.18);
+  transition: transform 60ms, box-shadow 60ms;
+}
+.ep-key:active:not(:disabled),
+.ep-pad:active:not(:disabled),
+.ep-pad[data-down] {
+  transform: translate(1px, 3px);
+  box-shadow: inset 0 2px 0 rgb(255 255 255 / calc(var(--rim) * 0.6)), inset -2px -4px 0 var(--lip), inset 0 0 0 1px rgb(0 0 0 / 0.25);
+}
+.ep-key:disabled { cursor: default; }
+.ep-key[aria-disabled='true'] { opacity: 0.6; cursor: default; }
+.ep-key--black { color: var(--ep-black-ink); }
+.ep-key--light { --cap: var(--ep-light); --cap-hi: var(--ep-light-hi); --lip: var(--ep-light-lip); --rim: 0.75; --sheen: 0.25; color: var(--ep-light-ink); }
+.ep-key--group,
+.ep-key--shift { --cap: var(--ep-group); --cap-hi: var(--ep-group-hi); --lip: var(--ep-group-lip); --rim: 0.55; --sheen: 0.2; color: var(--ep-group-ink); }
+.ep-key--shift { --cap: var(--ep-shift); --cap-hi: var(--ep-shift-hi); --lip: var(--ep-shift-lip); color: var(--ep-shift-ink); text-shadow: 0 1px 0 rgb(0 0 0 / 0.18); }
+.ep-key--orange { --cap: var(--ep-rec); --cap-hi: var(--ep-rec-hi); --lip: var(--ep-rec-lip); --rim: 0.32; --sheen: 0.12; color: var(--ep-rec-ink); }
+.ep-key--grey { --cap: var(--ep-play); --cap-hi: var(--ep-play-hi); --lip: var(--ep-play-lip); --rim: 0.16; --sheen: 0.07; color: var(--ep-play-ink); }
+.ep-key--slim { display: grid; place-items: center; padding-bottom: 5px; font-size: 22px; font-weight: 400; letter-spacing: 0.06em; }
+.ep-key--word { display: grid; justify-items: center; align-content: start; padding-top: 17px; font-size: 22px; font-weight: 400; letter-spacing: 0.06em; }
+.ep-key--sign { display: grid; place-items: center; padding: 0 3px 6px 0; }
+.ep-key--sign svg { width: 44px; height: 44px; }
+.ep-key--sign path { fill: none; stroke: var(--ep-sign); stroke-width: 2.2; }
+.ep-key.is-sel { color: #FF6A2A; }
+/* The key layer's slim keys (KEYS, FADER, SHIFT) and group keys held, latched or clicked for the next key:
+ * their word lit signal orange in a glowing cap. */
+.ep-key--slim.is-lit,
+.ep-key--group.is-held {
+  color: #FF6A2A;
+  text-shadow: 0 0 8px rgb(255 106 42 / 0.75);
+  filter: drop-shadow(0 0 10px rgb(255 76 0 / 0.45));
+}
+.ep-key--group.is-held .ep-key__icon path { stroke: #FF6A2A; }
+/* Lit: cues in the cap (a brighter face, a glow), no rings. */
+.ep-key--grey.is-lit {
+  --cap: var(--ep-play-lit);
+  --cap-hi: var(--ep-play-lit-hi);
+  --lip: var(--ep-play-lit-lip);
+  --rim: 0.28;
+  --sheen: 0.1;
+  color: #FFFFFF;
+  text-shadow: 0 0 8px rgb(255 255 255 / 0.8);
+  filter: drop-shadow(0 0 7px rgb(255 255 255 / 0.3));
+}
+/* RECORD: lit while recording, blinking while armed. Lit is white-hot (a lighter cap, a bright sheen,
+ * the legend glowing white, a wide halo), well clear of the idle cap's orange. */
+.ep-key--orange.is-on {
+  --cap: #FF7A3C;
+  --cap-hi: #FF9A62;
+  --lip: #D24A10;
+  --rim: 0.6;
+  --sheen: 0.45;
+  color: #FFFFFF;
+  text-shadow: 0 0 6px #FFFFFF, 0 0 12px rgb(255 255 255 / 0.8);
+  filter: drop-shadow(0 0 22px rgb(255 90 20 / 0.8));
+}
+.ep-key--orange.is-armed { animation: ep-armed 900ms step-end infinite; }
+@keyframes ep-armed {
+  50% {
+    --cap: #FF7A3C;
+    --cap-hi: #FF9A62;
+    --lip: #D24A10;
+    --rim: 0.6;
+    --sheen: 0.45;
+    color: #FFFFFF;
+    text-shadow: 0 0 6px #FFFFFF, 0 0 12px rgb(255 255 255 / 0.8);
+    filter: drop-shadow(0 0 22px rgb(255 90 20 / 0.8));
+  }
+}
+.ep-key--group { text-align: start; }
+.ep-key__letter { position: absolute; left: 18px; top: 9px; font-size: 38px; font-weight: var(--ep-thin); line-height: 1; text-shadow: 0 1px 0 rgb(0 0 0 / 0.1); }
+.ep-key__icon { position: absolute; left: 19px; bottom: 25px; width: 24px; height: 24px; }
+.ep-key__icon path { fill: none; stroke: var(--ep-group-icon); stroke-width: 1.15; stroke-linecap: round; stroke-linejoin: round; }
+/* The group's pattern where the scene is worth saying, in the glyph's place; the one waiting blinks. */
+/* The numbers are state, not print: dark ink (and a deep orange waiting) so they read on the grey cap. */
+.ep-key__num { position: absolute; left: 19px; bottom: 20px; font-size: 26px; font-weight: 400; line-height: 1; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--ep-group-num); text-shadow: none; }
+.ep-key__num.is-queued { color: #A82C00; animation: scene-blink 700ms ease-in-out infinite alternate; }
+.ep-key--group.is-queued { outline: 6px solid #FF4C00; outline-offset: -9px; }
+
+/* Two-word keys: a short raised cap over a flat printed tile, in one well. Live's function keys on
+ * the drawn ones (SOUND, MAIN as PROJECT, TEMPO, FX, SAMPLE, ERASE) light a signal ring in the cap
+ * while on, and the cap orange while held. */
+.ep-key--split { border: 0; background: none; box-shadow: none; border-radius: 3px; overflow: visible; }
+.ep-key--split:active:not(:disabled) { transform: none; box-shadow: none; }
+.ep-h { position: absolute; display: grid; place-items: center; font-size: 22px; font-weight: 400; letter-spacing: 0.05em; white-space: nowrap; }
+.ep-key--split > .ep-h:first-child {
+  left: 4px;
+  top: 3px;
+  right: 6px;
+  height: 56px;
+  padding-bottom: 5px;
+  border-radius: 8px;
+  z-index: 1;
+  background:
+    radial-gradient(140% 90% at 22% 0%, rgb(255 255 255 / var(--sheen)), transparent 65%),
+    linear-gradient(180deg, var(--cap-hi), var(--cap) 55%);
+  box-shadow:
+    inset 0 2px 0 rgb(255 255 255 / var(--rim)),
+    inset 2px 0 0 rgb(255 255 255 / calc(var(--rim) * 0.45)),
+    inset -3px -6px 0 var(--lip),
+    inset -4px -8px 5px -3px color-mix(in srgb, var(--lip) 55%, transparent),
+    inset 0 0 0 1px rgb(0 0 0 / 0.2),
+    1px 5px 5px rgb(0 0 0 / 0.55);
+  transition: transform 60ms;
+}
+.ep-key--split:active > .ep-h:first-child {
+  transform: translate(1px, 3px);
+  box-shadow: inset 0 2px 0 rgb(255 255 255 / calc(var(--rim) * 0.6)), inset -2px -3px 0 var(--lip), 0 2px 2px rgb(0 0 0 / 0.5);
+}
+.ep-key--split > .ep-h:last-child {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: 66px;
+  padding-top: 2px;
+  border-radius: 0 0 3px 3px;
+  background: linear-gradient(180deg, rgb(0 0 0 / 0.32) 0, rgb(0 0 0 / 0.08) 9px, transparent 16px), var(--tile);
+  box-shadow: inset 0 -1px 0 rgb(0 0 0 / 0.12), inset 0 1px 0 rgb(0 0 0 / 0.2);
+}
+.ep-h--black { --cap: var(--ep-fn); --cap-hi: var(--ep-fn-hi); --lip: var(--ep-fn-lip); --rim: 0.14; --sheen: 0.05; color: var(--ep-fn-ink); }
+.ep-h--orange:first-child { --cap: var(--ep-fn-orange); --cap-hi: var(--ep-fn-orange-hi); --lip: var(--ep-fn-orange-lip); --rim: 0.32; --sheen: 0.12; color: var(--ep-fn-orange-ink); }
+.ep-h--lighter { --cap: var(--ep-fn-lighter); --cap-hi: var(--ep-fn-lighter-hi); --lip: var(--ep-fn-lighter-lip); --rim: 0.7; --sheen: 0.2; color: var(--ep-fn-lighter-ink); }
+.ep-h--light { --tile: var(--ep-tile); color: var(--ep-tile-ink); }
+.ep-h--light.ep-h--edit { --tile: var(--ep-tile-edit); }
+.ep-h--orange:last-child { --tile: var(--ep-tile-orange); color: var(--ep-tile-orange-ink); }
+.ep-h--grey { --tile: var(--ep-tile-grey); color: var(--ep-tile-grey-ink); }
+.ep-key--split.is-lit > .ep-h:first-child {
+  --ring: #FF4C00;
+  box-shadow: inset 0 0 0 3px var(--ring), inset 0 2px 0 rgb(255 255 255 / var(--rim)), inset -3px -6px 0 var(--lip), 1px 5px 5px rgb(0 0 0 / 0.55), 0 0 18px 2px rgb(255 76 0 / 0.45);
+}
+/* On SAMPLE's orange cap the ring is white. */
+.ep-key--split.is-lit > .ep-h--orange:first-child { --ring: #FFF4EE; }
+.ep-key--split.is-held > .ep-h:first-child { --cap: #F24C14; --cap-hi: #FF5A1E; --lip: #B83204; --rim: 0.32; --sheen: 0.12; color: #FFFFFF; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ep-rec.is-armed,
+  .ep-key--orange.is-armed,
+  .ep-led.is-sounding,
+  .ep-key__num.is-queued { animation: none; }
+  .ep-key,
+  .ep-pad,
+  .ep-key--split > .ep-h:first-child { transition: none; }
+}
+
+/* ---- the pads: black caps; a sounding one lights whole, from a deep ember to signal orange with its
+ * glow (--glow: the grid's, 0..1; --on: lit at all, fading out below a quarter) ---- */
+.ep-pad {
+  --on: clamp(0, var(--glow, 0) * 4, 1);
+  --on-pct: calc(var(--on) * 100%);
+  --glow-pct: calc(var(--glow, 0) * 100%);
+  --cap: color-mix(in oklab, color-mix(in oklab, #FF5A1E var(--glow-pct), #B8360A) var(--on-pct), var(--ep-pad));
+  --cap-hi: color-mix(in oklab, color-mix(in oklab, #FF6E33 var(--glow-pct), #C4400F) var(--on-pct), var(--ep-pad-hi));
+  --lip: color-mix(in oklab, color-mix(in oklab, #A33000 var(--glow-pct), #7A2200) var(--on-pct), var(--ep-pad-lip));
+  --rim: calc(0.13 + 0.2 * var(--on));
+  text-align: start;
+  color: var(--ep-pad-ink);
+  touch-action: none;
+  -webkit-touch-callout: none;
+  filter: drop-shadow(0 0 calc(24px * var(--glow, 0)) rgb(255 76 0 / calc(0.55 * var(--glow, 0))));
+}
+.ep-pad:disabled { cursor: default; }
+.ep-pad.is-playing::after { content: ''; position: absolute; inset: -3px; border: 4px solid #FF4C00; border-radius: 11px; pointer-events: none; }
+.ep-pad__num { position: absolute; left: 19px; top: 12px; font-size: 40px; font-weight: var(--ep-thin); line-height: 1; letter-spacing: 0; }
+.ep-pad__num--word { left: 0; right: 3px; top: 17px; text-align: center; font-size: 22px; font-weight: 400; letter-spacing: 0.06em; }
+.ep-pad__num--dot { left: 25px; top: 27px; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.ep-pad__name {
+  position: absolute;
+  left: 18px;
+  right: 12px;
+  bottom: 14px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+  color: color-mix(in oklab, #FFFFFF var(--hot-pct), var(--ep-pad-dim));
+}
+/* KEYS: the note in a thin ring that goes white and glows as it sounds; orange for the octave above. */
+.ep-pad__ring {
+  position: absolute;
+  left: 50%;
+  top: 47%;
+  width: 72px;
+  height: 72px;
+  margin: -36px 0 0 -38px;
+  display: grid;
+  place-items: center;
+  border: 2.5px solid color-mix(in oklab, #FFFFFF var(--glow-pct), var(--ep-pad-ring));
+  border-radius: 50%;
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-indent: 0.06em;
+  box-shadow: inset 0 0 calc(10px * var(--glow, 0)) rgb(255 255 255 / calc(0.25 * var(--glow, 0)));
+}
+.ep-pad--upper .ep-pad__ring { border-color: color-mix(in oklab, #FFFFFF var(--hot-pct), #FF5A1E); }
+.ep-pad__oct { position: absolute; right: 16px; bottom: 14px; font-size: 18px; font-weight: 400; color: color-mix(in oklab, rgb(255 255 255 / 0.75) var(--hot-pct), var(--ep-pad-dim)); }
+
+/* ---- Live's states on the drawn pads (MirrorScreen.css's .live-pad ones, in the drawing's units) ---- */
+.ep-pad.is-editing::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 5px solid color-mix(in oklab, #FF4C00 75%, transparent);
+  border-radius: 9px;
+  pointer-events: none;
+}
+.ep-pad__swap,
+.ep-pad__drop {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #FF4C00;
+  color: #FFFFFF;
+  line-height: 1;
+}
+.ep-pad__swap { top: auto; bottom: 14px; width: 42px; height: 42px; font-size: 28px; }
+.ep-pad__drop { padding: 7px 10px; font-size: 20px; font-weight: 500; letter-spacing: 0.04em; }
+.ep-pad.is-drop { outline: 6px dashed #FF4C00; outline-offset: 6px; }
+.ep-pad.is-erase-dim { opacity: 0.45; }
+.ep-pad.is-erase-dot::before {
+  content: '';
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #FF4C00;
+  pointer-events: none;
+}
+.ep-pad.is-step-lit,
+.ep-pad.is-arp-held,
+.ep-pad.is-sample-empty,
+.ep-pad.is-sample-filled { outline: 5px solid #FF4C00; outline-offset: -14px; }
+.ep-pad.is-step-picked,
+.ep-pad.is-sample-waiting,
+.ep-pad.is-sample-recording { outline: 8px solid #FF4C00; outline-offset: -16px; }
+.ep-pad.is-step-lit .ep-pad__num,
+.ep-pad.is-step-picked .ep-pad__num { color: #FF4C00; }
+.ep-pad.is-step-picked { filter: drop-shadow(0 0 10px rgb(255 76 0 / 0.45)); }
+.ep-pad.is-sample-recording { --cap: #FF4C00; --cap-hi: #FF5A1E; --lip: #A33000; }
+.ep-pad__nudge {
+  position: absolute;
+  left: 14px;
+  right: 16px;
+  bottom: 14px;
+  padding: 4px 0;
+  border-radius: 5px;
+  background: #FF4C00;
+  color: #FFFFFF;
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-align: center;
+}
+.ep-pad.is-sample-empty { animation: sample-blink 900ms ease-in-out infinite alternate; }
+@media (prefers-reduced-motion: reduce) {
+  .ep-pad.is-sample-empty { animation: none; outline-color: color-mix(in srgb, #FF4C00 45%, transparent); }
+}
+.ep-pad[data-arp-order]::after {
+  content: attr(data-arp-order);
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  font-size: 24px;
+  font-weight: 500;
+  color: color-mix(in oklab, #FFFFFF var(--hot-pct), #FF4C00);
+}
+/* FX held: the pads are the punch-ins, the effect's name where the pad prints its sound. */
+.ep-punch {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 14px 10px 16px 14px;
+}
+.ep-punch .live-punch__name { font-size: 21px; font-weight: 400; letter-spacing: 0.02em; overflow-wrap: normal; word-break: normal; hyphens: none; }
+.ep-punch .live-punch__hold { font-size: 20px; font-weight: 400; color: var(--ep-pad-dim); }
+.ep-punch.is-held .live-punch__hold { color: #FFFFFF; }
+.ep-punch .live-punch__bar { height: 10px; margin-bottom: 4px; }
+
+/* ---- a key's shortcuts ---- */
+.ep-card {
+  position: absolute;
+  z-index: 3;
+  width: 300px;
+  max-width: calc(100% - 8px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  padding: var(--space-14) var(--space-16);
+  border-radius: var(--radius-sheet, 14px);
+  background: var(--key);
+  color: var(--ink);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 0.28);
+}
+.ep-card:focus { outline: none; }
+.ep-card__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); }
+.ep-card__title { color: var(--graphite); }
+.ep-card__close { border: 0; background: none; color: var(--graphite); font-size: 22px; line-height: 1; cursor: pointer; padding: 0 4px; }
+.ep-card__row { display: flex; flex-direction: column; gap: var(--space-4); }
+.ep-card__text { margin: 0; }
+.ep-card__note { margin: 0; padding-top: var(--space-8); border-top: 1px solid var(--key-edge); color: var(--graphite); }
+.ep-card__more { align-self: flex-start; border: 0; padding: 0; background: none; color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; }
+.ep-card__more:focus-visible, .ep-card__close:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }

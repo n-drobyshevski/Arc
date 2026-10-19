@@ -4,7 +4,7 @@
 // how lit a pad is, how lit a group is, whether a fade is still running, the
 // two-octave keyboard's geometry and the display's main line.
 //
-// Web delta: times are milliseconds on the MIDI event clock (performance.now),
+// Web deltas: times are milliseconds on the MIDI event clock (performance.now),
 // where the Kotlin uses System.nanoTime; FADE_NS 300 ms is FADE_MS here.
 
 import type { Hit, MirrorState, PadLight } from '../../core/features/liveMirror'
@@ -92,7 +92,8 @@ export function keysLayout(last: number): KeyRect[] {
 
 /**
  * The display's main line: the error, "Reading…", the hit, offline the time
- * of the last read ("Last seen Oct 5, 2:02 PM"), or "Press a pad".
+ * of the last read ("Last seen Oct 5, 2:02 PM"), or "Press a pad". That Live's
+ * sound plays late is not said here but by the top bar's Bluetooth key.
  */
 export function displayLine(st: MirrorState, mirror: MirrorUi | null): string {
   const hit: Hit | null = st.lastHit
@@ -108,9 +109,9 @@ export function showOffline(st: MirrorState, mirror: MirrorUi | null): boolean {
   return mirror?.offline != null && st.playing === null
 }
 
-/** The offline line ("Last seen …") is longer than a hit: the display draws it a size down (22 for 26). */
+/** The offline line ("Last seen …") and "Press a pad on the EP-133." are longer than a hit: the display draws them a size down (22 for 26). */
 export function displayLineSmall(st: MirrorState, mirror: MirrorUi | null): boolean {
-  return mirror?.offline != null && st.lastHit === null
+  return st.lastHit === null && mirror?.error == null && mirror?.loading !== true
 }
 
 /** The all-groups display's transport word: "▶ Playing", "■ Stopped", or nothing before any clock. */

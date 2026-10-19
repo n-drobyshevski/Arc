@@ -285,11 +285,11 @@ describe('TourTest', () => {
     expect(Tour.target(CONNECT)).toBe('top.connection')
     expect(Tour.target(PAD)).toBe('live.pads')
     expect(Tour.target(HEAR)).toBe('live.pads')
-    expect(Tour.target(BACKUP)).toBe('top.backup')
+    expect(Tour.target(BACKUP)).toBe('backups.backup')
     expect(Tour.target(WELCOME)).toBeNull()
     expect(Tour.target(DONE)).toBeNull()
     // Every id is a coach mark the app has (Coach.kt's call sites).
-    const marks = new Set(['top.connection', 'live.pads', 'top.backup', 'top.help', 'edge.guide', 'side.more', 'top.sections'])
+    const marks = new Set(['top.connection', 'live.pads', 'backups.backup', 'top.help', 'edge.guide', 'side.more', 'top.sections'])
     expect(Tour.target(TOOLS)).toBe('side.more')
     expect(Tour.target(GUIDE)).toBe('edge.guide')
     expect(Tour.target(SECTIONS)).toBe('top.sections')

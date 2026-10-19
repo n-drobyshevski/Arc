@@ -252,7 +252,8 @@ object Tour {
     fun target(step: TourStep): String? = when (step) {
         TourStep.CONNECT -> "top.connection"
         TourStep.PAD, TourStep.HEAR -> "live.pads"
-        TourStep.BACKUP -> "top.backup"
+        // Back up is the first key of the Backups caption row: the step shows on Backups.
+        TourStep.BACKUP -> "backups.backup"
         TourStep.TOOLS -> "side.more"
         TourStep.GUIDE -> "edge.guide"
         TourStep.SECTIONS -> "top.sections"

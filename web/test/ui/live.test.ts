@@ -7,6 +7,7 @@ import { emptyMirrorState, type MirrorUi } from '../../src/state/types'
 import {
   FADE_MS,
   displayLine,
+  displayLineSmall,
   fading,
   glow,
   glowCss,
@@ -103,6 +104,22 @@ describe('display', () => {
     expect(displayLine(st({ lastHit: hit }), ui({ loading: true }))).toBe('A 7 · 001 kick · 124')
     expect(displayLine(st(), ui())).toBe(MirrorText.WAITING)
     expect(displayLine(st(), null)).toBe(MirrorText.WAITING)
+  })
+
+  it('leaves "plays late" to the top bar: the main line is the same, offline or not', () => {
+    const offline = ui({ offline: MirrorText.lastSeen('5 Oct, 14:02') })
+    expect(displayLine(st(), offline)).toBe(MirrorText.lastSeen('5 Oct, 14:02'))
+    expect(displayLine(st(), null)).toBe(MirrorText.WAITING)
+  })
+
+  it('draws the lines that are longer than a hit a size down: offline and waiting', () => {
+    const offline = ui({ offline: MirrorText.lastSeen('5 Oct, 14:02') })
+    expect(displayLineSmall(st(), offline)).toBe(true)
+    expect(displayLineSmall(st(), ui())).toBe(true)
+    expect(displayLineSmall(st(), null)).toBe(true)
+    expect(displayLineSmall(st({ lastHit: hit }), ui())).toBe(false)
+    expect(displayLineSmall(st(), ui({ loading: true }))).toBe(false)
+    expect(displayLineSmall(st(), ui({ error: 'Nope' }))).toBe(false)
   })
 
   it('shows the transport only once the clock said something', () => {

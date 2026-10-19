@@ -7,11 +7,19 @@
 // controller's dismissToast) when its time is up. A new id restarts the timer.
 // The last message stays rendered while the toast fades out.
 //
+// Web: a toast may carry a key (Live's UNDO, ToastMsg.action) at its end, in
+// signal orange; it stays 6 s (Kotlin's toast with an action), so there is time to press it.
+//
 // Swiping it sideways or down dismisses it at once, as with a notification
 // (past 30% of its width sideways, half its height down, or a fling faster
 // than 700 px/s that way); a shorter drag springs back. It fades as it leaves
 // and never moves up (that would cover the page). Screen readers get a
 // Dismiss key (Kotlin's custom accessibility action), shown when focused.
+//
+// On a short window (under 480 high) with a top bar whose middle is at least
+// 200 wide (TopBar's data-bar-slot), it sits over that middle, two lines at
+// most: a tap unfolds the rest and starts its time again, and it is swiped
+// away up or sideways, out of the bar (Kotlin's bar toast).
 import type { CSSProperties, JSX, TargetedPointerEvent } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { SettingsText } from '../../core/text/settingsText'
@@ -21,11 +29,14 @@ import './Toast.css'
 
 export const TOAST_MS = 3200
 export const ERROR_TOAST_MS = 7000
+/** A toast with a key to press (UNDO), as Components.kt's 6000. */
+export const ACTION_TOAST_MS = 6000
 /** The fade (Compose fadeIn() / fadeOut() default tween). */
 const FADE_MS = 150
 
-export function toastDuration(error: boolean): number {
-  return error ? ERROR_TOAST_MS : TOAST_MS
+/** How long a toast stays: longest for an error, longer for one with a key to press. */
+export function toastDuration(error: boolean, action = false): number {
+  return error ? ERROR_TOAST_MS : action ? ACTION_TOAST_MS : TOAST_MS
 }
 
 /** A fling faster than this (px/s, Kotlin 700.dp) dismisses the toast that way. */
@@ -42,26 +53,38 @@ export interface ToastDrag {
   /** The toast's size. */
   readonly width: number
   readonly height: number
+  /** In the top bar: it leaves up (dy never positive) instead of down. */
+  readonly up?: boolean
 }
 
-/** What a finished drag does: 'side' or 'down' dismisses it that way, 'back' springs it back. */
-export function swipeOutcome(d: ToastDrag): 'side' | 'down' | 'back' {
+/** What a finished drag does: 'side', 'down' or (in the bar) 'up' dismisses it that way, 'back' springs it back. */
+export function swipeOutcome(d: ToastDrag): 'side' | 'down' | 'up' | 'back' {
   const sideways = Math.abs(d.dx) > d.width * 0.3 || (Math.abs(d.vx) > TOAST_FLING && Math.abs(d.vx) > Math.abs(d.vy))
-  const down = d.dy > d.height * 0.5 || (d.vy > TOAST_FLING && d.vy > Math.abs(d.vx))
-  if (!sideways && !down) return 'back'
-  // Off the way it was going (Kotlin: |dx| >= dy goes sideways).
-  return Math.abs(d.dx) >= d.dy ? 'side' : 'down'
+  const away = d.up ? -d.dy : d.dy
+  const awayV = d.up ? -d.vy : d.vy
+  const off = away > d.height * 0.5 || (awayV > TOAST_FLING && awayV > Math.abs(d.vx))
+  if (!sideways && !off) return 'back'
+  // Off the way it was going (Kotlin: |dx| >= dy goes sideways); a fling from where it lay, the way it was flung.
+  const side = Math.abs(d.dx) === away ? Math.abs(d.vx) >= awayV : Math.abs(d.dx) > away
+  if (side) return 'side'
+  return d.up ? 'up' : 'down'
 }
 
-/** Where a dismissed toast goes: 1.2 widths sideways (the way it went) or 1.5 heights down. */
-export function swipeTarget(way: 'side' | 'down', dx: number, width: number, height: number): { x: number; y: number } {
+/** Where a dismissed toast goes: 1.2 widths sideways (the way it went), or 1.5 heights down (up, in the bar). */
+export function swipeTarget(way: 'side' | 'down' | 'up', dx: number, width: number, height: number): { x: number; y: number } {
   if (way === 'side') return { x: dx < 0 ? -width * 1.2 : width * 1.2, y: 0 }
-  return { x: 0, y: height * 1.5 }
+  return { x: 0, y: way === 'up' ? -height * 1.5 : height * 1.5 }
+}
+
+/** Whether the toast sits in the top bar now: a short window with a bar middle wide enough (TopBar's data-bar-slot). */
+export function toastInBar(): boolean {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return false
+  return (window.matchMedia?.('(max-height: 479.98px)').matches ?? false) && document.documentElement.hasAttribute('data-bar-slot')
 }
 
 /** The toast's opacity while dragged: it fades as it leaves, to 30%. */
 export function swipeAlpha(dx: number, dy: number, width: number, height: number): number {
-  const gone = Math.max(Math.abs(dx) / Math.max(1, width), dy / Math.max(1, height))
+  const gone = Math.max(Math.abs(dx) / Math.max(1, width), Math.abs(dy) / Math.max(1, height))
   return 1 - 0.7 * Math.min(1, Math.max(0, gone))
 }
 
@@ -78,6 +101,8 @@ export function velocityOf(samples: readonly { t: number; x: number; y: number }
 export interface ToastProps {
   toast: ToastMsg | null
   onTimeout: (id: number) => void
+  /** The toast's key was pressed (ToastMsg.action). */
+  onAction?: (id: number) => void
   /** Room left at the bottom (px), above anything docked there. */
   bottomInset?: number
 }
@@ -89,6 +114,8 @@ export function Toast(props: ToastProps): JSX.Element {
   const timeout = useRef(onTimeout)
   timeout.current = onTimeout
   const id = toast?.id ?? null
+  // Unfolded in the bar: its time starts again.
+  const [renewed, setRenewed] = useState(0)
 
   // Show the new message and time it out.
   useEffect(() => {
@@ -98,9 +125,9 @@ export function Toast(props: ToastProps): JSX.Element {
     }
     setShown(toast)
     setVisible(true)
-    const handle = window.setTimeout(() => timeout.current(toast.id), toastDuration(toast.error))
+    const handle = window.setTimeout(() => timeout.current(toast.id), toastDuration(toast.error, toast.action !== undefined))
     return () => window.clearTimeout(handle)
-  }, [id])
+  }, [id, renewed])
 
   // Drop the stale message once the fade-out is over.
   useEffect(() => {
@@ -114,7 +141,16 @@ export function Toast(props: ToastProps): JSX.Element {
       {/* A persistent polite live region, so each new message is announced. */}
       <div class="toast-frame">
         <div role="status" aria-live="polite" aria-atomic="true" class="toast-live">
-          {shown && <ToastCard key={shown.id} toast={shown} visible={visible} onDismiss={(id) => timeout.current(id)} />}
+          {shown && (
+            <ToastCard
+              key={shown.id}
+              toast={shown}
+              visible={visible}
+              onDismiss={(id) => timeout.current(id)}
+              onAction={(id) => props.onAction?.(id)}
+              onUnfold={() => setRenewed((n) => n + 1)}
+            />
+          )}
         </div>
         {/* Outside the live region, so it is not read out with every message. */}
         {shown && visible && (
@@ -135,9 +171,17 @@ interface Drag {
 }
 
 /** One message; its own drag state, so each toast starts in place. */
-function ToastCard(props: { toast: ToastMsg; visible: boolean; onDismiss: (id: number) => void }): JSX.Element {
+function ToastCard(props: {
+  toast: ToastMsg
+  visible: boolean
+  onDismiss: (id: number) => void
+  onAction: (id: number) => void
+  /** Tapped in the bar: the whole text shows, and its time starts again. */
+  onUnfold: () => void
+}): JSX.Element {
   const { toast, visible } = props
   const [drag, setDrag] = useState<Drag>({ x: 0, y: 0, mode: 'rest' })
+  const [unfolded, setUnfolded] = useState(false)
   const el = useRef<HTMLDivElement | null>(null)
   const start = useRef<{ id: number; x: number; y: number; dx: number; dy: number; moved: boolean } | null>(null)
   const samples = useRef<{ t: number; x: number; y: number }[]>([])
@@ -155,6 +199,8 @@ function ToastCard(props: { toast: ToastMsg; visible: boolean; onDismiss: (id: n
 
   const onPointerDown = (e: TargetedPointerEvent<HTMLDivElement>): void => {
     if (drag.mode === 'gone' || (e.pointerType === 'mouse' && e.button !== 0)) return
+    // The key takes its own tap.
+    if (e.target instanceof Element && e.target.closest('.toast__action')) return
     start.current = { id: e.pointerId, x: e.clientX, y: e.clientY, dx: drag.x, dy: drag.y, moved: false }
     samples.current = [{ t: e.timeStamp, x: e.clientX, y: e.clientY }]
   }
@@ -176,18 +222,26 @@ function ToastCard(props: { toast: ToastMsg; visible: boolean; onDismiss: (id: n
     }
     samples.current.push({ t: e.timeStamp, x: e.clientX, y: e.clientY })
     if (samples.current.length > 20) samples.current.shift()
-    // Down only: up would cover the page.
-    setDrag({ x: s.dx + mx, y: Math.max(0, s.dy + my), mode: 'drag' })
+    // Down only (up would cover the page); in the top bar, up only (out of the bar).
+    const y = s.dy + my
+    setDrag({ x: s.dx + mx, y: toastInBar() ? Math.min(0, y) : Math.max(0, y), mode: 'drag' })
   }
 
   const onPointerEnd = (e: TargetedPointerEvent<HTMLDivElement>, cancelled: boolean): void => {
     const s = start.current
     if (!s || s.id !== e.pointerId) return
     start.current = null
-    if (!s.moved) return
+    if (!s.moved) {
+      // A tap in the bar unfolds the rest of a long message (Kotlin: two lines, a tap shows all).
+      if (!cancelled && toastInBar() && !unfolded) {
+        setUnfolded(true)
+        props.onUnfold()
+      }
+      return
+    }
     const { w, h } = size()
     const { vx, vy } = velocityOf(samples.current)
-    const way = cancelled ? 'back' : swipeOutcome({ dx: drag.x, dy: drag.y, vx, vy, width: w, height: h })
+    const way = cancelled ? 'back' : swipeOutcome({ dx: drag.x, dy: drag.y, vx, vy, width: w, height: h, up: toastInBar() })
     if (way === 'back') {
       setDrag({ x: 0, y: 0, mode: 'back' })
       return
@@ -205,7 +259,7 @@ function ToastCard(props: { toast: ToastMsg; visible: boolean; onDismiss: (id: n
   return (
     <div
       ref={el}
-      class={`toast${toast.error ? ' toast--error' : ''}${visible ? ' is-visible' : ''}${drag.mode === 'drag' ? ' is-dragging' : ''}${drag.mode === 'back' ? ' is-returning' : ''}${drag.mode === 'gone' ? ' is-leaving' : ''}`}
+      class={`toast${toast.error ? ' toast--error' : ''}${unfolded ? ' is-unfolded' : ''}${visible ? ' is-visible' : ''}${drag.mode === 'drag' ? ' is-dragging' : ''}${drag.mode === 'back' ? ' is-returning' : ''}${drag.mode === 'gone' ? ' is-leaving' : ''}`}
       style={style}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -216,6 +270,11 @@ function ToastCard(props: { toast: ToastMsg; visible: boolean; onDismiss: (id: n
       }}
     >
       <span class="toast__text">{toast.text}</span>
+      {toast.action !== undefined && (
+        <button type="button" class="toast__action" onClick={() => props.onAction(toast.id)}>
+          {toast.action}
+        </button>
+      )}
     </div>
   )
 }
@@ -223,5 +282,12 @@ function ToastCard(props: { toast: ToastMsg; visible: boolean; onDismiss: (id: n
 /** The app's toast, wired to the controller's toast state and dismissToast. */
 export function ControllerToast(props: { controller: ArcController; bottomInset?: number }): JSX.Element {
   const c = props.controller
-  return <Toast toast={c.state.value.toast} onTimeout={(id) => c.dismissToast(id)} bottomInset={props.bottomInset} />
+  return (
+    <Toast
+      toast={c.state.value.toast}
+      onTimeout={(id) => c.dismissToast(id)}
+      onAction={(id) => c.runToastAction(id)}
+      bottomInset={props.bottomInset}
+    />
+  )
 }

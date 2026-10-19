@@ -1,0 +1,329 @@
+# Synth line cases, shared by Arc's Kotlin and TypeScript readers and scripts/beatcard.py.
+=== minimal
+ARC BEAT 1
+[A] bars 1 step 1/16
+synth A7 kick
+A7 kick | X... .... X... .... |
+--- expect
+--- python
+
+=== every-key
+ARC BEAT 1
+[B] bars 1 step 1/16
+synth B7 bass note C2 wave square chord oct attack 3 decay 25 length 1.25 tone 30 reso 75 sweep 70 bend 5 click 10 noise 5 snap 20 drive 40 detune 10 level 90 seed 7 name acid_bass
+B7 bass | X... .... X... .... |
+--- expect
+--- python
+
+=== any-case
+ARC BEAT 1
+[A] bars 1 step 1/16
+SYNTH A7 KICK DECAY 10 decay 20 Wave SAW name Decay
+--- expect
+--- python
+
+=== header
+ARC BEAT 1
+synth A7 kick
+[A] bars 1 step 1/16
+A7 kick | X... .... X... .... |
+--- expect
+2 error 'synth' needs a section first, such as [A].
+--- python
+2 error synth-outside-section
+
+=== after-notes
+ARC BEAT 1
+[A] bars 1 step 1/16
+A7 kick | X... .... X... .... |
+notes
+A1 at 1.1.1 note C4
+synth A1 sub note C2
+--- expect
+6 warning Put synth lines before notes, so older Arc can read the card.
+--- python
+6 warning synth-after-notes
+
+=== bar
+ARC BEAT 1
+[A] bars 1 step 1/16
+synth A7 kick | name x
+--- expect
+3 error A synth line can't hold a |.
+--- python
+3 error bad-synth-line
+
+=== too-short
+ARC BEAT 1
+[A] bars 1 step 1/16
+synth A7
+synth
+--- expect
+3 error A synth line needs a pad and a sound type, as in synth A7 kick.
+4 error A synth line needs a pad and a sound type, as in synth A7 kick.
+--- python
+3 error bad-synth-line
+4 error bad-synth-line
+
+=== pad-and-group
+ARC BEAT 1
+[A] bars 1 step 1/16
+synth A13 kick
+synth B7 kick
+--- expect
+3 error 'A13' isn't a pad. Use A to D, then . 0 E or 1 to 9.
+4 error B7 is in group B, but the section is [A].
+--- python
+3 error bad-pad
+4 error wrong-group
+
+=== unknown-type
+ARC BEAT 1
+[A] bars 1 step 1/16
+synth A7 kik decay 40
+synth A8 Kick
+--- expect
+3 warning Unknown sound type 'kik' on A7 synth, line ignored.
+--- python
+3 warning unknown-synth-type
+
+=== unknown-setting
+ARC BEAT 1
+[A] bars 1 step 1/16
+synth A7 kick foo 3 tone 40
+synth A8 kick foo tone 40
+synth A9 kick Foo bar baz tone 40
+synth A4 kick tone 40 foo
+--- expect
+3 warning Unknown setting 'foo' on A7 synth, ignored.
+4 warning Unknown setting 'foo' on A8 synth, ignored.
+5 warning Unknown setting 'Foo' on A9 synth, ignored.
+5 warning Unknown setting 'baz' on A9 synth, ignored.
+6 warning Unknown setting 'foo' on A4 synth, ignored.
+--- python
+3 warning unknown-synth-setting
+4 warning unknown-synth-setting
+5 warning unknown-synth-setting
+5 warning unknown-synth-setting
+6 warning unknown-synth-setting
+
+=== unknown-words
+ARC BEAT 1
+[C] bars 1 step 1/16
+synth C7 stab wave pulse chord dim7 tone 50
+--- expect
+3 warning C7 synth: unknown wave 'pulse', ignored.
+3 warning C7 synth: unknown chord 'dim7', ignored.
+--- python
+3 warning unknown-synth-word
+3 warning unknown-synth-word
+
+=== knobs-bad
+ARC BEAT 1
+[A] bars 1 step 1/16
+synth A1 kick decay 101
+synth A2 kick decay -1
+synth A3 kick decay 1.5
+synth A4 kick decay ٣
+synth A5 kick level 0
+synth A6 kick seed 1000
+synth A8 kick tone +40
+--- expect
+3 error A1 synth: decay must be a whole number from 0 to 100.
+4 error A2 synth: decay must be a whole number from 0 to 100.
+5 error A3 synth: decay must be a whole number from 0 to 100.
+6 error A4 synth: decay must be a whole number from 0 to 100.
+7 error A5 synth: level must be a whole number from 1 to 100.
+8 error A6 synth: seed must be a whole number from 0 to 999.
+9 error A8 synth: tone must be a whole number from 0 to 100.
+--- python
+3 error bad-synth-line
+4 error bad-synth-line
+5 error bad-synth-line
+6 error bad-synth-line
+7 error bad-synth-line
+8 error bad-synth-line
+9 error bad-synth-line
+
+=== knobs-edges
+ARC BEAT 1
+[A] bars 1 step 1/16
+synth A7 kick attack 0 decay 100 level 1 seed 999
+synth A8 kick tone 000 drive 007
+--- expect
+--- python
+
+=== notes-bad
+ARC BEAT 1
+[A] bars 1 step 1/16
+synth A1 sub note C8
+synth A2 sub note Db2
+synth A3 sub note c2
+synth A4 sub note B-1
+synth A9 sub note C#7
+--- expect
+3 error A1 synth: note must be C0 to C7, such as C2 or F#1.
+4 error A2 synth: note must be C0 to C7, such as C2 or F#1.
+5 error A3 synth: note must be C0 to C7, such as C2 or F#1.
+6 error A4 synth: note must be C0 to C7, such as C2 or F#1.
+7 error A9 synth: note must be C0 to C7, such as C2 or F#1.
+--- python
+3 error bad-synth-line
+4 error bad-synth-line
+5 error bad-synth-line
+6 error bad-synth-line
+7 error bad-synth-line
+
+=== notes-edges
+ARC BEAT 1
+[A] bars 1 step 1/16
+synth A5 sub note C0
+synth A6 sub note C7
+synth A7 sub note F#1
+--- expect
+--- python
+
+=== lengths-bad
+ARC BEAT 1
+[D] bars 1 step 1/16
+synth D1 riser length 0.04
+synth D2 riser length 4.01
+synth D3 riser length 1.255
+synth D4 riser length .5
+--- expect
+3 error D1 synth: length must be 0.05 to 4 seconds, with up to two decimals.
+4 error D2 synth: length must be 0.05 to 4 seconds, with up to two decimals.
+5 error D3 synth: length must be 0.05 to 4 seconds, with up to two decimals.
+6 error D4 synth: length must be 0.05 to 4 seconds, with up to two decimals.
+--- python
+3 error bad-synth-line
+4 error bad-synth-line
+5 error bad-synth-line
+6 error bad-synth-line
+
+=== lengths-ok
+ARC BEAT 1
+[D] bars 1 step 1/16
+synth D5 riser length 4
+synth D6 riser length 0.5
+synth D7 riser length 0.05
+synth D8 riser length 2.50
+--- expect
+--- python
+
+=== missing-value
+ARC BEAT 1
+[A] bars 1 step 1/16
+synth A7 kick decay
+synth A8 kick name
+--- expect
+3 error A7 synth: decay needs a value.
+4 error A8 synth: name needs a value.
+--- python
+3 error bad-synth-line
+4 error bad-synth-line
+
+=== names
+ARC BEAT 1
+[A] bars 1 step 1/16
+synth A1 kick name 808_kick
+synth A4 kick name a_very_long_kick_name
+synth A5 kick name 808 kick
+--- expect
+4 warning A4 synth: name cut to 13 characters.
+5 warning Unknown setting 'kick' on A5 synth, ignored.
+--- python
+4 warning long-synth-name
+5 warning unknown-synth-setting
+
+=== bad-names
+ARC BEAT 1
+[A] bars 1 step 1/16
+synth A2 kick name _kick
+synth A3 kick name kick.1
+synth A6 kick name 808é
+--- expect
+3 error A2 synth: name must be one word of letters, digits, _ or -, starting with a letter or digit.
+4 error A3 synth: name must be one word of letters, digits, _ or -, starting with a letter or digit.
+5 error A6 synth: name must be one word of letters, digits, _ or -, starting with a letter or digit.
+--- python
+3 error bad-synth-line
+4 error bad-synth-line
+5 error bad-synth-line
+
+=== duplicate
+ARC BEAT 1
+[A] bars 1 step 1/16
+synth A7 kick decay 40
+synth A7 kick decay 60
+--- expect
+4 warning A7 has two synth lines, kept the later.
+--- python
+4 warning duplicate-synth
+
+=== duplicate-with-error
+ARC BEAT 1
+[A] bars 1 step 1/16
+synth A7 kick decay 40
+synth A7 kick decay 101
+--- expect
+4 error A7 synth: decay must be a whole number from 0 to 100.
+--- python
+4 error bad-synth-line
+
+=== one-line-order
+ARC BEAT 1
+[A] bars 1 step 1/16
+A7 kick | X... .... X... .... |
+notes
+synth A7 kick foo 1 wave pulse decay 200
+--- expect
+5 warning Put synth lines before notes, so older Arc can read the card.
+5 warning Unknown setting 'foo' on A7 synth, ignored.
+5 warning A7 synth: unknown wave 'pulse', ignored.
+5 error A7 synth: decay must be a whole number from 0 to 100.
+--- python
+5 warning synth-after-notes
+5 warning unknown-synth-setting
+5 warning unknown-synth-word
+5 error bad-synth-line
+
+=== skipped-section
+ARC BEAT 1
+[A] bars 0 step 1/16
+synth A7 kick decay 500
+--- expect
+2 error bars must be a whole number from 1 to 99.
+--- python
+2 error bad-bars
+
+=== sound-and-synth
+ARC BEAT 1
+[A] bars 1 step 1/16
+sound A7 1 MICRO KICK
+synth A7 kick name kick
+A7 kick | X... .... X... .... |
+--- expect
+--- python
+
+=== scenes
+ARC BEAT 1
+scene
+[A] bars 1 step 1/16
+synth A7 kick decay 40
+A7 kick | X... .... X... .... |
+scene
+[A] bars 1 step 1/16
+synth A7 kick decay 60
+A7 kick | X... .... X... .... |
+--- expect
+--- python
+
+=== silent-pads
+ARC BEAT 1
+[A] bars 1 step 1/16
+synth A7 kick
+A7 kick | X... .... X... .... |
+A8 snare | .... X... .... X... |
+--- expect
+--- python

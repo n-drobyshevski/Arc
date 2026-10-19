@@ -12,7 +12,7 @@ import { readFile } from '../../src/platform/files/pick'
 import { openMidi, probePermission, requestMidiAccess, watchMidi, webMidiSupported } from '../../src/platform/midi/webmidi'
 import { nullChannel } from '../../src/platform/storage/channel'
 import { Library } from '../../src/platform/storage/library'
-import { CoachPrefs, LastReadPrefs, MirrorPrefs, SettingsStore, memoryStorage, type KeyValueStorage } from '../../src/platform/storage/settings'
+import { CoachPrefs, LastReadPrefs, OfflinePadsPrefs, MirrorPrefs, SettingsStore, memoryStorage, type KeyValueStorage } from '../../src/platform/storage/settings'
 import { createController, type ArcController } from '../../src/state/controller'
 import type { Deps } from '../../src/state/deps'
 import { activeProject, sameBpm, sameMirrorState } from '../../src/state/mirror'
@@ -72,6 +72,7 @@ async function harness(storage: KeyValueStorage = memoryStorage()): Promise<Harn
     liveAudio: fakeLiveAudio(),
     padSounds,
     lastRead: new LastReadPrefs(storage),
+    offlinePads: new OfflinePadsPrefs(storage),
     wakeLock: { set: async () => {} },
     trafficLog: new TrafficLog(),
     now: () => Date.now(),
@@ -175,6 +176,39 @@ describe('live mirror', () => {
     h.ep.input.receive([0x80, NOTE_A7, 0])
     s = await until(h, (st) => st.mirror?.state.pads.get(padKeyOf(A7))?.offAt != null)
     await until(h, (st) => st.mirror?.state.pads.has(padKeyOf(A7)) === false)
+  })
+
+  it('publishes at the next frame, once for a burst of notes, and nothing while idle', async () => {
+    const h = await live()
+    let last = h.c.state.value.mirror
+    let publishes = 0
+    const off = h.c.store.subscribe((st) => {
+      if (st.mirror === last) return
+      last = st.mirror
+      publishes++
+    })
+    try {
+      // No polling: an idle mirror publishes nothing.
+      await sleep(120)
+      expect(publishes).toBe(0)
+      h.ep.input.receive([0x90, NOTE_A7, 100])
+      h.ep.input.receive([0x90, 40, 90])
+      h.ep.input.receive([0x90, 41, 80])
+      const s = await until(h, (st) => st.mirror?.state.notes.size === 3)
+      expect(s.mirror!.state.pads.has(padKeyOf(A7))).toBe(true)
+      expect(publishes).toBe(1)
+      // Held notes have nothing left to time out: still nothing more.
+      await sleep(120)
+      expect(publishes).toBe(1)
+      // Released, each drops once faded (one timer, no loop).
+      h.ep.input.receive([0x80, NOTE_A7, 0])
+      h.ep.input.receive([0x80, 40, 0])
+      h.ep.input.receive([0x80, 41, 0])
+      await until(h, (st) => st.mirror?.state.notes.size === 0)
+      expect(publishes).toBe(3)
+    } finally {
+      off()
+    }
   })
 
   it('names pads straight away with links learned in an earlier session', async () => {

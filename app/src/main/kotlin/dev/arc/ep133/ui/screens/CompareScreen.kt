@@ -64,9 +64,9 @@ fun CompareScreen(
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             Modifier
+                .windowInsetsPadding(WindowInsets.safeDrawing)
                 .widthIn(max = 560.dp)
-                .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.safeDrawing),
+                .fillMaxWidth(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {

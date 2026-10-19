@@ -40,6 +40,18 @@ export function encodeWav(pcm: Uint8Array, channels: number, sampleRate: number)
   return out
 }
 
+/**
+ * Wav.header: the 44-byte header for [dataBytes] of 16-bit PCM, for audio
+ * written as it is recorded (Live's takes). Sizes wrap as in Kotlin's toUint32.
+ */
+export function wavHeader(dataBytes: number, channels: number, sampleRate: number): Uint8Array {
+  const out = encodeWav(new Uint8Array(0), channels, sampleRate)
+  const dv = new DataView(out.buffer)
+  dv.setUint32(4, (36 + dataBytes) >>> 0, true)
+  dv.setUint32(40, dataBytes >>> 0, true)
+  return out
+}
+
 /** Whether s16le PCM holds no sound at all: every sample is 0, or there are no samples. */
 export function isSilent(pcm: Uint8Array): boolean {
   for (let i = 0; i + 1 < pcm.length; i += 2) {

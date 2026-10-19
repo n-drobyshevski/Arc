@@ -8,7 +8,7 @@
 import type { JSX } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { peaks as samplePeaks, frames as sampleFrames, type Peak } from '../../core/features/sampleTrim'
-import { resolvedTheme } from '../theme/theme'
+import { resolvedSkin, resolvedTheme } from '../theme/theme'
 import './Waveform.css'
 
 /** TrimSheet.kt COLUMNS. */
@@ -77,6 +77,7 @@ export function Waveform(props: WaveformProps): JSX.Element {
   const canvas = useRef<HTMLCanvasElement>(null)
   const [width, setWidth] = useState(0)
   const theme = resolvedTheme.value
+  const skin = resolvedSkin.value
   const peaks = useMemo(() => samplePeaks(pcm, channels, columns), [pcm, channels, columns])
   const n = useMemo(() => sampleFrames(pcm, channels), [pcm, channels])
 
@@ -112,7 +113,7 @@ export function Waveform(props: WaveformProps): JSX.Element {
       ctx.fillRect(bar.x, bar.y, bar.w, bar.h)
     }
     ctx.globalAlpha = 1
-  }, [peaks, n, start, end, width, height, theme])
+  }, [peaks, n, start, end, width, height, theme, skin])
 
   return (
     <canvas

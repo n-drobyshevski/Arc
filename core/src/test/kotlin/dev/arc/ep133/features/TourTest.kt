@@ -276,11 +276,11 @@ class TourTest {
         assertEquals("top.connection", Tour.target(CONNECT))
         assertEquals("live.pads", Tour.target(PAD))
         assertEquals("live.pads", Tour.target(HEAR))
-        assertEquals("top.backup", Tour.target(BACKUP))
+        assertEquals("backups.backup", Tour.target(BACKUP))
         assertNull(Tour.target(WELCOME))
         assertNull(Tour.target(DONE))
         // Every id is a coach mark the app has (Coach.kt's call sites).
-        val marks = setOf("top.connection", "live.pads", "top.backup", "top.help", "edge.guide", "side.more", "top.sections")
+        val marks = setOf("top.connection", "live.pads", "backups.backup", "top.help", "edge.guide", "side.more", "top.sections")
         assertEquals("side.more", Tour.target(TOOLS))
         assertEquals("edge.guide", Tour.target(GUIDE))
         assertEquals("top.sections", Tour.target(SECTIONS))

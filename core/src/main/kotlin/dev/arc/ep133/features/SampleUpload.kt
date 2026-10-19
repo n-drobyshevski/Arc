@@ -67,6 +67,38 @@ object SampleUpload {
         return PakSound(i.slot, i.name, wav, settings)
     }
 
+    /**
+     * Live's "Upload a new sample…" on a pad (an addition): [wav] goes into
+     * the first free slot, through [upload], then onto [target]'s pad with
+     * [Device.assignPad]. Returns the slot it went into. The slots in use are
+     * listed on the device first, besides [occupied] (the caller's own list,
+     * which can be stale): a sound recorded on the EP-133 meanwhile, or an
+     * earlier upload whose assignment failed, is never overwritten. A given
+     * [slot] (SAMPLE's review picks one) is used only while that list still
+     * has it free; otherwise the upload fails with nothing written.
+     */
+    suspend fun uploadToPad(
+        session: Session,
+        fileName: String,
+        wav: ByteArray,
+        occupied: Set<Int>,
+        target: PadTarget,
+        trim: IntRange? = null,
+        onProgress: (Progress) -> Unit = {},
+        signal: CancelSignal? = null,
+        slot: Int? = null,
+    ): Int {
+        val used = occupied + Device.listSounds(session).map { it.slot }
+        if (slot != null && slot in used) throw UploadError(slotTaken(slot))
+        val into = slot ?: nextFree(used, emptySet()) ?: throw UploadError(dev.arc.ep133.text.MirrorText.NO_FREE_SLOT)
+        upload(session, listOf(UploadItem(into, nameFor(fileName), wav, trim)), onProgress, signal)
+        Device.assignPad(session, target.project, target.group, target.pad, into)
+        return into
+    }
+
+    /** Why a picked slot can't be used: a sound went there after it was picked. */
+    private fun slotTaken(slot: Int) = "Slot $slot has a sound now. Pick another slot."
+
     suspend fun upload(
         session: Session,
         items: List<UploadItem>,

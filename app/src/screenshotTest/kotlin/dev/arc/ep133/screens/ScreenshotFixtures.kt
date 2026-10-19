@@ -1,6 +1,16 @@
 package dev.arc.ep133.screens
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.DpRect
 import dev.arc.ep133.controller.DeviceSummary
 import dev.arc.ep133.controller.UiState
 import dev.arc.ep133.features.Hit
@@ -12,10 +22,18 @@ import dev.arc.ep133.protocol.DeviceInfo
 import dev.arc.ep133.protocol.Storage
 import dev.arc.ep133.text.BackupDevice
 import dev.arc.ep133.text.BackupRecord
+import dev.arc.ep133.text.SkinChoice
 import dev.arc.ep133.ui.components.ArcShell
+import dev.arc.ep133.ui.components.ArcToast
+import dev.arc.ep133.ui.components.BarSlot
 import dev.arc.ep133.ui.components.CoachHost
+import dev.arc.ep133.ui.components.LateKey
+import dev.arc.ep133.ui.components.LocalArcWindow
+import dev.arc.ep133.ui.components.LocalBarSlot
+import dev.arc.ep133.ui.components.SampleKey
 import dev.arc.ep133.ui.components.Tab
 import dev.arc.ep133.ui.screens.GuideScreen
+import dev.arc.ep133.ui.screens.liveInBar
 import dev.arc.ep133.ui.theme.ArcTheme
 
 /*
@@ -51,34 +69,67 @@ internal val playing = MirrorState(
     padOrder = PadOrder.FROM_TOP,
 )
 
-// Not connected: the pads and names as arc last read them, nothing lit.
-internal val lastRead = MirrorState(activeProject = 3, learned = (0..11).associateWith { it + 1 })
-
-/** A section as the app shows it: the top bar with its section tag, and the guide tab on the left edge. */
+/**
+ * A section as the app shows it: the top bar with its section tag, and the guide tab on the left edge.
+ * On a phone on its side Live's display line ([pill]) rides in the top bar, as MainActivity puts it.
+ */
 @Composable
 internal fun Framed(
     tab: Tab,
     connected: Boolean = true,
     dark: Boolean = false,
+    skin: SkinChoice = SkinChoice.EP133,
     guide: Boolean = false,
     menu: Boolean = false,
     guideOpen: Boolean = false,
+    pill: (@Composable BoxScope.() -> Unit)? = null,
+    /** A toast showing, and (in a short window) where the bar's middle is: the bar reports it a frame late. */
+    toast: String? = null,
+    barMiddle: DpRect? = null,
+    /** The toast's action key ("UNDO"). */
+    toastAction: String? = null,
+    /** Live's mic key in the top bar, as MainActivity has it on Live (here unlit unless given). */
+    sample: SampleKey? = if (tab == Tab.LIVE) SampleKey(false) {} else null,
+    /** Live's Bluetooth key in the top bar, while the sound goes to Bluetooth. */
+    late: LateKey? = null,
+    /** The connection key's ring part-way, as while it is held. */
+    holdProgress: Float = 0f,
     content: @Composable () -> Unit,
 ) {
-    ArcTheme(dark = dark) {
-        CoachHost(visible = guide, onDismiss = {}) {
-            ArcShell(
-                tab = tab, onTab = {},
-                connected = connected, canConnect = true, canBackup = connected,
-                onBackup = {}, onConnect = {}, onDebug = {}, onSettings = {}, onHelp = {},
-                guideOpen = guideOpen, onGuide = {},
-                guide = { GuideScreen(onBack = {}) },
-                initialMenuOpen = menu,
-                content = content,
-            )
+    ArcTheme(dark = dark, skin = skin) {
+        val density = LocalDensity.current
+        val slot = LocalBarSlot.current
+        val placed = remember(barMiddle) {
+            barMiddle?.let { m -> BarSlot().apply { bounds = with(density) { Rect(m.left.toPx(), m.top.toPx(), m.right.toPx(), m.bottom.toPx()) } } }
+        }
+        CompositionLocalProvider(LocalBarSlot provides (placed ?: slot)) {
+            Box(Modifier.fillMaxSize()) {
+                CoachHost(visible = guide, onDismiss = {}) {
+                    ArcShell(
+                        tab = tab, onTab = {},
+                        connected = connected, canConnect = true,
+                        onConnect = {}, onDisconnect = {}, onHint = {}, haptics = false, onDebug = {}, onSettings = {}, onHelp = {},
+                        guideOpen = guideOpen, onGuide = {},
+                        guide = { GuideScreen(onBack = {}) },
+                        middle = pill.takeIf { tab == Tab.LIVE && liveInBar(LocalArcWindow.current) },
+                        initialMenuOpen = menu,
+                        sample = sample,
+                        late = late,
+                        holdProgress = holdProgress,
+                        content = content,
+                    )
+                }
+                ArcToast(
+                    id = toast?.let { 1L }, text = toast.orEmpty(), error = false, onTimeout = {}, modifier = Modifier.align(Alignment.BottomCenter),
+                    action = toastAction, onAction = toastAction?.let { { } },
+                )
+            }
         }
     }
 }
+
+// Not connected: the pads and names as arc last read them, nothing lit.
+internal val lastRead = MirrorState(activeProject = 3, learned = (0..11).associateWith { it + 1 })
 
 internal val device = BackupDevice("EP-133", "TE032AS001", "", "2.5.1")
 

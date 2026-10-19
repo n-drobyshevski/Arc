@@ -8,14 +8,16 @@ import { readFile } from '../../src/platform/files/pick'
 import { openMidi, probePermission, requestMidiAccess, watchMidi, webMidiSupported } from '../../src/platform/midi/webmidi'
 import { nullChannel } from '../../src/platform/storage/channel'
 import { Library } from '../../src/platform/storage/library'
-import { CoachPrefs, LastReadPrefs, MirrorPrefs, SettingsStore, memoryStorage } from '../../src/platform/storage/settings'
+import { CoachPrefs, LastReadPrefs, LIVE_PAD_SETTINGS_KEY, OfflinePadsPrefs, MirrorPrefs, PatternPrefs, SettingsStore, memoryStorage } from '../../src/platform/storage/settings'
 import { createController, type ArcController } from '../../src/state/controller'
-import type { Deps } from '../../src/state/deps'
+import type { Deps, FactoryDeps } from '../../src/state/deps'
 import type { ToastMsg, UiState } from '../../src/state/types'
 import { DemoData } from '../helpers/demoData'
 import { connectMock, fakeNavigator, type FakeEp } from '../helpers/fakeMidiAccess'
 import type { MockEP133 } from '../helpers/mockDevice'
 import { fakeLiveAudio, type FakeLiveAudio } from './fakeLiveAudio'
+import { MemorySampleStore } from '../../src/platform/storage/sampleStore'
+import { memoryTakeStore } from '../../src/platform/storage/takeStore'
 
 let dbCount = 0
 
@@ -28,8 +30,12 @@ export interface LiveHarness {
   storage: ReturnType<typeof memoryStorage>
   padSounds: ReturnType<typeof memoryPadSoundStore>
   liveAudio: FakeLiveAudio
+  takes: ReturnType<typeof memoryTakeStore>
+  samples: MemorySampleStore
   toasts: ToastMsg[]
   setVisible(v: boolean): void
+  /** The page is going away (pagehide). */
+  pageHide(): void
 }
 
 export interface LiveHarnessOptions {
@@ -39,6 +45,10 @@ export interface LiveHarnessOptions {
   /** No EP-133 plugged in. */
   unplugged?: boolean
   now?: () => number
+  /** The fake output has a `late` signal of its own, as the real LiveAudio. */
+  late?: boolean
+  /** teenage engineering's site, for the factory sounds. */
+  factory?: FactoryDeps
 }
 
 const all: LiveHarness[] = []
@@ -63,8 +73,11 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
   const library = opts.library ?? (await freshLibrary())
   const storage = opts.storage ?? memoryStorage()
   const padSounds = opts.padSounds ?? memoryPadSoundStore()
-  const liveAudio = fakeLiveAudio()
+  const liveAudio = fakeLiveAudio(opts.late ?? false)
+  const takes = memoryTakeStore()
+  const samples = new MemorySampleStore()
   const visListeners = new Set<(v: boolean) => void>()
+  const hideListeners = new Set<() => void>()
   let visible = true
   const deps: Deps = {
     midi: {
@@ -79,12 +92,18 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
     settings: new SettingsStore(storage),
     mirrorPrefs: new MirrorPrefs(storage),
     coach: new CoachPrefs(storage),
+    patternPrefs: new PatternPrefs(storage),
     files: { pick: async () => [], read: (f) => readFile(f), save: async () => 'saved', canPickFolder: () => false, pickFolder: async () => null },
     share: { share: async () => 'shared' },
     player: new NullPlayer(),
     liveAudio,
     padSounds,
+    takes,
+    samples,
     lastRead: new LastReadPrefs(storage),
+    offlinePads: new OfflinePadsPrefs(storage),
+    offlinePadSettings: new OfflinePadsPrefs(storage, LIVE_PAD_SETTINGS_KEY),
+    factory: opts.factory,
     wakeLock: { set: async () => {} },
     trafficLog: new TrafficLog(),
     now: opts.now ?? (() => Date.now()),
@@ -97,6 +116,10 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
       subscribe: (l) => {
         visListeners.add(l)
         return () => visListeners.delete(l)
+      },
+      onPageHide: (l) => {
+        hideListeners.add(l)
+        return () => hideListeners.delete(l)
       },
     },
     title: { get: () => 'arc', set: () => {} },
@@ -117,10 +140,15 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
     storage,
     padSounds,
     liveAudio,
+    takes,
+    samples,
     toasts,
     setVisible(v) {
       visible = v
       for (const l of [...visListeners]) l(v)
+    },
+    pageHide() {
+      for (const l of [...hideListeners]) l()
     },
   }
   all.push(h)

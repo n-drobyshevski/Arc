@@ -1,4 +1,6 @@
-/* Port of the layout of app/src/main/kotlin/dev/arc/ep133/MainActivity.kt (Root's Box(fillMaxSize)). */
+/* Port of the layout of app/src/main/kotlin/dev/arc/ep133/MainActivity.kt (Root's Box(fillMaxSize)).
+ *
+ * Web only, from 1024px wide: the desk (app.tsx renders .desk only there). */
 
 .app {
   position: relative;
@@ -9,6 +11,23 @@
 .app__screen {
   position: relative;
   min-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+}
+
+/* ---------- the desk (web only, from 1024px wide) ---------- */
+
+/* [ruled edge | nav rail | page column | ruled edge] on the desk's grey
+ * (theme/desk.css paints the edges). The page column is .app__screen: the shell
+ * keeps its window height and scrolls inside, full screens scroll the page
+ * while the rail stays put (sticky). */
+@media (min-width: 1024px) {
+  .desk {
+    display: grid;
+    grid-template-columns: var(--rail-width) minmax(0, 1fr);
+    align-items: start;
+    min-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    padding-inline: var(--desk-gutter);
+  }
+  .desk > .app__screen { min-width: 0; }
 }
 
 /* ---------- the toast's top-layer popover (ToastLayer) ---------- */

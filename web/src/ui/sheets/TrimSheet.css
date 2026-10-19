@@ -16,3 +16,21 @@
   margin-top: var(--space-2);
 }
 .trim-sheet__row > .key { flex: 1 1 0; min-width: 0; }
+
+/* A short window (Kotlin TrimSheet's short layout): the waveform, range and selection on the left,
+ * the keys stacked small on the right; elsewhere the wrappers are nothing of their own. */
+.trim-sheet__split,
+.trim-sheet__main,
+.trim-sheet__keys { display: contents; }
+@media (max-height: 479.98px) {
+  .trim-sheet__split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.6fr);
+    gap: 20px;
+    align-items: start;
+  }
+  .trim-sheet__main,
+  .trim-sheet__keys { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .trim-sheet__keys .trim-sheet__row { flex-direction: column; margin-top: 0; }
+  .trim-sheet__keys .key { min-height: 40px; }
+}

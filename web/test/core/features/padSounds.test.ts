@@ -89,6 +89,28 @@ describe('PadSoundCache', () => {
     expect(dir.files.size).toBe(0)
   })
 
+  it("copies lists each copy's name by slot, after a restart too", async () => {
+    const { cache } = setup()
+    const c = cache()
+    expect(await c.copies()).toEqual(new Map())
+    await c.put(5, 'kick', 100, filled(10))
+    await c.put(7, 'Snare.wav', 100, filled(10))
+    expect(await c.copies()).toEqual(
+      new Map([
+        [5, 'kick'],
+        [7, 'Snare.wav'],
+      ]),
+    )
+    expect(await cache().copies()).toEqual(
+      new Map([
+        [5, 'kick'],
+        [7, 'Snare.wav'],
+      ]),
+    )
+    await c.clear()
+    expect(await c.copies()).toEqual(new Map())
+  })
+
   // Web cases.
 
   it('keeps the index in the order it was written, as Kotlin does', async () => {
@@ -146,6 +168,29 @@ describe('PadSounds', () => {
     ]
     expect(PadSounds.newestBackupWith(5, 'kick', names, [old, neu, other])).toBe(neu)
     expect(PadSounds.newestBackupWith(7, 'kick', names, [old, neu, other])).toBeNull()
+  })
+
+  it("the sounds arc can't play without the device", () => {
+    const names = new Map([
+      [1, 'kick'],
+      [2, 'snare'],
+      [3, 'hat'],
+      [4, '004.pcm'],
+      [5, 'my take'],
+    ])
+    const copies = new Map([
+      [1, 'KICK'],
+      [2, 'old snare'],
+    ])
+    const entries: NameEntry[] = [
+      { backupId: 'b', slot: 3, name: 'hat.wav' },
+      { backupId: 'b', slot: 5, name: 'other take' },
+      { backupId: 'c', slot: 2, name: 'clap' },
+    ]
+    // 1 has a copy, 3 a backup; 2's copy and 5's backup are other sounds now; 4 needs the pack.
+    expect(PadSounds.unavailable(names, copies, entries, false)).toEqual(new Set([2, 4, 5]))
+    expect(PadSounds.unavailable(names, copies, entries, true)).toEqual(new Set([2, 5]))
+    expect(PadSounds.unavailable(new Map(), copies, entries, false)).toEqual(new Set())
   })
 
   it('names match ignoring case, spacing and a .wav ending', () => {

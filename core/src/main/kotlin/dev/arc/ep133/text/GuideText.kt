@@ -50,6 +50,110 @@ object GuideText {
     }
     const val NO_MATCHES = "Nothing matches."
 
+    // The redesigned list: a search that says how many there are, and tags before the caps.
+    /** "Search 93 shortcuts". */
+    fun searchCount(n: Int) = "Search $n shortcuts"
+
+    /** "SOUND MODE", the tag for a combo that starts in a mode (GuideKeymap.mode). */
+    fun modeTag(mode: String) = "${mode.uppercase()} MODE"
+
+    /** The tag before a key that is held, typed on, turned, moved or pressed twice (the caps' badges, DIAL read as TYPE). */
+    fun tag(action: KeyAction): String = when (action) {
+        KeyAction.DIAL -> "TYPE"
+        else -> badge(action)
+    }
+
+    /** A numbered step's tag in the illustration ("1 HOLD"); a plain press has none. */
+    fun stepTag(kind: StepKind): String? = when (kind) {
+        StepKind.PRESS -> null
+        StepKind.TWICE -> badge(KeyAction.TWICE)
+        StepKind.HOLD -> "HOLD"
+        StepKind.TYPE -> "TYPE"
+        StepKind.TURN -> "TURN"
+        StepKind.MOVE -> "MOVE"
+    }
+
+    /** What a step asks, in the expanded row's numbered steps: "hold", then the keys. */
+    fun stepWord(kind: StepKind): String = when (kind) {
+        StepKind.PRESS -> "press"
+        StepKind.TWICE -> "press twice"
+        StepKind.HOLD -> "hold"
+        StepKind.TYPE -> "type a number on the pads"
+        StepKind.TURN -> "turn"
+        StepKind.MOVE -> "move"
+    }
+
+    /** "Step 2", for screen readers. */
+    fun step(n: Int) = "Step $n"
+
+    // The K.O. II illustration beside the list (wide windows): what is printed on the panel.
+    /** The illustration as a whole, for screen readers. */
+    const val PANEL = "The EP-133 K.O. II, with the keys of the selected shortcut lit"
+    val PORTS = listOf("Output", "Input", "Sync \u00B7 MIDI", "USB", "Power")
+    /** Over the knobs: VOLUME, and the X and Y knobs' BPM and METRONOME. */
+    fun knobLabel(k: PanelKey): String? = when (k) {
+        PanelKey.VOL -> "Volume"
+        PanelKey.X -> "BPM"
+        PanelKey.Y -> "Metronome"
+        else -> null
+    }
+    /** The LED labels between the rows of keys, top row first. */
+    val LED_ROWS = listOf(
+        listOf("Level", "Pitch", "Time"),
+        listOf("LPF", "HPF", "\u2192 FX"),
+        listOf("Atk", "Rel", "Pan"),
+        listOf("Tune", "Vel", "Mod"),
+    )
+
+    /** A key's main word as printed (upper-cased where drawn). */
+    fun panelLabel(k: PanelKey): String = when (k) {
+        PanelKey.VOL -> "Volume"
+        PanelKey.SOUND -> "Sound"
+        PanelKey.MAIN -> "Main"
+        PanelKey.TEMPO -> "Tempo"
+        PanelKey.X -> "X"
+        PanelKey.Y -> "Y"
+        PanelKey.KEYS -> "Keys"
+        PanelKey.FADER -> "Fader"
+        PanelKey.SHIFT -> "Shift"
+        PanelKey.A -> "A"
+        PanelKey.B -> "B"
+        PanelKey.C -> "C"
+        PanelKey.D -> "D"
+        PanelKey.P0 -> "0"
+        PanelKey.P1 -> "1"
+        PanelKey.P2 -> "2"
+        PanelKey.P3 -> "3"
+        PanelKey.P4 -> "4"
+        PanelKey.P5 -> "5"
+        PanelKey.P6 -> "6"
+        PanelKey.P7 -> "7"
+        PanelKey.P8 -> "8"
+        PanelKey.P9 -> "9"
+        PanelKey.DOT -> "."
+        PanelKey.ENTER -> "Enter"
+        PanelKey.SAMPLE -> "Sample"
+        PanelKey.TIMING -> "Timing"
+        PanelKey.FX -> "FX"
+        PanelKey.ERASE -> "Erase"
+        PanelKey.MINUS -> "\u2212"
+        PanelKey.PLUS -> "+"
+        PanelKey.REC -> "Record"
+        PanelKey.PLAY -> "Play"
+    }
+
+    /** The shifted function printed under a two-tier key, or null. */
+    fun panelSub(k: PanelKey): String? = when (k) {
+        PanelKey.SOUND -> "Edit"
+        PanelKey.MAIN -> "Commit"
+        PanelKey.TEMPO -> "Loop"
+        PanelKey.SAMPLE -> "Chop"
+        PanelKey.TIMING -> "Correct"
+        PanelKey.FX -> "Output"
+        PanelKey.ERASE -> "System"
+        else -> null
+    }
+
     /**
      * Sections with only the entries whose action, keys or note contain every
      * word of [query] (case-insensitive); empty sections are left out.

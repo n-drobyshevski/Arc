@@ -7,6 +7,8 @@
 // Web delta: Kotlin's String.toIntOrNull (which reads any Unicode decimal
 // digits) is the local ktToIntOrNull below.
 
+import { topNumber } from './padPush'
+
 const ND = /\p{Nd}/u
 const isDigitUnit = (u: number): boolean => u >= 0 && ND.test(String.fromCharCode(u))
 // Unicode decimal digits come in runs of ten from zero: a digit's value is how far it is from its run's start.
@@ -57,6 +59,26 @@ export function format(learned: ReadonlyMap<number, number>): string {
 }
 
 /**
+ * Live's pad links offline, where nothing can be learned (no device): the
+ * [learned] ones, the rest numbered from the top row as arc writes pads
+ * before any press (PadPush.topNumber), never over a learned number. So
+ * the last read (or the factory sounds, whose kicks then sit on '.' and
+ * '0') shows names and plays with none learned. Never saved as learned.
+ */
+export function offline(learned: ReadonlyMap<number, number>): Map<number, number> {
+  const out = new Map(learned)
+  const taken = new Set(out.values())
+  for (let offset = 0; offset <= 11; offset++) {
+    const n = topNumber(offset)
+    if (!out.has(offset) && !taken.has(n)) {
+      out.set(offset, n)
+      taken.add(n)
+    }
+  }
+  return out
+}
+
+/**
  * Links brought back from the folder, with the ones learned here on top.
  * A pad number belongs to one key only, so a restored link to a number
  * learned here for another key is dropped.
@@ -70,4 +92,4 @@ export function merge(restored: ReadonlyMap<number, number>, local: ReadonlyMap<
 }
 
 /** The Kotlin `LearnedLinks` object. */
-export const LearnedLinks = { parse, format, merge } as const
+export const LearnedLinks = { parse, format, merge, offline } as const
