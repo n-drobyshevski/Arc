@@ -1,6 +1,7 @@
 // Port of core/src/test/kotlin/dev/arc/ep133/features/BeatCardLessonTest.kt (the same cases, in the same order).
 import { describe, expect, it } from 'vitest'
 import { BeatCards, type CardRead } from '../../../src/core/features/beatCard'
+import { PracticeText } from '../../../src/core/text/practiceText'
 
 const body = ['[A] bars 1', 'A7 kick  | X... .... X... .... |', 'A9 snare | .... X... .... X... |', 'A4 hat   | x.x. x.x. x.x. x.x. |'].join('\n')
 
@@ -41,5 +42,18 @@ describe('a card lesson', () => {
     expect(err('lesson Slow | A7 | 10')).toContain('25 to 100')
     expect(err('lesson Odd | A7 Q9')).toContain("'Q9'")
     expect(err(Array.from({ length: 13 }, (_, i) => `lesson Step ${i + 1} | A7`).join('\n'))).toContain('more than 12')
+  })
+})
+
+// The practice texts of a lesson (PracticeText, from the same Kotlin file; the keypad-order case before it,
+// BeatCards.lessonPads, comes with the lesson run).
+describe('a card lesson in PRACTICE', () => {
+  it('the practice texts of a lesson', () => {
+    expect(PracticeText.step(2, 4)).toBe('Step 2/4')
+    expect(PracticeText.toGo(1)).toBe('1 clean pass to go')
+    expect(PracticeText.steps([[94, true], [71, false], null])).toBe('1 94% ✓ · 2 71% · 3 –')
+    expect(PracticeText.reportStep(2, 'Add the snare', 'A7 A9', 50, PracticeText.reportResult(71, 3, false, 'snare came late most'))).toBe(
+      '- Step 2, Add the snare (A7 A9, 50%): 71% on time over 3 passes; snare came late most',
+    )
   })
 })

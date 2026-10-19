@@ -107,6 +107,11 @@ export class Transport {
     }
   }
 
+  /** PRACTICE's PLAY (an addition): from stopped, a bar counted in, then playing, nothing recorded. */
+  practise(): TransportAction {
+    return this.current.phase === 'STOPPED' || this.current.phase === 'ARMED' ? this.start(1, false) : None
+  }
+
   /** A pad (or a KEYS note) goes down at [at]: armed, recording starts right there, bar 1 on the press. */
   padDown(at: number): TransportAction {
     if (this.current.phase !== 'ARMED') return None
