@@ -51,6 +51,7 @@ Claude Code picks it up the next time it starts, and uses it whenever you talk a
 | `references/arc-app.md` | What each Arc screen does, for Claude to explain |
 | `references/ep133-guide.md` | The 100 official OS 2.5 key combinations. **Generated, do not edit** |
 | `scripts/beatcard.py` | `check` (also `--sounds` to check sound lines against your sound list, and `--kit ep40` for the EP-40 kit; `--sounds factory` or `factory-ep40` checks against a factory pack), `analyse`, `grid`, `midi` and `synth` (lists a card's synth lines and with `-o` writes them as WAV files, the same bytes Arc makes); Python 3.9+, standard library only |
+| `scripts/remake_audio.py` | Claude Code only: measures a song's audio (Beat This!, Demucs, ADTOF, Basic Pitch) and drafts a remake card of scenes; the models install into a Python 3.11 environment (see its docstring), the card part needs the standard library only |
 | `scripts/test_beatcard.py` | Tests; also checks every card in the references |
 
 ## Working on the skill

@@ -2387,6 +2387,98 @@ class Synth(unittest.TestCase):
             self.assertIn("wrote %s (peak 29204, PCM CRC-32 %s)" % (path, crc), r.stdout)
 
 
+def remake_analysis():
+    """An analysis as remake_audio.py writes it: 16 bars at 120 BPM, a groove of 8, a break of 2 with no drums, the groove for 6."""
+    import remake_audio as ra
+    bars = [[i * 2.0, 2.0] for i in range(16)]
+    groove = {"kick": "x...x...x..x..x.", "hat": "..x...x...x...x.", "snare": "....x.......x..."}
+    drums = {k: [v if not 8 <= b < 10 else "." * 16 for b in range(16)] for k, v in groove.items()}
+    chords = [{"name": n, "root": r, "shape": list(s)} for n, r, s in [("D#m", 3, (0, 3, 7)), ("B", 11, (0, 4, 7))] * 8]
+    bass = [[b * 2.0, b * 2.0 + 0.4, 39 if b % 2 == 0 else 47, 0.6] for b in range(16)]
+    levels = {s: [0.0 if 8 <= b < 10 and s == "drums" else 0.8 for b in range(16)] for s in ("bass", "drums", "other", "vocals")}
+    names = [c["name"] for c in chords]
+    feats = ra.bar_features(drums, levels, names)
+    sections = ra.sections_of(feats, names)
+    return {
+        "title": "Test song", "tempo": 120.0, "bars": bars, "swing": 50, "key": "D# minor", "key_fit": 0.9,
+        "drum_source": "test", "drums": drums, "bass_notes": bass, "chords": chords, "levels": levels,
+        "sections": sections, "parts": ra.group_sections(sections, feats, names),
+    }
+
+
+class RemakeAudio(unittest.TestCase):
+    """remake_audio.py's measuring after the models: grids, tempo, swing, key, chords, sections and the draft card."""
+
+    @classmethod
+    def setUpClass(cls):
+        import remake_audio
+        cls.ra = remake_audio
+
+    def test_place_and_grid(self):
+        bars = [(0.0, 2.0), (2.0, 2.0)]
+        self.assertEqual(self.ra.place(0.0, bars)[:2], (0, 0))
+        self.assertEqual(self.ra.place(0.5, bars)[:2], (0, 4))
+        self.assertEqual(self.ra.place(1.99, bars)[:2], (1, 0))  # the next bar's downbeat, a hair early
+        self.assertIsNone(self.ra.place(-1.0, bars))
+        grid = self.ra.drum_grid({"kick": [0.0, 1.0, 2.25]}, bars)
+        self.assertEqual(grid["kick"], ["x.......x.......", "..x............."])
+
+    def test_tempo_fits_all_bars(self):
+        # Bar starts on a 20 ms grid around 134 BPM: one bar's length is off, the line through them isn't.
+        bar = 240 / 134
+        bars = [(round(i * bar / 0.02) * 0.02, 1.8) for i in range(17)]
+        self.assertAlmostEqual(self.ra.tempo_of(bars), 134, delta=0.15)
+
+    def test_swing_from_late_off_sixteenths(self):
+        bars = [(float(b) * 2, 2.0) for b in range(4)]
+        step = 2.0 / 16
+        times = [b * 2 + s * step + (step / 6 if s % 2 else 0) for b in range(4) for s in range(16)]
+        self.assertEqual(self.ra.swing_of(times, bars), 58)
+        self.assertEqual(self.ra.swing_of(times[:5], bars), 50)  # too few to tell
+        self.assertEqual(self.ra.swing_ticks(58), 4)
+
+    def test_key_and_chords(self):
+        weights = [0.0] * 12
+        for pc, w in ((3, 5), (6, 3), (10, 4), (1, 2), (8, 2), (11, 2), (5, 1)):
+            weights[pc] = w
+        self.assertEqual(self.ra.key_of(weights)[0], "D# minor")
+        tones = [0.0] * 12
+        for pc in (3, 6, 10):
+            tones[pc] = 1.0
+        self.assertEqual(self.ra.chord_of(tones, bass=3)[0], "D#m")
+        self.assertEqual(self.ra.chord_of(tones, bass=6, scale=self.ra.scale_of("D# minor"))[0], "D#m")
+        self.assertIsNone(self.ra.chord_of([0.0] * 12))
+        self.assertEqual(self.ra.voicing(3, (0, 3, 7)), [63, 66, 70])
+
+    def test_sections_and_parts(self):
+        a = remake_analysis()
+        self.assertEqual(a["sections"], [(0, 8), (8, 2), (10, 6)])
+        self.assertEqual(a["parts"], [0, 1, 0])
+
+    def test_draft_card_reads(self):
+        card = self.ra.draft_card(remake_analysis())
+        parsed = bc.parse_card(card)
+        self.assertTrue(parsed.ok, [str(p) for p in parsed.problems])
+        self.assertIn("chain 1x2 2 1x2", card)  # the groove comes back: the same scene again
+        self.assertEqual(len(parsed.scenes), 2)
+        self.assertIn("[A] bars 1 step 1/16\n\n[B]", card)  # the break mutes the drums
+        self.assertIn("B7 at 1.1.1 note D#2", card)
+        self.assertIn("C7 at 1.1.1 note D#4", card)
+
+    def test_from_json_redraws_without_models(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "analysis.json")
+            with open(path, "w") as fh:
+                json.dump(remake_analysis(), fh)
+            out, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                code = self.ra.main(["--from-json", path, "--loop-bars", "2"])
+            self.assertEqual(code, 0, err.getvalue())
+            self.assertTrue(out.getvalue().startswith("ARC BEAT 1"))
+            self.assertTrue(os.path.exists(os.path.join(d, "card.txt")))
+            self.assertIn("chain 1x4 2 1x3", out.getvalue())
+
+
 class SkillFiles(unittest.TestCase):
     def test_every_card_in_the_references_is_valid_and_has_no_warnings(self):
         total = 0
