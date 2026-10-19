@@ -1,12 +1,12 @@
 # Genre recipes
 
-Fifty-six starting points, including a techno family of twelve (Techno, Detroit, minimal, dub, acid, hypnotic, peak-time, melodic, industrial, hard techno, schranz and hard groove), each a complete ARC BEAT card (see [beat-card.md](beat-card.md) for the format). One of them, Breakcore arrangement, is a whole track idea: a card of five scenes with a chain. Use them as a base: change the tempo and a few steps and say what you changed. The cards are checked by the skill's test, so they are valid as written.
+Fifty-seven starting points, including a techno family of twelve (Techno, Detroit, minimal, dub, acid, hypnotic, peak-time, melodic, industrial, hard techno, schranz and hard groove), each a complete ARC BEAT card (see [beat-card.md](beat-card.md) for the format). Two of them, Breakcore arrangement and Schranz arrangement, are whole track ideas: cards of five scenes with a chain. Use them as a base: change the tempo and a few steps and say what you changed. The cards are checked by the skill's test, so they are valid as written.
 
 The last seven, marked **(EP-40)**, are reggae, dub and dancehall for the EP-40 Riddim kit: one drop, rockers, steppers, dub, digital riddim, dancehall and UK dub. Their pads are that kit's (kick A1, rimshot A2, closed hat A4, siren D1; see [ep40-kit.md](ep40-kit.md)), not the assumed kit below. Use them when the share says the EP-133 plays the EP-40 kit, or when the user asks for these styles and confirms that kit. For the EP-40's loops, follow the loop rules in ep40-kit.md.
 
 `scripts/beatcard.py analyse` compares a user's beat with these recipes, reading the `BPM:` and `Swing:` lines and the card of each section below. Keep that shape if you add a recipe: a `##` heading, the two lines, then one fenced card.
 
-Some styles are defined by their effects, and those recipes carry `fx`, `send`, `comp` and `sidechain` lines right after `swing` (see "Effects" in [beat-card.md](beat-card.md)): house (sidechain pump), dub techno (delay), industrial techno, hard techno, schranz and breakcore (distortion and compression) and lo-fi (low-pass filter). A line under the card says in one sentence what they do. The importing user can switch **APPLY FX** off to keep their own FX; a recipe without these lines leaves the FX alone. Write them only when the style needs them.
+Some styles are defined by their effects, and those recipes carry `fx`, `send`, `comp` and `sidechain` lines right after `swing` (see "Effects" in [beat-card.md](beat-card.md)): house (sidechain pump), dub techno (delay), industrial techno, hard techno and breakcore (distortion and compression), schranz (distortion, compression and a sidechain pump) and lo-fi (low-pass filter). A line under the card says in one sentence what they do. The importing user can switch **APPLY FX** off to keep their own FX; a recipe without these lines leaves the FX alone. Write them only when the style needs them.
 
 ## The assumed kit
 
@@ -20,7 +20,7 @@ When the user has not copied a pattern out of Arc, the card does not know what i
 | A. | cowbell | A0 | perc | AENTER | crash |
 
 - **Group B** is a bass sound on pad 7, **C** a chord or keys sound on pad 7, **D** a lead or effect sound on pad 7. They are played in KEYS mode, so they live in the `notes` list. `note C4` is the sample's own pitch (MIDI 60), so a bass line sits around C1-C3.
-- **No sound for a part?** When the user's list (or the factory pack) has nothing that fits, such as a lead on the empty group D, a real 808 sub or an acid bass, add a `synth` line for that pad so Arc makes one; the recipes and the rules are in [synth-sounds.md](synth-sounds.md). A made bass plays its own note (C2) at `note C4`, so move a card's bass line up two octaves for it: `note F1` becomes `note F3`, `note E2` becomes `note E4`. The cards below have no synth lines: they play whatever is on the pads.
+- **No sound for a part?** When the user's list (or the factory pack) has nothing that fits, such as a lead on the empty group D, a real 808 sub or an acid bass, add a `synth` line for that pad so Arc makes one; the recipes and the rules are in [synth-sounds.md](synth-sounds.md). A made bass plays its own note (C2) at `note C4`, so move a card's bass line up two octaves for it: `note F1` becomes `note F3`, `note E2` becomes `note E4`. The cards below have no synth lines, so they play whatever is on the pads, except the two schranz ones, whose made sounds are the style.
 - Names after the pad are only for reading. The pattern plays whatever sound is on the pad.
 - Hats: `x` is a normal hit, `o` a quiet one, `X` an accent. A digit 1-9 is a velocity of 14 times the digit.
 
@@ -414,33 +414,171 @@ B7 at 1.4.4 note F1 gate 1/16 vel 100
 The effect lines give the kick its edge: `fx distortion 45 55` is a medium drive with a neutral tone, `send A 25 B 35` mixes some of the drums and the rumble into it, and `comp 50 25` glues the mix with a fast compressor.
 
 ## Schranz
-- BPM: 150-165
+- BPM: 155-165
 - Swing: 50
-- Feel: relentless, loopy and crunchy, all drums and no melody. A distorted four on the floor kick carries the low end on its own, with no rumble or bassline under it. A pitched-down snare and a clap on 2 and 4, rattling sixteenth hats with a ride on every eighth, and the drive: a tom and rim loop that repeats every three sixteenths, so it turns against the bar. Distortion and a hard compressor on the whole kit make the crunch the style is named for.
+- Feel: the modern revival sound: fast, hard and bouncy. A short overdriven kick on every beat, a reese bass (three detuned saws) held a bar at a time and pumped by the kick's sidechain, the drive (a noisy, overdriven tom on the three sixteenths between the kicks), an offbeat open hat, quiet tick hats, a clap on 2 and 4 and a short stab hook between the kicks. Every fourth bar the kick drops out on beat 4 for a clap roll.
 
 ```
 ARC BEAT 1
 name Schranz pressure
-tempo 155
+tempo 160
 swing 50
-fx distortion 60 50
-send A 45
-comp 70 20
+fx distortion 55 55
+send A 30 B 45 D 35
+comp 65 20
+sidechain A7 B 30 60
 
-[A] bars 2 step 1/16
-pad A9 pitch -4
-A7 kick        | X... X... X... X... | X... X... X... X... |
-A9 snare       | .... x... .... x... | .... x... .... x.xX |
-A4 closed hat  | xoXo xoXo xoXo xoXo | xoXo xoXo xoXo xoXo |
-A5 open hat    | o.x. o.x. o.x. o.x. | o.x. o.x. o.x. o.x. |
-A6 clap        | .... x... .... x... | .... x... .... x... |
-A1 rim         | ..o. .x.. o..x ..o. | .x.. o..x ..o. .x.. |
-A2 tom         | .x.. x..x ..x. .x.. | x..x ..x. .x.. x..x |
+[A] bars 4 step 1/16
+synth A7 kick note F1 decay 30 bend 70 click 60 drive 70 name schranz_kick
+synth A4 hat decay 8 tone 80 name tick_hat
+synth A5 openhat decay 25 tone 75 name offbeat_hat
+synth A6 clap decay 30 tone 60 drive 40 name clap
+synth A2 tom note C3 decay 12 tone 60 noise 50 drive 80 name drive
+A7 kick        | X... X... X... X... | X... X... X... X... | X... X... X... X... | X... X... X... .... |
+A4 tick hat    | .o.o .o.o .o.o .o.o | .o.o .o.o .o.o .o.o | .o.o .o.o .o.o .o.o | .o.o .o.o .o.o .o.o |
+A5 open hat    | ..x. ..x. ..x. ..x. | ..x. ..x. ..x. ..x. | ..x. ..x. ..x. ..x. | ..x. ..x. ..x. ..x. |
+A6 clap        | .... x... .... x... | .... x... .... x... | .... x... .... x... | .... x... .... 579X |
+A2 drive       | .oXo .oXo .oXo .oXo | .oXo .oXo .oXo .oXo | .oXo .oXo .oXo .oXo | .oXo .oXo .oXo .... |
+
+[B] bars 4
+synth B7 bass note C2 decay 90 length 2 tone 35 sweep 0 detune 65 drive 30 name reese
+pad B7 mode key
+notes
+B7 at 1.1.1 note F4 gate 384
+B7 at 2.1.1 note F4 gate 384
+B7 at 3.1.1 note C#4 gate 384
+B7 at 4.1.1 note D#4 gate 384
+
+[D] bars 4
+synth D7 stab note C4 chord oct decay 20 tone 65 detune 35 drive 60 name hook
+pad D7 mode key
+notes
+D7 at 1.1.3 note F4
+D7 at 1.2.2 note F4 vel 100
+D7 at 1.2.4 note G#4
+D7 at 1.3.3 note F4
+D7 at 1.4.2 note C5
+D7 at 1.4.4 note G#4 vel 100
+D7 at 2.1.3 note F4
+D7 at 2.2.2 note F4 vel 100
+D7 at 2.2.4 note G#4
+D7 at 2.3.3 note D#5
+D7 at 2.4.2 note C5
+D7 at 2.4.3 note G#4 vel 100
+D7 at 3.1.3 note F4
+D7 at 3.2.2 note F4 vel 100
+D7 at 3.2.4 note G#4
+D7 at 3.3.3 note F4
+D7 at 3.4.2 note C5
+D7 at 3.4.4 note G#4 vel 100
+D7 at 4.1.3 note F4
+D7 at 4.2.2 note F4 vel 100
+D7 at 4.2.4 note G#4
+D7 at 4.3.3 note F4
 ```
 
-Schranz is the loop, not a song: the tom and the rim repeat every three sixteenths, so they meet the kick in a new place on every beat and the bar never sounds the same twice. Bar 2 differs only by a short snare roll into the next bar. The open hat row stands in for a ride (put a ride on A5 if you have one); keep it washing on every eighth rather than as a house-style offbeat open hat. `pad A9 pitch -4` drops the snare a little, for the dull thud of a detuned 909 snare. The effect lines are the schranz sound: `fx distortion 60 50` is a strong, mid-range drive, `send A 45` pushes the whole kit into it, kick included, and `comp 70 20` is a hard, fast compressor that makes everything breathe with the kick. There is no group B: the kick is the bass. A rolling rumble under the kick, a bassline or a lead turn it into hard techno.
+This recipe makes its own sounds with `synth` lines (see [synth-sounds.md](synth-sounds.md)): the made sounds are most of the style, and a factory kit played through this grid doesn't sound like schranz. When the user's list has a hard kick or a reese that fits, a `sound` line on the same pad wins. The parts:
 
-To make a track of it, build it up and strip it down rather than drop it: start with the kick and the drive, bring in the hats, the ride and the snare one at a time every 8 or 16 bars, and take them out again the same way. Schranz has no real breakdown; the change comes from layers and from a filter swept by hand while it plays (the punch-in FX, FX-6 in ep133-guide.md). A card of scenes can write those layers: one scene per stage, each leaving out the rows that haven't come in yet.
+- **The bounce** is the reese and the sidechain together: `sidechain A7 B 30 60` ducks the held reese on every kick, so it pumps back up between them. The reese plays F, F, C# and D#, one bar each; a `note F4` plays F2, since it was made at C2 (the KEYS rule).
+- **The drive**, `.oXo` on A2, is the grit between the kicks: loudest on the offbeat, quiet on the e and the a, where the tick hats sit too, so the two add up instead of cluttering.
+- **The hook** on D7 is a short saw stab with its octave, on the offbeats and sixteenths, never on a beat, so it never fights the kick. It is a two-bar call and answer in F minor (F, G#, C, D#) that rests on the fourth bar's last beat.
+- **The gap**: in bar 4 the kick and the drive stop on beat 4, the reese swells with nothing ducking it, and the clap rolls up (`579X`) into the next bar.
+- **The effect lines**: `fx distortion 55 55` is a medium drive, `send A 30 B 45 D 35` puts the reese into it hardest, then the hook and the drums, and `comp 65 20` is a hard, fast compressor on the whole mix.
+
+Keep it lean: the drive, the hats and the hook already fill every sixteenth, and another sixteenth layer turns it to mush. To tweak: `detune` 50-80 on the reese for its width, the sidechain's length (30) up for more pump, `drive` or `click` up on the kick for more punch, `chord fifth` on the hook for a darker power-chord stab, `level 75` on the hook to tuck it in. Classic 2000s schranz (Chris Liebing, DJ Rush) is the drums alone at about 150, crushed harder: leave out groups B and D, drop the sidechain and send A to the distortion at 50 or more.
+
+## Schranz arrangement
+- BPM: 155-165
+- Swing: 50
+- Feel: the Schranz recipe as a track: five scenes and a chain, about 90 seconds before it loops. An intro of kick, drive and tick hats; the groove, where the open hat, the clap and the pumping reese come in; the drop, where the hook lands; a breakdown with no kick, so the reese swells unpumped under the open hat and the clap; a build where the kick doubles up to sixteenths; and the drop again.
+
+```
+ARC BEAT 1
+name Schranz track
+tempo 160
+swing 50
+fx distortion 55 55
+send A 30 B 45 D 35
+comp 65 20
+sidechain A7 B 30 60
+chain 1x2 2x2 3x4 4x2 5 3x4
+
+scene Intro
+[A] bars 4 step 1/16
+synth A7 kick note F1 decay 30 bend 70 click 60 drive 70 name schranz_kick
+synth A4 hat decay 8 tone 80 name tick_hat
+synth A5 openhat decay 25 tone 75 name offbeat_hat
+synth A6 clap decay 30 tone 60 drive 40 name clap
+synth A2 tom note C3 decay 12 tone 60 noise 50 drive 80 name drive
+A7 kick        | X... X... X... X... | X... X... X... X... | X... X... X... X... | X... X... X... .... |
+A4 tick hat    | .o.o .o.o .o.o .o.o | .o.o .o.o .o.o .o.o | .o.o .o.o .o.o .o.o | .o.o .o.o .o.o .o.o |
+A2 drive       | .oXo .oXo .oXo .oXo | .oXo .oXo .oXo .oXo | .oXo .oXo .oXo .oXo | .oXo .oXo .oXo .... |
+
+[B] bars 4
+synth B7 bass note C2 decay 90 length 2 tone 35 sweep 0 detune 65 drive 30 name reese
+pad B7 mode key
+
+[D] bars 4
+synth D7 stab note C4 chord oct decay 20 tone 65 detune 35 drive 60 name hook
+pad D7 mode key
+
+scene Groove
+[A] bars 4 step 1/16
+A7 kick        | X... X... X... X... | X... X... X... X... | X... X... X... X... | X... X... X... .... |
+A4 tick hat    | .o.o .o.o .o.o .o.o | .o.o .o.o .o.o .o.o | .o.o .o.o .o.o .o.o | .o.o .o.o .o.o .o.o |
+A5 open hat    | ..x. ..x. ..x. ..x. | ..x. ..x. ..x. ..x. | ..x. ..x. ..x. ..x. | ..x. ..x. ..x. ..x. |
+A6 clap        | .... x... .... x... | .... x... .... x... | .... x... .... x... | .... x... .... 579X |
+A2 drive       | .oXo .oXo .oXo .oXo | .oXo .oXo .oXo .oXo | .oXo .oXo .oXo .oXo | .oXo .oXo .oXo .... |
+
+[B] bars 4
+notes
+B7 at 1.1.1 note F4 gate 384
+B7 at 2.1.1 note F4 gate 384
+B7 at 3.1.1 note C#4 gate 384
+B7 at 4.1.1 note D#4 gate 384
+
+scene Drop
+
+[D] bars 4
+notes
+D7 at 1.1.3 note F4
+D7 at 1.2.2 note F4 vel 100
+D7 at 1.2.4 note G#4
+D7 at 1.3.3 note F4
+D7 at 1.4.2 note C5
+D7 at 1.4.4 note G#4 vel 100
+D7 at 2.1.3 note F4
+D7 at 2.2.2 note F4 vel 100
+D7 at 2.2.4 note G#4
+D7 at 2.3.3 note D#5
+D7 at 2.4.2 note C5
+D7 at 2.4.3 note G#4 vel 100
+D7 at 3.1.3 note F4
+D7 at 3.2.2 note F4 vel 100
+D7 at 3.2.4 note G#4
+D7 at 3.3.3 note F4
+D7 at 3.4.2 note C5
+D7 at 3.4.4 note G#4 vel 100
+D7 at 4.1.3 note F4
+D7 at 4.2.2 note F4 vel 100
+D7 at 4.2.4 note G#4
+D7 at 4.3.3 note F4
+
+scene Breakdown
+[A] bars 4 step 1/16
+A5 open hat    | ..x. ..x. ..x. ..x. | ..x. ..x. ..x. ..x. | ..x. ..x. ..x. ..x. | ..x. ..x. ..x. ..x. |
+A6 clap        | .... x... .... x... | .... x... .... x... | .... x... .... x... | .... x... .... x... |
+
+[D] bars 4
+
+scene Build
+[A] bars 4 step 1/16
+A7 kick        | X... .... X... .... | X... X... X... X... | X.X. X.X. X.X. X.X. | XXXX XXXX XXXX .... |
+A4 tick hat    | .o.o .o.o .o.o .o.o | .o.o .o.o .o.o .o.o | xxxx xxxx xxxx xxxx | XXXX XXXX XXXX .... |
+A6 clap        | .... x... .... x... | .... x... .... x... | ..x. ..x. ..x. ..x. | 4455 6677 8899 XXXX |
+```
+
+The `chain` line plays the intro twice, the groove twice, the drop four times, the breakdown twice, the build once and the drop four times again: 60 bars, then it loops. An empty section (`[D] bars 4` with nothing under it) imports as a blank pattern, so it mutes that group in its scene: the intro has no reese or hook, and the breakdown and the build have no hook. A group a scene leaves out plays the previous scene's pattern: the drop writes only the hook over the groove's drums and reese, and the build keeps the reese, which its doubling kick chops through the sidechain like a riser. The synth lines sit in the first scene; the sounds are the pads', so every scene plays them. The effect lines are the project's, so they apply to every scene; for a filter sweep in the breakdown, hold FX and press pad 4 (low-pass) or 5 (high-pass).
 
 ## Hard groove
 - BPM: 135-145

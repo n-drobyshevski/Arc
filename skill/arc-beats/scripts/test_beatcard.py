@@ -723,8 +723,10 @@ class Analyse(unittest.TestCase):
         recipes = bc.load_recipes(os.path.join(REFS, "genres.md"))
         self.assertGreaterEqual(len(recipes), 14)
         for heading, _before, text in bc.split_cards(read(os.path.join(REFS, "genres.md"))):
-            top = bc.similarity(bc.parse_card(text), recipes, 1)
-            self.assertEqual((top[0]["genre"], top[0]["score"]), (heading, 100), heading)
+            # An arrangement built on a loop recipe (Schranz arrangement's groove is Schranz's) ties with it at 100.
+            top = bc.similarity(bc.parse_card(text), recipes, 2)
+            self.assertEqual(top[0]["score"], 100, heading)
+            self.assertIn(heading, [t["genre"] for t in top if t["score"] == 100], heading)
 
     def test_groups_with_no_drums_dont_dilute_the_drums(self):
         # The Jungle recipe's break, with a skank on C and shouts on D: those groups have pad hits but no kick, snare or hat.

@@ -1357,7 +1357,7 @@ describe('BeatCardTest', () => {
       expect(BeatCards.read(BeatCards.write(r.card!)).card!.fx).toEqual(r.card!.fx)
     }
     const withFx = cards.map((t) => BeatCards.read(t).card!).filter((c) => c.fx !== null)
-    expect(withFx.map((c) => c.name).sort()).toEqual(['Amen shred', 'Breakcore track', 'Dub chord echo', 'Dub plate', 'Dusty lo-fi', 'Hard groove workout', 'Hard techno pound', 'House groove', 'Industrial pressure', 'Schranz pressure', 'UK dub'])
+    expect(withFx.map((c) => c.name).sort()).toEqual(['Amen shred', 'Breakcore track', 'Dub chord echo', 'Dub plate', 'Dusty lo-fi', 'Hard groove workout', 'Hard techno pound', 'House groove', 'Industrial pressure', 'Schranz pressure', 'Schranz track', 'UK dub'])
     expect(withFx.find((c) => c.name === 'House groove')!.fx!.sidechain).toEqual(sidechain({ on: true, group: 0, pad: 9, dests: 0b0010, x: 0.3, y: 0.55 }))
     expect(withFx.find((c) => c.name === 'Dusty lo-fi')!.fx!.type).toBe(FxType.FILTER)
     // The one card of scenes: five scenes and a chain, and it reads back as itself.
