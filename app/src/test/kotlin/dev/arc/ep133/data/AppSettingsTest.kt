@@ -42,6 +42,14 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `background play is on by default, stored like the other switches and read back from library json`() {
+        assertTrue(AppSettings().backgroundPlay)
+        assertEquals("false", AppSettings(backgroundPlay = false).values()["backgroundPlay"])
+        assertFalse(AppSettings().withIndex(mapOf("app.backgroundPlay" to "false")).backgroundPlay)
+        assertTrue(AppSettings().withIndex(mapOf("app.backgroundPlay" to "maybe")).backgroundPlay)
+    }
+
+    @Test
     fun `sharing the sound list is on by default, stored like the other switches and read back from library json`() {
         assertTrue(AppSettings().shareSounds)
         assertEquals("true", AppSettings().values()["shareSounds"])
@@ -68,6 +76,7 @@ class AppSettingsTest {
             keysShowNames = false,
             pianoWhites = dev.arc.ep133.features.Piano.CHOICES.filterNotNull().first(),
             haptics = false,
+            backgroundPlay = false,
             makeUpDelay = false,
             liveTempo = 98,
             shareSounds = false,

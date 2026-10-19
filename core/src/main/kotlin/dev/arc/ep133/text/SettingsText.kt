@@ -100,6 +100,8 @@ object SettingsText {
     }
     /** Why a piano size is greyed out. */
     const val DOESNT_FIT = "Too wide for this window"
+    const val BACKGROUND_PLAY = "Play in the background"
+    const val BACKGROUND_PLAY_NOTE = "A beat playing in Live goes on when you leave arc or lock the phone. The notification, the lock screen and headphone buttons stop it."
     const val HAPTICS = "Haptics"
     const val HAPTICS_NOTE = "A light tick when a pad or key goes down."
     /** Making up for the delay of a Bluetooth or hearing-aid output (an addition). */

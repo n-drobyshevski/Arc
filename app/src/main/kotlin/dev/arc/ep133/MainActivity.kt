@@ -219,10 +219,15 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
     }
 
+    override fun onStart() {
+        super.onStart()
+        controller.backOnScreen()
+    }
+
     override fun onStop() {
         super.onStop()
-        // Nothing keeps playing in the background (a rotation is not leaving the app).
-        if (!isChangingConfigurations) controller.stopPlayback()
+        // With background play a beat playing goes on (a rotation is not leaving the app); else nothing keeps playing.
+        if (!isChangingConfigurations) controller.leaveScreen()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -761,7 +766,9 @@ class MainActivity : ComponentActivity() {
                         kotlinx.coroutines.awaitCancellation()
                     } finally {
                         // A recreation (dark mode, language) keeps the mirror; the new activity takes it over.
-                        if (!isChangingConfigurations) controller.pauseMirror()
+                        if (!isChangingConfigurations) {
+                            controller.pauseMirror(background = !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED))
+                        }
                     }
                 }
             }
@@ -1132,6 +1139,7 @@ class MainActivity : ComponentActivity() {
                     onShowNames = controller::setKeysShowNames,
                     onPianoWhites = controller::setPianoWhites,
                     onHaptics = controller::setHaptics,
+                    onBackgroundPlay = controller::setBackgroundPlay,
                     onMakeUpDelay = controller::setMakeUpDelay,
                     wireless = liveWireless,
                     latency = controller.outputLatencyMs,

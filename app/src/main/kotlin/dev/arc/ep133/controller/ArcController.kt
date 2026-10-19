@@ -336,6 +336,9 @@ private const val PRACTICE_START_SPEED = 75
 /** WAIT's lane shows this many steps ahead. */
 private const val PRACTICE_WAIT_AHEAD = 6
 
+/** Stopped with arc off the screen, Live's output and mirror wait this long for PLAY on the notification. */
+private const val AWAY_IDLE_MS = 10 * 60 * 1000L
+
 /** A lesson's step opens the next after this many clean passes in a row. */
 internal const val LESSON_CLEAN_PASSES = 4
 
@@ -2111,6 +2114,11 @@ class ArcController(
      * which a take stopped by it says.
      */
     fun closeLiveAudio(background: Boolean = false) {
+        // Arc left the screen with the beat going on (background play): the output stays for it; SAMPLE still goes.
+        if (keepsAway(background)) {
+            exitSample(background)
+            return
+        }
         // The transport stops (recording ends, kept) before the output goes.
         patternStop()
         // SAMPLE goes with it: its RSP takes the output's mix, and its mic is never left open.
@@ -4340,6 +4348,10 @@ class ArcController(
         refreshPatternPlan()
         patternScheduler.play(a.countInBars, if (a.countInBars > 0) COUNT_IN_LEAD_NS else extraLeadNs, a.at)
         followPattern()
+        // With background play the beat may go on off the screen: its service starts now, while arc is in front.
+        awayRelease?.cancel()
+        awayRelease = null
+        if (settings.value.backgroundPlay && practiceRun == null) startPlaybackService()
     }
 
     /** The transport stopped: recording ([wasRecording]) ends where it is heard, the sequencer lets go, and the patterns are kept. */
@@ -4370,6 +4382,11 @@ class ArcController(
         _pattern.update { it.copy(countIn = null) }
         refreshPatternPlan()
         savePatterns()
+        // Stopped off the screen: Live's output and mirror wait a while for PLAY on the notification.
+        if (away && _awayKept.value) awayRelease = scope.launch {
+            delay(AWAY_IDLE_MS)
+            releaseAway()
+        }
     }
 
     /** Recording starts while running ([fromStop]: in the count-in, where AUTO length may open empty groups). */
@@ -7319,7 +7336,9 @@ class ArcController(
      * Stops listening while the app is in the background; the screen keeps
      * its last state, and a take kept meanwhile waits for Live to be back.
      */
-    fun pauseMirror() {
+    fun pauseMirror(background: Boolean = false) {
+        // The beat going on with arc off the screen plays the pads' sounds from the mirror: it stays.
+        if (keepsAway(background)) return
         liveOpens++
         livePaused.value = true
         stopMirror()
@@ -7439,6 +7458,95 @@ class ArcController(
         unmeasured.clear()
         liveAudio.stopAll()
         player.stop()
+    }
+
+    // ---------- BACKGROUND PLAY: the beat goes on with arc off the screen (an addition) ----------
+
+    /** Arc is off the screen (its activity stopped). */
+    private var away = false
+
+    /** Live's output and mirror were kept for the beat with arc off the screen; [releaseAway] lets them go. */
+    private val _awayKept = MutableStateFlow(false)
+    val awayKept: StateFlow<Boolean> = _awayKept
+
+    // Stopped off the screen: Live's output and mirror go after a while.
+    private var awayRelease: Job? = null
+
+    /** The beat goes on off the screen: the setting is on and the transport runs, not for a practice (its score follows the screen). */
+    private fun playsAway() = settings.value.backgroundPlay && patternRunning() && practiceRun == null
+
+    /**
+     * Arc is leaving the screen ([background]): Live's output and mirror stay while the beat plays off it, or
+     * stopped there and waits for PLAY on the notification ([awayKept]).
+     */
+    private fun keepsAway(background: Boolean): Boolean {
+        if (!background) return false
+        if (!_awayKept.value && playsAway()) _awayKept.value = true
+        return _awayKept.value
+    }
+
+    /**
+     * Arc left the screen. With background play and the transport running, the beat goes on: recording stops
+     * (kept) and RECORD is disarmed, SAMPLE and a practice end, the arp and the keys held let go. Else nothing keeps
+     * playing ([stopPlayback]).
+     */
+    fun leaveScreen() {
+        away = true
+        if (practiceRun != null) endPractice()
+        if (!keepsAway(background = true)) {
+            stopPlayback()
+            return
+        }
+        patternAct { transport.punchOut() }
+        exitSample(background = true)
+        // The hands left with the screen; the pattern's own notes ring on.
+        playToken++
+        arpClear()
+        held.clear()
+        cut.clear()
+        unsure.clear()
+        unmeasured.clear()
+        player.stop()
+    }
+
+    /** Arc is back on the screen: Live takes its output and mirror back as they are, and a stopped beat's notification goes. */
+    fun backOnScreen() {
+        away = false
+        awayRelease?.cancel()
+        awayRelease = null
+        _awayKept.value = false
+    }
+
+    /** PLAY from the notification, the lock screen or headphones: the transport starts if it is stopped (while Live's output and mirror are there for it). */
+    fun awayPlay() {
+        if (patternRunning()) return
+        if (away && !_awayKept.value) return
+        patternPlay()
+    }
+
+    /**
+     * Stopped off the screen, the notification swiped away or left a while: Live's output and mirror go as they
+     * would have when arc left the screen, and the notification with them.
+     */
+    fun releaseAway() {
+        awayRelease?.cancel()
+        awayRelease = null
+        if (!away || !_awayKept.value || patternRunning()) return
+        _awayKept.value = false
+        closeLiveAudio(background = true)
+        pauseMirror()
+    }
+
+    /** What plays, for the notification: "S02 · 122 BPM · chain". */
+    fun playbackLabel(): String = dev.arc.ep133.text.PlaybackText.now(
+        projectSeq.scene,
+        Math.round(patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)).toInt(),
+        projectSeq.chain.on,
+    )
+
+    // Not allowed from the background on newer Android: it is started while arc is in front, as the transport starts.
+    private fun startPlaybackService() {
+        runCatching { ContextCompat.startForegroundService(context, Intent(context, dev.arc.ep133.service.PlaybackService::class.java)) }
     }
 
     /** Plays PCM that is already in memory (the trim preview). */
@@ -7723,6 +7831,8 @@ class ArcController(
     fun setPianoWhites(whites: Int?) = changeSettings { it.copy(pianoWhites = dev.arc.ep133.features.Piano.choiceOf(whites)) }
 
     fun setHaptics(on: Boolean) = changeSettings { it.copy(haptics = on) }
+
+    fun setBackgroundPlay(on: Boolean) = changeSettings { it.copy(backgroundPlay = on) }
 
     /** Make up for Bluetooth delay (kept): see [dev.arc.ep133.audio.OutputDelay] for what moves. */
     fun setMakeUpDelay(on: Boolean) = changeSettings { it.copy(makeUpDelay = on) }
