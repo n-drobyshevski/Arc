@@ -372,7 +372,7 @@ def sections_of(features: Sequence[Sequence[float]], chords: Sequence[Optional[s
 def group_sections(sections: Sequence[Tuple[int, int]], features: Sequence[Sequence[float]], chords: Sequence[Optional[str]], threshold: float = 0.4, kicks: Optional[Sequence[str]] = None) -> List[int]:
     """Which part each section is (0, 1, 2 ...): a section that sounds like any section of an earlier
     part is that part. Chords count a little: two sections that share few chords sound further apart.
-    So does the kick: a four-on-the-floor and a two-step are as busy, but not the same groove."""
+    The kick decides: a four-on-the-floor and a two-step are as busy, but never the same part."""
     means = [_mean(features[start:start + length]) for start, length in sections]
     names = [{c for c in chords[start:start + length] if c} for start, length in sections]
     grooves = []
@@ -389,7 +389,7 @@ def group_sections(sections: Sequence[Tuple[int, int]], features: Sequence[Seque
             if names[i] and names[j] and len(names[i] & names[j]) < 0.3 * min(len(names[i]), len(names[j])):
                 d += 0.15
             if grooves[i] and grooves[j] and grooves[i] != grooves[j]:
-                d += 0.3
+                d += 1.0
             if d <= best:
                 found, best = labels[j], d
         labels.append(found if found is not None else max(labels, default=-1) + 1)
