@@ -5,26 +5,46 @@
 // hit; the first two bars of a long pattern), where each section goes, the new
 // scene a card of several groups adds, its tempo (a chip sets it: off until
 // chosen), its swing, and its problems with their lines (COPY PROBLEMS copies
-// them for Claude). IMPORT puts it all in as one UNDO step; it is off, and
-// says why, when the card can't be read or a group is full.
+// them for Claude). When the card has sound lines a SOUNDS block follows the
+// rows: a line for each, ticked to be put on its pad (PUT ON PADS switches
+// them all). A card that plays pads with no sound has a SILENT PADS block
+// before the sounds (amber): a row for each, with PICK SOUND, which swaps the
+// sheet for the pad sheet's sound list (live/SoundPicker: find, hundreds,
+// preview). A pick doesn't touch the pad: it adds a ticked row to SOUNDS
+// (nothing to something) that IMPORT puts on the pad with the card's own
+// sounds, in the same UNDO step; the silent row then says "→ 512 PIANO" with
+// a CHANGE key. IMPORT puts it all in as one UNDO step; it is off, and says
+// why, when the card can't be read or a group is full. [onImport] gets
+// whether the tempo is to be set, the pads whose sounds are to be put on and
+// the sounds picked for silent pads.
 //
 // Web deltas:
 // - The grid's cells are spans in a row that scrolls sideways when long,
 //   where Kotlin draws them on a Canvas.
 // - [pasting]: PASTE BEAT where the page may not read the clipboard shows a
 //   box a paste goes into instead (WebText.PASTE_HERE), before any card.
+// - A sound row is a checkbox button (Kotlin's toggleable row); the picker's
+//   pad is named by its label on a small cap, not the device view's PadCap.
+// - PUT ON PADS is a pill like the tempo chip, until the sheet's switches
+//   become LED keys. The rows of a pack's sound to upload, the synth rows,
+//   the suggested sounds, FX and PAD SHAPING come with their ports.
 import type { JSX } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
-import type { CardProblem } from '../../core/features/beatCard'
+import type { ReadonlySignal } from '@preact/signals'
+import { SoundStatus, type CardProblem } from '../../core/features/beatCard'
+import { SoundSource } from '../../core/features/offlinePads'
+import { padKey, type PhysicalPad } from '../../core/features/padNotes'
 import { ClaudeText } from '../../core/text/claudeText'
+import { plural } from '../../core/text/format'
 import { MirrorText } from '../../core/text/mirrorText'
 import { SettingsText } from '../../core/text/settingsText'
 import { Strings } from '../../core/text/strings'
 import { WebText } from '../../core/text/webText'
-import type { BeatGridUi, BeatImportUi, Weight } from '../../state/beatPlan'
+import { pickedRow, soundsUiOf, type BeatGridUi, type BeatImportUi, type SilentRowUi, type SilentUi, type SoundRowUi, type SoundsUi, type Weight } from '../../state/beatPlan'
 import { GridPlate, PlateLine } from '../components/GridPlate'
 import { Key } from '../components/Key'
 import { Sheet } from '../components/Sheet'
+import { SoundPicker } from '../live/SoundPicker'
 import './BeatImportSheet.css'
 
 export interface BeatImportSheetProps {
@@ -34,25 +54,59 @@ export interface BeatImportSheetProps {
   /** PASTE BEAT is waiting for a paste. */
   pasting: boolean
   onCancel(): void
-  onImport(setTempo: boolean): void
+  /** IMPORT: whether the tempo is set, the pads (pad keys) whose sounds go on, and the sounds picked for silent pads (pad key to slot). */
+  onImport(setTempo: boolean, soundPads: ReadonlySet<number>, picked: ReadonlyMap<number, number>): void
   onCopyProblems(problems: readonly CardProblem[]): void
   /** A text pasted into the box. */
   onPaste(text: string): void
+  /** The preview of the sounds PICK SOUND lists: the key of the one playing, read by each row (controller.playing). */
+  playing: ReadonlySignal<string | null>
+  onPlay(slot: number, source: SoundSource): void
+  onStop(): void
+  /** The device is busy with something else: connected, a sound can't be picked. */
+  busy: boolean
 }
+
+/** What the card's sheet chose so far: the tempo, PUT ON PADS, the unticked rows (pad keys), the picks for silent pads (pad key to slot) and the pad whose picker is open. */
+interface Choices {
+  readonly setTempo: boolean
+  readonly putOnPads: boolean
+  readonly unticked: ReadonlySet<number>
+  readonly picked: ReadonlyMap<number, number>
+  readonly picking: number | null
+}
+
+const NO_CHOICES: Choices = { setTempo: false, putOnPads: true, unticked: new Set(), picked: new Map(), picking: null }
 
 export function BeatImportSheet(props: BeatImportSheetProps): JSX.Element {
   const { ui } = props
-  // Chosen on this sheet only: a card's tempo never replaces Arc's unasked.
-  const [setTempo, setSetTempo] = useState(false)
+  // Chosen on this sheet only: a card's tempo never replaces Arc's unasked. The sounds: all put on pads, bar the rows unticked.
+  const [choices, setChoices] = useState(NO_CHOICES)
   useEffect(() => {
-    if (!props.open) setSetTempo(false)
+    if (!props.open) setChoices(NO_CHOICES)
   }, [props.open])
+  const silent = ui?.silent ?? null
+  const pickRow = choices.picking === null ? undefined : silent?.rows.find((r) => padKey(r.pad) === choices.picking)
   return (
     <Sheet open={props.open} onDismiss={props.onCancel} labelledBy="beat-sheet-title" class="beat-sheet">
       {ui === null ? (
         <PasteBox onPaste={props.onPaste} onCancel={props.onCancel} />
+      ) : silent !== null && pickRow !== undefined ? (
+        <PickView
+          {...props}
+          row={pickRow}
+          silent={silent}
+          onPick={(slot) => {
+            const key = padKey(pickRow.pad)
+            // A pick is ticked to begin with, even where the pad's earlier pick was unticked.
+            const unticked = new Set(choices.unticked)
+            unticked.delete(key)
+            setChoices({ ...choices, picked: new Map(choices.picked).set(key, slot), unticked, picking: null })
+          }}
+          onBack={() => setChoices({ ...choices, picking: null })}
+        />
       ) : (
-        <CardView {...props} ui={ui} setTempo={setTempo} onSetTempo={setSetTempo} />
+        <CardView {...props} ui={ui} choices={choices} onChoices={setChoices} />
       )}
     </Sheet>
   )
@@ -83,9 +137,24 @@ function PasteBox(props: { onPaste(text: string): void; onCancel(): void }): JSX
   )
 }
 
-function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; setTempo: boolean; onSetTempo(on: boolean): void }): JSX.Element {
-  const { ui, setTempo } = props
+function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; choices: Choices; onChoices(c: Choices): void }): JSX.Element {
+  const { ui, choices } = props
+  const { setTempo, putOnPads, unticked, picked } = choices
   const tempo = ui.tempo
+  const silent = ui.silent
+  // The picks as SOUNDS rows, in pad order: only for pads the card still leaves silent.
+  const pickedRows: SoundRowUi[] = []
+  if (silent !== null) {
+    for (const [key, slot] of [...picked].sort((a, b) => a[0] - b[0])) {
+      const row = silent.rows.find((r) => padKey(r.pad) === key)
+      if (row !== undefined) pickedRows.push(pickedRow(row.pad, slot, silent.choices?.names.get(slot) ?? null))
+    }
+  }
+  // The card's own sound rows, with the picked ones after them.
+  const sounds: SoundsUi | null =
+    pickedRows.length === 0 || silent === null ? ui.sounds : soundsUiOf([...(ui.sounds?.rows ?? []), ...pickedRows], ui.sounds?.offline ?? silent.offline, ui.sounds?.project ?? silent.project)
+  const isTicked = (row: SoundRowUi): boolean => putOnPads && !unticked.has(padKey(row.pad))
+  const ticked = sounds?.changes.filter(isTicked) ?? []
   const goes = ui.grids.filter((g) => g.goesTo !== null)
   const rows: JSX.Element[] = []
   for (const g of goes) rows.push(<ValueRow key={`g${g.group}`} label={ClaudeText.GOES_TO} value={ClaudeText.goesTo(g.group, g.goesTo!)} />)
@@ -93,11 +162,17 @@ function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; setTempo: bo
   if (tempo !== null) {
     rows.push(
       <ValueRow key="tempo" label={ClaudeText.TEMPO} value={String(tempo)}>
-        <TempoChip now={ui.tempoNow} card={tempo} on={setTempo} onToggle={() => props.onSetTempo(!setTempo)} />
+        <TempoChip now={ui.tempoNow} card={tempo} on={setTempo} onToggle={() => props.onChoices({ ...choices, setTempo: !setTempo })} />
       </ValueRow>,
     )
   }
   const problems = ui.read.problems
+  const onImport = (): void => {
+    const pads = new Set(ticked.map((r) => padKey(r.pad)))
+    // The picked sounds that are ticked: they are in [pads] too, being SOUNDS rows.
+    const chosen = new Map(pickedRows.filter((r) => pads.has(padKey(r.pad))).map((r) => [padKey(r.pad), r.pick.slot!]))
+    props.onImport(setTempo && tempo !== null, pads, chosen)
+  }
   return (
     <>
       <div class="beat-sheet__head">
@@ -111,6 +186,33 @@ function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; setTempo: bo
         <GridPlate>
           {rows.flatMap((r, i) => (i === 0 ? [r] : [<PlateLine key={`l${i}`} />, r]))}
         </GridPlate>
+      )}
+      {silent !== null && (
+        <SilentBlock
+          silent={silent}
+          // A pad's pick counts while its SOUNDS row is ticked (and PUT ON PADS is on): otherwise the pad stays silent.
+          soundOf={(pad) => {
+            const slot = picked.get(padKey(pad))
+            if (slot === undefined || !putOnPads || unticked.has(padKey(pad))) return null
+            return ClaudeText.soundName(slot, silent.choices?.names.get(slot) ?? null)
+          }}
+          onPick={(pad) => props.onChoices({ ...choices, picking: padKey(pad) })}
+        />
+      )}
+      {sounds !== null && (
+        <SoundsBlock
+          sounds={sounds}
+          on={putOnPads}
+          onToggle={() => props.onChoices({ ...choices, putOnPads: !putOnPads })}
+          ticked={ticked.length}
+          isTicked={isTicked}
+          onTick={(row) => {
+            const next = new Set(unticked)
+            const key = padKey(row.pad)
+            if (!next.delete(key)) next.add(key)
+            props.onChoices({ ...choices, unticked: next })
+          }}
+        />
       )}
       {ui.swing !== null && <p class="t-small beat-sheet__dim">{ClaudeText.swingLine(ui.swing)}</p>}
       {problems.length > 0 && (
@@ -131,9 +233,239 @@ function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; setTempo: bo
       </p>
       <div class="beat-sheet__actions">
         <Key text={Strings.CANCEL} onClick={props.onCancel} />
-        <Key text={ClaudeText.IMPORT} variant="signal" disabled={ui.blocked !== null} onClick={() => props.onImport(setTempo && tempo !== null)} />
+        <Key text={ClaudeText.IMPORT} variant="signal" disabled={ui.blocked !== null} onClick={onImport} />
       </div>
     </>
+  )
+}
+
+/**
+ * The SILENT PADS block (amber): its header and a row for each pad the card
+ * plays that has no sound ([SilentRow]), and under them what a pick does.
+ * [soundOf] gives the sound picked for a pad ("512 PIANO") while its SOUNDS
+ * row is ticked, else null.
+ */
+function SilentBlock(props: { silent: SilentUi; soundOf(pad: PhysicalPad): string | null; onPick(pad: PhysicalPad): void }): JSX.Element {
+  const { silent } = props
+  return (
+    <>
+      <GridPlate role="group" aria-label={ClaudeText.SILENT_PADS}>
+        <div class="beat-block__head">
+          <span class="beat-block__bar is-warn" aria-hidden="true" />
+          <span class="t-caps beat-sheet__dim">{ClaudeText.SILENT_PADS}</span>
+        </div>
+        {silent.rows.map((row) => (
+          <div key={padKey(row.pad)}>
+            <PlateLine />
+            <SilentRow row={row} sound={props.soundOf(row.pad)} canPick={silent.choices !== null} onPick={() => props.onPick(row.pad)} />
+          </div>
+        ))}
+      </GridPlate>
+      <p class="t-small beat-sheet__dim">{ClaudeText.SILENT_NOTE}</p>
+    </>
+  )
+}
+
+/**
+ * One silent pad: an amber bar, "D7 · 12 notes, no sound: they will be
+ * silent" and its PICK SOUND key (no key when Arc knows no sounds to pick
+ * from). Once a sound is picked ([sound], "512 PIANO") the bar is navy, the
+ * row says "→ 512 PIANO" and the key is CHANGE.
+ */
+function SilentRow(props: { row: SilentRowUi; sound: string | null; canPick: boolean; onPick(): void }): JSX.Element {
+  const { row, sound } = props
+  return (
+    <div class="beat-silent">
+      <span class={`beat-silent__bar${sound === null ? '' : ' is-picked'}`} aria-hidden="true" />
+      <div class="beat-silent__text" role="note" aria-label={sound === null ? ClaudeText.silentRowName(row.pad, row.notes) : ClaudeText.pickedRowName(row.pad, sound)}>
+        {sound === null ? (
+          <span class="t-small beat-sheet__ink" aria-hidden="true">{ClaudeText.silentRow(row.pad, row.notes)}</span>
+        ) : (
+          <>
+            <span class="t-small beat-sheet__dim" aria-hidden="true">{ClaudeText.padLabel(row.pad) + ' \u00B7 ' + plural(row.notes, 'note')}</span>
+            <span class="t-small beat-sheet__strong beat-sheet__clamp" aria-hidden="true">{'\u2192 ' + sound}</span>
+          </>
+        )}
+      </div>
+      {props.canPick && (
+        <Key
+          text={sound === null ? ClaudeText.PICK_SOUND : ClaudeText.CHANGE_PICK}
+          size="small"
+          aria-label={sound === null ? ClaudeText.pickSoundName(row.pad) : ClaudeText.changePickName(row.pad, sound)}
+          onClick={props.onPick}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * PICK SOUND's picker, in place of the sheet: the pad's cap and what it
+ * plays in the card, the pad sheet's sound list (SoundPicker: the search, the
+ * hundreds, a preview on each sound) and a key back to the card. A tap on a
+ * sound picks it ([onPick]; nothing is written yet, see CardView). The list
+ * is the one IMPORT picks from: the EP-133's while connected, offline the
+ * view's (so no Device / Factory switch, and no upload).
+ */
+function PickView(props: BeatImportSheetProps & { row: SilentRowUi; silent: SilentUi; onPick(slot: number): void; onBack(): void }): JSX.Element {
+  const { row, silent } = props
+  const choices = silent.choices
+  const fromPack = choices?.source === SoundSource.FACTORY
+  const stop = (): void => {
+    if (props.playing.peek() !== null) props.onStop()
+  }
+  return (
+    <>
+      <div class="beat-pick__head">
+        <span class="beat-pick__cap cap-3d" aria-hidden="true">{ClaudeText.padLabel(row.pad)}</span>
+        <div class="beat-sheet__head">
+          <h2 id="beat-sheet-title" class="t-heading beat-sheet__title">{ClaudeText.pickTitle(row.pad)}</h2>
+          <p class="t-small beat-sheet__dim">{ClaudeText.pickLine(row.notes)}</p>
+        </div>
+      </div>
+      {choices !== null && (
+        <>
+          <SoundPicker
+            sounds={fromPack ? [] : choices.entries}
+            factory={fromPack ? choices.entries : null}
+            unavailable={choices.unavailable}
+            offline={silent.offline}
+            current={null}
+            padSource={choices.source}
+            playing={props.playing}
+            onPlay={props.onPlay}
+            onStop={props.onStop}
+            onPick={(snd) => {
+              stop()
+              props.onPick(snd.slot)
+            }}
+            disabled={props.busy && !silent.offline}
+            findLabel={MirrorText.FIND_FOR_PAD}
+          />
+          <p class="t-small beat-sheet__dim">{ClaudeText.PICK_NOTE}</p>
+        </>
+      )}
+      <Key
+        text={ClaudeText.PICK_BACK}
+        variant="quiet"
+        block
+        onClick={() => {
+          stop()
+          props.onBack()
+        }}
+      />
+    </>
+  )
+}
+
+/**
+ * The SOUNDS block: its header with the PUT ON PADS chip (shown when some row
+ * can be ticked; [on] by default), a row for each sound line ([SoundRow]),
+ * and under it what writing them does ([ticked] pads): to the EP-133 and its
+ * project, or kept in Arc until it connects.
+ */
+function SoundsBlock(props: {
+  sounds: SoundsUi
+  on: boolean
+  onToggle(): void
+  ticked: number
+  isTicked(row: SoundRowUi): boolean
+  onTick(row: SoundRowUi): void
+}): JSX.Element {
+  const { sounds, on, ticked } = props
+  const changes = sounds.changes.length
+  let note: string | null = null
+  if (on && ticked > 0) {
+    // A pad with no sound can't be emptied again by UNDO: a ticked pick (or any such row) stays on it.
+    const keeps = sounds.rows.some((r) => r.changes && props.isTicked(r) && (r.picked || r.oldName === ClaudeText.NO_SOUND))
+    note = sounds.offline ? ClaudeText.SOUNDS_OFFLINE_NOTE : ClaudeText.soundsNote(ticked, sounds.project, keeps)
+  }
+  return (
+    <>
+      <GridPlate role="group" aria-label={ClaudeText.SOUNDS}>
+        <div class="beat-block__head">
+          <span class="t-caps beat-sheet__dim">{ClaudeText.SOUNDS}</span>
+          {changes > 0 && <SwitchChip text={ClaudeText.PUT_ON_PADS} description={ClaudeText.putOnPadsName(on, changes)} on={on} onToggle={props.onToggle} />}
+        </div>
+        {sounds.rows.map((row) => (
+          <div key={padKey(row.pad)}>
+            <PlateLine />
+            <SoundRow row={row} ticked={props.isTicked(row)} chipOn={on} onTick={() => props.onTick(row)} />
+          </div>
+        ))}
+      </GridPlate>
+      {sounds.noneFound && <p class="t-small beat-sheet__dim">{ClaudeText.NONE_ON_DEVICE}</p>}
+      {note !== null && <p class="t-small beat-sheet__dim">{note}</p>}
+    </>
+  )
+}
+
+/**
+ * A sound line: a tick box (for a row that changes the pad), the pad, and
+ * what changes: the old name struck through and the new sound after it, the
+ * sound and "Already there" when the pad has it, or, amber with no box, why
+ * it isn't on the user's EP-133. A sound used by its slot says what the card
+ * called it, and one picked for a silent pad says so. [chipOn] is the chip:
+ * off, the rows are dimmed and can't be ticked.
+ */
+function SoundRow(props: { row: SoundRowUi; ticked: boolean; chipOn: boolean; onTick(): void }): JSX.Element {
+  const { row, ticked, chipOn } = props
+  const pick = row.pick
+  const wanted = pick.wanted
+  const missing = pick.status === SoundStatus.MISSING
+  // A sound listed unnamed is its file name ("012.pcm") already: the slot isn't said twice.
+  const now = missing ? null : pick.unverified && pick.name !== null ? pick.name : ClaudeText.soundName(pick.slot ?? wanted.slot, pick.name)
+  const cardSays = row.cardSays
+  const description =
+    (missing
+      ? ClaudeText.soundRowMissing(pick.pad, wanted.slot, wanted.name)
+      : pick.status === SoundStatus.SAME
+        ? ClaudeText.soundRowSame(pick.pad, now ?? '')
+        : ClaudeText.soundRowName(pick.pad, row.oldName, now ?? '')) + (cardSays === null ? '' : '. ' + ClaudeText.cardSays(cardSays))
+  const dim = row.changes && !chipOn ? ' is-dim' : ''
+  const body = (
+    <>
+      <span class="beat-sound__mark" aria-hidden="true">
+        {row.changes ? <span class={`beat-tick${ticked && chipOn ? ' is-on' : ''}`} /> : missing ? <span class="beat-sound__bar" /> : null}
+      </span>
+      <span class="t-field-label beat-sound__pad" aria-hidden="true">{ClaudeText.padLabel(pick.pad)}</span>
+      {missing ? (
+        <span class="t-small beat-sheet__ink beat-sound__what beat-sheet__clamp" aria-hidden="true">{ClaudeText.soundMissing(wanted.slot, wanted.name)}</span>
+      ) : pick.status === SoundStatus.SAME ? (
+        <span class="beat-sound__what" aria-hidden="true">
+          <span class="t-field-label beat-sheet__ink beat-sound__one">{now}</span>
+          <span class="t-tiny beat-sheet__dim">{ClaudeText.ALREADY_THERE}</span>
+        </span>
+      ) : (
+        <span class={`beat-sound__what${dim}`} aria-hidden="true">
+          <span class="t-small beat-sheet__clamp">
+            {row.oldName !== null && (
+              <>
+                <s class="beat-sheet__dim">{row.oldName}</s>
+                {'  \u2192  '}
+              </>
+            )}
+            <b class="beat-sheet__strong">{now}</b>
+          </span>
+          {/* A factory sound the EP-133 lists without a name: used by its slot, the card's name not checked. */}
+          {cardSays !== null && <span class="t-tiny beat-sheet__dim">{ClaudeText.cardSays(cardSays)}</span>}
+          {/* A sound the user picked for a silent pad, not the card's. */}
+          {row.picked && <span class="t-tiny beat-sheet__dim">{ClaudeText.PICKED_HERE}</span>}
+        </span>
+      )}
+    </>
+  )
+  if (!row.changes) {
+    return (
+      <div class="beat-sound" role="note" aria-label={description}>
+        {body}
+      </div>
+    )
+  }
+  return (
+    <button type="button" class="beat-sound is-tickable" role="checkbox" aria-checked={ticked && chipOn} aria-label={description} disabled={!chipOn} onClick={props.onTick}>
+      {body}
+    </button>
   )
 }
 
@@ -150,17 +482,22 @@ function ValueRow(props: { label: string; value: string; children?: JSX.Element 
 
 /** The tempo chip: "SET · NOW 122". Off it is a flat pill (the tempo stays Arc's), on it is navy; a tap switches it. */
 function TempoChip(props: { now: number; card: number; on: boolean; onToggle(): void }): JSX.Element {
+  return <SwitchChip text={ClaudeText.tempoChip(props.now)} description={ClaudeText.tempoChipName(String(props.card), props.now, props.on)} on={props.on} onToggle={props.onToggle} />
+}
+
+/** A block's switch: [text] on a flat pill, navy while [on]; a tap switches it, and screen readers hear [description] and its state. */
+function SwitchChip(props: { text: string; description: string; on: boolean; onToggle(): void }): JSX.Element {
   return (
     <button
       type="button"
       role="switch"
-      class={`tempo-chip${props.on ? ' is-on' : ''}`}
+      class={`beat-chip${props.on ? ' is-on' : ''}`}
       aria-checked={props.on}
-      aria-label={ClaudeText.tempoChipName(String(props.card), props.now, props.on)}
+      aria-label={props.description}
       aria-description={props.on ? SettingsText.ON : SettingsText.OFF}
       onClick={props.onToggle}
     >
-      {ClaudeText.tempoChip(props.now)}
+      {props.text}
     </button>
   )
 }

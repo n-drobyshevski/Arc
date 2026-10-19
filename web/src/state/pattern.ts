@@ -28,7 +28,7 @@
 import { Chain } from '../core/features/chain'
 import { signal, type ReadonlySignal, type Signal } from '@preact/signals'
 import { physicalPad, type PhysicalPad } from '../core/features/padNotes'
-import { Pattern, Patterns, ProjectPatterns, ProjectSeq, Seq, TimingSettings, type Timing } from '../core/features/pattern'
+import { Pattern, Patterns, ProjectPatterns, ProjectSeq, Seq, TimingSettings, sameSeq, type Timing } from '../core/features/pattern'
 import { PatternRecorder } from '../core/features/patternRecorder'
 import { frameAt } from '../core/features/sampleTiming'
 import { Steps } from '../core/features/steps'
@@ -40,7 +40,10 @@ import { ClockFollow, TapTempo, Tempo, type Beat, type BeatGrid } from '../core/
 import type { MidiEvent } from '../core/protocol/midiInput'
 import { ArpSettings, type ArpNote, type ArpOrder } from '../core/features/arp'
 import { OutputDelay } from '../core/features/outputDelay'
-import { BeatCards, type CardRead } from '../core/features/beatCard'
+import { BeatCards, type BeatCard, type CardRead } from '../core/features/beatCard'
+import type { PadTarget } from '../core/features/liveMirror'
+import { OfflinePadSettings } from '../core/features/offlinePadSettings'
+import { OfflinePads } from '../core/features/offlinePads'
 import { ClaudeText } from '../core/text/claudeText'
 import { FeatureText } from '../core/text/featureText'
 import { MirrorText } from '../core/text/mirrorText'
@@ -65,7 +68,7 @@ import {
   type PatternUiState,
 } from './patternPlan'
 import { ARP_PRESSURE_MS, ARP_UI, ArpDesk, type ArpUi } from './arpPlan'
-import { applyBeat, beatImportUi, beatImported, beatShare, beatShareChain, type BeatApplied, type BeatImportUi, type BeatShare, type ShareParts } from './beatPlan'
+import { applyBeat, beatImportUi, beatImported, beatShare, beatShareChain, isBefore, type BeatApplied, type BeatBlocks, type BeatImportUi, type BeatShare, type ShareParts } from './beatPlan'
 import { ClipMode, PadStage, SCENE_UI, SceneDesk, type SceneUi } from './scenePlan'
 import { CORRECT_SHOWN_MS, STEP_UI, StepDesk, arpTakesPress, auditionMs, stepOpens, stepWord, type StepNote, type StepUi } from './stepPlan'
 import type { Store } from './store'
@@ -119,7 +122,65 @@ export interface PatternHost {
   noteNames?(): NoteNames
   /** [pad]'s sound name as Live shows it (a beat card's rows), or null. */
   padName?(pad: PhysicalPad): string | null
+  /** A beat card's SOUNDS and SILENT PADS blocks as the pads are now (the controller knows them). */
+  beatBlocks?(): BeatBlocks
+  /**
+   * IMPORT's second half: the sounds of the ticked pads ([soundPads], pad
+   * keys) and the ones [picked] for silent pads (pad key to slot) put on their
+   * pads, [entry] keeping what UNDO needs; null when none changes a pad now.
+   */
+  putBeatSounds?(card: BeatCard, soundPads: ReadonlySet<number>, picked: ReadonlyMap<number, number>, entry: BeatUndo): Promise<SoundsPut> | null
+  /** UNDO took back an import that put sounds on pads ([entry]): they get their old sounds back. */
+  putBackBeatSounds?(entry: BeatUndo): Promise<void>
+  /** A toast with a key ([label]: UNDO) that runs [run] once. */
+  toastWith?(text: string, label: string, run: () => void, error?: boolean): void
 }
+
+/** A pad an IMPORT put a sound on: the [pad] and its [target], whose slot is the sound it had (null when none was known). */
+export interface PadBack {
+  readonly pad: PhysicalPad
+  readonly target: PadTarget
+}
+
+/** The sounds an IMPORT put on: the pads [done], the [skipped] picks, the recordings that went to Takes ([moved]) and why it stopped ([failure]; null when it didn't). */
+export interface SoundsPut {
+  readonly done: readonly PadBack[]
+  readonly skipped: number
+  readonly moved: number
+  readonly failure: string | null
+}
+
+/**
+ * One IMPORT, to be taken back by UNDO: the [recorder] it went through, the
+ * sequencer as it was [before] and as it stood [after] it (the toast's UNDO
+ * only acts while it still does). While its sounds are being [writing], UNDO
+ * only marks it [undone]: the writes stop and put back what they did. If it
+ * put sounds on [pads], their targets hold the sound each pad had, and an
+ * import made [offline] keeps the offline pad changes and settings as they
+ * were ([padsBefore], [settingsBefore]).
+ */
+export class BeatUndo {
+  pads: readonly PadBack[] = []
+  writing = false
+  undone = false
+  offline = false
+  padsBefore: OfflinePads = OfflinePads.EMPTY
+  settingsBefore: OfflinePadSettings = OfflinePadSettings.EMPTY
+
+  constructor(
+    readonly recorder: PatternRecorder,
+    readonly before: ProjectSeq,
+    readonly after: ProjectSeq,
+  ) {}
+
+  /** Whether UNDO went back to the sequencer before this import ([c], what the recorder gave back; open groups come back closed). */
+  restores(c: ProjectSeq): boolean {
+    return isBefore(c, this.before)
+  }
+}
+
+/** The imports UNDO can still take back, at most. */
+const MAX_BEAT_UNDOS = 8
 
 /** The plan last handed to the sequencer, to tell when a new one changes anything. */
 interface SentPlan {
@@ -1594,7 +1655,7 @@ export class PatternDesk {
 
   // The sheet for [read], planned into the project's patterns as they are now.
   private showBeat(read: CardRead): void {
-    this._beat.value = beatImportUi(read, this.seq, this.bpm(), (pad) => this.padName(pad))
+    this._beat.value = beatImportUi(read, this.seq, this.bpm(), (pad) => this.padName(pad), this.host.beatBlocks?.() ?? {})
   }
 
   /** The sheet closes (CANCEL, a tap outside, Back, another section): nothing was imported. */
@@ -1610,12 +1671,21 @@ export class PatternDesk {
    * card's tempo becomes the phone's. It takes over at once, stopped or
    * playing, as COMMIT does; the picks waiting go. Where a group has no free
    * pattern now the sheet stays, with the reason.
+   *
+   * [soundPads] are the pads (pad keys) whose sound lines the sheet had
+   * ticked: after the patterns each is matched again to the sounds as they
+   * are now and put on its pad (host.putBeatSounds), in the same UNDO step,
+   * and so are the sounds the user [picked] for the pads the card leaves
+   * silent (pad key to slot; they are in [soundPads] too, being ticked). The
+   * toast, with UNDO, waits for them.
    */
-  importBeat(setTempo: boolean): void {
+  importBeat(setTempo: boolean, soundPads: ReadonlySet<number> = new Set(), picked: ReadonlyMap<number, number> = new Map()): void {
     const ui = this._beat.peek()
     const card = ui?.read.card ?? null
     if (ui === null || card === null) return
     let applied: BeatApplied | null = null
+    // The sequencer as it was: UNDO is that one, once the sounds are back with it.
+    const before = this.seq
     this.sceneEdit(() => {
       const a = applyBeat(this.seq, card, this.recorder)
       applied = a
@@ -1631,7 +1701,57 @@ export class PatternDesk {
     }
     this._beat.value = null
     if (setTempo && card.tempo !== null) this.setTempo(Tempo.round(card.tempo))
-    this.host.toast(beatImported(a))
+    const entry = new BeatUndo(this.recorder, before, a.seq)
+    this.beatUndos.push(entry)
+    while (this.beatUndos.length > MAX_BEAT_UNDOS) this.beatUndos.shift()
+    const put = soundPads.size === 0 ? null : (this.host.putBeatSounds?.(card, soundPads, picked, entry) ?? null)
+    if (put === null) {
+      this.importToast(beatImported(a), entry)
+      return
+    }
+    entry.writing = true
+    void this.putTail(a, entry, put)
+  }
+
+  // The imports whose UNDO is still ahead, the latest last.
+  private readonly beatUndos: BeatUndo[] = []
+
+  /**
+   * IMPORT's second half, once the sounds went on ([put]): the toast says what
+   * was done, or what stopped it. UNDO during the writes ([BeatUndo.undone])
+   * stops them, and what they did is put back.
+   */
+  private async putTail(applied: BeatApplied, entry: BeatUndo, put: Promise<SoundsPut>): Promise<void> {
+    const s = await put
+    entry.writing = false
+    if (entry.undone) {
+      // The patterns are back already: the pads done follow them, with no import toast.
+      if (entry.pads.length > 0) await this.host.putBackBeatSounds?.(entry)
+      return
+    }
+    if (s.failure !== null) this.importToast(ClaudeText.soundsFailed(s.failure, s.done.length), entry, true)
+    else this.importToast(beatImported(applied, s.done.length, s.skipped) + (s.moved > 0 ? ' ' + MirrorText.samplesToTakes(s.moved) : ''), entry)
+  }
+
+  // An import's toast, with UNDO when the host has keys on its toasts.
+  private importToast(text: string, entry: BeatUndo, error = false): void {
+    if (this.host.toastWith) this.host.toastWith(text, MirrorText.UNDO, () => this.undoImport(entry), error)
+    else this.host.toast(text, error)
+  }
+
+  /** The import's toast UNDO: UNDO on the pattern line, while the import is still the last edit of the sequencer. */
+  private undoImport(entry: BeatUndo): void {
+    if (this.beatUndos.at(-1) !== entry || entry.recorder !== this.recorder || !sameSeq(entry.after, this.seq)) return
+    this.undo()
+  }
+
+  /** The offline pad changes of imports are written or dropped: UNDO of those imports leaves the pads alone. */
+  forgetOfflineUndos(): void {
+    for (const e of this.beatUndos) {
+      if (!e.offline) continue
+      e.pads = []
+      e.offline = false
+    }
   }
 
   private padName(pad: PhysicalPad): string | null {
@@ -1665,7 +1785,8 @@ export class PatternDesk {
 
   /** UNDO: back to before the last pass recorded, clear or length change. */
   undo(): void {
-    const seq = this.recorder.undo(this.seq)
+    const rec = this.recorder
+    const seq = rec.undo(this.seq)
     // A pick waiting goes.
     if (seq !== null) this.sceneDesk.cancel()
     if (seq !== null && seq !== this.seq) {
@@ -1675,6 +1796,13 @@ export class PatternDesk {
       if (!this.transport.state.recording) this.save()
     }
     this.show()
+    // An IMPORT that put sounds on pads is one step with them: they go back too.
+    const taken = seq === null ? undefined : this.beatUndos.findLast((e) => e.recorder === rec && e.restores(seq))
+    if (taken === undefined) return
+    this.beatUndos.splice(this.beatUndos.indexOf(taken), 1)
+    // Marked even with no pads yet: the writes still running see it and put back what they did (putTail).
+    taken.undone = true
+    if (!taken.writing && taken.pads.length > 0) void this.host.putBackBeatSounds?.(taken)
   }
 
   /** TIMING: the grid recorded notes snap to ('off': free time). Kept. */

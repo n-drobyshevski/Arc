@@ -1546,6 +1546,8 @@ function LiveBeatSheet(props: { view: NavView }): JSX.Element | null {
   const p = c.pattern
   const beat = p.beat.value
   const pasting = c.beatPasting.value
+  // PICK SOUND's list waits while the device is busy (read alone: the sheet doesn't follow the mirror).
+  const busy = useComputed(() => c.state.value.busy).value
   const shown = beat !== null || pasting
   const has = props.view.sheets.includes(BEAT_SHEET)
   // The layer opens with the card; the layer closed (Back) while the card waits is a CANCEL.
@@ -1589,9 +1591,13 @@ function LiveBeatSheet(props: { view: NavView }): JSX.Element | null {
         p.dismissBeat()
         c.cancelBeatPaste()
       }}
-      onImport={(setTempo) => p.importBeat(setTempo)}
+      onImport={(setTempo, soundPads, picked) => p.importBeat(setTempo, soundPads, picked)}
       onCopyProblems={(problems) => void c.copyProblems(problems)}
       onPaste={(text) => void c.receiveBeat(text)}
+      playing={c.playing}
+      onPlay={(slot, source) => void c.playLiveSound(slot, source)}
+      onStop={() => c.stopPlayback()}
+      busy={busy}
     />
   )
 }

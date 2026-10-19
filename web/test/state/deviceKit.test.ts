@@ -1,16 +1,15 @@
 // Port of app/src/test/kotlin/dev/arc/ep133/controller/DeviceKitTest.kt: the kit a share names and a card's sounds are
 // read by: the device's own, told by its slots, never the one Live plays offline. An EP-133 with its own sounds and only
 // the EP-40's pack saved (Live on that kit) is the EP-133's kit, its unnamed sounds left unnamed, and a card's EP-40
-// sounds are not put on by their slots.
-// Web deltas: deviceKitOf takes the connected list as its own argument (Kotlin's MirrorUi.sounds); the second test's
-// soundsUi and packSoundOf asserts (the SOUNDS rows, the upload from a saved pack) come with those ports.
+// sounds are uploaded from the pack, not put on by their slots.
+// Web delta: deviceKitOf takes the connected list as its own argument (Kotlin's MirrorUi.sounds).
 import { describe, expect, it } from 'vitest'
 import { BeatCards, SoundStatus, cardSound } from '../../src/core/features/beatCard'
 import { FactoryKit, FactorySounds } from '../../src/core/features/factorySounds'
 import { SoundSource } from '../../src/core/features/offlinePads'
 import type { SoundEntry } from '../../src/core/protocol/device'
 import { BackupDevice, type BackupRecord } from '../../src/core/text/libraryRules'
-import { deviceKitOf, foreignTo } from '../../src/state/beatPlan'
+import { deviceKitOf, foreignTo, packSoundOf, soundSet, soundsUi } from '../../src/state/beatPlan'
 import { emptyMirrorState, type MirrorUi } from '../../src/state/types'
 
 const pack = (kit: FactoryKit, slots: readonly number[]): BackupRecord => ({
@@ -60,7 +59,7 @@ describe('DeviceKitTest', () => {
     expect(deviceKitOf(offline, [], backups, new Map([[FactoryKit.EP40, ep40Names]]), null, FactoryKit.EP40).names?.get(53)).toBe('mpc kick')
   })
 
-  it("another kit's sound is not put on by its slot", () => {
+  it("another kit's sound is not put on by its slot, and a pack that has it can upload it", () => {
     const packs = new Map([[FactoryKit.EP40, ep40Names]])
     const card = BeatCards.read(
       'ARC BEAT 1\n[A] bars 1\nsound A7 53 mpc kick\nsound A4 234 mpc hh\nsound A9 154 my snare\nA7 kick | X... .... .... .... |\nA4 hat | x.x. x.x. x.x. x.x. |\nA9 sn | .... X... .... X... |\n',
@@ -73,6 +72,16 @@ describe('DeviceKitTest', () => {
     // A name no pack has, on an unnamed slot, is still used by its slot.
     expect(picks.get(11)!.status).toBe(SoundStatus.CHANGE)
     expect(picks.get(11)!.unverified).toBe(true)
+    const ui = soundsUi(card, soundSet('the EP-133', available), () => null, () => null, false, 1, packs, FactoryKit.EP133)!
+    const kick = ui.rows.find((r) => r.pad.offset === 9)!
+    expect(kick.fromPack?.slot).toBe(53)
+    expect(kick.fromPack?.kit).toBe(FactoryKit.EP40)
+    expect(kick.changes).toBe(true)
+    // Offline it can't be uploaded: no tick, the row says to connect.
+    const off = soundsUi(card, soundSet('the last read', available), () => null, () => null, true, 1, packs, FactoryKit.EP133)!
+    expect(off.rows.find((r) => r.pad.offset === 9)!.changes).toBe(false)
+    expect(packSoundOf(cardSound(9, 'MPC HH'), packs)?.slot).toBe(234)
+    expect(packSoundOf(cardSound(9, '009.pcm'), packs)).toBeNull()
     expect(foreignTo(packs, FactoryKit.EP40)(cardSound(53, 'mpc kick'))).toBe(false)
     expect(FactorySounds.unnamed(53, available.get(53)!)).toBe(true)
   })

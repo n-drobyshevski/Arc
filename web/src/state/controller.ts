@@ -99,7 +99,7 @@ import { WebText } from '../core/text/webText'
 import { ktTrim } from '../core/util/kotlinText'
 import { APP_BUILD } from '../version'
 import { describeFile, PAK_ACCEPT, WAV_ACCEPT, type ReadableFile } from '../platform/files/pick'
-import { BeatCards, cardSound } from '../core/features/beatCard'
+import { BeatCards, SoundStatus, cardSound, type BeatCard, type SoundPick } from '../core/features/beatCard'
 import { logFileName } from '../platform/files/save'
 import type { FileData } from '../platform/files/save'
 import { FileListTarget, type ExternalTarget } from '../platform/storage/external'
@@ -113,10 +113,25 @@ import { FxKeeper, duckSource } from './fx'
 import { voiceShape } from './padShape'
 import { stepWord } from './stepPlan'
 import { PadEditDesk } from './padEdit'
-import { PatternDesk } from './pattern'
+import { PatternDesk, type BeatUndo, type PadBack, type SoundsPut } from './pattern'
 import { SampleDesk } from './sample'
-import { physicalPadOf } from './samplePlan'
-import { deviceKitOf, soundSetOf, type BeatShare, type DeviceKit, type ShareParts } from './beatPlan'
+import { physicalPadOf, recordingsLetGo } from './samplePlan'
+import {
+  cardPicks,
+  deviceKitOf,
+  foreignTo,
+  offlineRestore,
+  pickedSounds,
+  silentUi,
+  soundChoicesOf,
+  soundSetOf,
+  soundsUi,
+  type BeatBlocks,
+  type BeatShare,
+  type DeviceKit,
+  type PlannedSound,
+  type ShareParts,
+} from './beatPlan'
 import { patternBpm } from './patternPlan'
 import { MirrorController } from './mirror'
 import { PreviewCache, type DecodedSound } from './previewCache'
@@ -463,6 +478,10 @@ export class ArcController {
       shapeOf: (pad, keys) => this.shapeFor({ group: Math.floor(pad / 12), offset: pad % 12 }, keys),
       noteNames: () => this.deps.settings.settings.keysNames,
       padName: (pad) => this.mirrorName(pad),
+      beatBlocks: () => this.beatBlocks(),
+      putBeatSounds: (card, soundPads, picked, entry) => this.putBeatSounds(card, soundPads, picked, entry),
+      putBackBeatSounds: (entry) => this.putBackBeatSounds(entry),
+      toastWith: (text, label, run, error) => this.toastWith(text, label, run, error),
     })
     this.padEdit = new PadEditDesk({
       store: this.store,
@@ -888,10 +907,10 @@ export class ArcController {
   }
 
   /** A toast with a key ([label], e.g. UNDO) that runs [run] once, if pressed before it goes. */
-  private toastWith(text: string, label: string, run: () => void): void {
+  private toastWith(text: string, label: string, run: () => void, error = false): void {
     const id = ++this.toastIds
     this.toastRun = { id, run }
-    this.store.update((s) => ({ ...s, toast: { id, text, error: false, action: label } }))
+    this.store.update((s) => ({ ...s, toast: { id, text, error, action: label } }))
   }
 
   /** The toast's key was pressed: runs what it offered and dismisses it. */
@@ -1894,19 +1913,15 @@ export class ArcController {
   private async assignOffline(pad: PhysicalPad, t: PadTarget, slot: number, source: SoundSource): Promise<boolean> {
     const m = this.mirror.offline
     const off = this.offlineSounds()
-    const snd = (source === SoundSource.FACTORY ? off?.factory : off?.device)?.find((e) => e.slot === slot)
     const readSlot = m?.slotAt(t.group, t.pad) ?? null
-    const own = source === SoundSource.DEVICE && slot === readSlot
-    if (m === null || off === null || snd === undefined || (source === SoundSource.DEVICE && !own && off.unavailable.has(slot))) {
+    const snd = off === null ? null : offlinePick(off, slot, source, readSlot)
+    if (m === null || snd === null) {
       this.toast(MirrorText.NEEDS_DEVICE)
       return false
     }
     const pads = await this.live.loadOfflinePads()
     if (this.mirror.offline !== m) return false
-    const next =
-      own
-        ? OfflinePads.drop(pads, t.project, t.group, t.pad)
-        : OfflinePads.put(pads, { project: t.project, group: t.group, pad: t.pad, slot, name: snd.name, source, ...this.padKit(source) })
+    const next = offlineAssign(pads, t, slot, snd.name, source, readSlot, this.padKit(source))
     this.live.setOfflinePads(next)
     m.setLocal(next)
     // The new sound comes with its own settings, as on the device.
@@ -1918,6 +1933,7 @@ export class ArcController {
 
   /** Reset pads: the offline changes go (recordings to Takes), and the pads show what the last read had. */
   async resetOfflinePads(): Promise<void> {
+    this.pattern.forgetOfflineUndos()
     const moved = await this.dropOfflinePads()
     this.padEdit.saveOffline(OfflinePadSettings.EMPTY)
     void this.padEdit.padsOffline()
@@ -2032,6 +2048,8 @@ export class ArcController {
     // Recordings uploading now are left to their upload (SampleDesk).
     const uploading = this.sample.uploadingNow()
     const pads = (await this.live.loadOfflinePads()).list.filter((p) => p.file == null || !uploading.has(p.file))
+    // Whatever goes on the device or is dropped now is not an import's to bring back.
+    this.pattern.forgetOfflineUndos()
     let written = 0
     let skipped = 0
     // Recordings that couldn't go on: to Takes, never dropped.
@@ -2095,6 +2113,7 @@ export class ArcController {
   /** Discard: the offline changes go; the EP-133 keeps what it has. */
   async discardOfflinePads(): Promise<void> {
     this.store.update((st) => ({ ...st, offlinePrompt: null }))
+    this.pattern.forgetOfflineUndos()
     const moved = await this.dropOfflinePads()
     this.padEdit.saveOffline(OfflinePadSettings.EMPTY)
     this.toast(MirrorText.OFFLINE_DISCARDED + samplesMoved(moved))
@@ -3025,6 +3044,205 @@ export class ArcController {
     return this.shareDeviceKit().kit
   }
 
+  /**
+   * The beat card sheet's SOUNDS and SILENT PADS blocks as the pads are now
+   * (ArcController.showBeat): the card's sound lines matched to the sounds
+   * Arc knows (soundsUi, the pads' slots and names as Live shows them), and
+   * the pads it plays that have no sound, once the pads are read (silentUi):
+   * PICK SOUND chooses among the sounds the SOUNDS block uses.
+   */
+  private beatBlocks(): BeatBlocks {
+    const st = this.store.get()
+    const m = this.mirror.current
+    const dk = this.shareDeviceKit()
+    const sounds = this.live.deviceSoundList()
+    const set = soundSetOf(st.mirror, sounds, dk.names)
+    const offline = st.device === null
+    const project = m?.snapshot(this.deps.perfNow()).activeProject ?? null
+    // Web delta: no pack's names are read yet (UiState.kitNames), so no saved pack's sound is offered for upload.
+    const packs = new Map<FactoryKit, ReadonlyMap<number, string>>()
+    return {
+      sounds: (card) => soundsUi(card, set, (pad) => m?.slotOf(pad) ?? null, (pad) => this.mirrorName(pad), offline, project, packs, dk.kit),
+      silent: (card) => silentUi(card, (pad) => m?.soundSlot(pad) ?? null, m?.padsKnown() === true, soundChoicesOf(st.mirror, sounds, dk.names), offline, project),
+    }
+  }
+
+  /**
+   * IMPORT's sounds (ArcController.importBeat after the patterns): the ticked
+   * pads ([soundPads], pad keys) planned again as the sounds are now, as the
+   * sheet plans them (cardPicks), and the sounds [picked] for silent pads,
+   * put on their pads (putSounds); null when none of them changes a pad now.
+   */
+  private putBeatSounds(card: BeatCard, soundPads: ReadonlySet<number>, picked: ReadonlyMap<number, number>, entry: BeatUndo): Promise<SoundsPut> | null {
+    const dk = this.shareDeviceKit()
+    const m = this.mirror.current
+    const packs = new Map<FactoryKit, ReadonlyMap<number, string>>()
+    const names = soundSetOf(this.store.get().mirror, this.live.deviceSoundList(), dk.names)?.names ?? new Map<number, string>()
+    const plan = cardPicks(card, names, foreignTo(packs, dk.kit), (pad) => m?.slotOf(pad) ?? null, packs, this.conn.session !== null).filter((p) =>
+      soundPads.has(padKey(p.pick.pad)),
+    )
+    const picks = this.importPicks(plan, soundPads, picked)
+    return picks.length === 0 ? null : this.putSounds(entry, picks)
+  }
+
+  /**
+   * The ticked pads of [plan] (the card matched to the sounds as they are
+   * now, cardPicks) that still change their pad to a slot the EP-133 has, and
+   * after them the sounds [picked] for silent pads (ticked too), each a change
+   * unless its pad has the sound now. A picked pad is one the card has no line for.
+   */
+  private importPicks(plan: readonly PlannedSound[], ticked: ReadonlySet<number>, picked: ReadonlyMap<number, number>): SoundPick[] {
+    if (ticked.size === 0) return []
+    const lines = plan
+      .map((p) => p.pick)
+      .filter((p) => ticked.has(padKey(p.pad)) && p.slot !== null && (p.status === SoundStatus.CHANGE || p.status === SoundStatus.FOUND_BY_NAME))
+    // Were a picked pad to have a line of the card's, the card's line is the one that goes on.
+    const own = new Set(plan.map((p) => padKey(p.pick.pad)))
+    const set = soundSetOf(this.store.get().mirror, this.live.deviceSoundList(), this.shareDeviceKit().names)
+    if (set === null) return lines
+    const m = this.mirror.current
+    const mine = new Map([...picked].filter(([k]) => ticked.has(k) && !own.has(k)))
+    return [...lines, ...pickedSounds(mine, set.names, (pad) => m?.slotOf(pad) ?? null)]
+  }
+
+  /**
+   * Each of [picks] put on its pad, one after the other, with no toast of its
+   * own. Connected, each pad is looked up as EDIT does ([editTarget]) and
+   * written ([writePad]); offline they become offline pad changes in one go
+   * ([putSoundsOffline]). A pad with no target (its number not known yet, a
+   * project not read) or, offline, a sound Arc can't play is skipped and
+   * counted. A write that fails stops it: [SoundsPut.failure] says why, the
+   * pads done stay. [entry] keeps what UNDO needs. Web delta: a recording on
+   * a pad written over while connected stays where it is, as EDIT's pick leaves it.
+   */
+  private async putSounds(entry: BeatUndo, picks: readonly SoundPick[]): Promise<SoundsPut> {
+    if (!this.deviceReady) return this.putSoundsOffline(entry, picks)
+    let skipped = 0
+    let failure: string | null = null
+    const done: PadBack[] = []
+    for (const p of picks) {
+      const slot = p.slot
+      if (slot === null) continue
+      const t = this.editTarget(p.pad, true)
+      if (t === null) {
+        skipped++
+        continue
+      }
+      const w = await this.writePad(t, slot)
+      if (w === null || w.error !== null) {
+        failure = w?.error ?? MirrorText.EDIT_OFFLINE
+        break
+      }
+      this.mirror.assigned(t, slot)
+      done.push({ pad: p.pad, target: t })
+      entry.pads = [...done]
+      // UNDO came during the writes: no more pads.
+      if (entry.undone) break
+    }
+    entry.pads = [...done]
+    return { done, skipped, moved: 0, failure }
+  }
+
+  /**
+   * Offline, [picks] become offline pad changes in arc only (offlineAssign,
+   * as assignOffline makes one): only a sound arc can play is taken
+   * (offlinePick), each pad's own settings go with its old sound, and a
+   * recording on a pad goes to Takes. The changes and settings as they were
+   * are kept in [entry] for UNDO.
+   */
+  private async putSoundsOffline(entry: BeatUndo, picks: readonly SoundPick[]): Promise<SoundsPut> {
+    const m = this.mirror.offline
+    const sounds = this.offlineSounds()
+    if (m === null) return { done: [], skipped: picks.length, moved: 0, failure: null }
+    const before = await this.live.loadOfflinePads()
+    const settingsBefore = await this.padEdit.loadOffline()
+    let pads = before
+    let settings = settingsBefore
+    let skipped = 0
+    const done: PadBack[] = []
+    for (const p of picks) {
+      const slot = p.slot
+      if (slot === null) continue
+      if (sounds === null) {
+        skipped++
+        continue
+      }
+      const t = this.editTarget(p.pad, true)
+      const readSlot = t === null ? null : m.slotAt(t.group, t.pad)
+      const snd = t === null ? null : offlinePick(sounds, slot, sounds.base, readSlot)
+      if (t === null || snd === null) {
+        skipped++
+        continue
+      }
+      pads = offlineAssign(pads, t, slot, snd.name, sounds.base, readSlot, this.padKit(sounds.base))
+      // The new sound comes with its own settings, as on the device.
+      settings = OfflinePadSettings.drop(settings, t.project, t.group, t.pad)
+      done.push({ pad: p.pad, target: t })
+    }
+    if (done.length === 0 || this.mirror.offline !== m || entry.undone) return { done: [], skipped: skipped + done.length, moved: 0, failure: null }
+    this.live.setOfflinePads(pads)
+    const moved = await this.sample.recordingsToTakes(recordingsLetGo(before, pads, this.sample.uploadingNow()))
+    this.padEdit.saveOffline(settings)
+    for (const d of done) this.padEdit.forget(d.target)
+    m.setLocal(pads)
+    this.mirror.localChanged()
+    this.pattern.refreshPlan()
+    entry.pads = done
+    entry.offline = true
+    entry.padsBefore = before
+    entry.settingsBefore = settingsBefore
+    return { done, skipped, moved, failure: null }
+  }
+
+  /**
+   * UNDO of an import that put sounds on pads (BeatUndo). Connected, each pad
+   * gets the slot it had written back ([writePad]; one that was empty can't
+   * be emptied again); a failure says why and stops. Offline, the pads'
+   * offline changes and settings are put back as they were
+   * (offlineRestore), while arc is still offline: once the EP-133 connected,
+   * the changes were asked about, and written or dropped, so there is
+   * nothing of the import's left.
+   */
+  private async putBackBeatSounds(e: BeatUndo): Promise<void> {
+    if (e.offline) {
+      const m = this.mirror.offline
+      if (m === null || this.deviceReady) return
+      const targets = e.pads.map((b) => b.target)
+      const pads = offlineRestore(await this.live.loadOfflinePads(), e.padsBefore, targets)
+      let settings = await this.padEdit.loadOffline()
+      for (const t of targets) {
+        const was = OfflinePadSettings.at(e.settingsBefore, t.project, t.group, t.pad)
+        settings = was !== null ? OfflinePadSettings.put(settings, was) : OfflinePadSettings.drop(settings, t.project, t.group, t.pad)
+      }
+      if (this.mirror.offline !== m) return
+      this.live.setOfflinePads(pads)
+      this.padEdit.saveOffline(settings)
+      await this.padEdit.padsOffline()
+      m.setLocal(pads)
+      this.mirror.localChanged()
+      this.pattern.refreshPlan()
+      this.toast(ClaudeText.importUndone(targets.length, 0, 0, false))
+      return
+    }
+    let back = 0
+    let empty = 0
+    for (const b of e.pads) {
+      const old = b.target.slot
+      if (old === null) {
+        empty++
+        continue
+      }
+      const w = await this.writePad(b.target, old)
+      if (w === null || w.error !== null) {
+        this.toast(MirrorText.undoFailed(w?.error ?? MirrorText.EDIT_OFFLINE), true)
+        return
+      }
+      this.mirror.assigned(b.target, old)
+      back++
+    }
+    this.toast(ClaudeText.importUndone(back, empty, 0, false))
+  }
+
   /** Learn with Claude where there is no link to follow: the starter prompt, shared or copied. */
   async learnWithClaude(): Promise<void> {
     await this.sendText(ClaudeText.LEARN_TITLE, WebText.LEARN_PROMPT)
@@ -3117,6 +3335,28 @@ export class ArcController {
 
 /** The key the review sheet's take plays under (SoundPlayer.playing). */
 export const REVIEW_KEY = 'sample:review'
+
+/**
+ * [slot]'s row in [source]'s list of [off] when it is listed and arc can play
+ * it; null: it needs the EP-133. The pad's own sound in the read ([readSlot])
+ * is always taken, unplayable or not: picking it drops the pad's change.
+ */
+function offlinePick(off: OfflineSounds, slot: number, source: SoundSource, readSlot: number | null): SoundEntry | null {
+  const list = source === SoundSource.FACTORY ? off.factory : off.device
+  const e = list?.find((it) => it.slot === slot)
+  return e !== undefined && (source === SoundSource.FACTORY || !off.unavailable.has(slot) || slot === readSlot) ? e : null
+}
+
+/**
+ * [pads] after [slot] ([name], from [source]) was picked offline for [t]'s
+ * pad: picking the device's own sound, the one the read has there
+ * ([readSlot]), drops the pad's change; anything else is put on it, a factory
+ * sound with its [kit] (padKit).
+ */
+function offlineAssign(pads: OfflinePads, t: PadTarget, slot: number, name: string, source: SoundSource, readSlot: number | null, kit: { kit?: FactoryKitId }): OfflinePads {
+  if (source === SoundSource.DEVICE && slot === readSlot) return OfflinePads.drop(pads, t.project, t.group, t.pad)
+  return OfflinePads.put(pads, { project: t.project, group: t.group, pad: t.pad, slot, name, source, ...kit })
+}
 
 /** " 2 samples kept in Takes." after a toast, when [n] recordings went there. */
 function samplesMoved(n: number): string {

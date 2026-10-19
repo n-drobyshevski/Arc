@@ -4,12 +4,16 @@
 // beatCardOf(ui) / beatProblems(ui); [placed] pairs are [group, n] tuples; the names callback gives string | null,
 // its map keyed by padKey; the test's `with` helper is withP (`with` is reserved in JS); the sequencer is compared
 // with toEqual (plain data, as Kotlin's data class equals) and assertSame is toBe. beatShare's named arguments are its
-// ShareParts object; soundSetOf takes the connected list as an argument (Kotlin's MirrorUi.sounds).
+// ShareParts object, beatImportUi's blocks its BeatBlocks; soundSetOf and soundChoicesOf take the connected list as an
+// argument (Kotlin's MirrorUi.sounds); the picks for silent pads are keyed by padKey.
 // Left for the steps that port them: the prompt share (PromptText), the scene imports with REPLACE and SET CHAIN, the
-// sheet's SOUNDS, SILENT PADS, FX and PAD SHAPING blocks, synth rows, the offline restore and isBefore.
+// sheet's FX and PAD SHAPING blocks, and the synth rows (the four synth tests and "the sheet and IMPORT plan the same
+// sounds", which needs a synth line).
 import { describe, expect, it } from 'vitest'
 import { FactoryKit } from '../../src/core/features/factorySounds'
-import { BeatCards, beatCard, cardPad, cardSection, cardSound, type BeatCard, type CardSection, type CardSound } from '../../src/core/features/beatCard'
+import { BeatCards, SoundStatus, beatCard, cardPad, cardSection, cardSound, type BeatCard, type CardSection, type CardSound } from '../../src/core/features/beatCard'
+import type { PadTarget } from '../../src/core/features/liveMirror'
+import { OfflinePads, type OfflinePad } from '../../src/core/features/offlinePads'
 import { chain, chainStep } from '../../src/core/features/chain'
 import { FxSettings, FxType, comp } from '../../src/core/features/fxSettings'
 import { SoundSource } from '../../src/core/features/offlinePads'
@@ -31,9 +35,18 @@ import {
   beatShareChain,
   chainForCard,
   chainSceneCount,
+  isBefore,
+  offlineRestore,
+  pickedRow,
+  pickedSounds,
+  silentUi,
+  soundChoicesOf,
   soundSet,
   soundSetOf,
+  soundsUi,
   type BeatGridUi,
+  type SoundChoices,
+  type SoundSet,
 } from '../../src/state/beatPlan'
 import { emptyMirrorState, type MirrorUi } from '../../src/state/types'
 
@@ -324,6 +337,29 @@ describe('BeatPlanTest', () => {
     expect(soundSetOf(mirror({ offline: 'Factory sounds' }), [])).toBeNull()
   })
 
+  it("the sheet's sound rows are the card's lines matched to the sounds, with the old names", () => {
+    const sections = cardSection(0, null, pat([hit(0), hit(96, 11)]), new Map([[9, cardSound(12, 'Micro kick')], [11, cardSound(300, 'Rim dusty')], [0, cardSound(40, 'Hat')]]))
+    const c = card([sections])
+    const set = soundSet(ClaudeText.SOUNDS_FROM_DEVICE, new Map([[12, 'Micro kick'], [40, 'Hat'], [77, 'Other']]))
+    const current = new Map([[padKey(micro), 5], [padKey(physicalPad(0, 0)), 40]])
+    const ui = soundsUi(c, set, (p) => current.get(padKey(p)) ?? null, (p) => (padKey(p) === padKey(micro) ? 'Kick dusty' : null), false, 3)!
+    expect(ui.project).toBe(3)
+    expect(ui.offline).toBe(false)
+    // Keypad order: 7 (offset 9), 9 (offset 11), then . (offset 0).
+    expect(ui.rows.map((r) => r.pad)).toEqual([micro, rim, physicalPad(0, 0)])
+    expect(ui.rows.map((r) => r.pick.status)).toEqual([SoundStatus.CHANGE, SoundStatus.MISSING, SoundStatus.SAME])
+    expect(ui.rows.map((r) => r.oldName)).toEqual(['Kick dusty', null, null])
+    // Only the change can be ticked.
+    expect(ui.changes.map((r) => r.pad)).toEqual([micro])
+    // No sounds known at all: every line is missing. A card without sound lines has no block.
+    expect(soundsUi(c, null, () => null, nameOf, true, null)!.rows.map((r) => r.pick.status)).toEqual(Array(3).fill(SoundStatus.MISSING))
+    expect(soundsUi(card([section(0, pat([hit(0)]))]), set, () => null, nameOf, false, 1)).toBeNull()
+    // The sheet carries them.
+    const sheet = beatImportUi(read(c), ProjectSeq.DEFAULT, 120.0, nameOf, { sounds: (it) => soundsUi(it, set, () => null, nameOf, false, 2) })
+    expect(sheet.sounds!.rows.length).toBe(3)
+    expect(beatImportUi(read(c), ProjectSeq.DEFAULT, 120.0, nameOf).sounds).toBeNull()
+  })
+
   it('the factory pack names the sounds the EP-133 lists unnamed, in the sound set and the sheet', () => {
     const pack = new Map([[12, 'KICK DEEP'], [200, 'HH CLOSED'], [201, '201.pcm']])
     const connected = entries([12, '012.pcm'], [200, '200.pcm'], [201, '201.pcm'], [5, 'Mine'])
@@ -332,7 +368,27 @@ describe('BeatPlanTest', () => {
     const offline = mirror({ offline: 'Last seen', offlineSounds: { base: SoundSource.DEVICE, device: entries([200, '200.pcm']), factory: entries([200, 'HH CLOSED']), unavailable: new Set() } })
     const set = soundSetOf(offline, [], pack)!
     expect([set.source, set.names]).toEqual([ClaudeText.SOUNDS_FROM_LAST_READ, new Map([[200, 'HH CLOSED']])])
-    // The sheet's rows (soundsUi) come with the SOUNDS block.
+    // With the names, a card's line is found; without them it is taken by its slot, unverified, and the row says what the card called it.
+    const c = card([cardSection(0, null, pat([hit(0)]), new Map([[9, cardSound(200, 'HH CLOSED')], [11, cardSound(201, 'SNARE')], [0, cardSound(201, '201.pcm')], [3, cardSound(5, 'Mine')]]))])
+    const rows = (s: SoundSet | null) => soundsUi(c, s, () => null, nameOf, false, 1)!.rows
+    // Keypad order: 7, 9, 1, then . (offsets 9, 11, 3, 0). Slot 201 is unnamed in the pack too.
+    const named = rows(soundSetOf(mirror(), connected, pack))
+    expect(named.map((r) => r.pick.unverified)).toEqual([false, true, false, true])
+    expect(named.map((r) => r.cardSays)).toEqual([null, 'SNARE', null, null])
+    const bare = rows(soundSetOf(mirror(), connected))
+    expect(bare.map((r) => r.pick.unverified)).toEqual([true, true, false, true])
+    // The card's name is only quoted where it differs from what the row shows.
+    expect(bare.map((r) => r.cardSays)).toEqual(['HH CLOSED', 'SNARE', null, null])
+    expect(bare.map((r) => r.pick.status)).toEqual(Array(4).fill(SoundStatus.CHANGE))
+  })
+
+  it('the hint to share the sound list shows when every sound line is missing', () => {
+    const c = card([cardSection(0, null, pat([hit(0)]), new Map([[9, cardSound(301, 'Rim')], [11, cardSound(410, null)]]))])
+    const set = soundSet(ClaudeText.SOUNDS_FROM_DEVICE, new Map([[12, 'Kick'], [301, 'Rim']]))
+    expect(soundsUi(c, soundSet(ClaudeText.SOUNDS_FROM_DEVICE, new Map([[12, 'Kick']])), () => null, nameOf, false, 1)!.noneFound).toBe(true)
+    expect(soundsUi(c, null, () => null, nameOf, false, 1)!.noneFound).toBe(true)
+    // One found is enough to leave it out.
+    expect(soundsUi(c, set, () => null, nameOf, false, 1)!.noneFound).toBe(false)
   })
 
   // ---- silent pads ----
@@ -357,6 +413,105 @@ describe('BeatPlanTest', () => {
     expect(all.text).not.toContain('no sound on')
     // A group's share names only its own pads.
     expect(beatShare(melody(), 3, 120.0, 50, nameOf, { held: () => null, padsKnown: true })!.text).toContain('# no sound on: D7\n')
+  })
+
+  it('the silent pads block has a row for each pad with its notes, and none when the pads are not known or all have a sound', () => {
+    const m = melody()
+    const c = BeatCards.read(BeatCards.write(BeatCards.fromPatterns(null, 120.0, 50, [2, 3, 0].map((g) => cardSection(g, null, ProjectSeq.pattern(m, g, 1)))))).card!
+    const choices: SoundChoices = { source: SoundSource.DEVICE, entries: [{ slot: 512, name: 'PIANO', size: 0 }], unavailable: new Set(), names: new Map([[512, 'PIANO']]) }
+    const held = (pad: PhysicalPad): number | null => (padKey(pad) === padKey(micro) ? 12 : null)
+    const ui = silentUi(c, held, true, choices, false, 3)!
+    expect(ui.rows.map((r) => r.pad)).toEqual([c7, d7])
+    expect(ui.rows.map((r) => r.notes)).toEqual([3, 2])
+    expect(ui.project).toBe(3)
+    expect(ui.offline).toBe(false)
+    expect(silentUi(c, held, false, choices, false, 3)).toBeNull()
+    expect(silentUi(c, () => 1, true, choices, false, 3)).toBeNull()
+    // No sound list known: the rows stay, without a way to pick.
+    expect(silentUi(c, held, true, null, true, null)!.choices).toBeNull()
+    // The sheet carries it, and a card that isn't readable has none.
+    expect(beatImportUi(read(c), ProjectSeq.DEFAULT, 120.0, nameOf, { silent: (it) => silentUi(it, held, true, choices, false, 3) }).silent!.rows.length).toBe(2)
+    expect(beatImportUi(read(c), ProjectSeq.DEFAULT, 120.0, nameOf).silent).toBeNull()
+  })
+
+  it('the sounds to pick from are the ones the sound rows choose from, named as the sound set names them', () => {
+    const pack = new Map([[12, 'KICK DEEP']])
+    const connected = entries([12, '012.pcm'], [512, 'PIANO'])
+    const c = soundChoicesOf(mirror(), connected, pack)!
+    expect(c.source).toBe(SoundSource.DEVICE)
+    expect(c.names).toEqual(soundSetOf(mirror(), connected, pack)!.names)
+    expect(c.entries.map((e) => e.slot)).toEqual([12, 512])
+    expect(soundChoicesOf(null, [])).toBeNull()
+    expect(soundChoicesOf(mirror(), [])).toBeNull()
+    // Offline: the view's list, the last read's with the slots Arc has no audio for, or the factory pack's.
+    const device = entries([5, 'Kick'], [6, 'Snare'])
+    const factory = entries([1, 'Pack kick'], [2, 'Pack snare'], [3, 'Pack hat'])
+    const off = mirror({ offline: 'Last seen', offlineSounds: { base: SoundSource.DEVICE, device, factory, unavailable: new Set([6]) } })
+    const last = soundChoicesOf(off, [])!
+    expect([last.source, last.unavailable]).toEqual([SoundSource.DEVICE, new Set([6])])
+    expect(last.names).toEqual(soundSetOf(off, [])!.names)
+    const pk = soundChoicesOf(mirror({ ...off, offlineSounds: { base: SoundSource.FACTORY, device, factory, unavailable: new Set([6]) } }), [])!
+    expect([pk.source, pk.unavailable]).toEqual([SoundSource.FACTORY, new Set()])
+    expect(pk.entries.length).toBe(3)
+    expect(soundChoicesOf(mirror({ offline: 'Factory sounds' }), [])).toBeNull()
+    expect(soundChoicesOf(mirror({ ...off, offlineSounds: { base: SoundSource.FACTORY, device, factory: null, unavailable: new Set() } }), [])).toBeNull()
+  })
+
+  it('a picked sound is a sound row that changes the silent pad from no sound, and an extra pick for IMPORT', () => {
+    const row = pickedRow(d7, 512, 'PIANO')
+    expect(row.changes).toBe(true)
+    expect(row.picked).toBe(true)
+    expect(row.pick.status).toBe(SoundStatus.CHANGE)
+    expect(row.pick.slot).toBe(512)
+    expect(row.pick.name).toBe('PIANO')
+    expect(row.oldName).toBe(ClaudeText.NO_SOUND)
+    expect(row.pick.unverified).toBe(false)
+    expect(row.cardSays).toBeNull()
+    // A sound the EP-133 lists unnamed is used by its slot, as a card's line would be.
+    const unnamed = pickedRow(d7, 512, '512.pcm')
+    expect(unnamed.pick.unverified).toBe(true)
+    expect(unnamed.cardSays).toBeNull()
+    // IMPORT matches the picks to the sounds as they are then: a slot no longer listed is left out, as is a pad that has it already.
+    const names = new Map([[512, 'PIANO'], [515, 'RHODES']])
+    const picks = pickedSounds(new Map([[padKey(d7), 512], [padKey(c7), 515], [padKey(micro), 999]]), names, (p) => (padKey(p) === padKey(c7) ? 515 : null))
+    expect(picks.map((p) => p.pad)).toEqual([d7])
+    expect(picks.map((p) => p.status)).toEqual([SoundStatus.CHANGE])
+    expect(picks[0]!.slot).toBe(512)
+    expect(picks[0]!.currentSlot).toBeNull()
+  })
+
+  it("taking the sounds back offline restores each pad's change as it was, or drops it, never a recording gone to Takes", () => {
+    const a: PadTarget = { project: 1, group: 0, pad: 1, slot: 10 }
+    const b: PadTarget = { project: 1, group: 0, pad: 2, slot: 11 }
+    const c: PadTarget = { project: 1, group: 0, pad: 3, slot: 12 }
+    const change = (project: number, group: number, pad: number, slot: number, name: string, source: SoundSource, file?: string): OfflinePad =>
+      file === undefined ? { project, group, pad, slot, name, source } : { project, group, pad, slot, name, source, file }
+    const oldA = change(1, 0, 1, 20, 'Old A', SoundSource.DEVICE)
+    const recorded = change(1, 0, 3, 0, 'Take', SoundSource.RECORDED, 'take.wav')
+    const before: OfflinePads = { list: [oldA, recorded] }
+    // The import replaced all three pads' changes; a fourth change of the user's came after.
+    const other = change(1, 1, 1, 9, 'Other', SoundSource.DEVICE)
+    const after: OfflinePads = {
+      list: [change(1, 0, 1, 31, 'New A', SoundSource.FACTORY), change(1, 0, 2, 32, 'New B', SoundSource.FACTORY), change(1, 0, 3, 33, 'New C', SoundSource.FACTORY), other],
+    }
+    const restored = offlineRestore(after, before, [a, b, c])
+    expect(OfflinePads.at(restored, 1, 0, 1)).toEqual(oldA)
+    expect(OfflinePads.at(restored, 1, 0, 2)).toBeNull()
+    expect(OfflinePads.at(restored, 1, 0, 3)).toBeNull()
+    expect(OfflinePads.at(restored, 1, 1, 1)).toEqual(other)
+    expect(OfflinePads.size(restored)).toBe(2)
+  })
+
+  it("UNDO is the import's when it goes back to the sequencer before it, and not when an edit came between", () => {
+    const recorder = new PatternRecorder()
+    const seq = withP(ProjectSeq.DEFAULT, 0, 1, pat([hit(0, 11)]))
+    recorder.seq = seq
+    const applied = applyBeat(seq, card([section(0, pat([hit(0)]))]), recorder)
+    // A later edit of the banks: its undo is not the import's.
+    recorder.seq = applied.seq
+    const edited = recorder.editSeq(applied.seq, withP(applied.seq, 1, 1, pat([hit(0)])))
+    expect(isBefore(recorder.undo(edited)!, seq)).toBe(false)
+    expect(isBefore(recorder.undo(applied.seq)!, seq)).toBe(true)
   })
 
   // ---- FX and pad shaping ----
@@ -393,6 +548,7 @@ function entries(...e: [number, string][]): SoundEntry[] {
 const mirror = (o: Partial<MirrorUi> = {}): MirrorUi => ({ state: emptyMirrorState(), loading: false, error: null, offline: null, ...o })
 
 const micro = physicalPad(0, 9)
+const rim = physicalPad(0, 11)
 const pads = new Map<number, [number, string]>([
   [padKey(micro), [12, 'Kick dusty']],
   [padKey(physicalPad(0, 11)), [300, 'Rim']],
