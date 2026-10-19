@@ -21,8 +21,12 @@ object StallWatch {
     /** Frames of the main thread's stack kept with a note. */
     private const val MAX_FRAMES = 25
 
-    /** Notes how long the process took to get here ([what]): its start to now. */
+    // What [since] noted already: a start is timed once per process (a later activity isn't a start).
+    private val noted = HashSet<String>()
+
+    /** Notes how long the process took to get here ([what]): its start to now, once per process. */
     fun since(log: TrafficLog, what: String) {
+        if (!synchronized(noted) { noted.add(what) }) return
         log.note("start: $what ${SystemClock.uptimeMillis() - Process.getStartUptimeMillis()} ms after the process started")
     }
 

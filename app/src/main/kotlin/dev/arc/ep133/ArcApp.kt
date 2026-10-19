@@ -17,8 +17,13 @@ class ArcApp : Application() {
     lateinit var controller: ArcController
         private set
 
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     override fun onCreate() {
         super.onCreate()
+        // Compose's content capture (the screen's text for the system's intelligence features) walks the whole
+        // semantics tree each time a screen appears or goes: on Live that held the main thread a second at a time
+        // on a Pixel, pads included. arc's pads and keys are nothing to capture.
+        androidx.compose.ui.contentcapture.ContentCaptureManager.isEnabled = false
         CrashReport.install(this)
         val trafficLog = TrafficLog()
         StallWatch.start(trafficLog)
