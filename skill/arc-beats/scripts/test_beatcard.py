@@ -2499,6 +2499,14 @@ class RemakeAudio(unittest.TestCase):
         self.assertEqual(self.ra.loop_size(chords, 0, 8), 2)
         self.assertEqual(self.ra.loop_size(["A", "B", "C", "D", "E"], 0, 5), 5)  # no repeat: the whole section
         self.assertEqual(self.ra.loop_size(["A"] * 40, 0, 40), 1)
+        self.assertEqual(self.ra.loop_size([str(i) for i in range(24)], 0, 24), 24)  # whole, up to 32 bars
+        self.assertEqual(self.ra.loop_size([str(i) for i in range(40)], 0, 40), 20)  # past it: whole 4s that divide
+        # Two grooves as busy as each other, one four-on-the-floor, one two-step: two parts.
+        four, two = "x...x...x...x...", "x......x..x....."
+        kicks = [four] * 4 + [two] * 4
+        feats = [[0.25, 0.8]] * 8
+        self.assertEqual(self.ra.group_sections([(0, 4), (4, 4)], feats, [None] * 8, kicks=kicks), [0, 1])
+        self.assertEqual(self.ra.group_sections([(0, 4), (4, 4)], feats, [None] * 8), [0, 0])
 
     def test_key_by_chords_and_stray_swing(self):
         def chord(root, shape):

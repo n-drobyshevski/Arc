@@ -369,11 +369,17 @@ def sections_of(features: Sequence[Sequence[float]], chords: Sequence[Optional[s
     return out
 
 
-def group_sections(sections: Sequence[Tuple[int, int]], features: Sequence[Sequence[float]], chords: Sequence[Optional[str]], threshold: float = 0.4) -> List[int]:
+def group_sections(sections: Sequence[Tuple[int, int]], features: Sequence[Sequence[float]], chords: Sequence[Optional[str]], threshold: float = 0.4, kicks: Optional[Sequence[str]] = None) -> List[int]:
     """Which part each section is (0, 1, 2 ...): a section that sounds like any section of an earlier
-    part is that part. Chords count a little: two sections that share few chords sound further apart."""
+    part is that part. Chords count a little: two sections that share few chords sound further apart.
+    So does the kick: a four-on-the-floor and a two-step are as busy, but not the same groove."""
     means = [_mean(features[start:start + length]) for start, length in sections]
     names = [{c for c in chords[start:start + length] if c} for start, length in sections]
+    grooves = []
+    for start, length in sections:
+        # A groove only where the kick plays most bars: an intro's stray hit is none.
+        bars = [k for k in (kicks or [])[start:start + length] if "x" in k]
+        grooves.append(Counter(bars).most_common(1)[0][0] if len(bars) * 2 >= length else None)
     labels: List[int] = []
     for i in range(len(sections)):
         found = None
@@ -382,6 +388,8 @@ def group_sections(sections: Sequence[Tuple[int, int]], features: Sequence[Seque
             d = _dist(means[i], means[j])
             if names[i] and names[j] and len(names[i] & names[j]) < 0.3 * min(len(names[i]), len(names[j])):
                 d += 0.15
+            if grooves[i] and grooves[j] and grooves[i] != grooves[j]:
+                d += 0.3
             if d <= best:
                 found, best = labels[j], d
         labels.append(found if found is not None else max(labels, default=-1) + 1)
@@ -401,9 +409,10 @@ def merge_runs(sections: Sequence[Tuple[int, int]], parts: Sequence[int]) -> Tup
     return out_s, out_p
 
 
-def loop_size(chords: Sequence[Optional[str]], start: int, length: int, cap: int = 16) -> int:
+def loop_size(chords: Sequence[Optional[str]], start: int, length: int, cap: int = 32) -> int:
     """How many bars a section's scene loops: the shortest of 1, 2, 4, 8 and 16 bars after which its
-    chords repeat (three bars in four), else the whole section up to the cap."""
+    chords repeat (three bars in four); else the whole section up to the cap, or past it the longest
+    loop of whole 4 bars that divides it, so the passes add up to the section's real bars."""
     run = list(chords[start:start + length])
     for size in (1, 2, 4, 8, 16):
         if size > min(length, cap):
@@ -413,7 +422,12 @@ def loop_size(chords: Sequence[Optional[str]], start: int, length: int, cap: int
         same = sum(1 for k in range(size, length) if run[k] == run[k - size])
         if same >= 0.75 * (length - size):
             return size
-    return min(length, cap)
+    if length <= cap:
+        return length
+    for size in range(cap - cap % 4, 3, -4):
+        if length % size == 0:
+            return size
+    return cap
 
 
 def common_loop(rows: Sequence[str], size: int) -> str:
@@ -675,7 +689,7 @@ def derive(raw: dict) -> dict:
     names = [c["name"] if c else None for c in chords]
     feats = bar_features(grid, levels, names)
     sections = sections_of(feats, names)
-    sections, parts = merge_runs(sections, group_sections(sections, feats, names))
+    sections, parts = merge_runs(sections, group_sections(sections, feats, names, kicks=grid.get("kick")))
     hat_times = list(hits.get("hat", [])) or [t for v in hits.values() for t in v]
     return {
         "title": raw.get("title", "Remake"),
