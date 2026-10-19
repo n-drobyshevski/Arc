@@ -1357,14 +1357,14 @@ describe('BeatCardTest', () => {
       expect(BeatCards.read(BeatCards.write(r.card!)).card!.fx).toEqual(r.card!.fx)
     }
     const withFx = cards.map((t) => BeatCards.read(t).card!).filter((c) => c.fx !== null)
-    expect(withFx.map((c) => c.name).sort()).toEqual(['Amen shred', 'Breakcore track', 'Dub chord echo', 'Dub plate', 'Dusty lo-fi', 'Hard groove workout', 'Hard techno pound', 'House groove', 'Industrial pressure', 'Schranz pressure', 'UK dub'])
+    expect(withFx.map((c) => c.name).sort()).toEqual(['Acid squelch', 'Amen shred', 'Breakcore track', 'Dub chord echo', 'Dub plate', 'Dusty lo-fi', 'Hard groove workout', 'Hard techno pound', 'House groove', 'Industrial pressure', 'Melodic arpeggio', 'Peak-time build', 'Schranz pressure', 'Schranz track', 'Tech groove', 'UK dub'])
     expect(withFx.find((c) => c.name === 'House groove')!.fx!.sidechain).toEqual(sidechain({ on: true, group: 0, pad: 9, dests: 0b0010, x: 0.3, y: 0.55 }))
     expect(withFx.find((c) => c.name === 'Dusty lo-fi')!.fx!.type).toBe(FxType.FILTER)
     // The one card of scenes: five scenes and a chain, and it reads back as itself.
     const track = withFx.find((c) => c.name === 'Breakcore track')!
     expect(track.scenes.map((s) => s.name)).toEqual(['Intro', 'Drop', 'Breakdown', 'Build', 'Drop 2'])
     expect(track.chain).toEqual([[1, 2], [2, 2], [3, 1], [4, 1], [5, 2]])
-    expect(track.scenes.map((s) => s.sections.map((x) => x.group))).toEqual([[0, 1], [0, 1], [0, 1], [0], [0, 1]])
+    expect(track.scenes.map((s) => s.sections.map((x) => x.group))).toEqual([[0, 1, 2], [0, 1], [0, 1], [0], [0, 1]])
     expect(BeatCards.read(BeatCards.write(track)).card).toEqual(track)
     // Planned into a project, it adds its five scenes and chain.
     const plan = BeatCards.plan(ProjectSeq.DEFAULT, track)
