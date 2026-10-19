@@ -414,56 +414,33 @@ B7 at 1.4.4 note F1 gate 1/16 vel 100
 The effect lines give the kick its edge: `fx distortion 45 55` is a medium drive with a neutral tone, `send A 25 B 35` mixes some of the drums and the rumble into it, and `comp 50 25` glues the mix with a fast compressor.
 
 ## Schranz
-- BPM: 150-160
+- BPM: 150-165
 - Swing: 50
-- Feel: very dense and loopy. A hard four on the floor kick, a clap on 2 and 4 that rolls at the end, hats and shaker on every sixteenth, and a rim that moves against the bar so no two beats feel the same. A rumble bass rolls after every kick and climbs in the last bar.
+- Feel: relentless, loopy and crunchy, all drums and no melody. A distorted four on the floor kick carries the low end on its own, with no rumble or bassline under it. A pitched-down snare and a clap on 2 and 4, rattling sixteenth hats with a ride on every eighth, and the drive: a tom and rim loop that repeats every three sixteenths, so it turns against the bar. Distortion and a hard compressor on the whole kit make the crunch the style is named for.
 
 ```
 ARC BEAT 1
 name Schranz pressure
-tempo 152
+tempo 155
 swing 50
-fx distortion 60 40
-send A 35 B 45
-comp 65 20
+fx distortion 60 50
+send A 45
+comp 70 20
 
 [A] bars 2 step 1/16
-A7 kick        | X... X... X... X... | X... X... X... X.X. |
-A6 clap        | .... x... .... x... | .... x... .... xxxX |
-A4 closed hat  | xoxo Xoxo Xoxo Xoxo | xoxo Xoxo Xoxo .... |
-A5 open hat    | ..x. ..x. ..x. ..x. | ..x. ..x. ..x. .... |
-A1 rim         | x..x ..x. .x.. x..x | ..x. .x.. x..x ..x. |
-A3 shaker      | .xx. .xx. .xx. .xx. | .xx. .xx. .xx. .xx. |
-
-[B] bars 2
-notes
-B7 at 1.1.2 note F1 gate 1/16 vel 110
-B7 at 1.1.3 note F1 gate 1/16 vel 90
-B7 at 1.1.4 note F1 gate 1/16 vel 100
-B7 at 1.2.2 note F1 gate 1/16 vel 110
-B7 at 1.2.3 note F1 gate 1/16 vel 90
-B7 at 1.2.4 note F1 gate 1/16 vel 100
-B7 at 1.3.2 note F1 gate 1/16 vel 110
-B7 at 1.3.3 note F1 gate 1/16 vel 90
-B7 at 1.3.4 note F1 gate 1/16 vel 100
-B7 at 1.4.2 note F1 gate 1/16 vel 110
-B7 at 1.4.3 note F1 gate 1/16 vel 90
-B7 at 1.4.4 note F#1 gate 1/16 vel 100
-B7 at 2.1.2 note F1 gate 1/16 vel 110
-B7 at 2.1.3 note F1 gate 1/16 vel 90
-B7 at 2.1.4 note F1 gate 1/16 vel 100
-B7 at 2.2.2 note F1 gate 1/16 vel 110
-B7 at 2.2.3 note F1 gate 1/16 vel 90
-B7 at 2.2.4 note F1 gate 1/16 vel 100
-B7 at 2.3.2 note G#1 gate 1/16 vel 110
-B7 at 2.3.3 note G#1 gate 1/16 vel 90
-B7 at 2.3.4 note G#1 gate 1/16 vel 100
-B7 at 2.4.2 note G#1 gate 1/16 vel 110
-B7 at 2.4.3 note G#1 gate 1/16 vel 90
-B7 at 2.4.4 note G#1 gate 1/16 vel 100
+pad A9 pitch -4
+A7 kick        | X... X... X... X... | X... X... X... X... |
+A9 snare       | .... x... .... x... | .... x... .... x.xX |
+A4 closed hat  | xoXo xoXo xoXo xoXo | xoXo xoXo xoXo xoXo |
+A5 open hat    | o.x. o.x. o.x. o.x. | o.x. o.x. o.x. o.x. |
+A6 clap        | .... x... .... x... | .... x... .... x... |
+A1 rim         | ..o. .x.. o..x ..o. | .x.. o..x ..o. .x.. |
+A2 tom         | .x.. x..x ..x. .x.. | x..x ..x. .x.. x..x |
 ```
 
-Bar 2 is the fill: a doubled kick, the clap roll, thinner hats and a bass that steps up. Repeat bar 1 for longer phrases and use bar 2 every fourth or eighth bar. The effect lines are the schranz sound: `fx distortion 60 40` is a strong, slightly dark drive, `send A 35 B 45` pushes the drums and the rumble into it, and `comp 65 20` is a hard, fast compressor that makes everything breathe with the kick.
+Schranz is the loop, not a song: the tom and the rim repeat every three sixteenths, so they meet the kick in a new place on every beat and the bar never sounds the same twice. Bar 2 differs only by a short snare roll into the next bar. The open hat row stands in for a ride (put a ride on A5 if you have one); keep it washing on every eighth rather than as a house-style offbeat open hat. `pad A9 pitch -4` drops the snare a little, for the dull thud of a detuned 909 snare. The effect lines are the schranz sound: `fx distortion 60 50` is a strong, mid-range drive, `send A 45` pushes the whole kit into it, kick included, and `comp 70 20` is a hard, fast compressor that makes everything breathe with the kick. There is no group B: the kick is the bass. A rolling rumble under the kick, a bassline or a lead turn it into hard techno.
+
+To make a track of it, build it up and strip it down rather than drop it: start with the kick and the drive, bring in the hats, the ride and the snare one at a time every 8 or 16 bars, and take them out again the same way. Schranz has no real breakdown; the change comes from layers and from a filter swept by hand while it plays (the punch-in FX, FX-6 in ep133-guide.md). A card of scenes can write those layers: one scene per stage, each leaving out the rows that haven't come in yet.
 
 ## Hard groove
 - BPM: 135-145

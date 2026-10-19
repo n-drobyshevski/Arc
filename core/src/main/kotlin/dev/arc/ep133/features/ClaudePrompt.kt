@@ -40,7 +40,7 @@ object Genres {
         Genre("melodic", "Melodic techno", GenreFamily.TECHNO, 120..126, 122, "Melodic"),
         Genre("industrial", "Industrial techno", GenreFamily.TECHNO, 130..140, 136, "Industrial"),
         Genre("hard-techno", "Hard techno", GenreFamily.TECHNO, 145..160, 152, "Hard"),
-        Genre("schranz", "Schranz", GenreFamily.TECHNO, 150..160, 152),
+        Genre("schranz", "Schranz", GenreFamily.TECHNO, 150..165, 155),
         Genre("hard-groove", "Hard groove", GenreFamily.TECHNO, 135..145, 140),
         Genre("boom-bap", "Boom bap", GenreFamily.HIP_HOP, 84..96, 90),
         Genre("lo-fi", "Lo-fi", GenreFamily.HIP_HOP, 70..86, 76),

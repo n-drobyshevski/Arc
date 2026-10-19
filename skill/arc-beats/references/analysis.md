@@ -129,7 +129,7 @@ The recipes in [genres.md](genres.md) carry these where the style needs them. St
 | Dub techno | `fx delay 62 60`, `send C 30` | a dotted-eighth delay with long repeats on the chords |
 | Industrial techno | `fx distortion 65 35`, `send A 50 B 60`, `comp 55 30` | heavy dark distortion on drums and bass, squeezed together |
 | Hard techno | `fx distortion 45 55`, `send A 25 B 35`, `comp 50 25` | a medium drive that gives the kick its edge, glued by a fast compressor |
-| Schranz | `fx distortion 60 40`, `send A 35 B 45`, `comp 65 20` | a strong drive and a hard fast compressor that pumps with the kick |
+| Schranz | `fx distortion 60 50`, `send A 45`, `comp 70 20` | the whole kit, kick included, through a strong mid-range drive and a hard fast compressor that pumps with the kick |
 | Breakcore | `fx distortion 55 50`, `send A 45 B 30`, `comp 60 15` | the break crushed and pumped |
 | Lo-fi | `fx filter 27 20`, `send A 100 C 100` | a low-pass over the drums and chords: dull, tape-like |
 
