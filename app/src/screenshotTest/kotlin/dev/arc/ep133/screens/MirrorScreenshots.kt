@@ -1423,6 +1423,40 @@ fun LivePracticeWaitPreview() = Live(
     ),
 )
 
+// A card's lesson, step 2 of 4 at 360 dp, ready: the title and tip over the lane, the clean passes to go, ‹ and › for LOOP.
+@PreviewTest
+@Preview(name = "Live practice lesson", widthDp = 360, heightDp = 780, showBackground = true)
+@Composable
+fun LivePracticeLessonPreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(),
+    practice = dev.arc.ep133.ui.screens.LivePractice(
+        practiceUi.copy(
+            spec = practiceUi.spec.copy(pads = setOf(9, 11), speed = 50), pads = listOf(9, 11), bpm = 46,
+            lesson = dev.arc.ep133.controller.LessonPlace(2, 4, "Add the snare", "Snare on 2 and 4", 4, listOf(dev.arc.ep133.controller.LessonRecord(96, 5, true), null, null, null)),
+        ),
+        frame = { practiceFrame },
+    ),
+)
+
+// The lesson done, dark: how the last step went, each step's share in time, COPY for Claude.
+@PreviewTest
+@Preview(name = "Live practice lesson done dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePracticeLessonDoneDarkPreview() = Live(
+    lastRead, dark = true, oneGroup = true, transport = patternUi(),
+    practice = dev.arc.ep133.ui.screens.LivePractice(
+        practiceUi.copy(
+            counts = dev.arc.ep133.features.PracticeCounts(onTime = 40, early = 3, late = 1, passes = 6, cleanRun = 4),
+            worst = 6 to dev.arc.ep133.features.HitMark.EARLY,
+            lesson = dev.arc.ep133.controller.LessonPlace(
+                3, 3, "The whole groove", null, 0,
+                listOf(dev.arc.ep133.controller.LessonRecord(96, 5, true), dev.arc.ep133.controller.LessonRecord(88, 7, true), dev.arc.ep133.controller.LessonRecord(91, 6, true)),
+                done = true,
+            ),
+        ),
+    ),
+)
+
 @PreviewTest
 @Preview(name = "Live step panel", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
@@ -2564,6 +2598,20 @@ A4 hat       | x.x. x.x. x.x. x.xo | x.x. x.x. x.x. x.xo |
 wobble 3
 ```"""
 
+private const val BOOM_BAP_LESSON = """ARC BEAT 1
+name Lazy boom bap lesson
+tempo 92
+lesson Kick alone | A7 | 50 | Count 1 e and a out loud
+lesson Add the snare | A7 A9 | 50 | Snare on 2 and 4
+lesson Hats on top | A4 | 75
+lesson The whole groove | A
+
+[A] bars 2 step 1/16
+A7 kick      | X... ..x. X... .... | X... ..x. X.x. .... |
+A9 snare     | .... X... .... X..o | .... X... .... X..o |
+A4 hat       | x.x. x.x. x.x. x.xo | x.x. x.x. x.x. x.xo |
+"""
+
 private const val NIGHT_DRIVE = """ARC BEAT 1
 name Night drive
 tempo 118
@@ -2675,6 +2723,12 @@ fun BeatSheetScenesChainPreview() = BeatSheet(TRACK)
 fun BeatSheetScenesReplacePreview() = BeatSheet(TRACK, seq = beatSeq.withScenes(List(3) { dev.arc.ep133.features.Scene() }, 0), replaceScenes = true)
 
 // A card that can't be read: its errors and warning by line, COPY PROBLEMS, and IMPORT off with the reason.
+// A card with lesson lines: the LESSON block lists the steps, IMPORT AND PRACTISE runs them.
+@PreviewTest
+@Preview(name = "Beat sheet lesson", widthDp = 360, heightDp = 1040, showBackground = true)
+@Composable
+fun BeatSheetLessonPreview() = BeatSheet(BOOM_BAP_LESSON, practise = true)
+
 @PreviewTest
 @Preview(name = "Beat sheet errors", widthDp = 360, heightDp = 760, showBackground = true)
 @Composable

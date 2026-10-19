@@ -974,6 +974,8 @@ class MainActivity : ComponentActivity() {
                     onStop = controller::practiceStop,
                     onClose = controller::endPractice,
                     onChange = controller::changePractice,
+                    onStep = controller::lessonStep,
+                    onCopy = { controller.practiceReport()?.let { copyText(dev.arc.ep133.text.PracticeText.REPORT_SUBJECT, it) } },
                 )
             }
         }

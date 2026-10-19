@@ -5403,9 +5403,15 @@ class ArcController(
      * PRACTICE on [group]'s pattern in the scene showing ([spec]'s pads, bars and speed): Live shows that group's pads
      * (one group, PADS), STEP's and SCENE's panels close, the transport stops, and the pattern plays from a bar counted in
      * with the player's hits taken out, the rest of the scene underneath ([dev.arc.ep133.features.Practice.patterns]).
-     * Nothing is recorded. A toast, and no practice, when the group has no pad hits there.
+     * Nothing is recorded. A toast, and no practice, when the group has no pad hits there. A lesson going on ends.
      */
-    fun practise(spec: dev.arc.ep133.features.PracticeSpec, lesson: LessonPlace? = null) {
+    fun practise(spec: dev.arc.ep133.features.PracticeSpec) {
+        lessonRun = null
+        startPractice(spec)
+    }
+
+    /** [practise], a lesson going on kept (its step's spec, or the step's settings changed). */
+    private fun startPractice(spec: dev.arc.ep133.features.PracticeSpec) {
         val g = spec.group.coerceIn(0, 3)
         val pattern = projectPatterns.group(g)
         val targets = dev.arc.ep133.features.Practice.targets(pattern, spec)
@@ -5425,7 +5431,6 @@ class ArcController(
             dev.arc.ep133.features.PracticeScore(targets, length, bpm),
             if (spec.wait) dev.arc.ep133.features.PracticeWait(targets) else null,
         )
-        practiceLesson = lesson
         refreshPatternPlan()
         showPractice()
         if (!spec.wait) practicePlay()
@@ -5442,12 +5447,15 @@ class ArcController(
         val run = practiceRun ?: return
         val next = change(run.spec)
         if (next == run.spec) return
-        practise(next, practiceLesson)
+        keepLessonRecord()
+        startPractice(next)
     }
 
     /** PRACTICE's ▶: from the top again, the counts cleared (in WAIT, the first step). */
     fun practicePlay() {
         val run = practiceRun ?: return
+        keepLessonRecord()
+        lessonRun?.moving = false
         run.score = dev.arc.ep133.features.PracticeScore(run.targets, run.length, run.bpm)
         run.wait = if (run.spec.wait) dev.arc.ep133.features.PracticeWait(run.targets) else null
         if (!run.spec.wait) {
@@ -5469,13 +5477,10 @@ class ArcController(
         if (practiceRun == null) return
         if (patternRunning()) patternStop()
         practiceRun = null
-        practiceLesson = null
+        lessonRun = null
         _practice.value = null
         refreshPatternPlan()
     }
-
-    /** A lesson's place while one runs ([practise] with one). */
-    private var practiceLesson: LessonPlace? = null
 
     /** [pad] pressed at [at] while practising: scored by its time heard, or in WAIT by whether the step waits for it. */
     private fun practicePress(pad: dev.arc.ep133.features.PhysicalPad, at: Long) {
@@ -5518,14 +5523,98 @@ class ArcController(
         return PracticeFrame(tick, run.score.upcoming(tick), run.score.counts)
     }
 
-    /** A pass closed in a lesson's step: enough clean ones in a row open the next ([LessonPlace.passesToGo]). */
-    private fun lessonPassed(run: PracticeRun) {
-        val l = practiceLesson ?: return
-        if (run.score.counts.cleanRun >= LESSON_CLEAN_PASSES) onLessonStepDone?.invoke(l.step)
+    /**
+     * A lesson going on: the card's [name], its [tempo] and [steps], the step on ([at], from 0), each step's record so far,
+     * whether every step is [done], and [moving] while the next step is on its way (so a pass closing meanwhile counts once).
+     */
+    private class LessonRun(val name: String?, val steps: List<dev.arc.ep133.features.LessonStep>) {
+        var at = 0
+        val records = arrayOfNulls<LessonRecord>(steps.size)
+        var done = false
+        var moving = false
     }
 
-    /** Told when a lesson's step has had its clean passes (the lesson's runner opens the next). */
-    var onLessonStepDone: ((step: Int) -> Unit)? = null
+    private var lessonRun: LessonRun? = null
+
+    /** The card the last IMPORT read, for its lesson (IMPORT AND PRACTISE). */
+    private var lastImportCard: dev.arc.ep133.features.BeatCard? = null
+
+    /** A lesson's step [i] (from 0, kept in range): practice on its group's pattern in the scene showing, its pads, at its speed. */
+    private fun startLessonStep(i: Int) {
+        val l = lessonRun ?: return
+        l.at = i.coerceIn(0, l.steps.lastIndex)
+        l.moving = false
+        val s = l.steps[l.at]
+        startPractice(dev.arc.ep133.features.PracticeSpec(s.group, s.pads, speed = s.speed))
+    }
+
+    /** PRACTICE's ‹ and ›: the lesson's step before or after, its record of how it went kept. */
+    fun lessonStep(delta: Int) {
+        val l = lessonRun ?: return
+        val next = (l.at + delta).coerceIn(0, l.steps.lastIndex)
+        if (next == l.at) return
+        keepLessonRecord()
+        startLessonStep(next)
+    }
+
+    /** How the lesson's step on went, kept as its record once it has hits ([done]: its clean passes were played). */
+    private fun keepLessonRecord(done: Boolean = false) {
+        val l = lessonRun ?: return
+        val run = practiceRun ?: return
+        val counts = run.wait?.counts ?: run.score.counts
+        if (counts.hits == 0 && !done) return
+        val old = l.records[l.at]
+        val worst = run.score.worst()?.let { (pad, mark) -> (run.names[pad] ?: dev.arc.ep133.features.PadNotes.LABELS[pad]) to mark }
+        l.records[l.at] = LessonRecord(counts.percent, counts.passes, done || old?.done == true, worst)
+    }
+
+    /** A pass closed in a lesson's step: enough clean ones in a row open the next ([LessonPlace.passesToGo]); after the last, the lesson is done. */
+    private fun lessonPassed(run: PracticeRun) {
+        val l = lessonRun ?: return
+        if (l.moving || run.score.counts.cleanRun < LESSON_CLEAN_PASSES) return
+        l.moving = true
+        keepLessonRecord(done = true)
+        val step = l.at
+        if (step < l.steps.lastIndex) {
+            toast(dev.arc.ep133.text.PracticeText.stepDone(step + 1, l.steps[step + 1].title))
+            scope.launch { if (lessonRun === l && l.at == step) startLessonStep(step + 1) }
+        } else {
+            l.done = true
+            toast(dev.arc.ep133.text.PracticeText.LESSON_DONE)
+            scope.launch { if (lessonRun === l) practiceStop() }
+        }
+    }
+
+    /**
+     * COPY HOW IT WENT: a short report of the practice on, for Claude: with a lesson, each step with its share in time,
+     * passes and the pad most often off; else the counts. Null when no practice is on.
+     */
+    fun practiceReport(): String? {
+        val run = practiceRun ?: return null
+        val t = dev.arc.ep133.text.PracticeText
+        val l = lessonRun
+        fun worstText(w: Pair<String, dev.arc.ep133.features.HitMark>?) = w?.let { (name, mark) -> t.worst(name, mark) }
+        if (l == null) {
+            val n = run.wait?.counts ?: run.score.counts
+            val worst = run.score.worst()?.let { (pad, mark) -> (run.names[pad] ?: dev.arc.ep133.features.PadNotes.LABELS[pad]) to mark }
+            return listOf(
+                t.reportHead(run.place, Math.round(run.bpm).toInt(), run.spec.speed),
+                t.reportPlain(t.counts(n.hits, n.onTime, n.early, n.late, n.missed, n.extra), n.passes, worstText(worst)),
+                t.REPORT_ASK,
+            ).joinToString("\n")
+        }
+        keepLessonRecord()
+        val tempo = patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)
+        val lines = ArrayList<String>()
+        lines += t.reportLessonHead(l.name, Math.round(tempo).toInt())
+        for ((i, s) in l.steps.withIndex()) {
+            val r = l.records[i]
+            val result = r?.let { t.reportResult(it.percent, it.passes, it.done, worstText(it.worst)) } ?: t.REPORT_NOT_PLAYED
+            lines += t.reportStep(i + 1, s.title, dev.arc.ep133.features.BeatCards.lessonPads(s), s.speed, result)
+        }
+        lines += t.REPORT_ASK
+        return lines.joinToString("\n")
+    }
 
     private fun showPractice() {
         val run = practiceRun ?: return
@@ -5539,7 +5628,13 @@ class ArcController(
             waiting = w?.waiting ?: emptySet(),
             waitStep = w?.step ?: 0,
             waitSteps = w?.steps?.size ?: 0,
-            lesson = practiceLesson?.let { it.copy(passesToGo = (LESSON_CLEAN_PASSES - counts.cleanRun).coerceAtLeast(0)) },
+            lesson = lessonRun?.let { l ->
+                val s = l.steps[l.at]
+                LessonPlace(
+                    l.at + 1, l.steps.size, s.title, s.tip, (LESSON_CLEAN_PASSES - counts.cleanRun).coerceAtLeast(0),
+                    l.records.toList(), l.done,
+                )
+            },
         )
     }
 
@@ -5754,6 +5849,7 @@ class ArcController(
         val ui = _beatImport.value ?: return
         val card = ui.card ?: return
         lastImport = null
+        lastImportCard = null
         var applied: BeatApplied? = null
         // The sequencer as it was: UNDO is that one, once the sounds are back with it.
         val before = projectSeq
@@ -5770,6 +5866,7 @@ class ArcController(
             return
         }
         lastImport = a
+        lastImportCard = card
         _beatImport.value = null
         _claudeWaiting.value = null
         if (setTempo) card.tempo?.let { setTempo(dev.arc.ep133.features.Tempo.round(it)) }
@@ -5845,11 +5942,17 @@ class ArcController(
     private var lastImport: BeatApplied? = null
 
     /**
-     * IMPORT AND PRACTISE: practice on what the last import placed, in the scene it selected: the first of its groups
-     * with pad hits ([practiceGroup]).
+     * IMPORT AND PRACTISE: practice on what the last import placed, in the scene it selected: a card with a lesson runs
+     * its steps from the first ([LessonRun]), else the first of its groups with pad hits ([practiceGroup]).
      */
     fun practiseImport() {
         val a = lastImport ?: return
+        val card = lastImportCard
+        if (card != null && card.lesson.isNotEmpty()) {
+            lessonRun = LessonRun(card.name, card.lesson.take(dev.arc.ep133.features.LessonStep.MAX))
+            startLessonStep(0)
+            return
+        }
         val first = a.placed.firstOrNull()?.first ?: 0
         practise(dev.arc.ep133.features.PracticeSpec(practiceGroup(projectPatterns, first), speed = PRACTICE_START_SPEED))
     }

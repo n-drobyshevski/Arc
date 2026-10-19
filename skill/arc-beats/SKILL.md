@@ -160,7 +160,7 @@ Follow [lessons.md](references/lessons.md): twelve lessons from a first beat to 
 
 ## PLAY: teach a card to play
 
-When the user wants to play a card on the device rather than import it (Arc's PLAY tab sends *teach me to play this ... myself* with `- Way:`, `- Me:` and `- Start:` lines), follow [play.md](references/play.md): read the card, set the starting tempo, then one part per message in counts ("kick on 1 and 3"), with a hand for each pad, and wait between steps. Only the guide's combos, by id.
+When the user wants to play a card on the device rather than import it (Arc's PLAY tab sends *teach me to play this ... myself* with `- Way:`, `- Me:` and `- Start:` lines), follow [play.md](references/play.md): read the card, set the starting tempo, then one part per message in counts ("kick on 1 and 3"), with a hand for each pad, and wait between steps. Only the guide's combos, by id. With `- Arc:` asking for lesson lines, also give the card with a `lesson` line per step ("Lesson" in beat-card.md) so Arc's PRACTICE runs them.
 
 ## PUNCH-IN TIPS: performance advice, never in the card
 

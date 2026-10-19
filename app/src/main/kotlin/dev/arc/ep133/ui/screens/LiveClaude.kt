@@ -357,6 +357,7 @@ fun ColumnScope.BeatImportSheetContent(
             onTick = { row -> shapeOff = if (padKey(row.pad) in shapeOff) shapeOff - padKey(row.pad) else shapeOff + padKey(row.pad) },
         )
     }
+    ui.card?.lesson?.takeIf { it.isNotEmpty() }?.let { LessonBlock(it, practising = onPractise != null) }
     ui.swing?.let { Text(ClaudeText.swingLine(it), style = ArcType.small, color = c.graphite) }
     if (ui.problems.isNotEmpty()) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -648,6 +649,41 @@ private fun FxBlock(fx: BeatFxUi, on: Boolean, onToggle: () -> Unit) {
         }
     }
     if (on && fx.changes) Text(ClaudeText.FX_BLOCK_NOTE, style = ArcType.small, color = c.graphite)
+}
+
+/**
+ * The LESSON block: a row for each step of the card's lesson, its number, title and tip, and the pads and speed on the
+ * right; under it, that IMPORT AND PRACTISE runs them ([practising]: the key is there).
+ */
+@Composable
+private fun LessonBlock(steps: List<dev.arc.ep133.features.LessonStep>, practising: Boolean) {
+    val c = LocalArcColors.current
+    GridPlate {
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(dev.arc.ep133.text.PracticeText.LESSON.uppercase(), style = ArcType.caps, color = c.graphite, maxLines = 1)
+        }
+        for ((i, step) in steps.withIndex()) {
+            PlateLine()
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 8.dp).semantics(mergeDescendants = true) {},
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("${i + 1}", style = ArcType.caps, color = c.graphite, maxLines = 1, modifier = Modifier.width(18.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(step.title, style = ArcType.small, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    step.tip?.let { Text(it, style = ArcType.tiny, color = c.graphite, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                }
+                Text(
+                    dev.arc.ep133.text.PracticeText.lessonPads(dev.arc.ep133.features.BeatCards.lessonPads(step), step.speed),
+                    style = ArcType.small,
+                    color = c.ink,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+    if (practising) Text(dev.arc.ep133.text.PracticeText.LESSON_NOTE, style = ArcType.small, color = c.graphite)
 }
 
 /** The width of the label column of an FX row, and of a pad shaping row's pad. */

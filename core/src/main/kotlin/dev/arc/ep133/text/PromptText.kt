@@ -330,6 +330,8 @@ object PromptText {
                         PlayLevel.SURE -> "I'm sure on the pads"
                     },
                     "- Start: " + if (p.speed >= 100) "at its own tempo" else "at ${p.speed}% of its tempo, then work up to it",
+                    // Finger drumming is what PRACTICE runs: the steps as the card's lesson lines play on Live's pads.
+                    if (p.way == PlayWay.FINGERS) "- Arc: also give me the card with lesson lines for your steps, so Arc's PRACTICE runs them on its pads" else null,
                     "Go one step at a time: explain the step, give me something to play, and wait for me before the next one. $THE_CARD",
                 )
             }

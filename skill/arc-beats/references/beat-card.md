@@ -97,6 +97,22 @@ A project in Arc can have a chain: steps of (scene, passes), at most 64. Arc pla
 - **Saving and undo:** the chain is saved with the project, and the scenes' undo covers it.
 
 
+## Lesson (optional)
+`lesson` lines turn a card into a lesson that Arc's PRACTICE runs a step at a time, on the card's first scene (or its only one). One line per step, in order, at most 12. A line may stand anywhere in the card.
+
+```
+lesson Kick alone | A7 | 50 | Count 1 e and a out loud
+lesson Add the snare | A7 A9 | 50
+lesson The whole groove | A | 100
+```
+
+- **Fields**, split by `|`: the title (at most 40 characters, longer is shortened with a warning), the pads to play, the speed and an optional tip.
+- **Pads:** written as in grid rows, all in one group. A bare group letter, as in `A`, means all the group's pads.
+- **Speed:** a percent of the card's tempo, 25–100, with or without `%`. When left out it is 100.
+- **Errors:** a line without a title or pads, a pad that isn't one, pads from two groups, a speed outside 25–100, more than 12 steps, and a step whose pads have no pad hits in that group's pattern in the first scene.
+- **In Arc:** the import sheet lists the steps, and IMPORT AND PRACTISE starts step 1 on the imported pattern of the step's group: the other groups play, and the step's pads are left out for the player and lit before each hit. After 4 clean passes in a row (no hit missed and no extra press) the next step starts.
+- **Writing:** Arc writes the lesson lines after the `chain` line, as `lesson <title> | <pads> | <speed> | <tip>`, the speed left out at 100 and the tip left out when there is none.
+
 ## Effects (header lines, all optional)
 These lines set the project's FX in Arc: the same master effect, sends, compressor and sidechain as Arc's FX sheet. Like the header, they come before the first section. Knob values are percentages, 0–100, as the knob's travel.
 | Line | Meaning |

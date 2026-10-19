@@ -78,6 +78,8 @@ SWING_STEPS = ("1/8", "1/16")
 #: Pad labels as printed, in order of their note offset 0..11.
 PAD_LABELS = [".", "0", "ENTER", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
 LABEL_OFFSET = {".": 0, "0": 1, "E": 2, "ENTER": 2, **{str(n): n + 2 for n in range(1, 10)}}
+#: A pad offset's label as a card writes it (ENTER as E).
+OFFSET_LABEL = {0: ".", 1: "0", 2: "E", **{n + 2: str(n) for n in range(1, 10)}}
 #: The keypad top row first (7 8 9 / 4 5 6 / 1 2 3 / . 0 ENTER) as note offsets.
 KEYPAD_ORDER = [9, 10, 11, 6, 7, 8, 3, 4, 5, 0, 1, 2]
 GROUPS = "ABCD"
@@ -309,6 +311,8 @@ class Card:
     chain_line: int = 0
     #: The factory kit its slots are read by: "ep133" or "ep40" ([card_kit] from its sound lines; the command line or the sound list may say otherwise).
     kit: str = "ep133"
+    #: The `lesson` lines, in order: what Arc's PRACTICE runs a step at a time.
+    lesson: List["LessonStep"] = field(default_factory=list)
 
     @property
     def all_patterns(self) -> List[Pattern]:
@@ -379,6 +383,28 @@ _NOTE_NUMBERS = {note_name(n): n for n in range(128)}
 def parse_note_name(text: str) -> Optional[int]:
     """The MIDI number of a note name C-1..G9 (C4 is 60), or None. Only the names note_name makes count: capitals, sharps written C#4 (so no B#3)."""
     return _NOTE_NUMBERS.get(text)
+
+
+#: A lesson step has at most this many, and its speed is a percent of the tempo in this range.
+LESSON_MAX = 12
+LESSON_SPEEDS = (25, 100)
+
+
+@dataclass
+class LessonStep:
+    """A `lesson` line: its title, the group and pads (offsets, None for all the group's) played, the speed in percent, a tip."""
+
+    title: str
+    group: int
+    pads: Optional[List[int]]
+    speed: int = 100
+    tip: Optional[str] = None
+    line: int = 0
+
+    def pads_text(self) -> str:
+        if self.pads is None:
+            return GROUPS[self.group]
+        return " ".join(GROUPS[self.group] + OFFSET_LABEL[o] for o in KEYPAD_ORDER if o in self.pads)
 
 
 def parse_pad(token: str) -> Tuple[int, int]:
@@ -497,6 +523,7 @@ class _Reader:
         if self.section_lines == 0:
             self.err(start + 1, "no-sections", "the card has no section: add [A], [B], [C] or [D] with grid rows")
         self.check_chain()
+        self.check_lesson()
         self.card.fx = self.fx if self.fx.kinds() else None
         self.card.scenes = self.scenes
         self.card.patterns = self.scenes[0].patterns
@@ -530,8 +557,67 @@ class _Reader:
             return False
         return True
 
+    def lesson_line(self, n: int, text: str) -> None:
+        """lesson <title> | <pads> | <speed> | <tip>: a step of the lesson. A line with a fault is left out."""
+        parts = [_trim(p) for p in text[len(_tokens(text)[0]):].split("|")]
+        title = parts[0] if parts else ""
+        pads_text = parts[1] if len(parts) > 1 else ""
+        if not title or not pads_text:
+            self.err(n, "lesson-line", "a lesson line needs a title and the pads to play, as in lesson Kick alone | A7 | 50")
+            return
+        if len(self.card.lesson) == LESSON_MAX:
+            self.err(n, "lesson-too-long", "the lesson has more than %d steps, the most is %d" % (LESSON_MAX, LESSON_MAX))
+            return
+        if len(title) > NAME_MAX:
+            self.warn(n, "lesson-title-long", "a lesson step title is longer than %d characters; shortened" % NAME_MAX)
+            title = _trim(title[:NAME_MAX])
+        group: Optional[int] = None
+        pads: Optional[List[int]] = []
+        for tok in _tokens(pads_text):
+            whole = len(tok) == 1 and tok in GROUPS
+            if whole:
+                g = GROUPS.index(tok)
+            else:
+                try:
+                    g, offset = parse_pad(tok)
+                except ValueError:
+                    self.err(n, "lesson-pad", "'%s' isn't a pad or a group: write pads such as A7 A9, or A for the whole group" % tok)
+                    return
+            if group is not None and g != group:
+                self.err(n, "lesson-groups", "a lesson step's pads are all in one group")
+                return
+            group = g
+            if whole:
+                pads = None
+            elif pads is not None and offset not in pads:
+                pads.append(offset)
+        speed_text = _trim(parts[2].rstrip("%")) if len(parts) > 2 else ""
+        speed = 100 if speed_text == "" else (int(speed_text) if re.fullmatch(r"[0-9]{1,3}", speed_text) else None)
+        if speed is None or not LESSON_SPEEDS[0] <= speed <= LESSON_SPEEDS[1]:
+            self.err(n, "lesson-speed", "a lesson step's speed is %d to %d percent of the tempo" % LESSON_SPEEDS)
+            return
+        tip = _trim(" | ".join(parts[3:])) or None
+        self.card.lesson.append(LessonStep(title, group, sorted(pads) if pads is not None else None, speed, tip, n))
+
+    def check_lesson(self) -> None:
+        """Each step's pads have pad hits in the first scene's pattern of its group."""
+        first = self.scenes[0].patterns if self.scenes else []
+        for step in self.card.lesson:
+            p = next((q for q in first if q.group == step.group), None)
+            played = {h.pad for h in (p.hits if p else []) if h.semi is None}
+            missing = [o for o in (step.pads or []) if o not in played]
+            if not played:
+                self.err(step.line, "lesson-no-hits", "lesson step '%s': the card's first scene has no pad hits in group %s" % (step.title, GROUPS[step.group]))
+            elif missing:
+                self.err(step.line, "lesson-no-hits", "lesson step '%s': %s has no hits in the first scene's [%s]" % (
+                    step.title, " ".join(GROUPS[step.group] + OFFSET_LABEL[o] for o in missing), GROUPS[step.group]))
+
     def line(self, n: int, text: str) -> None:
         first = _tokens(text)[0].lower()
+        # A lesson line may come anywhere: it names no section's pads but its own.
+        if first == "lesson":
+            self.lesson_line(n, text)
+            return
         if first == "scene":
             self.scene_line(n, text)
             return
@@ -2021,6 +2107,7 @@ def analyse_card(card: Card, recipes: Optional[List[dict]] = None) -> dict:
     every = card.all_patterns
     all_hits = [h for p in every for h in p.hits if h.semi is None]
     report = {
+        "lesson": [{"title": st.title, "pads": st.pads_text(), "speed": st.speed, "tip": st.tip} for st in card.lesson],
         "name": card.name,
         "tempo": card.tempo,
         "swing": card.swing,
@@ -2255,6 +2342,8 @@ def render_grid(card: Card) -> str:
     if card.fx is not None:
         for text in fx_lines(describe_fx(card.fx)):
             out.append(text)
+    for i, step in enumerate(card.lesson):
+        out.append("lesson %d: %s (%s, %d%%)%s" % (i + 1, step.title, step.pads_text(), step.speed, " - " + step.tip if step.tip else ""))
     if card.multi_scene:
         if card.chain:
             out.append("chain %s (loops)" % _chain_text(card.chain))
@@ -2588,6 +2677,8 @@ def render_analysis(report: dict) -> str:
     out.append("%s | tempo %s | swing %s | groups %s" % (head, report["tempo"] if report["tempo"] is not None else "-", report["swing"], " ".join(report["groups"])))
     if report.get("silent_pads"):
         out.append("silent pads (no sound on the EP-133, from the share's comment): %s" % " ".join(report["silent_pads"]))
+    for i, step in enumerate(report.get("lesson") or []):
+        out.append("lesson %d: %s (%s, %d%%)%s" % (i + 1, step["title"], step["pads"], step["speed"], " - " + step["tip"] if step["tip"] else ""))
     if report.get("fx"):
         out.append("fx:")
         for text in fx_lines(report["fx"]):

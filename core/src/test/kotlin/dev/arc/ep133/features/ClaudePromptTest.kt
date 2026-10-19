@@ -171,6 +171,8 @@ class ClaudePromptTest {
         assertTrue(PromptText.prompt(p.copy(speed = 100), SharePick.CHAIN, true).contains("this EP-133 arrangement") )
         assertTrue(PromptText.prompt(p.copy(speed = 100), SharePick.CHAIN, true).contains("- Start: at its own tempo\n"))
         assertEquals("Teach me to play it by step entry as an improver starting at three-quarter tempo".lowercase(), PromptText.sentence(p, FactoryKit.EP133).joinToString(" ") { it.text }.lowercase())
+        assertFalse(PromptText.prompt(p, SharePick.PATTERN, true).contains("lesson lines"))
+        assertTrue(PromptText.prompt(p.copy(way = PlayWay.FINGERS), SharePick.PATTERN, true).contains("- Start: at 75% of its tempo, then work up to it\n- Arc: also give me the card with lesson lines for your steps, so Arc's PRACTICE runs them on its pads\n"))
         assertEquals("Play \u00B7 Steps 75%", PromptText.name(p))
         assertEquals("New", PromptText.tab(PromptTask.BEAT))
     }

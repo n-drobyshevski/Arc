@@ -31,6 +31,21 @@ Sixteen steps a bar are counted **1 e and a, 2 e and a, 3 e and a, 4 e and a**: 
 
 Arc's **PRACTICE** (the PLAY tab on the Claude page, or **IMPORT AND PRACTISE** on the beat card sheet) plays the beat with the player's group left out, lights each pad before its hit and counts the hits in time. Suggest it for each step: a beginner with **WAIT** on (the beat waits for each hit: the order first) and **50%**, then WAIT off, then 75% and 100%. Ask them how many hits were in time and which pad Arc says was off most, and make the next step from that.
 
+## Lesson lines: let Arc run the steps
+
+When the prompt has `- Arc: also give me the card with lesson lines` (Arc sends it with finger drumming), or the user asks Arc to run the steps, give the card back once, unchanged but for a new name (the old one plus "lesson") and one `lesson` line per step, before your first step:
+
+```
+lesson Kick alone | A7 | 50 | Count 1 e and a out loud
+lesson Add the snare | A7 A9 | 50 | Snare on 2 and 4
+lesson Hats on top | A7 A9 A4 | 75
+lesson The whole groove | A | 100
+```
+
+- **The steps are your plan**, in your order (kick, backbeat, hats ...), each adding to the last; the last plays the whole group at the card's tempo. The rules are in "Lesson" in [beat-card.md](beat-card.md): one group per step, pads that play in the first scene, speed 25-100, at most 12 steps, the title at most 40 characters and the tip one short sentence. Check the card with `scripts/beatcard.py check`.
+- **Say how to use it** in two lines: PASTE CARD, then **IMPORT AND PRACTISE** on the sheet; Arc plays the rest of the beat, lights each pad before its hit, and moves on after four clean passes. ‹ and › change step.
+- **Then teach as below**, one step a message, and ask them to tap **COPY** (how it went) on the practice panel and paste it to you: it lists each step's share in time and the pad most often off. Make the next step, or a slower one, from that.
+
 ## Each step
 
 Give one step per message: what to play (pads, counts, hand), at what tempo, how to tell it is right, and what to do if it isn't (slower, or that part alone). Then stop and wait for them. When they say it works, the next step; when they say it doesn't, a smaller step or a slower tempo, never more words. When the whole beat plays, suggest recording it on the EP-133 (SEQ-1 or SEQ-4) and offer a variation to learn next.

@@ -31,8 +31,22 @@ data class PracticeUi(
     val speed: Int get() = spec.speed
 }
 
-/** Where a lesson is: [step] (from 1) of [steps], called [title], its [tip] if any, and the clean passes that open the next. */
-data class LessonPlace(val step: Int, val steps: Int, val title: String, val tip: String?, val passesToGo: Int)
+/**
+ * Where a lesson is: [step] (from 1) of [steps], called [title], its [tip] if any, and the clean passes that open the
+ * next; each step's [records] so far (null: not played), and whether every step is [done].
+ */
+data class LessonPlace(
+    val step: Int,
+    val steps: Int,
+    val title: String,
+    val tip: String?,
+    val passesToGo: Int,
+    val records: List<LessonRecord?> = emptyList(),
+    val done: Boolean = false,
+)
+
+/** How a lesson's step went the last time it played: the [percent] in time over [passes], whether it was [done] (its clean passes), the pad most often off by name. */
+data class LessonRecord(val percent: Int, val passes: Int, val done: Boolean, val worst: Pair<String, HitMark>? = null)
 
 /**
  * A frame of a practice running: the [tick] heard into the loop (negative counting in), each pad's next hits not yet
