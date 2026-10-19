@@ -27,7 +27,7 @@
   pointer-events: none;
 }
 
-/* While Try arc shows, the toast sits at the top, clear of the step card and the pads
+/* While Try arc shows a card in the lower half, the toast sits at the top, clear of it
  * (MainActivity: the toast's alignment while the tour is open). */
 .toast-layer--top { inset: 0 0 auto 0; }
 .toast-layer--top .toast-host {

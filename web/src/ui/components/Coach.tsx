@@ -149,6 +149,12 @@ interface Entry {
   readonly spec: CoachMarkSpec
 }
 
+/**
+ * The tour's card sits in the lower half of the screen (MainActivity's
+ * tourCardLow): the toast then shows at the top, else at the bottom.
+ */
+export const tourCardLow: Signal<boolean> = signal(false)
+
 /** The marks registered by useCoachMark under one CoachHost. */
 export class CoachRegistry {
   private readonly entries = new Map<string, Entry>()
@@ -399,6 +405,7 @@ export function CoachOverlay(props: CoachOverlayProps): JSX.Element | null {
       card = placeTourCard(vp.width, vp.height, target?.bounds ?? null, heightAt, headingAt, 0, 0, dockBottom)
       el.style.width = `${card.card.right - card.card.left}px`
       hole = target ? holeOf(target.bounds, card.holeClip) : null
+      tourCardLow.value = (card.card.top + card.card.bottom) / 2 > vp.height / 2
     }
     setLayout({ placed, vp, card, hole, missing: !!m?.spotlight && target === null })
   }, [registry, root])

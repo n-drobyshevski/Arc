@@ -19,6 +19,11 @@ import dev.arc.ep133.ui.theme.ArcTheme
 /*
  * "Try arc" on Live, a card per step, as a new install sees it: one group,
  * the veil cut away around what the step is about.
+ *
+ * These render one frame. The spotlit control reports where it is only after
+ * that frame's layout, so a card next to a control (CONNECT, PAD, HEAR, BACKUP)
+ * shows where a card without one goes; on a phone it moves into place on the
+ * next frame, under the overlay's fade. Where it lands is TourPlaceTest's.
  */
 
 /** Live under the tour; [connected] false shows it as before the EP-133 is connected. */

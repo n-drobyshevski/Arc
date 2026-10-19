@@ -341,6 +341,8 @@ class MainActivity : ComponentActivity() {
         var tourSession by rememberSaveable(stateSaver = TourSessionSaver) { mutableStateOf<TourSession?>(null) }
         // While the tour shows, Live shows one group (until Live is left; never saved).
         var forceOneGroup by rememberSaveable { mutableStateOf(false) }
+        // Its card is in the lower half: messages show at the top while it does.
+        var tourCardLow by remember { mutableStateOf(false) }
         // What opens by itself is decided once, when the library has been read.
         var firstRunChecked by rememberSaveable { mutableStateOf(false) }
         // The section under the top bar; the other screens stack over it without the bars.
@@ -661,6 +663,7 @@ class MainActivity : ComponentActivity() {
                 // Back pauses the tour (it comes back as Welcome back); on the first card it means Not now.
                 onBack = { if (tourUi?.step == TourStep.WELCOME) tourActions.onNotNow() else closeTour() },
                 coach = coach,
+                onCardLow = { tourCardLow = it },
                 onCoachDismiss = {
                     coach = false
                     // Seen once it has been closed (also kept in Documents/arc).
@@ -942,8 +945,8 @@ class MainActivity : ComponentActivity() {
                 text = toast?.text.orEmpty(),
                 error = toast?.error ?: false,
                 onTimeout = controller::dismissToast,
-                // At the top while the tour shows, clear of its card.
-                modifier = Modifier.align(if (tourSession != null) Alignment.TopCenter else Alignment.BottomCenter),
+                // While the tour shows, at the edge away from its card (and so clear of the control it rings).
+                modifier = Modifier.align(if (tourSession != null && tourCardLow) Alignment.TopCenter else Alignment.BottomCenter),
             )
         }
     }

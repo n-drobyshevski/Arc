@@ -120,7 +120,8 @@ fun tourMode(ui: TourUi): CoachMode {
 /**
  * The page with the guide overlay or the tour over it: [tour] shows the
  * tour's step (null: none), [coach] the guide overlay (the ? key). Back
- * pauses the tour ([onBack]) or closes the overlay.
+ * pauses the tour ([onBack]) or closes the overlay. [onCardLow] says whether
+ * the card sits in the lower half, so a message can show at the other edge.
  */
 @Composable
 fun TourHost(
@@ -129,13 +130,14 @@ fun TourHost(
     onBack: () -> Unit,
     coach: Boolean,
     onCoachDismiss: () -> Unit,
+    onCardLow: (Boolean) -> Unit = {},
     content: @Composable () -> Unit,
 ) {
     // The last step stays on the veil while it fades out.
     val shown = remember { mutableStateOf<TourUi?>(null) }.apply { if (tour != null) value = tour }.value
     val ui = if (tour == null && coach) null else tour ?: shown
     val card: (@Composable (target: () -> Rect?, clipHole: (Rect?) -> Unit) -> Unit)? = if (ui != null) {
-        { target, clipHole -> TourCardLayout(target, clipHole, dockBottom = ui.step == TourStep.DONE) { headingOnly -> TourCard(ui, actions, headingOnly = headingOnly) } }
+        { target, clipHole -> TourCardLayout(target, clipHole, dockBottom = ui.step == TourStep.DONE, onCardLow = onCardLow) { headingOnly -> TourCard(ui, actions, headingOnly = headingOnly) } }
     } else {
         null
     }
@@ -494,6 +496,7 @@ fun TourCardLayout(
     target: () -> Rect?,
     clipHole: (Rect?) -> Unit,
     dockBottom: Boolean = false,
+    onCardLow: (Boolean) -> Unit = {},
     card: @Composable (headingOnly: Boolean) -> Unit,
 ) {
     val insets = WindowInsets.safeDrawing
@@ -524,6 +527,7 @@ fun TourCardLayout(
         )
         val p = measure(place.headingOnly, place.card.width)
         clipHole(place.holeClip?.let { Rect(it.left * d, it.top * d, it.right * d, it.bottom * d) })
+        onCardLow(place.card.center.y > vh / 2)
         layout(constraints.maxWidth, constraints.maxHeight) {
             p.place((place.card.left * d).roundToInt(), (place.card.top * d).roundToInt())
         }

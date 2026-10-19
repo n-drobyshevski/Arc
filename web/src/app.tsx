@@ -45,7 +45,7 @@ import {
   sheetLayer,
   type NavView,
 } from './ui/nav'
-import { CoachHost, useCoachFirstRun } from './ui/components/Coach'
+import { CoachHost, tourCardLow, useCoachFirstRun } from './ui/components/Coach'
 import { TourCard, tourMode, type TourActions } from './ui/components/Tour'
 import { Key } from './ui/components/Key'
 import { Sheet } from './ui/components/Sheet'
@@ -289,7 +289,7 @@ function Root(): JSX.Element {
           restore 'restore:<id>', the delete dialog 'delete'. */}
       {tabs && v.tab === 'backups' && <BackupsSheets view={v} />}
       <ProgressSlot task={progressShown ? state.task : null} onCancel={() => c.cancelTask()} />
-      <ToastLayer raise={state.toast?.id ?? null} top={tour.shown}>
+      <ToastLayer raise={state.toast?.id ?? null} top={tour.shown && tourCardLow.value}>
         <ControllerToast controller={c} />
         <UpdatePrompt />
       </ToastLayer>
