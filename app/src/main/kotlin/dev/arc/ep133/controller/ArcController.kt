@@ -2107,9 +2107,38 @@ class ArcController(
         }
         if (liveAudio.isOpen) return
         val opened = liveAudio.open()
+        // Opened by [openLiveAudioSoon] while this waited: it says so itself.
+        if (liveOpening?.isActive == true) return
         trafficLog.note("live audio: " + if (opened) liveAudio.description else "no output")
         if (opened) prepareLive(padMemory.sounds())
         sampleOutputChanged()
+    }
+
+    // Live's output being opened off the main thread ([openLiveAudioSoon]).
+    private var liveOpening: Job? = null
+
+    /**
+     * [openLiveAudio] for Live coming on screen, off the main thread: opening the native output can take most of
+     * a second (AAudio exclusive, a Bluetooth route), which held the first screen and the pads. A press or the
+     * transport meanwhile opens it at once ([openLiveAudio], waiting on the same lock); Live left meanwhile, the
+     * output goes again.
+     */
+    fun openLiveAudioSoon() {
+        if (!liveAudioOpen) {
+            liveAudioOpen = true
+            player.volume.start()
+        }
+        if (liveAudio.isOpen || liveOpening?.isActive == true) return
+        liveOpening = scope.launch {
+            val opened = kotlinx.coroutines.withContext(Dispatchers.IO) { liveAudio.open() }
+            if (!liveAudioOpen) {
+                if (opened) liveAudio.close()
+                return@launch
+            }
+            trafficLog.note("live audio: " + if (opened) liveAudio.description else "no output")
+            if (opened) prepareLive(padMemory.sounds())
+            sampleOutputChanged()
+        }
     }
 
     /**

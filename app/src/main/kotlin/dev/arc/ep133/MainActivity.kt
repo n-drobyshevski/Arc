@@ -818,7 +818,7 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(live) {
             if (live) {
                 lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
-                    controller.openLiveAudio()
+                    controller.openLiveAudioSoon()
                     try {
                         kotlinx.coroutines.awaitCancellation()
                     } finally {
