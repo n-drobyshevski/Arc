@@ -1352,7 +1352,7 @@ class BeatCardTest {
             assertEquals(r.card!!.fx, BeatCards.read(BeatCards.write(r.card!!)).card!!.fx)
         }
         val withFx = cards.map { BeatCards.read(it).card!! }.filter { it.fx != null }
-        assertEquals(setOf("House groove", "Dub chord echo", "Industrial pressure", "Hard techno pound", "Schranz pressure", "Schranz track", "Hard groove workout", "Dusty lo-fi", "Amen shred", "Breakcore track", "Dub plate", "UK dub"), withFx.map { it.name }.toSet())
+        assertEquals(setOf("House groove", "Tech groove", "Peak-time build", "Melodic arpeggio", "Acid squelch", "Dub chord echo", "Industrial pressure", "Hard techno pound", "Schranz pressure", "Schranz track", "Hard groove workout", "Dusty lo-fi", "Amen shred", "Breakcore track", "Dub plate", "UK dub"), withFx.map { it.name }.toSet())
         val house = withFx.first { it.name == "House groove" }.fx!!
         assertEquals(Sidechain(true, 0, 9, 0b0010, 0.3f, 0.55f), house.sidechain)
         assertEquals(FxType.FILTER, withFx.first { it.name == "Dusty lo-fi" }.fx!!.type)
@@ -1360,7 +1360,7 @@ class BeatCardTest {
         val track = withFx.first { it.name == "Breakcore track" }
         assertEquals(listOf("Intro", "Drop", "Breakdown", "Build", "Drop 2"), track.scenes.map { it.name })
         assertEquals(listOf(1 to 2, 2 to 2, 3 to 1, 4 to 1, 5 to 2), track.chain)
-        assertEquals(listOf(listOf(0, 1), listOf(0, 1), listOf(0, 1), listOf(0), listOf(0, 1)), track.scenes.map { s -> s.sections.map { it.group } })
+        assertEquals(listOf(listOf(0, 1, 2), listOf(0, 1), listOf(0, 1), listOf(0), listOf(0, 1)), track.scenes.map { s -> s.sections.map { it.group } })
         assertEquals(track, BeatCards.read(BeatCards.write(track)).card)
         // Planned into a project, it adds its five scenes and chain.
         val plan = BeatCards.plan(ProjectSeq.DEFAULT, track)

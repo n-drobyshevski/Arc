@@ -732,10 +732,9 @@ class Analyse(unittest.TestCase):
         # The Jungle recipe's break, with a skank on C and shouts on D: those groups have pad hits but no kick, snare or hat.
         recipes = bc.load_recipes(os.path.join(REFS, "genres.md"))
         card = bc.parse_card("ARC BEAT 1\ntempo 166\nswing 54\n[A] bars 2 step 1/16\n"
-                             "A7 kick        | X.x. .... ..xx .... | X.x. .... ..x. x... |\n"
-                             "A9 snare       | .... X..o .o.X ...o | .... X..o .... X..o |\n"
-                             "A4 closed hat  | x.x. x.x. x.x. x.x. | x.x. x.x. x.x. x.x. |\n"
-                             "A5 open hat    | .... .... .... .... | .... .... .... ..x. |\n"
+                             "A7 kick        | X.x. .... ..xx .... | X.x. .... ..x. .... |\n"
+                             "A9 snare       | .... X..o .o.. X..o | .... X..o .o.. ..Xo |\n"
+                             "A4 ride        | x.x. x.x. x.x. x.x. | x.x. x.x. x.x. x.x. |\n"
                              "[C] bars 2\nC7 skank | ..x. ..x. ..x. ..x. | ..x. ..x. ..x. ..x. |\n"
                              "[D] bars 2\nD3 shout | x... .... .... .... | .... .... .... .... |\n")
         top = bc.similarity(card, recipes, 1)
@@ -748,7 +747,7 @@ class Analyse(unittest.TestCase):
                              "A7 kick | 8... ..6. ..7. .... | 8... ..6. .... .5.. |\n"
                              "A9 snare | .... 7... .... 7..3 | .... 7... ..3. 7.3. |\n"
                              "A4 closed hat | 5.3. 5.3. 5.3. 5.3. | 5.3. 5.3. 5.3. 5.4. |\n")
-        top = bc.similarity(card, recipes, 16)
+        top = bc.similarity(card, recipes, len(recipes))
         self.assertEqual(top[0]["genre"], "Lo-fi")
         by = {s["genre"]: s for s in top}
         self.assertGreaterEqual(top[0]["score"] - by["Footwork"]["score"], 15)
