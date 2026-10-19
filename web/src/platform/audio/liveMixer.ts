@@ -243,6 +243,10 @@ export class MixerHost {
   private clickOn = false
   private clickBpm = 120
   private clickGrid: FrameGrid | null = null
+  // The pattern's beats as a grid, kept while its clock is the same; and the count-in's clicks, reused (web: no garbage a block).
+  private seqGridOf: TransportClock | null = null
+  private seqGrid: FrameGrid | null = null
+  private readonly countClicks: Click[] = []
   private readonly clickTimes: ClickScheduler
   private readonly clickTrack: ClickTrack
   private clicking = false
@@ -395,13 +399,19 @@ export class MixerHost {
     let clicks: readonly Click[] = NO_CLICKS
     if (on) {
       if (!this.clicking) this.clickTimes.reset()
-      const grid: FrameGrid | null =
-        c !== null ? { anchorFrame: frameOf(c, 0), beatIndex: 0, periodFrames: framesPerTick(c) * Seq.PPQN, barKnown: true } : this.clickGrid
+      if (c !== null && this.seqGridOf !== c) {
+        this.seqGridOf = c
+        this.seqGrid = { anchorFrame: frameOf(c, 0), beatIndex: 0, periodFrames: framesPerTick(c) * Seq.PPQN, barKnown: true }
+      }
+      const grid: FrameGrid | null = c !== null ? this.seqGrid : this.clickGrid
       clicks = this.clickTimes.block(before, frames, this.clickBpm, grid)
       // Off, it only counts in: nothing from bar 1 on.
       if (!this.clickOn && c !== null) {
         const zero = frameOf(c, 0)
-        if (clicks.some((k) => k.frame >= zero)) clicks = clicks.filter((k) => k.frame < zero)
+        const kept = this.countClicks
+        kept.length = 0
+        for (const k of clicks) if (k.frame < zero) kept.push(k)
+        if (kept.length < clicks.length) clicks = kept
       }
       for (const k of clicks) this.post({ t: 'beat', index: k.index, time: time + (k.frame - before) / this.rate, accent: k.accent })
     }
