@@ -15,11 +15,12 @@
 // set by soundRowUi and soundsUiOf, BeatFxUi's [changes] is a field set by
 // beatFxUi. The picks for silent pads and the pads padShapes takes are keyed
 // by padKey, as are SilentUi's [suggested] and the row names suggestedSounds
-// takes; beatImportUi's [kit] is in BeatBlocks. Not yet here: the synth rows
-// (SynthVoice).
+// takes; beatImportUi's [kit] is in BeatBlocks. A SoundRowUi's [synth] is
+// null where the Kotlin has null, a SoundPick's absent.
 
 import { FactoryKit, FactorySounds } from '../core/features/factorySounds'
-import { BeatCards, SoundStatus, allSections, cardPadIsEmpty, isMultiScene, cardSection, cardSound, type BeatCard, type CardImport, type CardPad, type CardProblem, type CardRead, type CardSection, type CardSound, type SoundPick } from '../core/features/beatCard'
+import { BeatCards, SoundStatus, allSections, cardPadIsEmpty, isMultiScene, cardSection, cardSound, type BeatCard, type CardImport, type CardPad, type CardProblem, type CardRead, type CardSection, type CardSound, type CardSynth, type SoundPick } from '../core/features/beatCard'
+import { SynthVoice } from '../core/features/synthVoice'
 import type { ChainStep } from '../core/features/chain'
 import type { FxSettings } from '../core/features/fxSettings'
 import { PadSettings } from '../core/features/padSettings'
@@ -291,9 +292,11 @@ export interface BeatChainUi {
  * pad plays now ([oldName], null when unknown). A [picked] row is not the
  * card's: the user chose its sound for a silent pad (pickedRow). A missing
  * sound a saved factory pack has ([fromPack], PackSound): IMPORT can upload it
- * into a free slot, while connected ([uploadable]). [changes]: whether the row
- * can be ticked (the sound is somewhere in the list and not on the pad yet,
- * or can be uploaded from a pack). [cardSays]: the name the card gave a sound
+ * into a free slot, while connected ([uploadable]). [synth]: the pad's synth
+ * line, when the row is it: found on the device by its name, or made by
+ * IMPORT ([makes]: a synth line no slot holds yet, made connected or
+ * offline). [changes]: whether the row can be ticked (the sound is somewhere
+ * in the list and not on the pad yet, can be uploaded from a pack, or made). [cardSays]: the name the card gave a sound
  * used by its slot because the EP-133 lists it unnamed ("200.pcm"), for the
  * line "Card says HH CLOSED"; null for any other row, and when the card named
  * no other sound than the one shown.
@@ -304,14 +307,22 @@ export interface SoundRowUi {
   readonly picked: boolean
   readonly fromPack: PackSound | null
   readonly uploadable: boolean
+  readonly synth: CardSynth | null
   readonly pad: PhysicalPad
+  readonly makes: boolean
   readonly changes: boolean
   readonly cardSays: string | null
 }
 
-export function soundRowUi(pick: SoundPick, oldName: string | null, o: { picked?: boolean; fromPack?: PackSound | null; uploadable?: boolean } = {}): SoundRowUi {
+export function soundRowUi(
+  pick: SoundPick,
+  oldName: string | null,
+  o: { picked?: boolean; fromPack?: PackSound | null; uploadable?: boolean; synth?: CardSynth | null } = {},
+): SoundRowUi {
   const fromPack = o.fromPack ?? null
   const uploadable = o.uploadable ?? false
+  const synth = o.synth ?? null
+  const makes = synth !== null && pick.status === SoundStatus.MISSING
   const said = pick.unverified ? pick.wanted.name : null
   return {
     pick,
@@ -319,8 +330,10 @@ export function soundRowUi(pick: SoundPick, oldName: string | null, o: { picked?
     picked: o.picked ?? false,
     fromPack,
     uploadable,
+    synth,
     pad: pick.pad,
-    changes: pick.status === SoundStatus.CHANGE || pick.status === SoundStatus.FOUND_BY_NAME || (fromPack !== null && uploadable),
+    makes,
+    changes: pick.status === SoundStatus.CHANGE || pick.status === SoundStatus.FOUND_BY_NAME || (fromPack !== null && uploadable) || makes,
     cardSays: said !== null && said.trim() !== '' && !PadSoundCache.sameName(said, pick.name ?? '') ? said : null,
   }
 }
@@ -330,7 +343,8 @@ export function soundRowUi(pick: SoundPick, oldName: string | null, o: { picked?
  * [offline] when the pads change in Arc only until the EP-133 connects, and
  * the [project] they are written in (connected; null when not known).
  * [changes]: the rows that can be ticked. [noneFound]: no sound line is on the
- * user's EP-133 (every row is missing): the sheet says to share with the sound list.
+ * user's EP-133 (every sound row is missing; synth rows don't count): the
+ * sheet says to share with the sound list.
  */
 export interface SoundsUi {
   readonly rows: readonly SoundRowUi[]
@@ -341,19 +355,21 @@ export interface SoundsUi {
 }
 
 export function soundsUiOf(rows: readonly SoundRowUi[], offline: boolean, project: number | null): SoundsUi {
+  const lines = rows.filter((r) => r.synth === null)
   return {
     rows,
     offline,
     project,
     changes: rows.filter((r) => r.changes),
-    noneFound: rows.length > 0 && rows.every((r) => r.pick.status === SoundStatus.MISSING),
+    noneFound: lines.length > 0 && lines.every((r) => r.pick.status === SoundStatus.MISSING),
   }
 }
 
 /**
- * [card]'s sound lines matched to [set] (cardPicks) as the sheet's rows, each
- * with the name the pad plays now ([names]), the slot it plays now being
- * [current]; null when the card has none. With no [set] every sound line is missing.
+ * [card]'s sound and synth lines matched to [set] (cardPicks) as the sheet's
+ * rows, each with the name the pad plays now ([names]), the slot it plays now
+ * being [current]; null when the card has neither. With no [set] every sound
+ * line is missing, and every synth line is made.
  */
 export function soundsUi(
   card: BeatCard,
@@ -365,10 +381,11 @@ export function soundsUi(
   packs: ReadonlyMap<FactoryKit, ReadonlyMap<number, string>> = new Map(),
   deviceKit: FactoryKit | null = null,
 ): SoundsUi | null {
-  if (allSections(card).every((s) => s.sounds.size === 0)) return null
+  if (allSections(card).every((s) => s.sounds.size === 0 && (s.synths?.size ?? 0) === 0)) return null
   const rows = cardPicks(card, set?.names ?? new Map(), foreignTo(packs, deviceKit), current, packs, !offline).map((it) =>
-    soundRowUi(it.pick, names(it.pick.pad), { fromPack: it.fromPack, uploadable: it.uploadable }),
+    soundRowUi(it.pick, names(it.pick.pad), { fromPack: it.fromPack, uploadable: it.uploadable, synth: it.pick.synth ?? null }),
   )
+  // A card whose only synth lines make no sound has nothing to show.
   return rows.length === 0 ? null : soundsUiOf(rows, offline, project)
 }
 
@@ -380,11 +397,15 @@ export interface PlannedSound {
 }
 
 /**
- * One sound for each pad [card] gives a sound line, the sheet's and IMPORT's
- * alike: a sound line found in [names] (BeatCards.resolveSounds: a change,
- * the same, or found by name), else the missing sound line, with the saved
- * pack's sound of it (packSoundOf), to upload while [connected]. [foreign] and
- * [current] are as BeatCards.resolveSounds has them.
+ * One sound for each pad [card] gives a sound or synth line, the sheet's and
+ * IMPORT's alike. For each pad, project-wide, the first of: a sound line
+ * found in [names] (BeatCards.resolveSounds: a change, the same, or found by
+ * name); the pad's synth line already on the device, by its device name
+ * (SynthVoice.deviceName); a missing sound line that a saved pack has
+ * (packSoundOf), while [connected]; the synth line, made (MISSING, with its
+ * synth); or else the missing sound line. A synth line that makes no sound
+ * (SynthVoice.silent) is left out. [foreign] and [current] are as
+ * BeatCards.resolveSounds has them.
  */
 export function cardPicks(
   card: BeatCard,
@@ -394,11 +415,38 @@ export function cardPicks(
   packs: ReadonlyMap<FactoryKit, ReadonlyMap<number, string>>,
   connected: boolean,
 ): PlannedSound[] {
-  return BeatCards.resolveSounds(card, names, current, foreign).map((p) => {
-    if (p.status !== SoundStatus.MISSING) return { pick: p, fromPack: null, uploadable: false }
-    const pack = packSoundOf(p.wanted, packs)
-    return { pick: p, fromPack: pack, uploadable: pack !== null && connected }
-  })
+  const synths = new Map([...BeatCards.synthsByPad(card)].filter(([, s]) => !SynthVoice.silent(s)))
+  // The pad's synth line as a pick: on the device already (the same, or found by its name), or missing (to be made).
+  const synthPick = (pad: PhysicalPad, s: CardSynth, now: number | null): SoundPick => {
+    const dn = SynthVoice.deviceName(s)
+    const found = BeatCards.slotNamed(names, dn, now)
+    if (found === null) return { pad, wanted: cardSound(0, dn), slot: null, name: null, currentSlot: now, status: SoundStatus.MISSING, unverified: false, synth: s }
+    const status = found === now ? SoundStatus.SAME : SoundStatus.FOUND_BY_NAME
+    return { pad, wanted: cardSound(found, dn), slot: found, name: names.get(found) ?? null, currentSlot: now, status, unverified: false, synth: s }
+  }
+  const out = new Map<number, PlannedSound>()
+  for (const p of BeatCards.resolveSounds(card, names, current, foreign)) {
+    const sy = synths.get(padKey(p.pad))
+    let planned: PlannedSound
+    if (p.status !== SoundStatus.MISSING) {
+      planned = { pick: p, fromPack: null, uploadable: false }
+    } else if (sy !== undefined) {
+      const sp = synthPick(p.pad, sy, p.currentSlot)
+      const pack = sp.status === SoundStatus.MISSING ? packSoundOf(p.wanted, packs) : null
+      // A synth on the device first; then the pack's sound, while connected; else the synth is made.
+      planned = pack !== null && connected ? { pick: p, fromPack: pack, uploadable: true } : { pick: sp, fromPack: null, uploadable: false }
+    } else {
+      const pack = packSoundOf(p.wanted, packs)
+      planned = { pick: p, fromPack: pack, uploadable: pack !== null && connected }
+    }
+    out.set(padKey(p.pad), planned)
+  }
+  for (const [key, sy] of synths) {
+    if (out.has(key)) continue
+    const pad = padFromKey(key)
+    out.set(key, { pick: synthPick(pad, sy, current(pad)), fromPack: null, uploadable: false })
+  }
+  return [...out.values()]
 }
 
 /** A sound of a saved factory pack: its [kit], its [slot] there and its [name]. */

@@ -9,9 +9,13 @@
 // writes that throw stop it with its error toast. The card's FX replace the project's and its
 // pad lines shape the ticked pads (on the EP-133, or as offline pad settings), in that same step.
 // A card's sound no slot holds that a saved factory pack has is uploaded into a free slot first.
+// A card's synth line no slot holds is made: uploaded under its device name while connected, kept
+// in arc's samples store offline (UNDO throws it away), and put on or uploaded at the next Write;
+// its row's play key plays it first.
 import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { BeatCards, SoundStatus } from '../../src/core/features/beatCard'
+import { BeatCards, SoundStatus, cardSynth } from '../../src/core/features/beatCard'
+import { SynthVoice } from '../../src/core/features/synthVoice'
 import { FxSettings, FxType } from '../../src/core/features/fxSettings'
 import { OfflinePadSettings } from '../../src/core/features/offlinePadSettings'
 import { PadSettings } from '../../src/core/features/padSettings'
@@ -27,6 +31,7 @@ import { writeZip } from '../../src/core/formats/zip'
 import { tone } from '../helpers/demoData'
 import { LIVE_PAD_SETTINGS_KEY, memoryStorage } from '../../src/platform/storage/settings'
 import type { Deps } from '../../src/state/deps'
+import type { NullPlayer } from '../../src/platform/audio/player'
 import { disposeAll, liveHarness, until, type LiveHarness } from './liveHarness'
 
 let clockSpy: { mockRestore(): void } | null = null
@@ -397,6 +402,110 @@ describe('BEAT CARDS', () => {
     expect(done.toast?.error).toBe(true)
     expect(h.c.mirrorName(snare.pad)).toBe(before)
     expect(h.c.mirrorName(A2)).toBe('clap')
+  })
+
+  // ---- synth lines ----
+
+  const KICK = cardSynth('kick')
+  const KICK_NAME = SynthVoice.deviceName(KICK)
+  const SYNTH = ['ARC BEAT 1', 'name Made', '[A]', 'synth A2 kick', 'A2 | X... X... X... X... |'].join('\n')
+
+  it('IMPORT makes a synth line into a free slot under its device name and puts it on the pad; imported again it reuses the slot', async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    await h.c.receiveBeat(SYNTH)
+    const row = p.beat.value!.sounds!.rows[0]!
+    expect([row.pad, row.makes, row.changes, row.synth]).toEqual([A2, true, true, KICK])
+    expect(row.pick.wanted.name).toBe(KICK_NAME)
+    p.importBeat(false, new Set([padKey(A2)]))
+    const done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    expect(done.toast?.text).toBe(ClaudeText.imported([[0, 2]], null, 1))
+    const into = [...h.mock.sounds].find(([, snd]) => snd.name === KICK_NAME)?.[0]
+    expect(into).toBeDefined()
+    expect(h.mock.sounds.get(into!)!.pcm.length).toBe(2 * SynthVoice.frames(KICK))
+    expect(await onDevice(h, 'a', 5)).toBe(into)
+    expect(h.c.mirrorName(A2)).toBe(KICK_NAME)
+    // UNDO: the old sound back on the pad; the made one stays on the EP-133.
+    h.c.runToastAction(done.toast!.id)
+    await until(h, (st) => st.toast?.text === ClaudeText.importUndone(1, 0, 0, false))
+    expect(await onDevice(h, 'a', 5)).toBe(5)
+    // The same line again: found by its name, nothing made.
+    await h.c.receiveBeat(SYNTH)
+    const again = p.beat.value!.sounds!.rows[0]!
+    expect([again.pick.status, again.pick.slot, again.makes]).toEqual([SoundStatus.FOUND_BY_NAME, into, false])
+  })
+
+  it("a synth row's play key plays the sound made in the browser, before IMPORT makes it", async () => {
+    const h = await liveOn()
+    const player = h.deps.player as NullPlayer
+    await h.c.playSynth(KICK)
+    const play = player.plays.at(-1)!
+    expect([play.key, play.channels, play.sampleRate]).toEqual([`synth:${SynthVoice.tag(KICK)}`, 1, SynthVoice.RATE])
+    expect(play.pcm.length).toBe(2 * SynthVoice.frames(KICK))
+    expect(player.resumed).toBeGreaterThan(0)
+    // Nothing is made on the EP-133.
+    expect([...h.mock.sounds.values()].some((snd) => snd.name === KICK_NAME)).toBe(false)
+  })
+
+  it('offline, IMPORT keeps the made sound in arc, UNDO throws it away, and at the next Write the device takes it', async () => {
+    const h = await liveOn()
+    await vi.waitFor(
+      async () => {
+        for (const slot of [1, 2, 3, 4, 5]) expect(await h.padSounds.has(`s${slot}.wav`)).toBe(true)
+        expect(h.c.state.value.backgroundRead).toBe(false)
+      },
+      { timeout: 5000 },
+    )
+    h.ep.access.unplug(h.ep.input, h.ep.output)
+    await until(h, (st) => st.mirror?.offlineSounds != null)
+    const p = h.c.pattern
+    const file = SynthVoice.fileName(KICK, 1, 0, 5)
+    await h.c.receiveBeat(SYNTH)
+    expect(p.beat.value!.sounds!.offline).toBe(true)
+    expect(p.beat.value!.sounds!.rows[0]!.makes).toBe(true)
+    p.importBeat(false, new Set([padKey(A2)]))
+    let done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    expect(h.c.state.value.offlinePads).toBe(1)
+    expect(h.c.mirrorName(A2)).toBe(KICK_NAME)
+    expect(h.samples.rows.get(file)?.wav.length).toBe(44 + 2 * SynthVoice.frames(KICK))
+    // UNDO: the change and the made sound go.
+    h.c.runToastAction(done.toast!.id)
+    await until(h, (st) => st.toast?.text === ClaudeText.importUndone(1, 0, 0, false))
+    expect(h.c.state.value.offlinePads).toBe(0)
+    expect(h.samples.rows.has(file)).toBe(false)
+    // Again; meanwhile the EP-133 got the sound by its name, so Write puts that slot on the pad, uploading nothing.
+    await h.c.receiveBeat(SYNTH)
+    p.importBeat(false, new Set([padKey(A2)]))
+    done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true && st.toast.id !== done.toast!.id)
+    expect(h.samples.rows.has(file)).toBe(true)
+    h.mock.addSound({ slot: 700, name: KICK_NAME, pcm: new Uint8Array(64) })
+    const sounds = h.mock.sounds.size
+    h.ep.access.plug(h.ep.input, h.ep.output)
+    await until(h, (st) => st.offlinePrompt !== null && st.mirror !== null && !st.mirror.loading && !st.busy)
+    expect(h.c.state.value.offlinePrompt).toEqual({ changes: 0, samples: 1 })
+    await h.c.writeOfflinePads()
+    expect(h.toasts.at(-1)?.text).toBe(MirrorText.offlineWritten(1, 0))
+    expect(await onDevice(h, 'a', 5)).toBe(700)
+    expect(h.mock.sounds.size).toBe(sounds)
+    expect(h.samples.rows.has(file)).toBe(false)
+    expect(h.c.state.value.offlinePads).toBe(0)
+  })
+
+  it('a synth sound made offline goes up under its device name at the next Write', async () => {
+    const h = await liveOn()
+    await vi.waitFor(() => expect(h.c.state.value.backgroundRead).toBe(false), { timeout: 5000 })
+    h.ep.access.unplug(h.ep.input, h.ep.output)
+    await until(h, (st) => st.mirror?.offline != null)
+    await h.c.receiveBeat(SYNTH)
+    h.c.pattern.importBeat(false, new Set([padKey(A2)]))
+    await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    h.ep.access.plug(h.ep.input, h.ep.output)
+    await until(h, (st) => st.offlinePrompt !== null && st.mirror !== null && !st.mirror.loading && !st.busy)
+    await h.c.writeOfflinePads()
+    const into = [...h.mock.sounds].find(([, snd]) => snd.name === KICK_NAME)?.[0]
+    expect(into).toBeDefined()
+    expect(await onDevice(h, 'a', 5)).toBe(into)
+    expect(h.samples.rows.size).toBe(0)
   })
 
   // ---- FX and PAD SHAPING ----

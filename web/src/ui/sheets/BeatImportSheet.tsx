@@ -5,9 +5,10 @@
 // hit; the first two bars of a long pattern), where each section goes, the new
 // scene a card of several groups adds, its tempo (SET sets it: off until
 // chosen; the row says "136 → 85" while on, "136 · card 85" while off), its swing, and its problems with their lines (COPY PROBLEMS copies
-// them for Claude). When the card has sound lines a SOUNDS block follows the
-// rows: a line for each, ticked to be put on its pad (PUT ON PADS switches
-// them all). A card that plays pads with no sound has a SILENT PADS block
+// them for Claude). When the card has sound or synth lines a SOUNDS block
+// follows the rows: a line for each, ticked to be put on its pad (PUT ON PADS
+// switches them all); a synth line no slot holds says "Make 808 kick", with a
+// play key ([onPlaySynth]), and IMPORT makes it. A card that plays pads with no sound has a SILENT PADS block
 // before the sounds (amber): a row for each, with PICK SOUND, which swaps the
 // sheet for the pad sheet's sound list (live/SoundPicker: find, hundreds,
 // preview). A pick doesn't touch the pad: it adds a ticked row to SOUNDS
@@ -43,8 +44,9 @@
 // - Opening the picker focuses its title and leaving it focuses the pad's
 //   PICK SOUND / CHANGE key again, as the upload sheet's trim view does.
 // - The sheet's switches (SET, PUT ON PADS, APPLY FX, SET CHAIN, REPLACE) are a
-//   role="switch" button on theme/cap.css's cap, pressed by :active. The rows
-//   of a pack's sound to upload and the synth rows come with their ports.
+//   role="switch" button on theme/cap.css's cap, pressed by :active.
+// - A synth row's play key sits beside its checkbox button, not inside it,
+//   so its label names the sound ("Play 808 kick").
 // - The sounds Arc suggests for silent pads are the picks while nothing is
 //   chosen yet ([choices] null), so they follow the card planned again until
 //   then; Kotlin keeps the first plan's.
@@ -55,7 +57,8 @@
 import { Fragment, type JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type { ReadonlySignal } from '@preact/signals'
-import { SoundStatus, type CardProblem } from '../../core/features/beatCard'
+import { SoundStatus, type CardProblem, type CardSynth } from '../../core/features/beatCard'
+import { SynthVoice } from '../../core/features/synthVoice'
 import { SoundSource } from '../../core/features/offlinePads'
 import { padKey, type PhysicalPad } from '../../core/features/padNotes'
 import { ClaudeText } from '../../core/text/claudeText'
@@ -81,6 +84,7 @@ import {
 } from '../../state/beatPlan'
 import { GridPlate, PlateLine } from '../components/GridPlate'
 import { Key } from '../components/Key'
+import { PlayKey } from '../components/PlayKey'
 import { Sheet } from '../components/Sheet'
 import { SoundPicker } from '../live/SoundPicker'
 import './BeatImportSheet.css'
@@ -111,6 +115,8 @@ export interface BeatImportSheetProps {
   /** The Scenes row's REPLACE (a setting, kept for the next card): the card's scenes take the place of the project's. */
   replaceScenes: boolean
   onReplaceScenes(on: boolean): void
+  /** The play key on a synth row IMPORT makes: hear the sound first. */
+  onPlaySynth(s: CardSynth): void
 }
 
 /**
@@ -356,6 +362,7 @@ function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; choices: Cho
           onToggle={() => props.onChoices({ ...choices, putOnPads: !putOnPads })}
           ticked={ticked.length}
           isTicked={isTicked}
+          onPlaySynth={props.onPlaySynth}
           onTick={(row) => {
             const next = new Set(unticked)
             const key = padKey(row.pad)
@@ -535,7 +542,8 @@ function PickView(props: BeatImportSheetProps & { row: SilentRowUi; silent: Sile
 
 /**
  * The SOUNDS block: its header with the PUT ON PADS chip (shown when some row
- * can be ticked; [on] by default), a row for each sound line ([SoundRow]),
+ * can be ticked; [on] by default), a row for each sound or synth line
+ * ([SoundRow]; a synth row IMPORT makes has a play key, [onPlaySynth]),
  * and under it what writing them does ([ticked] pads): to the EP-133 and its
  * project, or kept in Arc until it connects.
  */
@@ -546,6 +554,7 @@ function SoundsBlock(props: {
   ticked: number
   isTicked(row: SoundRowUi): boolean
   onTick(row: SoundRowUi): void
+  onPlaySynth(s: CardSynth): void
 }): JSX.Element {
   const { sounds, on, ticked } = props
   const changes = sounds.changes.length
@@ -565,7 +574,7 @@ function SoundsBlock(props: {
         {sounds.rows.map((row) => (
           <div key={padKey(row.pad)}>
             <PlateLine />
-            <SoundRow row={row} ticked={props.isTicked(row)} chipOn={on} onTick={() => props.onTick(row)} />
+            <SoundRow row={row} ticked={props.isTicked(row)} chipOn={on} offline={sounds.offline} onPlaySynth={props.onPlaySynth} onTick={() => props.onTick(row)} />
           </div>
         ))}
       </GridPlate>
@@ -581,11 +590,15 @@ function SoundsBlock(props: {
  * sound and "Already there" when the pad has it, the saved pack's sound to
  * upload into a free slot (connected; offline it says to connect), or, amber
  * with no box, why it isn't on the user's EP-133. A sound used by its slot says what the card
- * called it, and one picked for a silent pad says so. [chipOn] is the chip:
- * off, the rows are dimmed and can't be ticked.
+ * called it, and one picked for a silent pad says so. A synth line IMPORT
+ * makes (SoundRowUi.makes) says "Make 808 kick" and where it goes
+ * ([offline]: kept in Arc), ticked like a change, with a small play key
+ * beside the row ([onPlaySynth]; web delta: outside the row's checkbox, as a
+ * button can't hold another, its label naming the sound). [chipOn] is the chip: off, the rows are dimmed
+ * and can't be ticked.
  */
-function SoundRow(props: { row: SoundRowUi; ticked: boolean; chipOn: boolean; onTick(): void }): JSX.Element {
-  const { row, ticked, chipOn } = props
+function SoundRow(props: { row: SoundRowUi; ticked: boolean; chipOn: boolean; offline: boolean; onPlaySynth(s: CardSynth): void; onTick(): void }): JSX.Element {
+  const { row, ticked, chipOn, offline } = props
   const pick = row.pick
   const wanted = pick.wanted
   const missing = pick.status === SoundStatus.MISSING
@@ -593,8 +606,11 @@ function SoundRow(props: { row: SoundRowUi; ticked: boolean; chipOn: boolean; on
   const now = missing ? null : pick.unverified && pick.name !== null ? pick.name : ClaudeText.soundName(pick.slot ?? wanted.slot, pick.name)
   const cardSays = row.cardSays
   const pack = row.fromPack
+  const synth = row.makes ? row.synth : null
   const description =
-    (missing && pack !== null && row.uploadable
+    (synth !== null
+      ? ClaudeText.soundRowMake(pick.pad, SynthVoice.shownName(synth), offline)
+      : missing && pack !== null && row.uploadable
       ? ClaudeText.soundRowUpload(pick.pad, pack.slot, pack.name, pack.kit.model)
       : missing
       ? ClaudeText.soundRowMissing(pick.pad, wanted.slot, wanted.name) + (pack === null ? '' : '. ' + ClaudeText.inPack(pack.kit.model))
@@ -608,7 +624,13 @@ function SoundRow(props: { row: SoundRowUi; ticked: boolean; chipOn: boolean; on
         {row.changes ? <span class={`beat-tick${ticked && chipOn ? ' is-on' : ''}`} /> : missing ? <span class="beat-sound__bar" /> : null}
       </span>
       <span class="t-field-label beat-sound__pad" aria-hidden="true">{ClaudeText.padLabel(pick.pad)}</span>
-      {missing && pack !== null ? (
+      {synth !== null ? (
+        // A synth line no slot holds: made as IMPORT goes, into a free slot or (offline) kept in Arc.
+        <span class={`beat-sound__what${dim}`} aria-hidden="true">
+          <b class="t-small beat-sheet__strong beat-sheet__clamp">{ClaudeText.make(SynthVoice.shownName(synth))}</b>
+          <span class="t-tiny beat-sheet__dim beat-sheet__clamp">{offline ? ClaudeText.MADE_OFFLINE : ClaudeText.MADE_INTO_SLOT}</span>
+        </span>
+      ) : missing && pack !== null ? (
         // Not on the EP-133, but in a pack Arc has: uploaded into a free slot as IMPORT goes.
         <span class={`beat-sound__what${dim}`} aria-hidden="true">
           {row.uploadable ? (
@@ -651,10 +673,17 @@ function SoundRow(props: { row: SoundRowUi; ticked: boolean; chipOn: boolean; on
       </div>
     )
   }
-  return (
+  const box = (
     <button type="button" class="beat-sound is-tickable" role="checkbox" aria-checked={ticked && chipOn} aria-label={description} disabled={!chipOn} onClick={props.onTick}>
       {body}
     </button>
+  )
+  if (synth === null) return box
+  return (
+    <div class="beat-sound-make">
+      {box}
+      <PlayKey playing={false} description={`${ClaudeText.PLAY_SYNTH} ${SynthVoice.shownName(synth)}`} onClick={() => props.onPlaySynth(synth)} class="beat-sound-make__play" />
+    </div>
   )
 }
 

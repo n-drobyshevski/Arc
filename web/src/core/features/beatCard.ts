@@ -36,8 +36,9 @@
 //   without them compare equal as before. A CardSynth, built by `cardSynth()`,
 //   leaves out the fields its line didn't give (Kotlin has nulls), and its
 //   enums are string unions of their words. BeatCards.synthsByPad is keyed by
-//   padKey where the Kotlin has PhysicalPads. The web reads, writes and keeps
-//   synth lines; it makes no sounds.
+//   padKey where the Kotlin has PhysicalPads. A chord's notes (Kotlin's
+//   SynthChord.intervals) are SYNTH_CHORD_INTERVALS. SynthVoice (synthVoice.ts)
+//   makes the sounds. A SoundPick's [synth] is absent where the Kotlin has null.
 
 import { clamp01 } from '../formats/fx/fxMath'
 import { Chain, chainStep, type ChainStep } from './chain'
@@ -253,6 +254,19 @@ export const SYNTH_WAVES: readonly SynthWave[] = ['sine', 'tri', 'saw', 'square'
 /** The notes a synth line stacks on its root. */
 export type SynthChord = 'one' | 'min' | 'maj' | 'min7' | 'maj7' | 'dom7' | 'sus2' | 'sus4' | 'fifth' | 'oct'
 export const SYNTH_CHORDS: readonly SynthChord[] = ['one', 'min', 'maj', 'min7', 'maj7', 'dom7', 'sus2', 'sus4', 'fifth', 'oct']
+/** A chord's notes stacked on the root, in semitones. */
+export const SYNTH_CHORD_INTERVALS: Readonly<Record<SynthChord, readonly number[]>> = {
+  one: [0],
+  min: [0, 3, 7],
+  maj: [0, 4, 7],
+  min7: [0, 3, 7, 10],
+  maj7: [0, 4, 7, 11],
+  dom7: [0, 4, 7, 10],
+  sus2: [0, 2, 7],
+  sus4: [0, 5, 7],
+  fifth: [0, 7],
+  oct: [0, 12],
+}
 
 /**
  * A synth line: only what the line gave. A field the line left out is absent (Arc on Android fills in its type's
@@ -344,7 +358,9 @@ export const SoundStatus = {
  * is MISSING), the slot the pad plays now ([currentSlot], null when not known)
  * and the [status]. [unverified] is set when the slot is a factory sound the
  * EP-133 lists without a name ("200.pcm", see FactorySounds.unnamed): it is
- * used by its slot, as its name can't be checked.
+ * used by its slot, as its name can't be checked. [synth] is set when the
+ * pick is the pad's synth line: [wanted] then names its device name
+ * (SynthVoice.deviceName), and MISSING means Arc makes it.
  */
 export interface SoundPick {
   readonly pad: PhysicalPad
@@ -354,6 +370,7 @@ export interface SoundPick {
   readonly currentSlot: number | null
   readonly status: SoundStatus
   readonly unverified: boolean
+  readonly synth?: CardSynth
 }
 
 /** Something wrong with a card, at [line] (counted from 1 in the text read): an [error] stops the card being read, a warning doesn't. */
@@ -2019,6 +2036,11 @@ function soundNames(device: ReadonlyMap<number, string>, factory: ReadonlyMap<nu
 }
 
 // Whether [slot] is in [available] under the name the EP-133 gives a sound nobody named ("200.pcm").
+/** The slot of [available] (slot to name) that holds a sound called [name], as resolveSounds looks one up: the pad's own ([now]) when it does, else the lowest; null when none. */
+function slotNamed(available: ReadonlyMap<number, string>, name: string, now: number | null): number | null {
+  return lookUp(available, name, now)
+}
+
 function unnamedIn(available: ReadonlyMap<number, string>, slot: number): boolean {
   const name = available.get(slot)
   return name !== undefined && unnamed(slot, name)
@@ -2288,4 +2310,4 @@ function isCardFile(name: string): boolean {
 /** The most of a card file Arc reads: a longer one is no card. */
 const MAX_CARD_FILE = 1 << 20
 
-export const BeatCards = { VERSION, MAX_NAME, MAX_SCENES, TIDY_COMMENT, read, hasCard, write, lessonPads, fromPatterns, fromScenes, fxOf, padOf, applyFx, applyPad, resolveSounds, soundNames, soundList, silentPads, synthsByPad, notesByPad, suggestSound, isCardFile, MAX_CARD_FILE, plan, planScenes } as const
+export const BeatCards = { VERSION, MAX_NAME, MAX_SCENES, TIDY_COMMENT, read, hasCard, write, lessonPads, fromPatterns, fromScenes, fxOf, padOf, applyFx, applyPad, resolveSounds, soundNames, soundList, silentPads, synthsByPad, slotNamed, notesByPad, suggestSound, isCardFile, MAX_CARD_FILE, plan, planScenes } as const

@@ -185,6 +185,10 @@
   transform: rotate(45deg);
 }
 .beat-sound:disabled .beat-tick { opacity: 0.5; }
+/* A synth row IMPORT makes: the row's box, then its small play key (32 round) beside it. */
+.beat-sound-make { display: flex; align-items: center; padding-inline-end: 16px; }
+.beat-sound-make > .beat-sound { flex: 1 1 auto; min-width: 0; padding-inline-end: 8px; }
+.beat-sound-make__play.play-key { width: 32px; height: 32px; }
 
 /* An FX row: the kind's label in a 62 wide column, the project's value struck through over the card's; 48 high. Dimmed while APPLY FX is off. */
 .beat-fx {

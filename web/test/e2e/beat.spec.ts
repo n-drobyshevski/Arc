@@ -11,6 +11,7 @@
 // suggests, until CHANGE picks another. A card's FX and PAD SHAPING: APPLY FX switched,
 // a pad line ticked, and IMPORT applying the FX. A card's sound no slot holds that the
 // saved EP-40 pack has: ticked to upload into a free slot, and IMPORT puts it on the pad.
+// A card's synth line: "Make 808 kick", ticked, its play key, and IMPORT making it.
 import { encodeWav } from '../../src/core/formats/wav'
 import { writeZip } from '../../src/core/formats/zip'
 import { tone } from '../helpers/demoData'
@@ -338,6 +339,30 @@ test("SOUNDS: a card's sound the EP-133 lacks is uploaded from the saved EP-40 p
   await expect(upload).toHaveAttribute('aria-checked', 'true')
   await expect(upload).toContainText('Upload 100 riddim snare')
   await expect(upload).toContainText('From the EP-40 pack, into a free slot')
+
+  await sheet.getByRole('button', { name: 'Import' }).click()
+  await expect(sheet).toBeHidden()
+  await expect(page.getByRole('status').filter({ hasText: /^Imported to A · 02 and 1 sound\./ })).toBeVisible()
+})
+
+test("SOUNDS: a card's synth line is made by Arc, its play key plays it first, and IMPORT puts it on the pad", async ({ page }) => {
+  const card = ['ARC BEAT 1', 'name Made kick', '[A]', 'synth A2 kick note F1 decay 70 bend 40 click 10 drive 20 name 808_kick', 'A2 | X... X... X... X... |'].join('\n')
+  await page.goto('/?demo#/live')
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
+  await page.evaluate((text) => {
+    const data = new DataTransfer()
+    data.setData('text/plain', text)
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }))
+  }, card)
+  const sheet = page.getByRole('dialog', { name: 'Made kick' })
+  await expect(sheet).toBeVisible()
+  const sounds = sheet.getByRole('group', { name: 'Sounds' })
+  const make = sounds.getByRole('checkbox', { name: 'A2: Make 808 kick, made by Arc from the card, into a free slot' })
+  await expect(make).toHaveAttribute('aria-checked', 'true')
+  await expect(make).toContainText('Make 808 kick')
+  await expect(make).toContainText('Made by Arc from the card, into a free slot')
+  await sounds.getByRole('button', { name: 'Play 808 kick' }).click()
+  await expect(sheet).toBeVisible()
 
   await sheet.getByRole('button', { name: 'Import' }).click()
   await expect(sheet).toBeHidden()

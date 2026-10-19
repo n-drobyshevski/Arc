@@ -359,6 +359,21 @@ export const ClaudeText = {
   /** An upload that stopped part way: the pads before it keep their sounds. */
   UPLOAD_STOPPED: 'The upload stopped',
 
+  /** A card's synth line that no slot holds yet: IMPORT makes it ("Make 808 kick", "Made by Arc from the card, into a free slot"). */
+  make(name: string): string {
+    return `Make ${name}`
+  },
+  MADE_INTO_SLOT: 'Made by Arc from the card, into a free slot',
+  MADE_OFFLINE: 'Made by Arc, kept in Arc until you connect',
+  soundRowMake(pad: PhysicalPad, name: string, offline: boolean): string {
+    const where = offline ? ClaudeText.MADE_OFFLINE : ClaudeText.MADE_INTO_SLOT
+    return `${padLabel(pad)}: ${ClaudeText.make(name)}, ` + where.charAt(0).toLowerCase() + where.slice(1)
+  },
+  /** The progress sheet while IMPORT makes and uploads the card's synth sounds. */
+  MAKING_SOUNDS: 'Making sounds',
+  /** The play button on a make row (its label): hear the sound before it is made. */
+  PLAY_SYNTH: 'Play',
+
   /** What a row says when the sound is nowhere in the user's list: "Not on your EP-133: 301 Rim dusty". */
   soundMissing(slot: number, name: string | null): string {
     return `Not on your EP-133: ${ClaudeText.soundName(slot, name)}`

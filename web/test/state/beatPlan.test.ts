@@ -10,10 +10,11 @@
 // Web addition: "each silent pad starts with a sound Arc suggests" (suggestedSounds, which Kotlin tests only through
 // BeatCardTest's suggestSound), on that test's card and library.
 // Left for the steps that port them: the prompt share (PromptText), REPLACE (the projectScenes and replace asserts of
-// "the sheet names where each section goes"), and the synth rows (the four synth tests and "the sheet and IMPORT plan the same sounds", which needs a synth line).
+// "the sheet names where each section goes").
 import { describe, expect, it } from 'vitest'
 import { FactoryKit } from '../../src/core/features/factorySounds'
-import { BeatCards, SoundStatus, beatCard, cardFx, cardPad, cardSection, cardSound, type BeatCard, type CardSection, type CardSound } from '../../src/core/features/beatCard'
+import { BeatCards, SoundStatus, beatCard, cardFx, cardPad, cardSection, cardSound, cardSynth, type BeatCard, type CardSection, type CardSound, type CardSynth } from '../../src/core/features/beatCard'
+import { SynthVoice } from '../../src/core/features/synthVoice'
 import type { PadTarget } from '../../src/core/features/liveMirror'
 import { OfflinePads, SoundSource, type OfflinePad } from '../../src/core/features/offlinePads'
 import { chain, chainStep } from '../../src/core/features/chain'
@@ -35,6 +36,7 @@ import {
   beatProblems,
   beatShare,
   beatShareChain,
+  cardPicks,
   chainForCard,
   chainSceneCount,
   isBefore,
@@ -50,6 +52,7 @@ import {
   soundSetOf,
   soundsUi,
   type BeatGridUi,
+  type PlannedSound,
   type SoundChoices,
   type SoundSet,
 } from '../../src/state/beatPlan'
@@ -495,6 +498,113 @@ B8 bass | X... .... .... .... | .... .... .... .... |
     expect(soundsUi(c, null, () => null, nameOf, false, 1)!.noneFound).toBe(true)
     // One found is enough to leave it out.
     expect(soundsUi(c, set, () => null, nameOf, false, 1)!.noneFound).toBe(false)
+  })
+
+  // ---- synth lines ----
+
+  const kickSynth = cardSynth('kick')
+  const bassSynth = cardSynth('bass', { note: 36, name: 'acid' })
+  const synthPack = new Map([[FactoryKit.EP133, new Map([[5, 'KICK DEEP']])]])
+
+  const synthCard = (sounds: ReadonlyMap<number, CardSound>, synths: ReadonlyMap<number, CardSynth>): BeatCard =>
+    card([cardSection(0, null, pat([hit(0), hit(96, 11)]), sounds, new Map(), synths)])
+
+  const plan = (c: BeatCard, available: ReadonlyMap<number, string>, current: ReadonlyMap<number, number> = new Map(), connected = true): PlannedSound[] =>
+    cardPicks(c, available, () => false, (pad) => current.get(padKey(pad)) ?? null, synthPack, connected)
+
+  it('a card with only synth lines has a sound row for each, made by IMPORT and tickable connected or offline', () => {
+    const c = synthCard(new Map(), new Map([[9, kickSynth], [11, bassSynth]]))
+    for (const offline of [false, true]) {
+      const ui = soundsUi(c, null, () => null, nameOf, offline, null)!
+      expect(ui.rows.map((r) => r.pad)).toEqual([kick, rim])
+      expect(ui.rows.every((r) => r.makes && r.changes)).toBe(true)
+      expect(ui.rows.map((r) => r.synth)).toEqual([kickSynth, bassSynth])
+      // The pick names the sound by the name it will have on the device.
+      expect(ui.rows.map((r) => r.pick.wanted.name)).toEqual(['kick 08bcfa', SynthVoice.deviceName(bassSynth)])
+      expect(ui.changes.length).toBe(2)
+      expect(ui.offline).toBe(offline)
+    }
+  })
+
+  it("a pad's sound is its sound line first, then its synth on the device, then a pack's upload, then the synth made", () => {
+    const kickName = SynthVoice.deviceName(kickSynth)
+    const kickOnly = new Map([[9, kickSynth]])
+    // (1) The sound line is found: the synth line on the same pad is not used.
+    const found = plan(synthCard(new Map([[9, cardSound(12, 'Micro kick')]]), kickOnly), new Map([[12, 'Micro kick']]))
+    expect(found.length).toBe(1)
+    expect(found[0]!.pick.status).toBe(SoundStatus.CHANGE)
+    expect(found[0]!.pick.synth).toBeUndefined()
+    // (2) The sound line is missing, but the synth is on the device by its device name: found there, above the pack.
+    const line = new Map([[9, cardSound(5, 'KICK DEEP')]])
+    const onDevice = plan(synthCard(line, kickOnly), new Map([[77, kickName]]))[0]!
+    expect(onDevice.pick.status).toBe(SoundStatus.FOUND_BY_NAME)
+    expect(onDevice.pick.slot).toBe(77)
+    expect(onDevice.pick.synth).toEqual(kickSynth)
+    expect(onDevice.fromPack).toBeNull()
+    // The pad has it already.
+    expect(plan(synthCard(line, kickOnly), new Map([[77, kickName]]), new Map([[padKey(kick), 77]]))[0]!.pick.status).toBe(SoundStatus.SAME)
+    // (3) Not on the device, and a saved pack has the sound line's sound: uploaded while connected.
+    const upload = plan(synthCard(line, kickOnly), new Map())[0]!
+    expect(upload.pick.status).toBe(SoundStatus.MISSING)
+    expect(upload.pick.synth).toBeUndefined()
+    expect(upload.fromPack!.slot).toBe(5)
+    expect(upload.uploadable).toBe(true)
+    // (4) Offline the pack can't be uploaded: the synth is made.
+    const made = plan(synthCard(line, kickOnly), new Map(), new Map(), false)[0]!
+    expect(made.pick.status).toBe(SoundStatus.MISSING)
+    expect(made.pick.synth).toEqual(kickSynth)
+    expect(made.fromPack).toBeNull()
+    // (5) No synth line: the missing sound line, as before (its pack noted, but not uploadable offline).
+    const missing = plan(synthCard(line, new Map()), new Map(), new Map(), false)[0]!
+    expect(missing.pick.status).toBe(SoundStatus.MISSING)
+    expect(missing.pick.synth).toBeUndefined()
+    expect(missing.uploadable).toBe(false)
+    // The sheet's rows say the same, offline: the make row is ticked, the missing one can't be.
+    const both = new Map([...line, [11, cardSound(300, 'Rim')]])
+    const rows = soundsUi(synthCard(both, kickOnly), null, () => null, nameOf, true, null, synthPack)!.rows
+    expect(rows.map((r) => r.makes)).toEqual([true, false])
+    expect(rows.map((r) => r.changes)).toEqual([true, false])
+  })
+
+  it('a pad with a sound line and a synth line has one row, and a synth line that makes no sound has none', () => {
+    const quiet = cardSynth('lead', { wave: 'none' })
+    const c = synthCard(new Map([[9, cardSound(300, 'Rim')]]), new Map([[9, kickSynth], [0, quiet]]))
+    const rows = soundsUi(c, null, () => null, nameOf, false, 1)!.rows
+    expect(rows.map((r) => r.pad)).toEqual([kick])
+    expect(rows[0]!.makes).toBe(true)
+    // A card whose only synth line is silent has nothing to show.
+    expect(soundsUi(synthCard(new Map(), new Map([[0, quiet]])), null, () => null, nameOf, false, 1)).toBeNull()
+  })
+
+  it('the hint to share the sound list counts sound lines only, not synth rows', () => {
+    expect(soundsUi(synthCard(new Map(), new Map([[9, kickSynth]])), null, () => null, nameOf, false, 1)!.noneFound).toBe(false)
+    const mixed = synthCard(new Map([[11, cardSound(300, 'Rim')]]), new Map([[9, kickSynth]]))
+    expect(soundsUi(mixed, null, () => null, nameOf, false, 1)!.noneFound).toBe(true)
+  })
+
+  it('the sheet and IMPORT plan the same sounds from the same state', () => {
+    const c = synthCard(
+      new Map([
+        [9, cardSound(5, 'KICK DEEP')],
+        [11, cardSound(12, 'Rim')],
+      ]),
+      new Map([
+        [9, kickSynth],
+        [0, bassSynth],
+      ]),
+    )
+    const available = new Map([
+      [12, 'Rim'],
+      [40, SynthVoice.deviceName(bassSynth)],
+    ])
+    const key = (p: PlannedSound[]) => p.map((it) => [it.pick, it.fromPack?.slot ?? null, it.uploadable])
+    for (const connected of [true, false]) {
+      const sheet = plan(c, available, new Map(), connected)
+      expect(key(sheet)).toEqual(key(plan(c, available, new Map(), connected)))
+      // The order is the card's: its sound lines' pads, then the pads with only a synth line.
+      expect(sheet.map((p) => p.pick.pad)).toEqual([kick, rim, physicalPad(0, 0)])
+      expect(sheet[2]!.pick.status).toBe(SoundStatus.FOUND_BY_NAME)
+    }
   })
 
   // ---- silent pads ----

@@ -1610,6 +1610,7 @@ function LiveBeatSheet(props: { view: NavView }): JSX.Element | null {
       playing={c.playing}
       onPlay={(slot, source) => void c.playLiveSound(slot, source)}
       onStop={() => c.stopPlayback()}
+      onPlaySynth={(s) => void c.playSynth(s)}
       busy={busy}
     />
   )
