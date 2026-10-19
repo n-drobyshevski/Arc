@@ -69,7 +69,8 @@ export interface IndexedRow {
 /** A row in "padSounds": one file of PadSoundCache's folder (s<slot>.wav, index.json). */
 export interface PadSoundRow {
   name: string
-  bytes: Uint8Array
+  /** A Blob; a Uint8Array in a row written before (web: so a row's size is read without its sample). */
+  bytes: Blob | Uint8Array
 }
 
 /** A row in "takes": one take's WAV and what its file name and header would say. */
