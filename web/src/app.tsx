@@ -1655,7 +1655,7 @@ function TabScreen(props: TabProps): JSX.Element {
           onSoundDetails={(slot) => void c.loadSoundDetails(slot)}
           onProjectSounds={(p) => void c.loadProjectSounds(p)}
           onAddSamples={() => void c.pickSamples()}
-          playing={c.playing.value}
+          playing={c.playing}
           onPlay={(slot) => void c.playDeviceSound(slot)}
           onStop={() => c.stopPlayback()}
           onPads={(n) => nav.open(sheetLayer(`pads:device:${n}`))}
@@ -1702,7 +1702,7 @@ function LiveTab(props: TabProps): JSX.Element {
       }}
       takes={{
         list: state.takes,
-        playing: c.playing.value,
+        playing: c.playing,
         keyOf: (t) => c.takeKey(t),
         fmtWhen: (ms) => c.fmtDateTime(ms),
         connected: state.device !== null,
@@ -1768,7 +1768,7 @@ function LiveTab(props: TabProps): JSX.Element {
         onDropSlot: (pad, slot, source) => void c.assignPad(pad, slot, source),
         onDropFile: (pad, file) => void c.uploadForPad(pad, [file]),
         sounds: c.liveSounds(),
-        playing: c.playing.value,
+        playing: c.playing,
         onPlay: (slot, source) => void c.playLiveSound(slot, source),
         onStop: () => c.stopPlayback(),
         onUpload: (files) => void c.dropSamples(files),

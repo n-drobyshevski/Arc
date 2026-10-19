@@ -16,6 +16,7 @@
 //   the hint while there are no takes, the note once there are.
 import type { JSX } from 'preact'
 import { useState } from 'preact/hooks'
+import type { ReadonlySignal } from '@preact/signals'
 import type { RecState } from '../../core/features/takeRecorder'
 import { FeatureText } from '../../core/text/featureText'
 import { MirrorText } from '../../core/text/mirrorText'
@@ -24,6 +25,7 @@ import { WebText } from '../../core/text/webText'
 import type { TakeInfo } from '../../platform/storage/takeStore'
 import { Caption } from '../components/Caption'
 import { Key } from '../components/Key'
+import { useIs } from './memo'
 import './Takes.css'
 
 /** The TAKE key's state and what a tap does (Kotlin TakeUi). */
@@ -35,8 +37,8 @@ export interface TakeUi {
 /** Live tools' takes (Kotlin TakesUi). */
 export interface TakesUi {
   readonly list: readonly TakeInfo[]
-  /** The player's key now (FeatureText Stop on the row it matches). */
-  readonly playing: string | null
+  /** The player's key now (FeatureText Stop on the row it matches), read by each row's key. */
+  readonly playing: ReadonlySignal<string | null>
   readonly keyOf: (t: TakeInfo) => string
   readonly fmtWhen: (ms: number) => string
   /** To EP-133 is offered only while connected. */
@@ -97,7 +99,6 @@ export function TakesSection(props: { takes: TakesUi; take: TakeUi }): JSX.Eleme
       {t.list.length > 0 && (
         <ul class="takes__list">
           {t.list.map((take) => {
-            const playing = t.playing === t.keyOf(take)
             const unfolded = open === take.name
             const moreId = `take-more-${take.name}`
             return (
@@ -116,12 +117,7 @@ export function TakesSection(props: { takes: TakesUi; take: TakeUi }): JSX.Eleme
                     <span class="take__when">{t.fmtWhen(take.createdAt)}</span>
                     <span class="t-small take__length">{MirrorText.takeLength(take.seconds)}</span>
                   </button>
-                  <Key
-                    text={playing ? FeatureText.STOP : FeatureText.PLAY}
-                    size="small"
-                    aria-label={`${playing ? FeatureText.STOP : FeatureText.PLAY} ${t.fmtWhen(take.createdAt)}`}
-                    onClick={() => (playing ? t.onStop() : t.onPlay(take))}
-                  />
+                  <TakePlay t={t} take={take} />
                 </div>
                 {unfolded && (
                   <div id={moreId} class="take__more">
@@ -165,5 +161,19 @@ export function TakesSection(props: { takes: TakesUi; take: TakeUi }): JSX.Eleme
         {t.list.length === 0 ? MirrorText.TAKES_HINT : t.canShare ? WebText.TAKES_NOTE : WebText.TAKES_NOTE_SAVE_ONLY}
       </p>
     </section>
+  )
+}
+
+/** A take's Play / Stop key (web addition, out of the list): it alone follows whether its take plays. */
+function TakePlay(props: { t: TakesUi; take: TakeInfo }): JSX.Element {
+  const { t, take } = props
+  const playing = useIs(t.playing, t.keyOf(take))
+  return (
+    <Key
+      text={playing ? FeatureText.STOP : FeatureText.PLAY}
+      size="small"
+      aria-label={`${playing ? FeatureText.STOP : FeatureText.PLAY} ${t.fmtWhen(take.createdAt)}`}
+      onClick={() => (playing ? t.onStop() : t.onPlay(take))}
+    />
   )
 }

@@ -241,7 +241,8 @@ export interface EditUi {
   onDropFile: (pad: PhysicalPad, file: File) => void
   /** The Sounds tab: the device's sounds, their preview and the drop zone's files (a plain upload). */
   readonly sounds: readonly SoundEntry[]
-  readonly playing: string | null
+  /** The key of the sound playing (controller.playing), read by each row. */
+  readonly playing: ReadonlySignal<string | null>
   onPlay: (slot: number, source: SoundSource) => void
   onStop: () => void
   onUpload: (files: File[]) => void
@@ -1604,7 +1605,7 @@ interface SoundsPanelProps {
   connected: boolean
   offline: OfflineSounds | null
   sounds: readonly SoundEntry[]
-  playing: string | null
+  playing: ReadonlySignal<string | null>
   acts: SoundsActs
 }
 

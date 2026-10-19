@@ -1,6 +1,7 @@
 // Web addition: what Live's memoized caps share (MirrorScreen's pads and KEYS
 // keys, the piano's keys, the drawn device's parts): a component that renders
-// again only when its props changed, a set member read on its own, and a set
+// again only when its props changed, a set member (or the sound playing) read on
+// its own, and a set
 // kept while its notes are.
 
 import { h, type Component, type FunctionComponent, type JSX } from 'preact'
@@ -10,6 +11,11 @@ import { computed, type ReadonlySignal } from '@preact/signals'
 /** Whether [key] is in [set], read so that only a change of that answer re-renders the caller. */
 export function useHas(set: ReadonlySignal<ReadonlySet<number>>, key: number): boolean {
   return useMemo(() => computed(() => set.value.has(key)), [set, key]).value
+}
+
+/** Whether [sig] holds [key] (the player's key on a row), read so that only a change of that answer re-renders the caller. */
+export function useIs(sig: ReadonlySignal<string | null>, key: string): boolean {
+  return useMemo(() => computed(() => sig.value === key), [sig, key]).value
 }
 
 /**
