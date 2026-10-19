@@ -23,7 +23,7 @@
 }
 .beat-sheet__paste:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
 
-/* A row of the plate: label, value, then the chip; 48 high. */
+/* A row of the plate: label, value, then the switch; 48 high. */
 .beat-row {
   display: flex;
   align-items: center;
@@ -41,30 +41,64 @@
 /* A card scene's title over its grids: "SCENE 2 · DROP". */
 .beat-scene__title { margin: 0; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* A block's switch (the tempo chip, PUT ON PADS, APPLY FX, SET CHAIN): a flat pill, navy while on. */
-.beat-chip {
+/* A block's switch (SET, PUT ON PADS, APPLY FX, SET CHAIN) as a device key on
+ * theme/cap.css's cap: a light, the words, and ON or OFF; lit, the light is
+ * signal orange with a glow a little past its edge, and ON is in signal. */
+.beat-switch {
+  --cap-face: var(--key);
+  --cap-edge: var(--key-edge);
+  --cap-ink: var(--ink);
   flex: none;
-  min-height: 40px;
-  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin-bottom: var(--cap-dy);
+  padding: 0 12px;
   border: 0;
-  border-radius: 999px;
-  background: var(--shell);
-  color: var(--ink);
+  border-radius: 10px;
   font: inherit;
-  font-size: var(--size-caps-key);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.beat-switch:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+.beat-switch__light {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--graphite) 45%, transparent);
+}
+.beat-switch.is-on .beat-switch__light {
+  background: var(--signal);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--signal) 30%, transparent);
+}
+/* capsKeySmall */
+.beat-switch__text {
+  font-size: var(--size-caps-key-small);
   font-weight: 700;
+  line-height: 1.1;
   letter-spacing: var(--track-caps-key);
   text-transform: uppercase;
-  cursor: pointer;
 }
-.beat-chip.is-on { background: var(--navy); color: var(--on-navy); }
-.beat-chip:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+/* caps at 10 */
+.beat-switch__state {
+  color: var(--graphite);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+}
+.beat-switch.is-on .beat-switch__state { color: var(--signal); }
 
 .beat-sheet__ink { color: var(--ink); }
 .beat-sheet__strong { color: var(--ink); font-weight: 700; }
 .beat-sheet__clamp { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 
-/* A block's header on its plate (FX, SILENT PADS, SOUNDS, PAD SHAPING): the caps, and the chip at the end; 48 high. */
+/* A block's header on its plate (FX, SILENT PADS, SOUNDS, PAD SHAPING): the caps, and the switch at the end; 48 high. */
 .beat-block__head {
   display: flex;
   align-items: center;

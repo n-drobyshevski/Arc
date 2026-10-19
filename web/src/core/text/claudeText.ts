@@ -287,6 +287,14 @@ export const ClaudeText = {
   tempoChip(now: number): string {
     return `Set · now ${now}`
   },
+  /** The tempo row's key (SET, with its light and ON or OFF), and the row's value: "136 \u2192 85" while it sets the card's, "136 \u00B7 card 85" while not. */
+  SET_TEMPO: 'Set',
+  tempoChange(now: number, card: number): string {
+    return `${now} \u2192 ${card}`
+  },
+  tempoKept(now: number, card: number): string {
+    return `${now} \u00B7 card ${card}`
+  },
   tempoChipName(card: string, now: number, on: boolean): string {
     return on ? `Set the tempo to ${card}, now ${now}` : `Keep the tempo at ${now}, the card says ${card}`
   },

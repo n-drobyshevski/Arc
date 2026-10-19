@@ -1,6 +1,6 @@
 // BEAT CARDS end to end, on the simulated EP-133 of ?demo: Live tools' CLAUDE section
 // (its shares dimmed with no notes, PASTE BEAT), a beat card pasted on Live opening its
-// sheet (the grid, where it goes, the tempo chip), IMPORT placing it with a toast, and
+// sheet (the grid, where it goes, the tempo's SET key), IMPORT placing it with a toast, and
 // PASTE BEAT reading the clipboard. A card of scenes imported sets a chain: SHARE CHAIN
 // shares it, followed by the sound list while "With my sound list" is ticked; its sheet
 // shows each scene and the chain, and with SET CHAIN off IMPORT leaves the chain. A card's
@@ -39,10 +39,16 @@ test('BEAT CARDS: the CLAUDE section, a pasted card, IMPORT', async ({ page }) =
   await expect(sheet).toBeVisible()
   await expect(sheet.getByRole('group', { name: /^Group A/ })).toBeVisible()
   await expect(sheet).toContainText('A · 02')
-  const chip = sheet.getByRole('switch')
+  // The tempo's SET key, OFF to begin with: the row keeps Arc's tempo with the card's beside it, and on says the change.
+  const chip = sheet.getByRole('switch', { name: /^Keep the tempo at \d+, the card says 124$/ })
   await expect(chip).toHaveAttribute('aria-checked', 'false')
+  await expect(chip).toHaveText('SetOff')
+  await expect(sheet).toContainText(/\d+ · card 124/)
   await chip.click()
-  await expect(chip).toHaveAttribute('aria-checked', 'true')
+  const set = sheet.getByRole('switch', { name: /^Set the tempo to 124, now \d+$/ })
+  await expect(set).toHaveAttribute('aria-checked', 'true')
+  await expect(set).toHaveText('SetOn')
+  await expect(sheet).toContainText(/\d+ → 124/)
   await sheet.getByRole('button', { name: 'Import' }).click()
   await expect(sheet).toBeHidden()
   await expect(page.getByRole('status').filter({ hasText: /^Imported to A · 02/ })).toBeVisible()

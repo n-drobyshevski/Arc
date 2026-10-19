@@ -544,6 +544,7 @@ describe('FeatureTextTest', () => {
     expect(ClaudeText.goesTo(0, 4)).toBe('A \u00B7 04 (next free)')
     expect([ClaudeText.GOES_TO, MirrorText.NEW_SCENE, ClaudeText.TEMPO]).toEqual(['Goes to', 'New scene', 'Tempo'])
     expect(ClaudeText.tempoChip(122).toUpperCase()).toBe('SET \u00B7 NOW 122')
+    expect([ClaudeText.SET_TEMPO.toUpperCase(), ClaudeText.tempoChange(136, 85), ClaudeText.tempoKept(136, 85)]).toEqual(['SET', '136 \u2192 85', '136 \u00B7 card 85'])
     expect([true, false].map((on) => ClaudeText.tempoChipName('92', 122, on))).toEqual(['Set the tempo to 92, now 122', 'Keep the tempo at 122, the card says 92'])
     expect(ClaudeText.swingLine(58)).toBe('Swing 58 \u00B7 placed in the notes')
     // Problems: listed, announced and copied for Claude.

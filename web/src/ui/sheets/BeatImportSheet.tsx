@@ -3,8 +3,8 @@
 // A beat card's sheet: the card's name and what is in it, a read-only grid for
 // each section (a row for each pad with notes, cells lit by how hard it is
 // hit; the first two bars of a long pattern), where each section goes, the new
-// scene a card of several groups adds, its tempo (a chip sets it: off until
-// chosen), its swing, and its problems with their lines (COPY PROBLEMS copies
+// scene a card of several groups adds, its tempo (SET sets it: off until
+// chosen; the row says "136 → 85" while on, "136 · card 85" while off), its swing, and its problems with their lines (COPY PROBLEMS copies
 // them for Claude). When the card has sound lines a SOUNDS block follows the
 // rows: a line for each, ticked to be put on its pad (PUT ON PADS switches
 // them all). A card that plays pads with no sound has a SILENT PADS block
@@ -38,12 +38,13 @@
 //   pad is named by its label on a small cap, not the device view's PadCap.
 // - Opening the picker focuses its title and leaving it focuses the pad's
 //   PICK SOUND / CHANGE key again, as the upload sheet's trim view does.
-// - PUT ON PADS is a pill like the tempo chip, until the sheet's switches
-//   become LED keys; so is APPLY FX. The rows of a pack's sound to upload,
-//   the synth rows and the suggested sounds come with their ports.
+// - The sheet's switches (SET, PUT ON PADS, APPLY FX, SET CHAIN) are a
+//   role="switch" button on theme/cap.css's cap, pressed by :active. The rows
+//   of a pack's sound to upload, the synth rows and the suggested sounds come
+//   with their ports.
 // - A pad shaping row is a checkbox button like a sound row; the FX and pad
 //   rows' screen reader names are on the row (Kotlin's merged semantics).
-// - SET CHAIN is a pill too. The no room line is a warning's amber bar with
+// - The no room line is a warning's amber bar with
 //   ink words (as a problem is), where Kotlin writes the words in amber.
 import { Fragment, type JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
@@ -249,8 +250,14 @@ function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; choices: Cho
   }
   if (tempo !== null) {
     rows.push(
-      <ValueRow key="tempo" label={ClaudeText.TEMPO} value={String(tempo)}>
-        <TempoChip now={ui.tempoNow} card={tempo} on={setTempo} onToggle={() => props.onChoices({ ...choices, setTempo: !setTempo })} />
+      // On, the row says the change ("136 → 85"); off, the tempo that stays and the card's beside it.
+      <ValueRow key="tempo" label={ClaudeText.TEMPO} value={setTempo ? ClaudeText.tempoChange(ui.tempoNow, tempo) : ClaudeText.tempoKept(ui.tempoNow, tempo)}>
+        <SwitchChip
+          text={ClaudeText.SET_TEMPO}
+          description={ClaudeText.tempoChipName(String(tempo), ui.tempoNow, setTempo)}
+          on={setTempo}
+          onToggle={() => props.onChoices({ ...choices, setTempo: !setTempo })}
+        />
       </ValueRow>,
     )
   }
@@ -772,24 +779,26 @@ function StackedRow(props: { label: string; value: string; description: string |
   )
 }
 
-/** The tempo chip: "SET · NOW 122". Off it is a flat pill (the tempo stays Arc's), on it is navy; a tap switches it. */
-function TempoChip(props: { now: number; card: number; on: boolean; onToggle(): void }): JSX.Element {
-  return <SwitchChip text={ClaudeText.tempoChip(props.now)} description={ClaudeText.tempoChipName(String(props.card), props.now, props.on)} on={props.on} onToggle={props.onToggle} />
-}
-
-/** A block's switch: [text] on a flat pill, navy while [on]; a tap switches it, and screen readers hear [description] and its state. */
+/**
+ * A block's switch as a device key: a light, [text], and ON or OFF on the key
+ * itself (the light orange and ON in signal while [on], the light dark and OFF
+ * in graphite while not); a tap switches it, and screen readers hear
+ * [description] and its state.
+ */
 function SwitchChip(props: { text: string; description: string; on: boolean; onToggle(): void }): JSX.Element {
   return (
     <button
       type="button"
       role="switch"
-      class={`beat-chip${props.on ? ' is-on' : ''}`}
+      class={`beat-switch cap-3d${props.on ? ' is-on' : ''}`}
       aria-checked={props.on}
       aria-label={props.description}
       aria-description={props.on ? SettingsText.ON : SettingsText.OFF}
       onClick={props.onToggle}
     >
-      {props.text}
+      <span class="beat-switch__light" aria-hidden="true" />
+      <span class="beat-switch__text" aria-hidden="true">{props.text}</span>
+      <span class="beat-switch__state" aria-hidden="true">{props.on ? SettingsText.ON : SettingsText.OFF}</span>
     </button>
   )
 }
