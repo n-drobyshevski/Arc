@@ -41,7 +41,7 @@ export function isCompact(step: TourStep): boolean {
 }
 
 /** What the cards read of the app's state. */
-export type TourCardState = Pick<UiState, 'midiPermission' | 'plugged' | 'connected' | 'device' | 'busy' | 'connectNote'>
+export type TourCardState = Pick<UiState, 'midiSupported' | 'midiPermission' | 'plugged' | 'connected' | 'device' | 'busy' | 'connectNote'>
 
 export interface TourActions {
   /** Start or Continue. */
@@ -250,7 +250,7 @@ export function TourCard(props: TourCardProps): JSX.Element {
       )
     default: {
       // DONE (PAD and HEAR are the compact cards above).
-      const later = Tour.laterNote(props.progress, props.state.midiPermission !== 'unsupported')
+      const later = Tour.laterNote(props.progress, props.state.midiSupported)
       return card(
         TourText.DONE_HEAD,
         <>

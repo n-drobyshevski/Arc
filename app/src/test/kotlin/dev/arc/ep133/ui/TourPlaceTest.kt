@@ -146,6 +146,13 @@ class TourPlaceTest {
     }
 
     @Test
+    fun `done docks to the bottom, clear of its tags`() {
+        val done = placeTourCard(393f, 852f, null, { 260f }, { head }, safeBottom = 48f, dockBottom = true)
+        assertEquals(852f - 48f - TourPlace.MARGIN, done.card.bottom, 0.01f)
+        assertOnScreen(done, 393f, 852f, safeBottom = 48f)
+    }
+
+    @Test
     fun `the card is never wider than 400`() {
         assertEquals(400f, place(840f, 900f, null).card.width, 0.01f)
     }

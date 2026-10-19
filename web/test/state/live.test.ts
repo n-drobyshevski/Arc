@@ -4,6 +4,7 @@
 import 'fake-indexeddb/auto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { physicalPad, padKey } from '../../src/core/features/padNotes'
+import { FirstRun, Tour } from '../../src/core/features/tour'
 import { fromJson as snapshotFromJson } from '../../src/core/features/liveSnapshot'
 import { toJson as indexToJson } from '../../src/core/backup/libraryIndex'
 import { encodeWav } from '../../src/core/formats/wav'
@@ -458,5 +459,39 @@ describe('the guide flag and restoring from the folder', () => {
     const older = new MemoryTarget('arc', { 'live.json': live.replace('5000', '10'), 'y.pak': folder.files.get('x.pak')!.data })
     await h.c.restoreFromFolder(older)
     expect(JSON.parse(storage.getItem(LIVE_KEY)!)).toMatchObject({ savedAt: 5000 })
+  })
+})
+
+describe('Try arc against the settings', () => {
+  /** What Root decides on a start (Tour.firstRun with the controller's flags). */
+  const firstRun = (h: LiveHarness): FirstRun =>
+    Tour.firstRun(h.c.coach.seen, h.c.settings.value.tourDone, h.c.settings.value.tourSteps, h.c.state.value.backups.length, h.c.demo)
+
+  it('a new install gets the tour; the old coach_seen flag gets nothing', async () => {
+    expect(firstRun(await liveHarness())).toBe(FirstRun.TOUR)
+    expect(firstRun(await liveHarness({ storage: memoryStorage({ 'arc.coachSeen': 'true' }) }))).toBe(FirstRun.NONE)
+  })
+
+  it('a paused tour resumes (with backups too), and stops for good after Not now', async () => {
+    const h = await liveHarness({ storage: memoryStorage({ [SETTINGS_KEY]: JSON.stringify({ tourSteps: 'connect,~pad' }) }) })
+    expect(firstRun(h)).toBe(FirstRun.TOUR)
+    const s = Tour.open(Tour.decode(h.c.settings.value.tourSteps), h.c.coach.seen, h.c.settings.value.tourDone, 3)
+    expect(s.resumed).toBe(true)
+    expect(Tour.resumeAt(Tour.decode(h.c.settings.value.tourSteps))).toBe(3)
+    h.c.finishTour()
+    expect(firstRun(h)).toBe(FirstRun.NONE)
+  })
+
+  it("a restore that brings back a finished tour closes the running one, and its steps are taken back", async () => {
+    const h = await liveHarness()
+    const run = Tour.open(Tour.decode(''), h.c.coach.seen, h.c.settings.value.tourDone, 0)
+    expect(Tour.closes(run, h.c.coach.seen, h.c.settings.value.tourDone)).toBe(false)
+    const folder = new MemoryTarget('arc', {
+      'library.json': indexToJson({ entries: [], settings: { 'app.tourDone': 'true', 'app.guideSeen': 'true', 'app.tourSteps': 'connect,pad,~backup' } }),
+      'x.pak': await writeZip([{ path: 'meta.json', data: new TextEncoder().encode('{}'), compress: false }], { date: 0, offsetMin: 0 }),
+    })
+    await h.c.restoreFromFolder(folder)
+    expect(h.c.settings.value).toMatchObject({ tourDone: true, guideSeen: true, tourSteps: 'connect,pad,~backup' })
+    expect(Tour.closes(run, h.c.coach.seen, h.c.settings.value.tourDone)).toBe(true)
   })
 })

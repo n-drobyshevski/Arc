@@ -7,15 +7,17 @@ import { demo, expect, importPak, notAutomated, SAMPLE_PAK, selectTab, test } fr
 test('back up, look inside, restore, browse the device, live pads, import, no MIDI', async ({ page, context }) => {
   await notAutomated(page)
 
-  await test.step('1. load: the app opens on Live, the first-run guide overlay is dismissed, the top bar renders', async () => {
+  await test.step('1. load: the app opens on Live, Try arc is put off (Not now), the top bar renders', async () => {
     await page.goto('/?demo')
     await expect(page).toHaveURL(/#\/live$/)
     const bar = page.getByRole('banner')
     await expect(bar.getByRole('button', { name: 'Live, Sections' })).toBeVisible()
-    const coach = page.getByRole('dialog', { name: "What's what" })
-    await expect(coach).toBeVisible()
-    await coach.getByRole('button', { name: 'Tap anywhere to close' }).click()
-    await expect(coach).toBeHidden()
+    const tour = page.getByRole('dialog', { name: 'Try arc' })
+    await expect(tour).toBeVisible()
+    await tour.getByRole('button', { name: 'Not now' }).last().click()
+    await expect(tour).toBeHidden()
+    // Not now also counts the guide as seen: it doesn't open after the tour.
+    await expect(page.getByRole('dialog', { name: "What's what" })).toBeHidden()
     await selectTab(page, 'Backups')
     await expect(page).toHaveURL(/#\/backups$/)
     await expect(bar.getByRole('button', { name: 'Settings' })).toBeVisible()

@@ -10,6 +10,7 @@ ui/
   AppContext.tsx    useController(), useNav()
   nav.ts            the navigation stack (one history entry per layer)
   coachPlace.ts     pure coach-tag placement (tested)
+  tourPlace.ts      pure placement of Try arc's step card and the veil's hole (tested)
   theme/            tokens.css, base.css, theme.ts (applyTheme), fonts.ts
   components/       primitives + the shell (one .tsx + .css each)
   screens/          one file per Kotlin screen (+ its .css)
@@ -40,7 +41,8 @@ screens factored out is tested under `test/ui/`.
 ## Navigation (`nav.ts`)
 
 The app is a stack of layers; Back (browser or Android-style) pops one in
-Android's order: dialog, side panel, menu, coach, sheet, full screen, tab.
+Android's order: dialog, side panel, menu, coach, tour, sheet, full screen, tab.
+`nav.back()` keeps to the back guard too (nothing closes under the progress sheet).
 Every open thing is a layer, so Back closes it and a reload restores it.
 
 ```ts
@@ -50,14 +52,14 @@ nav.selectTab('live')                          // section switch; closes everyth
 nav.openScreen({ kind: 'contents', id })       // full screens: settings | debug | search | guide | contents | compare
 nav.open(sheetLayer(`detail:${b.id}`))         // sheets
 nav.open(dialogLayer('delete'))                // confirm dialogs
-nav.open(overlayLayer('side'))                 // 'menu' | 'side' | 'coach'
+nav.open(overlayLayer('side'))                 // 'menu' | 'side' | 'coach' | 'tour'
 nav.close(sheetLayer(`detail:${b.id}`))        // remove that layer (only it) from the stack
 nav.replace(sheetLayer(`detail:${id}`), screenLayer({ kind: 'contents', id }))  // Detail → Contents in one move
 nav.back()                                     // a Done/close key: same as system Back
 ```
 
 `NavView`: `tab`, `debug`, `settings`, `search`, `guide`, `contentsId`,
-`compare`, `menu`, `side`, `coach`, `sheets: string[]`, `dialogs: string[]`.
+`compare`, `menu`, `side`, `coach`, `tour`, `sheets: string[]`, `dialogs: string[]`.
 Sheet/dialog ids in use: `detail:<id>`, `restore:<id>`, `comparePick:<id>`,
 `pads:backup:<id>:<n>`, `pads:device:<n>`, `upload`, `trim:<i>`, `licence`,
 `progress` (owned by app.tsx), dialogs `delete`, `prune:<keep>`, `forget`,
@@ -98,6 +100,16 @@ hooked arrow (`coachPlace.ts` `edgeOf` / `sideHook`, Coach.kt's side tags). Yell
 `COACH_YELLOW` / `COACH_YELLOW_INK`. A custom tag: `data-coach-label`,
 `data-coach-face`, `data-coach-ink`. Mark only what is on screen.
 
+**Try arc** (the first-run tour) is the same overlay with a `mode` (`CoachMode`:
+`only`, `spotlight`, `passThrough`) and a `card`: no close hint, the veil does
+nothing when tapped, a ringed hole (`clip-path: path(evenodd …)`, `veilPath`)
+around the spotlit mark, and the step card (`components/Tour.tsx`, placed by
+`tourPlace.ts`). Only the veil and the card take pointer events; with
+`passThrough` (Hear) the pads take touches and the rest of the page is
+`inert`. app.tsx holds the run (`useTourFirstRun`, `useTourRun`): the
+session, the snapshot it reads, and the ticks kept in `settings.tourSteps`.
+Escape goes through `nav.back()`.
+
 ## Component catalogue (`components/`)
 
 Common optional props on most: `class`, `id`, `ref`. Colours are CSS values
@@ -127,7 +139,8 @@ Common optional props on most: `class`, `id`, `ref`. Colours are CSS values
 | `SideZone` | SideZone (Live tools) | `open`, `onOpen`, `onClose`, `title`, `panel`, `children` |
 | `ComboView`, `Cap`, `CloseKey` | GuideKeys | `combo`, `spoken` / `cap`, `badgeSpace` / `onClick`, `description` |
 | `Shell`, `TopBar`, `SectionTag`, `SectionMenu`, `GuideEdgeTab` | Chrome.kt | mounted by app.tsx; screens don't use them |
-| `CoachHost`, `CoachOverlay`, `useCoachMark` | Coach.kt | see above |
+| `CoachHost`, `CoachOverlay`, `useCoachMark` | Coach.kt | see above (`mode`, `card` for Try arc) |
+| `TourCard`, `tourMode` | Tour.kt | one card per step (`step`, `session`, `progress`, `state`, `demo`, `actions`); mounted by app.tsx through `CoachHost` |
 
 The top bar's 8dp spacing is drawn by shrinkable gap spans (not `gap`), so
 it matches Android at 360px and gives way only when the tag is long.

@@ -6,7 +6,8 @@
 // overlay only measures and draws. The card is min(vw - 32, 400) wide and at
 // most the screen less 32 tall (it scrolls beyond that).
 //
-// - No target: from 45% down the screen, moved up to fit, else docked to the bottom.
+// - No target: from 45% down the screen, moved up to fit; docked to the bottom
+//   with dockBottom (Done, whose tags sit around the middle of the screen).
 // - A key: below it when it is in the top half, else above it, with room for its tag.
 // - The pad grid, the first that works: beside it; below it; above it; docked
 //   to the side with more room, covering at most one row of pads (the cut-out
@@ -65,6 +66,7 @@ export function placeTourCard(
   headingHeight: (width: number) => number,
   safeTop = 0,
   safeBottom = 0,
+  dockBottom = false,
 ): TourPlacement {
   const m = TourPlace.MARGIN
   const gap = TourPlace.GAP
@@ -79,7 +81,7 @@ export function placeTourCard(
 
   if (target === null) {
     const h = Math.min(cardHeight(w), cap)
-    return placed(box(left, fit(vh * 0.45, h), w, h))
+    return placed(box(left, fit(dockBottom ? maxBottom - h : vh * 0.45, h), w, h))
   }
   if (height(target) <= vh * TourPlace.TALL) {
     const h = Math.min(cardHeight(w), cap)

@@ -136,6 +136,12 @@ describe('TourPlaceTest', () => {
     expectOnScreen(capped, 360, 600)
   })
 
+  it('done docks to the bottom, clear of its tags', () => {
+    const done = placeTourCard(393, 852, null, () => 260, () => head, 0, 48, true)
+    expect(done.card.bottom).toBeCloseTo(852 - 48 - TourPlace.MARGIN, 2)
+    expectOnScreen(done, 393, 852, 0, 48)
+  })
+
   it('the card is never wider than 400', () => {
     expect(width(place(840, 900, null).card)).toBeCloseTo(400, 2)
   })

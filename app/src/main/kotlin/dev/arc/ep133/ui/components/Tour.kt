@@ -135,7 +135,7 @@ fun TourHost(
     val shown = remember { mutableStateOf<TourUi?>(null) }.apply { if (tour != null) value = tour }.value
     val ui = if (tour == null && coach) null else tour ?: shown
     val card: (@Composable (target: () -> Rect?, clipHole: (Rect?) -> Unit) -> Unit)? = if (ui != null) {
-        { target, clipHole -> TourCardLayout(target, clipHole) { headingOnly -> TourCard(ui, actions, headingOnly) } }
+        { target, clipHole -> TourCardLayout(target, clipHole, dockBottom = ui.step == TourStep.DONE) { headingOnly -> TourCard(ui, actions, headingOnly = headingOnly) } }
     } else {
         null
     }
@@ -155,7 +155,7 @@ fun TourHost(
  * (see [placeTourCard]): the heading and the ×.
  */
 @Composable
-fun TourCard(ui: TourUi, actions: TourActions, headingOnly: Boolean = false, modifier: Modifier = Modifier) {
+fun TourCard(ui: TourUi, actions: TourActions, modifier: Modifier = Modifier, headingOnly: Boolean = false) {
     val c = LocalArcColors.current
     val compact = ui.compact()
     val shape = RoundedCornerShape(18.dp)
@@ -417,7 +417,8 @@ object TourPlace {
  * system bars. The card is min(vw − 32, 400) wide and at most the screen less
  * 32 tall (it scrolls beyond that).
  *
- * - No target: from 45% down the screen, moved up to fit, else docked to the bottom.
+ * - No target: from 45% down the screen, moved up to fit; docked to the bottom
+ *   with [dockBottom] (Done, whose tags sit around the middle of the screen).
  * - A key: below it when it is in the top half, else above it, with room for its tag.
  * - The pad grid, the first that works: beside it; below it; above it; docked
  *   to the side with more room, covering at most one row of pads (the cut-out
@@ -431,6 +432,7 @@ fun placeTourCard(
     headingHeight: (width: Float) -> Float,
     safeTop: Float = 0f,
     safeBottom: Float = 0f,
+    dockBottom: Boolean = false,
 ): TourPlacement {
     val m = TourPlace.MARGIN
     val gap = TourPlace.GAP
@@ -445,7 +447,7 @@ fun placeTourCard(
 
     if (target == null) {
         val h = min(cardHeight(w), cap)
-        return TourPlacement(box(left, fit(vh * 0.45f, h), w, h))
+        return TourPlacement(box(left, fit(if (dockBottom) maxBottom - h else vh * 0.45f, h), w, h))
     }
     if (target.height <= vh * TourPlace.TALL) {
         val h = min(cardHeight(w), cap)
@@ -488,7 +490,12 @@ fun placeTourCard(
  * and trims the cut-out where the card covers it ([clipHole]).
  */
 @Composable
-fun TourCardLayout(target: () -> Rect?, clipHole: (Rect?) -> Unit, card: @Composable (headingOnly: Boolean) -> Unit) {
+fun TourCardLayout(
+    target: () -> Rect?,
+    clipHole: (Rect?) -> Unit,
+    dockBottom: Boolean = false,
+    card: @Composable (headingOnly: Boolean) -> Unit,
+) {
     val insets = WindowInsets.safeDrawing
     SubcomposeLayout(Modifier.fillMaxSize()) { constraints ->
         val d = density
@@ -513,6 +520,7 @@ fun TourCardLayout(target: () -> Rect?, clipHole: (Rect?) -> Unit, card: @Compos
             headingHeight = { measure(true, it).height / d },
             safeTop = safeTop,
             safeBottom = safeBottom,
+            dockBottom = dockBottom,
         )
         val p = measure(place.headingOnly, place.card.width)
         clipHole(place.holeClip?.let { Rect(it.left * d, it.top * d, it.right * d, it.bottom * d) })

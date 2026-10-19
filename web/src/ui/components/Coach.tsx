@@ -394,7 +394,9 @@ export function CoachOverlay(props: CoachOverlayProps): JSX.Element | null {
         const pad = parseFloat(getComputedStyle(inner).paddingBottom) || 0
         return Math.ceil(head.getBoundingClientRect().bottom - el.getBoundingClientRect().top + pad)
       }
-      card = placeTourCard(vp.width, vp.height, target?.bounds ?? null, heightAt, headingAt)
+      // Done tags controls around the middle of the screen: its card docks below them.
+      const dockBottom = !m?.spotlight && (m?.only?.size ?? 0) > 0
+      card = placeTourCard(vp.width, vp.height, target?.bounds ?? null, heightAt, headingAt, 0, 0, dockBottom)
       el.style.width = `${card.card.right - card.card.left}px`
       hole = target ? holeOf(target.bounds, card.holeClip) : null
     }
