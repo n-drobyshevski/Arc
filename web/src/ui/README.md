@@ -67,8 +67,8 @@ KEYS's pad, so the shell reads neither:
 - The Claude page's prompt and saved prompts are signals of their own
   (`c.claudePrompt`, `c.claudePrompts`): a word tapped re-renders that page,
   and `c.settings` keeps its object while only they change.
-- Settings, Debug, Compare, Contents, Search and the beat import, keyboard keys
-  and font licence sheets are `lazy` (`lazy.ts`): chunks of their own, fetched
+- Settings, Debug, Compare, Contents, Search and the beat import, keyboard keys,
+  KEYS (`ScaleSheet`) and font licence sheets are `lazy` (`lazy.ts`): chunks of their own, fetched
   once the app is idle. So is the Claude page's deck, with the prompt
   builder's genres and words (`state/promptPlan.ts`), and the PRACTICE panel
   (`live/practice.tsx`'s slot).

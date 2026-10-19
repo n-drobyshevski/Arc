@@ -27,6 +27,9 @@
 //   finger; the long press's context menu is kept off. The fan
 //   (QuickPickFan.tsx) sits in the top layer, its line moved without a render.
 //   Its ticks are ui/useHaptic.ts's, under a finger only.
+// - PickWord's [onSheet] (Kotlin's onOpen; that name is the web's list layer
+//   here) is what a tap opens instead of the list: KEYS' sheet. The word then
+//   says it opens a dialog (aria-haspopup) rather than a listbox.
 import type { JSX, Ref, TargetedKeyboardEvent, TargetedPointerEvent } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { MirrorText } from '../../core/text/mirrorText'
@@ -64,7 +67,7 @@ export interface WordButtonProps {
   class?: string
   role?: 'option'
   'aria-selected'?: boolean
-  'aria-haspopup'?: 'listbox'
+  'aria-haspopup'?: 'listbox' | 'dialog'
   'aria-expanded'?: boolean
   'data-coach'?: string
   'data-coach-label'?: string
@@ -151,6 +154,8 @@ export interface PickWordProps<T> {
    * is higher. The tap's list and the swipe keep the list's order.
    */
   fanReversed?: boolean
+  /** What a tap opens instead of the list (KEYS' sheet, [KeysActions.onSheet]); undefined for the list. */
+  onSheet?: () => void
 }
 
 /** How far a [PickWord] swipe goes past the touch slop to step the choice: short, about the word's height. */
@@ -182,7 +187,7 @@ interface Gesture {
   lit: number | null
 }
 
-/** A word showing a choice ("MAJOR ▾"); a tap lists the choices over the grid, the chosen one marked. */
+/** A word showing a choice ("MAJOR ▾"); a tap opens the KEYS sheet where there is one ([onSheet]), or else lists the choices over the grid, the chosen one marked. */
 export function PickWord<T>(props: PickWordProps<T>): JSX.Element {
   const { label, options, selected, name, onPick, description, alignEnd = false, coach, columns, quick = false, fanReversed = false } = props
   const [own, setOwn] = useState(false)
@@ -192,6 +197,12 @@ export function PickWord<T>(props: PickWordProps<T>): JSX.Element {
   const setOpen = (o: boolean): void => {
     if (onOpen.current) onOpen.current(o)
     else setOwn(o)
+  }
+  // A tap's: the sheet where there is one, else the list.
+  const sheet = props.onSheet
+  const tapped = (): void => {
+    if (sheet) sheet()
+    else setOpen(!open)
   }
   const box = useRef<HTMLDivElement | null>(null)
   const word = useRef<HTMLButtonElement | null>(null)
@@ -275,8 +286,11 @@ export function PickWord<T>(props: PickWordProps<T>): JSX.Element {
     }
     const opened = QuickPick.fan(options.length, g.x, g.y, safeWindow())
     g.fan = opened
-    // Too short a window even for the tightest rows: the hold opens the list instead.
-    if (opened === null) setOpen(true)
+    // Too short a window even for the tightest rows: the hold opens the list (or the sheet) instead.
+    if (opened === null) {
+      if (sheet) sheet()
+      else setOpen(true)
+    }
     else {
       finger.current = { x: g.x, y: g.y }
       setFan(opened)
@@ -434,15 +448,15 @@ export function PickWord<T>(props: PickWordProps<T>): JSX.Element {
         label={`${label} ▾`}
         onClick={() => {
           if (swallow.current) swallow.current = false
-          else setOpen(!open)
+          else tapped()
         }}
         description={quick ? `${description} ${MirrorText.QUICK_PICK_HINT}.` : description}
         aria-description={quick ? WebText.pickSteps(MirrorText.PICK_NEXT, MirrorText.PICK_PREVIOUS) : undefined}
         class={quick ? 'word--quick' : undefined}
         {...quickly}
         top={!props.middle}
-        aria-haspopup="listbox"
-        aria-expanded={open}
+        aria-haspopup={sheet ? 'dialog' : 'listbox'}
+        aria-expanded={sheet ? undefined : open}
         data-coach={coach?.id}
         data-coach-label={coach?.label}
         data-coach-face={coach ? 'var(--navy)' : undefined}

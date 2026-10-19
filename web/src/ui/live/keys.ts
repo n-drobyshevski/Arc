@@ -121,6 +121,26 @@ export function keysPickerOf(dialogs: readonly string[]): KeysPicker | null {
   return null
 }
 
+/** Which of KEYS' words opened the KEYS sheet (ui/sheets/ScaleSheet.tsx): its section is scrolled into view. */
+export const KeysSheetPart = { SCALE: 'scale', KEY: 'key', OCTAVE: 'octave' } as const
+export type KeysSheetPart = (typeof KeysSheetPart)[keyof typeof KeysSheetPart]
+
+/**
+ * The KEYS sheet's layer id prefix: 'scale:<part>' (web: 'keys' is the keyboard keys sheet), so
+ * Back, Escape and the scrim close it.
+ */
+export const SCALE_SHEET_PREFIX = 'scale:'
+
+/** The KEYS sheet open, and the part it opened at, from the navigation stack's open sheets. */
+export function scaleSheetOf(sheets: readonly string[]): KeysSheetPart | null {
+  for (const s of sheets) {
+    if (!s.startsWith(SCALE_SHEET_PREFIX)) continue
+    const part = s.slice(SCALE_SHEET_PREFIX.length)
+    return part === KeysSheetPart.KEY || part === KeysSheetPart.OCTAVE ? part : KeysSheetPart.SCALE
+  }
+  return null
+}
+
 /**
  * The KEYS display's note words with the piano showing ([range]): a device
  * note past its ends is named as such ("DO2, below the keys"), as there is

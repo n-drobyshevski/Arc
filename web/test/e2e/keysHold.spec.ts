@@ -67,9 +67,9 @@ test.describe('upright', () => {
     await expect(scale).toHaveAttribute('aria-label', /^Scale: Dorian\./)
     await expect(page.getByRole('listbox')).toHaveCount(0)
 
-    // A tap still opens the list.
+    // A tap still opens the KEYS sheet.
     await octave.click()
-    await expect(page.getByRole('listbox')).toBeVisible()
+    await expect(page.getByRole('dialog', { name: 'Scale, key and octave' })).toBeVisible()
   })
 })
 

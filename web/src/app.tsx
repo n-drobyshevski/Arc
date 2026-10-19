@@ -67,7 +67,6 @@ import {
   Nav,
   bindViewHooks,
   browserNavEnv,
-  dialogLayer,
   onTabs,
   overlayLayer,
   rootView,
@@ -90,7 +89,7 @@ import { MainScreen } from './ui/screens/MainScreen'
 import { BackupsSheets } from './ui/sheets/BackupsSheets'
 import { ProgressSheet } from './ui/sheets/ProgressSheet'
 import { LivePill, MirrorScreen, type LivePlaying } from './ui/screens/MirrorScreen'
-import { PICK_PREFIX as PICK, keysPickerOf, type KeysShown } from './ui/live/keys'
+import { KeysSheetPart, SCALE_SHEET_PREFIX, scaleSheetOf, type KeysShown } from './ui/live/keys'
 import { liveInBar } from './ui/live/window'
 import type { NoteRange } from './core/features/piano'
 import { EDIT_PREFIX, editPadOf, PadEditSheet } from './ui/sheets/PadEditSheet'
@@ -143,8 +142,9 @@ const ContentsScreen = lazy('ContentsScreen', () => import('./ui/screens/Content
 const SearchScreen = lazy('SearchScreen', () => import('./ui/screens/SearchScreen').then((m) => m.SearchScreen))
 const BeatImportSheet = lazy('BeatImportSheet', () => import('./ui/sheets/BeatImportSheet').then((m) => m.BeatImportSheet))
 const KeyboardKeysSheet = lazy('KeyboardKeysSheet', () => import('./ui/sheets/KeyboardKeysSheet').then((m) => m.KeyboardKeysSheet))
+const ScaleSheet = lazy('ScaleSheet', () => import('./ui/sheets/ScaleSheet').then((m) => m.ScaleSheet))
 const FontLicenceSheet = lazy('FontLicenceSheet', () => import('./ui/sheets/FontLicenceSheet').then((m) => m.FontLicenceSheet))
-const LAZY = [SettingsScreen, DebugScreen, CompareScreen, ContentsScreen, SearchScreen, BeatImportSheet, KeyboardKeysSheet, FontLicenceSheet, { preload: preloadClaudeDeck }, { preload: preloadPracticePanel }]
+const LAZY = [SettingsScreen, DebugScreen, CompareScreen, ContentsScreen, SearchScreen, BeatImportSheet, KeyboardKeysSheet, ScaleSheet, FontLicenceSheet, { preload: preloadClaudeDeck }, { preload: preloadPracticePanel }]
 
 /** The progress sheet's layer id. */
 const PROGRESS = 'progress'
@@ -596,7 +596,7 @@ function Root(): JSX.Element {
       {/* The Device tab's sheets: pads 'pads:device:<n>', upload / trim from state.browser.draft. */}
       {tabs && v.tab === 'device' && <><DevicePadsSheet view={v} /><DeviceUploadSheet view={v} /></>}
       {/* Live's EDIT: the pad sheet 'edit:<group>:<offset>', and the upload / trim sheets for a new sample. */}
-      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /><LivePatternSheet view={v} /><LiveTempoSheet view={v} /><LiveProjectSheet view={v} /><LiveFxSheet view={v} /><LiveBeatSheet view={v} /><LiveReviewSheet view={v} /></>}
+      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /><LivePatternSheet view={v} /><LiveTempoSheet view={v} /><LiveProjectSheet view={v} /><LiveFxSheet view={v} /><LiveBeatSheet view={v} /><LiveReviewSheet view={v} /><LiveScaleSheet view={v} /></>}
       {/* The drawn device's pages: SOUND and EDIT keep the pad played last open for its knobs (after the pad sheet, which has it while open). */}
       {v.tab === 'live' && <DevicePages dk={deviceKeys} view={v} />}
       {/* The Backups tab's sheets: detail 'detail:<id>', compare picker 'comparePick:<id>',
@@ -1287,6 +1287,38 @@ function LiveTempoSheet(props: { view: NavView }): JSX.Element | null {
   )
 }
 
+/**
+ * A tap on KEYS' scale, key or octave word: the KEYS sheet 'scale:<part>' (Kotlin's keysSheet), opened at
+ * that word's section. A pick applies at once and it stays open; it goes with KEYS.
+ */
+function LiveScaleSheet(props: { view: NavView }): JSX.Element {
+  const c = useController()
+  const nav = useNav()
+  const part = scaleSheetOf(props.view.sheets)
+  const open = part !== null
+  // The settings only while open, so a change elsewhere doesn't re-render it closed.
+  const settings = open ? c.settings.value : c.settings.peek()
+  const close = (): void => {
+    const id = props.view.sheets.find((s) => s.startsWith(SCALE_SHEET_PREFIX))
+    if (id !== undefined) nav.close(sheetLayer(id))
+  }
+  const keysOn = settings.liveKeys
+  useEffect(() => {
+    if (open && !keysOn) close()
+  }, [open, keysOn])
+  return (
+    <ScaleSheet
+      open={open}
+      keys={{ root: settings.keysRoot, scale: settings.keysScale, octave: settings.keysOctave, names: settings.keysNames }}
+      onRoot={(r) => c.setKeysRoot(r)}
+      onScale={(s) => c.setKeysScale(s)}
+      onOctave={(o) => c.setKeysOctave(o)}
+      part={part ?? KeysSheetPart.SCALE}
+      onDismiss={close}
+    />
+  )
+}
+
 /** FX tapped: the project's effect, its sends, the compressor and the sidechain; the pad played last to hear them on. */
 function LiveFxSheet(props: { view: NavView }): JSX.Element {
   const c = useController()
@@ -1845,15 +1877,6 @@ function LiveTab(props: TabProps): JSX.Element {
       onTools={(open) => (open ? nav.open(overlayLayer('side')) : nav.close(overlayLayer('side')))}
       // The tools' first row: they close and Settings opens in their place.
       onSettings={() => nav.replace(overlayLayer('side'), screenLayer({ kind: 'settings' }))}
-      picker={keysPickerOf(v.dialogs)}
-      onPicker={(p) => {
-        // One list at a time: a dialog layer 'pick:<what>', so Back closes it (Kotlin's focusable Popup).
-        const cur = nav.current.dialogs.find((d) => d.startsWith(PICK))
-        if (p === null) {
-          if (cur !== undefined) nav.close(dialogLayer(cur))
-        } else if (cur === undefined) nav.open(dialogLayer(PICK + p))
-        else if (cur !== PICK + p) nav.replace(dialogLayer(cur), dialogLayer(PICK + p))
-      }}
       onPad={(pad, hold, unsure, at) => void c.playPad(pad, hold, unsure, at)}
       onPadHear={(pad) => void c.hearPad(pad)}
       onPadKept={(pad) => void c.keepPad(pad)}
@@ -1895,6 +1918,8 @@ function LiveTab(props: TabProps): JSX.Element {
         onNotePressure: (n, p) => c.notePressure(n, p),
         onView: (wide, view) => c.setKeysView(wide, view),
         onSelect: (pad) => c.selectKeysPad(pad),
+        // The scale, key and octave words open KEYS' sheet at their section (a layer 'scale:<part>').
+        onSheet: (part) => nav.open(sheetLayer(SCALE_SHEET_PREFIX + part)),
       }}
     />
   )

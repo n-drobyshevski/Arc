@@ -11,7 +11,7 @@ import type { ArpNote, ArpOrder } from '../features/arp'
 import { Chain, ChainPlay, type ChainStep } from '../features/chain'
 import { FactoryKit, FactorySounds } from '../features/factorySounds'
 import { FxSettings, FxType } from '../features/fxSettings'
-import { Keys, NoteNames, Scale } from '../features/keys'
+import { Keys, NoteNames, Scale, intervals } from '../features/keys'
 import type { Hit } from '../features/liveMirror'
 import type { PlayMode } from '../features/padSettings'
 import { noteName, type PhysicalPad } from '../features/padNotes'
@@ -197,6 +197,20 @@ export const MirrorText = {
   PICK_PREVIOUS: 'Previous',
   /** Added to a scale or octave word's description: held, its choices fan out beside the thumb to pick from. */
   QUICK_PICK_HINT: 'Hold to pick from the list',
+
+  // The KEYS sheet a tap on the scale, key or octave word opens: the scales with their notes as dots, the keys, the octaves.
+  OCTAVE: 'Octave',
+  /** The sheet's title for screen readers. */
+  KEYS_SHEET: 'Scale, key and octave',
+  CLOSE_KEYS_SHEET: 'Close scale, key and octave',
+  /** A scale's row for screen readers: "Major, 7 notes". */
+  scaleRow(s: Scale): string {
+    return `${MirrorText.scaleName(s)}, ${intervals(s).length} notes`
+  },
+  /** An octave's cap for screen readers: "Octave 4". */
+  octaveCap(n: number): string {
+    return `${MirrorText.OCTAVE} ${n}`
+  },
 
   /** "KEY DO", the key word above the piano. */
   keyWord(root: number, names: NoteNames): string {

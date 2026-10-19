@@ -38,11 +38,13 @@ test.describe('upright', () => {
     await page.waitForTimeout(100)
     await expect(octave).toHaveAttribute('aria-label', new RegExp(`^Octave ${n}\\.`))
     await expect(page.getByRole('listbox')).toHaveCount(0)
-    // A tap still opens the list.
+    // A tap still opens the KEYS sheet.
+    const sheet = page.getByRole('dialog', { name: 'Scale, key and octave' })
     await octave.click()
-    await expect(page.getByRole('listbox')).toBeVisible()
+    await expect(sheet).toBeVisible()
     await page.keyboard.press('Escape')
-    await expect(page.getByRole('listbox')).toHaveCount(0)
+    // Gone, its close transition too (the modal sheet keeps the page inert till then).
+    await expect(page.locator('.scale-sheet')).toHaveCount(0)
 
     // The scale steps the same way.
     const scale = page.getByRole('button', { name: /^Scale: / })

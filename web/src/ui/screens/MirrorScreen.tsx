@@ -55,6 +55,9 @@
 // - The scale, octave and key lists (Kotlin's focusable Popups, which Back
 //   dismisses) are navigation layers too: [picker] / [onPicker] (dialog
 //   'pick:scale' / 'pick:octave' / 'pick:key'); without them each word keeps its own state.
+//   In the app a tap opens the KEYS sheet instead (KeysActions.onSheet,
+//   ui/sheets/ScaleSheet.tsx), as Android's does; the lists stay for a screen
+//   given no sheet.
 // - The tools (the Step 1c redesign) are SettingRow cards: the View as small
 //   caps with a Follow row and its LED toggle (its note behind the row's ⓘ
 //   key), the last note in a small dark
@@ -158,7 +161,7 @@ import { rowPadSize, sidewaysRowPad } from '../live/desk'
 import { chosenView, pianoFor, type PianoPlan } from '../live/keyboard'
 import { holdCap, releaseCap, useLiveKeys } from '../live/useLiveKeys'
 import { computerKeys } from '../keyPrefs'
-import { DEFAULT_KEYS_SHOWN, keysLit, keysNoteText, octaves, upperOctave, type KeysPicker, type KeysShown } from '../live/keys'
+import { DEFAULT_KEYS_SHOWN, keysLit, keysNoteText, octaves, upperOctave, type KeysPicker, type KeysSheetPart, type KeysShown } from '../live/keys'
 import { PianoKeyboard } from '../live/PianoKeyboard'
 import { memo, sameNotes, sameProps, useHas } from '../live/memo'
 import { PressTracker, rawMovesSupported, ticking, type PressTarget } from '../live/press'
@@ -225,6 +228,11 @@ export interface KeysActions {
   onView?: (wide: boolean, view: KeysView) => void
   /** A pad played on the device in the pads view becomes the KEYS sound. */
   onSelect?: (pad: PhysicalPad) => void
+  /**
+   * A tap on the scale, key or octave word: the KEYS sheet (ui/sheets/ScaleSheet.tsx), opened at
+   * that word's section. Undefined keeps the words' own lists.
+   */
+  onSheet?: (part: KeysSheetPart) => void
 }
 
 /** Live's EDIT: giving a pad another sound (an addition; the controller's assignPad). */
@@ -2633,8 +2641,11 @@ function ModeRow(props: {
   onPlate?: boolean
 }): JSX.Element | null {
   const { keys, actions, picker, onPicker, plan, part } = props
-  const pick = (which: KeysPicker): { open?: boolean; onOpen?: (open: boolean) => void } =>
-    onPicker
+  const pick = (which: KeysPicker): PickLayer => {
+    // KEYS' sheet where there is one, opened at the word's own section (the picker names match the parts).
+    const sheet = actions.onSheet
+    if (sheet) return { onSheet: () => sheet(which) }
+    return onPicker
       ? {
           open: picker === which,
           onOpen: (open) => {
@@ -2643,6 +2654,7 @@ function ModeRow(props: {
           },
         }
       : {}
+  }
   const piano = keys.on && plan.range !== null
   const modeWord = (
     <WordButton
@@ -2741,6 +2753,9 @@ function ModeRow(props: {
   )
 }
 
+/** What a pick word's tap opens: KEYS' sheet ([onSheet]), or its list kept by the caller ([open] / [onOpen]). */
+type PickLayer = { open?: boolean; onOpen?: (open: boolean) => void; onSheet?: () => void }
+
 /** Below this window height a landscape window lays one group out sideways (a phone on its side). */
 const SIDEWAYS_MAX_HEIGHT = 560
 
@@ -2757,7 +2772,7 @@ const SCALE_NAME_ROOM = 470
 function SidewaysRow(props: {
   keys: KeysShown
   actions: KeysActions
-  pick: (which: KeysPicker) => { open?: boolean; onOpen?: (open: boolean) => void }
+  pick: (which: KeysPicker) => PickLayer
   mode: JSX.Element
   view: JSX.Element | false
   arp: JSX.Element
