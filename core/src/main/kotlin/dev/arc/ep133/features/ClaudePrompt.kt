@@ -85,11 +85,11 @@ object Genres {
     fun inFamily(family: GenreFamily): List<Genre> = ALL.filter { it.family == family }
 }
 
-/** What the prompt asks Claude for: the Claude page's tabs. */
-enum class PromptTask { BEAT, IMPROVE, TRACK, PLAY, LEARN }
+/** What the prompt asks Claude for: the Claude page's tabs, in their order. */
+enum class PromptTask { BEAT, IMPROVE, TRACK, REMAKE, PLAY, LEARN }
 
 /** A word of the prompt's sentence that can be changed (tapped on the glass). */
-enum class PromptSlot { BARS, FEEL, GENRE, TEMPO, KIT, PARTS, GOAL, EDITS, LENGTH, START, LESSON, WAY, LEVEL, SPEED }
+enum class PromptSlot { BARS, FEEL, GENRE, TEMPO, KIT, PARTS, GOAL, EDITS, LENGTH, START, LESSON, WAY, LEVEL, SPEED, SONG, SCOPE }
 
 /**
  * A feel word before the genre ("dreamy lo-fi"): the skill's genres.md turns each into changes to the recipe (tempo
@@ -114,8 +114,9 @@ enum class SharePick { SCENE, PATTERN, CHAIN }
 
 /**
  * The Claude page's prompt (an addition): its [task] and the choices its sentence shows. [kit] null is the kit Live
- * plays; [genre] null is any style (an IMPROVE keeps its own); [tempo] null leaves it to Claude; [fromPick] has a
- * TRACK continue the card SHARE picks; [text] is the prompt as edited by hand, null while it is built from the rest.
+ * plays; [genre] null is any style (an IMPROVE keeps its own); [tempo] null leaves it to Claude (a REMAKE: the song's
+ * own); [fromPick] has a TRACK continue the card SHARE picks; [song] and [loop] are a REMAKE's; [text] is the prompt as
+ * edited by hand, null while it is built from the rest.
  */
 data class ClaudePrompt(
     val task: PromptTask = PromptTask.IMPROVE,
@@ -135,6 +136,10 @@ data class ClaudePrompt(
     val level: PlayLevel = PlayLevel.NEW,
     /** A PLAY's starting tempo, in percent of the card's ([SPEEDS]). */
     val speed: Int = 50,
+    /** A REMAKE's song: its title and artist, a music app's link ([TrackLinks]), or both; at most [MAX_SONG]. */
+    val song: String? = null,
+    /** A REMAKE of the song's main loop, one scene, instead of the whole song as scenes with a chain. */
+    val loop: Boolean = false,
     val text: String? = null,
 ) {
     /** The prompt goes with a card ([SharePick]): an IMPROVE, a PLAY, or a TRACK that continues one. */
@@ -146,12 +151,21 @@ data class ClaudePrompt(
             PromptTask.BEAT -> listOf(PromptSlot.BARS, PromptSlot.FEEL, PromptSlot.GENRE, PromptSlot.TEMPO, PromptSlot.KIT, PromptSlot.PARTS)
             PromptTask.IMPROVE -> listOf(PromptSlot.GOAL, PromptSlot.GENRE, PromptSlot.EDITS, PromptSlot.KIT)
             PromptTask.TRACK -> listOf(PromptSlot.LENGTH, PromptSlot.FEEL, PromptSlot.GENRE, PromptSlot.TEMPO, PromptSlot.KIT, PromptSlot.START)
+            PromptTask.REMAKE -> listOf(PromptSlot.SONG, PromptSlot.SCOPE, PromptSlot.TEMPO, PromptSlot.KIT)
             PromptTask.PLAY -> listOf(PromptSlot.WAY, PromptSlot.LEVEL, PromptSlot.SPEED)
             PromptTask.LEARN -> listOf(PromptSlot.LESSON)
         }
 
-    /** Another task, its own words again (a hand-edited text is for the task it was written for). */
-    fun withTask(t: PromptTask): ClaudePrompt = if (t == task) this else copy(task = t, text = null)
+    /**
+     * Another task, its own words again (a hand-edited text is for the task it was written for). A REMAKE starts at the
+     * song's own tempo, so a genre's can't come along.
+     */
+    fun withTask(t: PromptTask): ClaudePrompt =
+        if (t == task) this else copy(task = t, text = null, tempo = if (t == PromptTask.REMAKE) null else tempo)
+
+    /** A REMAKE of [song] (shared from a music app), at the song's own tempo; the rest of the choices stay. */
+    fun remake(song: String): ClaudePrompt =
+        copy(task = PromptTask.REMAKE, song = song.trim().take(MAX_SONG).takeIf { it.isNotEmpty() }, text = null, tempo = null)
 
     /** [f] in or out of the feel words; a third one in lets the first go. */
     fun withFeel(f: Feel): ClaudePrompt = copy(feels = if (f in feels) feels - f else (feels + f).takeLast(MAX_FEELS))
@@ -176,6 +190,8 @@ data class ClaudePrompt(
         "way=${way.name}",
         "level=${level.name}",
         "speed=$speed",
+        song?.let { "song=${escape(it)}" },
+        "loop=$loop",
         text?.let { "text=${escape(it)}" },
     ).joinToString(";")
 
@@ -185,6 +201,9 @@ data class ClaudePrompt(
         val LENGTHS = listOf(16, 32, 64)
         val SPEEDS = listOf(50, 75, 100)
         const val MAX_FEELS = 2
+
+        /** The most of a REMAKE's song kept: room for a title, an artist and a link, not a pasted page. */
+        const val MAX_SONG = 300
 
         /** The lessons of the skill's lessons.md, in order: lesson n is [LESSONS] [n - 1]. */
         val LESSONS = listOf(
@@ -216,6 +235,9 @@ data class ClaudePrompt(
                 way = PlayWay.entries.firstOrNull { it.name == map["way"] } ?: d.way,
                 level = PlayLevel.entries.firstOrNull { it.name == map["level"] } ?: d.level,
                 speed = map["speed"]?.toIntOrNull()?.takeIf { it in SPEEDS } ?: d.speed,
+                // Not trimmed: the page's song field keeps every change as it is typed, a space before the next word too.
+                song = map["song"]?.let(::unescape)?.take(MAX_SONG)?.takeIf { it.isNotBlank() },
+                loop = map["loop"]?.toBooleanStrictOrNull() ?: d.loop,
                 text = map["text"]?.let(::unescape)?.takeIf { it.isNotBlank() },
             )
         }

@@ -407,6 +407,11 @@ fun MirrorScreen(
     /** The tools panel open, held by the caller (the tour reads it); null keeps it here. */
     toolsOpen: Boolean? = null,
     onToolsOpen: (Boolean) -> Unit = {},
+    /**
+     * Live tools asked to open on the CLAUDE page (a song shared to arc), at its top; the page itself starts on the
+     * request's word and says when it has opened ([ClaudeUi.open]).
+     */
+    openClaude: dev.arc.ep133.controller.ClaudeOpen? = null,
     /** For screenshots: start with the offline note unfolded. */
     initialNoteOpen: Boolean = false,
     /** Not connected: download the factory sounds (FactorySounds); null when they are in the library. */
@@ -863,6 +868,13 @@ fun MirrorScreen(
     val toolsHeader: (@Composable RowScope.() -> Unit)? = toolsPage?.let { p -> { ToolsBack(p) { toolsPage = null } } }
     val toolsActions: (@Composable RowScope.() -> Unit)? =
         if (toolsPage == null && onSettings != null) ({ SettingsKey { setTools(false); onSettings() } }) else null
+    // A song shared to arc: Live tools open on CLAUDE, at its top, where its REMAKE is.
+    LaunchedEffect(openClaude) {
+        if (openClaude == null) return@LaunchedEffect
+        setTools(true)
+        toolsPage = ToolsPage.CLAUDE
+        toolsScroll.scrollTo(0)
+    }
     // A practice starting (from Claude's page) closes Live tools: its pads are the point.
     LaunchedEffect(practice != null) {
         if (practice != null && tools) setTools(false)

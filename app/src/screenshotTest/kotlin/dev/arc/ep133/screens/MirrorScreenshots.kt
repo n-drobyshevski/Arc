@@ -2438,6 +2438,39 @@ fun LiveToolsClaudeLearnPreview() = Live(
     claude = ClaudeUi(sounds = 212, prompt = dev.arc.ep133.features.ClaudePrompt(dev.arc.ep133.features.PromptTask.LEARN, lesson = 5), picking = dev.arc.ep133.features.PromptSlot.LESSON),
 )
 
+// REMAKE: a song shared from Spotify, its title looked up, as the whole song at its own tempo; SHARE and COPY lit.
+private val remakeSong = dev.arc.ep133.features.ClaudePrompt().remake("One More Time \u00B7 Daft Punk https://open.spotify.com/track/0DiWol3AO6WpXZgp0goxAV")
+
+@PreviewTest
+@Preview(name = "Live tools claude remake", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeRemakePreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(sounds = 212, prompt = remakeSong, saved = savedPrompts),
+)
+
+// A short spotify.link shared, no words: the song field on the glass with its link, PASTE, LOOK UP (lit), CLEAR and DONE.
+@PreviewTest
+@Preview(name = "Live tools claude remake song", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeRemakeSongPreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(
+        sounds = 212,
+        prompt = dev.arc.ep133.features.ClaudePrompt().remake("https://spotify.link/AbCdEf123"),
+        picking = dev.arc.ep133.features.PromptSlot.SONG,
+    ),
+)
+
+// The remake shared: the glass waits for its card, named by the song's title.
+@PreviewTest
+@Preview(name = "Live tools claude remake waiting", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeRemakeWaitingPreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(sounds = 212, prompt = remakeSong, waiting = dev.arc.ep133.text.PromptText.what(remakeSong)),
+)
+
 // Live tools' front page after a share: the display waits for Claude's reply, with PASTE BEAT and a dismiss.
 @PreviewTest
 @Preview(name = "Live tools waiting for card", widthDp = 412, heightDp = 843, showBackground = true)
