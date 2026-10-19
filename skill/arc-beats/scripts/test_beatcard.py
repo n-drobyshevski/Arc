@@ -2459,7 +2459,7 @@ class RemakeAudio(unittest.TestCase):
         card = self.ra.draft_card(remake_analysis())
         parsed = bc.parse_card(card)
         self.assertTrue(parsed.ok, [str(p) for p in parsed.problems])
-        self.assertIn("chain 1x2 2 1x2", card)  # the groove comes back: the same scene again
+        self.assertIn("chain 1x4 2 1x3", card)  # two-bar chords loop; the groove comes back as the same scene
         self.assertEqual(len(parsed.scenes), 2)
         self.assertIn("[A] bars 1 step 1/16\n\n[B]", card)  # the break mutes the drums
         self.assertIn("B7 at 1.1.1 note D#2", card)
@@ -2472,11 +2472,42 @@ class RemakeAudio(unittest.TestCase):
                 json.dump(remake_analysis(), fh)
             out, err = io.StringIO(), io.StringIO()
             with redirect_stdout(out), redirect_stderr(err):
-                code = self.ra.main(["--from-json", path, "--loop-bars", "2"])
+                code = self.ra.main(["--from-json", path, "--loop-bars", "4"])
             self.assertEqual(code, 0, err.getvalue())
             self.assertTrue(out.getvalue().startswith("ARC BEAT 1"))
             self.assertTrue(os.path.exists(os.path.join(d, "card.txt")))
-            self.assertIn("chain 1x4 2 1x3", out.getvalue())
+            self.assertIn("chain 1x2 2 1x2", out.getvalue())
+
+    def test_bars_from_beats_when_downbeats_double(self):
+        # 134 BPM beats on a 20 ms grid; in the "drop" the tracker marks a downbeat every two beats.
+        gap = 60 / 134
+        beats = [round((1 + i) * gap / 0.02) * 0.02 for i in range(200)]
+        downbeats = [beats[i] for i in range(0, 200, 4)] + [beats[i] for i in range(82, 120, 4)]
+        bars = self.ra.bars_from(downbeats, beats, beats[-1] + 1)
+        self.assertAlmostEqual(self.ra.tempo_of(bars), 134, delta=0.05)
+        self.assertAlmostEqual(bars[1][0], beats[0] + 4 * gap, delta=0.02)  # the phase most downbeats agree with
+        self.assertEqual(len({round(length, 9) for _, length in bars}), 1)  # one steady grid
+        self.assertAlmostEqual(bars[0][1], 4 * gap, delta=0.005)
+
+    def test_groups_merge_and_loop_size(self):
+        quiet, busy = [0.0, 0.1], [0.9, 0.8]
+        feats = [quiet] * 4 + [busy] * 4 + [quiet] * 2 + [busy] * 4
+        chords = ["D#m", "B"] * 7
+        sections = [(0, 4), (4, 4), (8, 2), (10, 4)]
+        self.assertEqual(self.ra.group_sections(sections, feats, chords), [0, 1, 0, 1])
+        self.assertEqual(self.ra.merge_runs([(0, 4), (4, 4), (8, 2)], [0, 0, 1]), ([(0, 8), (8, 2)], [0, 1]))
+        self.assertEqual(self.ra.loop_size(chords, 0, 8), 2)
+        self.assertEqual(self.ra.loop_size(["A", "B", "C", "D", "E"], 0, 5), 5)  # no repeat: the whole section
+        self.assertEqual(self.ra.loop_size(["A"] * 40, 0, 40), 1)
+
+    def test_bass_lag_behind_kicks(self):
+        step = 60 / 134 / 4
+        kicks = [i * 4 * step for i in range(32)]
+        late = [[k + 1.3 * step, k + 3 * step, 39, 0.6] for k in kicks]
+        self.assertAlmostEqual(self.ra.bass_lag(late, kicks, step), 1.3 * step, places=6)
+        on_time = [[k + 0.1 * step, k + 3 * step, 39, 0.6] for k in kicks]
+        self.assertEqual(self.ra.bass_lag(on_time, kicks, step), 0.0)  # under half a sixteenth: left alone
+        self.assertEqual(self.ra.bass_lag(late[:5], kicks, step), 0.0)  # too few to tell
 
 
 class SkillFiles(unittest.TestCase):

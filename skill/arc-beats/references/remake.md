@@ -67,23 +67,23 @@ When you run in Claude Code on a computer and the user has the song as a file (a
 
 ```
 python scripts/remake_audio.py song.mp3 --out song.remake        # a few minutes for a whole song
-python scripts/remake_audio.py --from-json song.remake/analysis.json --loop-bars 2   # redraw, no models
+python scripts/remake_audio.py --from-json song.remake/raw.json --loop-bars 4   # redraw, no models
 ```
 
 | It measures | With | Trust it for |
 |---|---|---|
-| Bars and tempo | Beat This! (beats and downbeats), a line through the bar starts | The tempo to a tenth, where each bar starts |
+| Bars and tempo | Beat This! (beats and downbeats); the bars from a straight line through the beats, at the phase most downbeats agree with | The tempo to a tenth, where each bar starts, even where the tracker doubles the downbeats in a loud drop |
 | Stems | Demucs: drums, bass, other, vocals | Everything below works on one stem at a time |
 | Drums | ADTOF on the drum stem (kick, snare, tom, hat, cymbal); without it, band onsets | Kick and hats; a snare or clap buried in the mix can be missed |
-| Bass and chords | Basic Pitch on the bass and other stems; one chord a bar, matched with a bias to the key | The key and the roots; the chord quality (7, sus) less so. Deep sub-bass notes can be read a sixteenth or two late |
-| Sections | Where the bars' texture changes, grouped into parts that repeat | The cuts; the names (intro, chorus) are yours to give |
+| Bass and chords | Basic Pitch on the bass and other stems; one chord a bar, matched with a bias to the key | The key and the roots; the chord quality (7, sus) less so. Deep sub-bass reads late; the script measures that lag against the kicks and takes it off |
+| Sections | Where the bars' texture changes, grouped into parts that sound alike, neighbours of one part joined | The cuts and the repeats; the names (intro, chorus) are yours to give |
 
-It writes `analysis.json` (all of it, bar by bar) and `card.txt`: a scene for each part, its first bars as the loop, and the chain with the real bar counts. Then:
+It writes `raw.json` (the models' output), `analysis.json` (bar by bar) and `card.txt`: a scene for each part, looping as long as its chords run before they repeat (`--loop-bars` fixes it), and the chain with the real bar counts. `--from-json raw.json` works it all out again in a second, so try `--loop-bars` there. A song of 3 to 4 minutes gives 12 to 16 scenes. Then:
 
 - **Name the scenes** after the song's sections, from the cuts and the web (step 1 still pins the song).
 - **Add the sounds and FX** (step 3): the draft has none, and group D is empty.
 - **Write the hook** on D in the song's key and register (the script reports the vocal's range in `analysis.json`; it never transcribes a melody). Step 5 holds: no melody copied note for note, no lyrics.
-- **Look over the bass**: when it sits a sixteenth after each kick all through, move it onto the kick.
+- **Compare the length**: `analyse` gives the chain's bars and seconds; a few bars over the song's length is the rounding of passes.
 - **Say it is measured**: the `#` lines it writes say what each fact came from; keep them, and add what you found on the web.
 
 ## An example: a remake loop

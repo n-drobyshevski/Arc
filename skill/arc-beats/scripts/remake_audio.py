@@ -5,24 +5,29 @@ For Claude Code, on a computer, with the song as an audio file the user has (a
 recording, a purchase, an export). The Claude apps can't run it: they take no
 audio. references/remake.md says when to use it and what to do with the draft.
 
-    remake_audio.py SONG.(wav|mp3|flac|m4a) [--out DIR] [--start SEC] [--end SEC] [--loop-bars 1-4]
-    remake_audio.py --from-json DIR/analysis.json [--loop-bars 1-4]
+    remake_audio.py SONG.(wav|mp3|flac|m4a) [--out DIR] [--start SEC] [--end SEC] [--loop-bars 1|2|4|8|16]
+    remake_audio.py --from-json DIR/raw.json [--loop-bars 1|2|4|8|16]
 
 What it measures, each with a model made for the job:
-  bars and tempo   Beat This! (beats and downbeats)
+  bars and tempo   Beat This! beats; the bars on a straight line through them, at
+                   the phase most of its downbeats agree with (in a loud drop it can
+                   mark a downbeat every two beats; the beats stay steady)
   stems            Demucs htdemucs (drums, bass, other, vocals)
   drums            ADTOF on the drum stem (kick, snare, tom, hat, cymbal); without
                    it, onsets in three bands of the drum stem (kick, snare, hat)
-  bass and chords  Basic Pitch on the bass and other stems; the chords are matched
-                   per bar, and the key from all their notes
+  bass and chords  Basic Pitch on the bass and other stems, the bass moved back by
+                   its lag behind the kicks; one chord a bar, with a bias to the key
+                   all their notes give
   sections         where the bars' texture changes (which stems play, how busy
-                   the drums are, the chord), grouped into parts that repeat
+                   the drums are), grouped into parts that sound alike
 
-It writes DIR/analysis.json (every measurement, so --from-json redraws the card
-without the models) and DIR/card.txt, prints the card, and checks it with
-beatcard.py. The draft has no sound, synth or FX lines and an empty group D:
-the sounds and the hook are Claude's to add (remake.md). The vocal and lead
-lines are never transcribed, only their register.
+It writes DIR/raw.json (the models' output: --from-json on it works the rest out
+again in a second, without the models), DIR/analysis.json (bar by bar) and
+DIR/card.txt: a scene for each part, looping as long as its chords run before they
+repeat, and the chain. It prints the card and checks it with beatcard.py. The
+draft has no sound, synth or FX lines and an empty group D: the sounds and the
+hook are Claude's to add (remake.md). The vocal and lead lines are never
+transcribed, only their register.
 
 Setup, once (Python 3.11, ffmpeg on the PATH; about 3 GB with the models):
 
@@ -35,9 +40,10 @@ Setup, once (Python 3.11, ffmpeg on the PATH; about 3 GB with the models):
     # optional, better drums (CC BY-NC-SA 4.0: not for commercial use)
     uv pip install "adtof-pytorch @ git+https://github.com/xavriley/ADTOF-pytorch"
 
-A 4-minute song takes a few minutes on a laptop CPU. The functions after the
-analysis (grids, chords, key, sections, the card) use the standard library
-only, so the tests run without the models.
+A 4-minute song takes about 3 minutes on a 4-core CPU (song.wav and the stems are
+kept, so a second run on the same file takes under a minute). Everything after
+measure() (bars, grids, chords, key, sections, the card) uses the standard
+library only, so the tests run without the models.
 """
 
 import argparse
@@ -45,6 +51,7 @@ import json
 import os
 import subprocess
 import sys
+from bisect import bisect_right
 from collections import Counter
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -65,6 +72,8 @@ DRUMS = [
 ]
 # ADTOF's General MIDI notes.
 ADTOF_CLASSES = {35: "kick", 38: "snare", 47: "tom", 42: "hat", 49: "cymbal"}
+# Loudness values a second in the raw envelopes.
+ENVELOPE_RATE = 10
 
 # Krumhansl-Kessler key profiles, C first.
 MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
@@ -87,16 +96,35 @@ CHORDS = [
 # ---- grids and timing -------------------------------------------------------
 
 def bars_from(downbeats: Sequence[float], beats: Sequence[float], end: float) -> List[Tuple[float, float]]:
-    """Each bar's start and length in seconds, from the downbeats; the last bar takes the median length."""
-    starts = sorted(downbeats)
-    if len(starts) < 2:
-        if len(beats) < 2:
-            raise ValueError("too few beats to find bars")
-        step = median([b - a for a, b in zip(beats, beats[1:])]) * 4
-        starts = [beats[0] + i * step for i in range(int((end - beats[0]) / step) + 1)]
+    """Each bar's start and length in seconds, four beats a bar.
+
+    The beats are steadier than the downbeats: in a loud drop the tracker can mark a downbeat every
+    two beats. So the bars come from the beats, at the phase most downbeats agree with: a straight
+    line through the beats when the tempo holds (dance music), else the beats themselves in fours."""
+    beats = sorted(beats)
+    if len(beats) < 8:
+        raise ValueError("too few beats to find bars")
+    gap = median([b - a for a, b in zip(beats, beats[1:])])
+    # Number the beats gap by gap, so a missed beat still counts; numbering by time from the first
+    # would drift, the median gap being on the tracker's 20 ms grid.
+    index = [0]
+    for a, b in zip(beats, beats[1:]):
+        index.append(index[-1] + max(1, int(round((b - a) / gap))))
+    mi, mt = sum(index) / len(index), sum(beats) / len(beats)
+    period = sum((i - mi) * (t - mt) for i, t in zip(index, beats)) / sum((i - mi) ** 2 for i in index)
+    origin = mt - period * mi
+    votes = [0] * 4
+    for d in downbeats:
+        votes[int(round((d - origin) / period)) % 4] += 1
+    phase = max(range(4), key=lambda p: votes[p])
+    steady = max(abs(t - (origin + period * i)) for i, t in zip(index, beats)) < period / 4
+    if steady:
+        first = phase - 4 if phase and origin + (phase - 4) * period > -period else phase
+        count = int((end - (origin + first * period)) / (4 * period)) + 1
+        return [(origin + (first + 4 * k) * period, 4 * period) for k in range(count)]
+    starts = [t for i, t in zip(index, beats) if i % 4 == phase]
     lengths = [b - a for a, b in zip(starts, starts[1:])]
-    typical = median(lengths)
-    lengths.append(typical)
+    lengths.append(median(lengths) if lengths else 4 * gap)
     return list(zip(starts, lengths))
 
 
@@ -167,6 +195,22 @@ def swing_of(times: Sequence[float], bars: Sequence[Tuple[float, float]]) -> int
         return 50
     delay = median(off) - (median(on) if on else 0.0)
     return int(min(75, max(50, round(50 + delay * 50))))
+
+
+def bass_lag(notes: Sequence[Sequence[float]], kicks: Sequence[float], step: float) -> float:
+    """How late Basic Pitch starts the bass notes, in seconds: deep notes need a long window, so a sub
+    on the kick reads a sixteenth or two after it. The median gap from a kick to a bass note just after
+    it, when most notes have one and it is over half a sixteenth; else 0."""
+    kicks = sorted(kicks)
+    gaps = []
+    for n in notes:
+        i = bisect_right(kicks, n[0]) - 1
+        if i >= 0 and 0 <= n[0] - kicks[i] <= 2.5 * step:
+            gaps.append(n[0] - kicks[i])
+    if len(gaps) < 8 or len(gaps) < 0.5 * len(notes):
+        return 0.0
+    lag = median(gaps)
+    return lag if lag > step / 2 else 0.0
 
 
 def swing_ticks(swing: int) -> int:
@@ -284,23 +328,51 @@ def sections_of(features: Sequence[Sequence[float]], chords: Sequence[Optional[s
     return out
 
 
-def group_sections(sections: Sequence[Tuple[int, int]], features: Sequence[Sequence[float]], chords: Sequence[Optional[str]], threshold: float = 0.3) -> List[int]:
-    """Which part each section is (0, 1, 2 ...): one that sounds like an earlier one, with the same chords, is that part."""
-    parts: List[Tuple[List[float], Tuple]] = []
-    labels = []
-    for start, length in sections:
-        mean = _mean(features[start:start + length])
-        loop = tuple(c for c in chords[start:start + min(length, 4)])
+def group_sections(sections: Sequence[Tuple[int, int]], features: Sequence[Sequence[float]], chords: Sequence[Optional[str]], threshold: float = 0.4) -> List[int]:
+    """Which part each section is (0, 1, 2 ...): a section that sounds like any section of an earlier
+    part is that part. Chords count a little: two sections that share few chords sound further apart."""
+    means = [_mean(features[start:start + length]) for start, length in sections]
+    names = [{c for c in chords[start:start + length] if c} for start, length in sections]
+    labels: List[int] = []
+    for i in range(len(sections)):
         found = None
-        for i, (m, l) in enumerate(parts):
-            if _dist(mean, m) <= threshold and (l == loop or not any(loop) or not any(l)):
-                found = i
-                break
-        if found is None:
-            parts.append((mean, loop))
-            found = len(parts) - 1
-        labels.append(found)
+        best = threshold
+        for j in range(i):
+            d = _dist(means[i], means[j])
+            if names[i] and names[j] and len(names[i] & names[j]) < 0.3 * min(len(names[i]), len(names[j])):
+                d += 0.15
+            if d <= best:
+                found, best = labels[j], d
+        labels.append(found if found is not None else max(labels, default=-1) + 1)
     return labels
+
+
+def merge_runs(sections: Sequence[Tuple[int, int]], parts: Sequence[int]) -> Tuple[List[Tuple[int, int]], List[int]]:
+    """Sections next to each other that are the same part become one section."""
+    out_s: List[Tuple[int, int]] = []
+    out_p: List[int] = []
+    for (start, length), part in zip(sections, parts):
+        if out_p and out_p[-1] == part:
+            out_s[-1] = (out_s[-1][0], out_s[-1][1] + length)
+        else:
+            out_s.append((start, length))
+            out_p.append(part)
+    return out_s, out_p
+
+
+def loop_size(chords: Sequence[Optional[str]], start: int, length: int, cap: int = 16) -> int:
+    """How many bars a section's scene loops: the shortest of 1, 2, 4, 8 and 16 bars after which its
+    chords repeat (three bars in four), else the whole section up to the cap."""
+    run = list(chords[start:start + length])
+    for size in (1, 2, 4, 8, 16):
+        if size > min(length, cap):
+            break
+        if size * 2 > length:
+            continue
+        same = sum(1 for k in range(size, length) if run[k] == run[k - size])
+        if same >= 0.75 * (length - size):
+            return size
+    return min(length, cap)
 
 
 def common_loop(rows: Sequence[str], size: int) -> str:
@@ -356,14 +428,16 @@ def chord_notes(chords: Sequence[Optional[dict]], first: int, size: int) -> List
     return lines
 
 
-def draft_card(a: dict, loop_bars: int = 4) -> str:
-    """The card from an analysis: a scene for each part, its first loop_bars bars as the loop, and the chain."""
+def draft_card(a: dict, loop_bars: Optional[int] = None) -> str:
+    """The card from an analysis: a scene for each part, looping its first section's opening bars
+    (loop_bars, or as long as its chords run before they repeat), and the chain."""
     bars = [tuple(x) for x in a["bars"]]
     swing = a["swing"]
     grid = a["drums"]
     chords = a["chords"]
     sections = [tuple(s) for s in a["sections"]]
     parts = a["parts"]
+    chords_named = [c["name"] if c else None for c in chords]
     tempo = int(round(a["tempo"]))
     out = ["ARC BEAT 1"]
     out.append("# %s, measured from the audio by remake_audio.py, not by ear" % a.get("title", "song"))
@@ -380,13 +454,22 @@ def draft_card(a: dict, loop_bars: int = 4) -> str:
     first_of = {}
     for (start, length), part in zip(sections, parts):
         first_of.setdefault(part, (start, length))
+    # A section much shorter than its part's loop (a 2-bar drop-out that sounds like the intro)
+    # would play the whole loop: it gets a scene of its own.
+    parts = list(parts)
+    for i, ((start, length), part) in enumerate(zip(sections, parts)):
+        size = min(loop_bars, first_of[part][1]) if loop_bars else loop_size(chords_named, *first_of[part])
+        if length < 0.75 * size:
+            parts[i] = max(parts) + 1
+            first_of[parts[i]] = (start, length)
     order = sorted(first_of, key=lambda p: first_of[p][0])
     scene_no = {p: i + 1 for i, p in enumerate(order[:16])}
+    sizes = {p: min(loop_bars, first_of[p][1]) if loop_bars else loop_size(chords_named, *first_of[p]) for p in order}
     steps = []
     for (start, length), part in zip(sections, parts):
         if part not in scene_no:
             continue
-        size = min(loop_bars, first_of[part][1])
+        size = sizes[part]
         passes = max(1, int(round(length / size)))
         while passes > 0:
             n = min(8, passes)
@@ -396,7 +479,7 @@ def draft_card(a: dict, loop_bars: int = 4) -> str:
 
     for part in order[:16]:
         start, length = first_of[part]
-        size = min(loop_bars, length)
+        size = sizes[part]
         out.append("")
         out.append("scene Part %s (bars %d-%d)" % (chr(65 + scene_no[part] - 1), start + 1, start + length))
         drum_size = 1
@@ -439,7 +522,8 @@ def _run(cmd: List[str]) -> None:
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def analyse(path: str, out: str, start: Optional[float], end: Optional[float]) -> dict:
+def measure(path: str, out: str, start: Optional[float], end: Optional[float]) -> dict:
+    """Run the models: the raw measurements that derive() turns into bars, grids, chords and sections."""
     try:
         import numpy as np
         import librosa
@@ -456,69 +540,100 @@ def analyse(path: str, out: str, start: Optional[float], end: Optional[float]) -
     cmd += ["-i", path]
     if end is not None:
         cmd += ["-t", str(end - (start or 0))]
-    _run(cmd + ["-ac", "2", "-ar", "44100", wav])
+    # The same song and span as last time: keep song.wav and its stems, the slow part.
+    marker = os.path.join(out, "song.json")
+    same = [os.path.abspath(path), os.path.getsize(path), start, end]
+    if os.path.exists(marker) and os.path.exists(wav):
+        with open(marker) as fh:
+            fresh = json.load(fh) != same
+    else:
+        fresh = True
+    if fresh:
+        _run(cmd + ["-ac", "2", "-ar", "44100", wav])
+        with open(marker, "w") as fh:
+            json.dump(same, fh)
     duration = librosa.get_duration(path=wav)
 
-    print("bars and tempo (Beat This!)...", file=sys.stderr)
+    print("beats (Beat This!)...", file=sys.stderr)
     beats, downbeats = File2Beats(checkpoint_path="final0", device="cpu", dbn=False)(wav)
-    bars = bars_from(list(map(float, downbeats)), list(map(float, beats)), duration)
 
-    print("stems (Demucs)...", file=sys.stderr)
-    _run([sys.executable, "-m", "demucs", "-n", "htdemucs", "-o", out, wav])
     stems = {s: os.path.join(out, "htdemucs", "song", s + ".wav") for s in ("drums", "bass", "other", "vocals")}
+    if fresh or not all(os.path.exists(f) for f in stems.values()):
+        print("stems (Demucs)...", file=sys.stderr)
+        _run([sys.executable, "-m", "demucs", "-n", "htdemucs", "-o", out, wav])
 
     print("drums...", file=sys.stderr)
     hits, source = _drum_hits(stems["drums"])
-    grid = drum_grid(hits, bars)
 
     print("notes (Basic Pitch)...", file=sys.stderr)
-    def notes_of(stem: str, lo: int, hi: int) -> List[Tuple[float, float, int, float]]:
+    notes = {}
+    for stem, lo, hi in (("bass", 24, 60), ("other", 40, 96), ("vocals", 40, 96)):
         _, _, events = predict(stems[stem], onset_threshold=0.5, frame_threshold=0.3, minimum_note_length=80)
-        return sorted((float(s), float(e), int(p), float(amp)) for s, e, p, amp, _ in events if lo <= p <= hi)
-    bass = notes_of("bass", 24, 60)
-    other = notes_of("other", 40, 96)
-    vocals = notes_of("vocals", 40, 96)
+        notes[stem] = sorted([round(float(s), 3), round(float(e), 3), int(p), round(float(amp), 3)] for s, e, p, amp, _ in events if lo <= p <= hi)
 
-    key, fit = key_of([x + y for x, y in zip(pitch_weights(bass), pitch_weights(other))])
-    chords = []
-    for s, length in bars:
-        w = [x + 0.5 * y for x, y in zip(pitch_weights(other, s, s + length), pitch_weights(bass, s, s + length))]
-        bw = pitch_weights(bass, s, s + length)
-        root = max(range(12), key=lambda i: bw[i]) if sum(bw) > 0 else None
-        c = chord_of(w, root, scale_of(key)) if sum(w) > 0.05 * length else None
-        chords.append({"name": c[0], "root": c[1], "shape": list(c[2])} if c else None)
-
-    levels = {}
+    # Each stem's loudness, ten values a second, for the sections.
+    envelopes = {}
     for s, f in stems.items():
         y, sr = librosa.load(f, sr=11025, mono=True)
-        rms = []
-        for b0, length in bars:
-            seg = y[int(b0 * sr):int((b0 + length) * sr)]
-            rms.append(float(np.sqrt(np.mean(seg ** 2))) if len(seg) else 0.0)
-        top = max(rms) or 1.0
-        levels[s] = [r / top for r in rms]
-
-    names = [c["name"] if c else None for c in chords]
-    feats = bar_features(grid, levels, names)
-    sections = sections_of(feats, names)
-    parts = group_sections(sections, feats, names)
-    hat_times = list(hits.get("hat", [])) or [t for v in hits.values() for t in v]
+        hop = sr // ENVELOPE_RATE
+        envelopes[s] = [round(float(np.sqrt(np.mean(y[i:i + hop] ** 2))), 5) for i in range(0, len(y), hop)]
     return {
         "title": os.path.splitext(os.path.basename(path))[0][:40],
         "source": os.path.abspath(path),
         "start": start, "end": end, "seconds": round(duration, 2),
+        "beats": [round(float(t), 3) for t in beats],
+        "downbeats": [round(float(t), 3) for t in downbeats],
+        "drum_hits": {k: [round(t, 3) for t in v] for k, v in hits.items()},
+        "drum_source": source,
+        "notes": notes,
+        "envelopes": envelopes,
+    }
+
+
+def derive(raw: dict) -> dict:
+    """The analysis from the raw measurements: bars, tempo, swing, drum grids, key, chords, levels and sections."""
+    bars = bars_from(raw["downbeats"], raw["beats"], raw["seconds"])
+    hits = raw["drum_hits"]
+    grid = drum_grid(hits, bars)
+    bass, other, vocals = (raw["notes"].get(s, []) for s in ("bass", "other", "vocals"))
+    lag = bass_lag(bass, hits.get("kick", []), median([length for _, length in bars]) / STEPS)
+    bass = [[s - lag, e - lag, p, amp] for s, e, p, amp in bass]
+    key, fit = key_of([x + y for x, y in zip(pitch_weights(bass), pitch_weights(other))])
+    scale = scale_of(key)
+    chords = []
+    for s, length in bars:
+        bw = pitch_weights(bass, s, s + length)
+        w = [x + 0.5 * y for x, y in zip(pitch_weights(other, s, s + length), bw)]
+        root = max(range(12), key=lambda i: bw[i]) if sum(bw) > 0 else None
+        c = chord_of(w, root, scale) if sum(w) > 0.05 * length else None
+        chords.append({"name": c[0], "root": c[1], "shape": list(c[2])} if c else None)
+    levels = {}
+    for s, env in raw["envelopes"].items():
+        per_bar = []
+        for b0, length in bars:
+            seg = env[max(0, int(b0 * ENVELOPE_RATE)):int((b0 + length) * ENVELOPE_RATE)]
+            per_bar.append(sum(seg) / len(seg) if seg else 0.0)
+        top = max(per_bar) or 1.0
+        levels[s] = [v / top for v in per_bar]
+    names = [c["name"] if c else None for c in chords]
+    feats = bar_features(grid, levels, names)
+    sections = sections_of(feats, names)
+    sections, parts = merge_runs(sections, group_sections(sections, feats, names))
+    hat_times = list(hits.get("hat", [])) or [t for v in hits.values() for t in v]
+    return {
+        "title": raw.get("title", "Remake"),
         "tempo": round(tempo_of(bars), 2),
         "bars": [[round(s, 4), round(l, 4)] for s, l in bars],
         "swing": swing_of(hat_times, bars),
         "key": key, "key_fit": fit,
-        "drum_source": source,
+        "drum_source": raw.get("drum_source", ""),
         "drums": grid,
         "bass_notes": bass,
         "chords": chords,
         "levels": levels,
         "sections": sections,
         "parts": parts,
-        "vocal_range": [note_name(min(p for _, _, p, _ in vocals)), note_name(max(p for _, _, p, _ in vocals))] if vocals else None,
+        "vocal_range": [note_name(min(n[2] for n in vocals)), note_name(max(n[2] for n in vocals))] if vocals else None,
     }
 
 
@@ -563,7 +678,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--start", type=float, help="analyse from this second")
     p.add_argument("--end", type=float, help="analyse up to this second")
     p.add_argument("--from-json", help="redraw the card from an earlier analysis.json, without the models")
-    p.add_argument("--loop-bars", type=int, default=4, choices=[1, 2, 3, 4], help="bars a scene loops (default 4)")
+    p.add_argument("--loop-bars", type=int, choices=[1, 2, 4, 8, 16], help="bars every scene loops (default: as long as its chords run before they repeat)")
     args = p.parse_args(argv)
     if args.from_json:
         with open(args.from_json) as fh:
@@ -571,11 +686,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         out = os.path.dirname(os.path.abspath(args.from_json))
     elif args.audio:
         out = args.out or os.path.splitext(args.audio)[0] + ".remake"
-        a = analyse(args.audio, out, args.start, args.end)
-        with open(os.path.join(out, "analysis.json"), "w") as fh:
-            json.dump(a, fh, indent=1)
+        a = measure(args.audio, out, args.start, args.end)
+        with open(os.path.join(out, "raw.json"), "w") as fh:
+            json.dump(a, fh)
     else:
         p.error("give an audio file or --from-json")
+    if "beats" in a:
+        # Raw measurements: work out the bars, grids, chords and sections again (cheap, no models).
+        a = derive(a)
+        with open(os.path.join(out, "analysis.json"), "w") as fh:
+            json.dump(a, fh, indent=1)
     card = draft_card(a, args.loop_bars)
     with open(os.path.join(out, "card.txt"), "w") as fh:
         fh.write(card)
