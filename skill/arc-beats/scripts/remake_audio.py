@@ -191,7 +191,8 @@ def swing_of(times: Sequence[float], bars: Sequence[Tuple[float, float]]) -> int
         p = place(t, bars)
         if p:
             (off if p[1] % 2 else on).append(p[2])
-    if len(off) < 8:
+    # Off-sixteenths that are a few stray hits among straight eighths say nothing about swing.
+    if len(off) < max(16, 0.15 * (len(on) + len(off))):
         return 50
     delay = median(off) - (median(on) if on else 0.0)
     return int(min(75, max(50, round(50 + delay * 50))))
@@ -256,6 +257,32 @@ def scale_of(key: str) -> set:
     r = NAMES.index(root)
     steps = (0, 2, 4, 5, 7, 9, 11) if mode == "major" else (0, 2, 3, 5, 7, 8, 10)
     return {(r + s) % 12 for s in steps}
+
+
+def key_by_chords(chords: Sequence[Optional[dict]], weights: Sequence[float]) -> Tuple[str, float]:
+    """The key whose scale holds the most bars' chords; among keys within a tenth of the best (a
+    major key and its relative minor always tie, and keys a fifth apart share six notes), the one
+    the notes fit best. The notes alone lean
+    to whatever sounds loudest: a bass on the fourth can outweigh the tonic."""
+    found = [c for c in chords if c]
+    if not found:
+        return key_of(weights)
+    covers = {}
+    for root in range(12):
+        for mode in ("major", "minor"):
+            key = "%s %s" % (NAMES[root], mode)
+            scale = scale_of(key)
+            covers[key] = sum(1 for c in found if {(c["root"] + i) % 12 for i in c["shape"]} <= scale)
+    best = max(covers.values())
+    near = [k for k, n in covers.items() if n >= best - max(2, 0.1 * len(found))]
+    fits = {}
+    for key in near:
+        root, mode = key.split()
+        r = NAMES.index(root)
+        profile = MAJOR if mode == "major" else MINOR
+        fits[key] = _corr(weights, profile[-r:] + profile[:-r] if r else profile)
+    key = max(near, key=lambda k: fits[k])
+    return key, round(fits[key], 3)
 
 
 def chord_of(weights: Sequence[float], bass: Optional[int] = None, scale: Optional[set] = None) -> Optional[Tuple[str, int, Tuple[int, ...]]]:
@@ -442,7 +469,7 @@ def draft_card(a: dict, loop_bars: Optional[int] = None) -> str:
     out = ["ARC BEAT 1"]
     out.append("# %s, measured from the audio by remake_audio.py, not by ear" % a.get("title", "song"))
     out.append("# tempo %.1f (Beat This! downbeats), swing %d (measured on the hats)" % (a["tempo"], swing))
-    out.append("# key %s (Basic Pitch notes of the bass and other stems, fit %.2f)" % (a["key"], a["key_fit"]))
+    out.append("# key %s (the scale that holds the most bars' chords; the notes fit it %.2f)" % (a["key"], a["key_fit"]))
     out.append("# drums: %s; bass and chords: Basic Pitch, chords matched a bar" % a["drum_source"])
     out.append("# sections: where the texture changes; the scene names are placeholders")
     out.append("# draft: add the sounds, FX and a hook of your own on D (remake.md)")
@@ -598,15 +625,21 @@ def derive(raw: dict) -> dict:
     bass, other, vocals = (raw["notes"].get(s, []) for s in ("bass", "other", "vocals"))
     lag = bass_lag(bass, hits.get("kick", []), median([length for _, length in bars]) / STEPS)
     bass = [[s - lag, e - lag, p, amp] for s, e, p, amp in bass]
-    key, fit = key_of([x + y for x, y in zip(pitch_weights(bass), pitch_weights(other))])
-    scale = scale_of(key)
-    chords = []
-    for s, length in bars:
-        bw = pitch_weights(bass, s, s + length)
-        w = [x + 0.5 * y for x, y in zip(pitch_weights(other, s, s + length), bw)]
-        root = max(range(12), key=lambda i: bw[i]) if sum(bw) > 0 else None
-        c = chord_of(w, root, scale) if sum(w) > 0.05 * length else None
-        chords.append({"name": c[0], "root": c[1], "shape": list(c[2])} if c else None)
+    weights = [x + y for x, y in zip(pitch_weights(bass), pitch_weights(other))]
+
+    def chords_in(scale: Optional[set]) -> List[Optional[dict]]:
+        out = []
+        for s, length in bars:
+            bw = pitch_weights(bass, s, s + length)
+            w = [x + 0.5 * y for x, y in zip(pitch_weights(other, s, s + length), bw)]
+            root = max(range(12), key=lambda i: bw[i]) if sum(bw) > 0 else None
+            c = chord_of(w, root, scale) if sum(w) > 0.05 * length else None
+            out.append({"name": c[0], "root": c[1], "shape": list(c[2])} if c else None)
+        return out
+
+    # The key from the chords as heard with no key in mind, then the chords again with its bias.
+    key, fit = key_by_chords(chords_in(None), weights)
+    chords = chords_in(scale_of(key))
     levels = {}
     for s, env in raw["envelopes"].items():
         per_bar = []

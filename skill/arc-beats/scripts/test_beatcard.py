@@ -2500,6 +2500,23 @@ class RemakeAudio(unittest.TestCase):
         self.assertEqual(self.ra.loop_size(["A", "B", "C", "D", "E"], 0, 5), 5)  # no repeat: the whole section
         self.assertEqual(self.ra.loop_size(["A"] * 40, 0, 40), 1)
 
+    def test_key_by_chords_and_stray_swing(self):
+        def chord(root, shape):
+            return {"name": "", "root": root, "shape": list(shape)}
+        # A B C#m E, over and over: E major's chords (IV V vi I), though the bass leans on A and C#.
+        loop = [chord(9, (0, 4, 7)), chord(11, (0, 4, 7, 10)), chord(1, (0, 3, 7)), chord(4, (0, 4, 7, 11))] * 8
+        weights = [0.0] * 12
+        for pc, w in ((9, 10), (1, 10), (4, 5), (11, 4), (3, 2), (8, 2), (6, 1)):
+            weights[pc] = w
+        self.assertEqual(self.ra.key_of(weights)[0], "A major")  # the loudest notes alone
+        self.assertIn(self.ra.key_by_chords(loop, weights)[0], ("C# minor", "E major"))
+        # A few stray off-sixteenths among straight eighths are no swing.
+        bars = [(float(b) * 2, 2.0) for b in range(8)]
+        step = 2.0 / 16
+        eighths = [b * 2 + s * step for b in range(8) for s in range(0, 16, 2)]
+        strays = [b * 2 + 3 * step + step / 3 for b in range(8)]
+        self.assertEqual(self.ra.swing_of(eighths + strays, bars), 50)
+
     def test_bass_lag_behind_kicks(self):
         step = 60 / 134 / 4
         kicks = [i * 4 * step for i in range(32)]
