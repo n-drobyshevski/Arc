@@ -1439,16 +1439,21 @@ function write(card: BeatCard, names: (pad: PhysicalPad) => string | null = () =
   return out.join('\n') + '\n'
 }
 
-// The chain line: steps as 2 or 2x4; those naming a scene the card hasn't, or passes out of range, are left out, and so is a chain left with none.
 /** A lesson step as its line: "lesson Kick alone | A7 | 50 | Count out loud" (the speed left out at 100, A for the whole group). */
 export function lessonText(step: LessonStep): string {
-  const pads = step.pads === null ? letter(step.group) : ROWS.flat().filter((o) => step.pads!.includes(o)).map((o) => padText(step.group, o)).join(' ')
-  const parts = [cleanText(step.title, MAX_NAME), pads]
+  const parts = [cleanText(step.title, MAX_NAME), lessonPads(step)]
   if (step.speed !== LESSON_MAX_SPEED || step.tip !== null) parts.push(`${step.speed}`)
   if (step.tip !== null) parts.push(cleanText(step.tip, Number.MAX_SAFE_INTEGER))
   return 'lesson ' + parts.join(' | ')
 }
 
+/** A lesson step's pads as a card writes them, in keypad order ("A7 A9"), or the group's letter for all its pads. */
+export function lessonPads(step: LessonStep): string {
+  const pads = step.pads
+  return pads === null ? letter(step.group) : ROWS.flat().filter((o) => pads.includes(o)).map((o) => padText(step.group, o)).join(' ')
+}
+
+// The chain line: steps as 2 or 2x4; those naming a scene the card hasn't, or passes out of range, are left out, and so is a chain left with none.
 function writeChain(out: string[], chain: readonly (readonly [number, number])[], sceneCount: number): void {
   const steps = chain.filter(([sc, passes]) => sc >= 1 && sc <= sceneCount && passes >= Chain.MIN_PASSES && passes <= Chain.MAX_PASSES).slice(0, Chain.MAX_STEPS)
   if (steps.length === 0) return
@@ -2283,4 +2288,4 @@ function isCardFile(name: string): boolean {
 /** The most of a card file Arc reads: a longer one is no card. */
 const MAX_CARD_FILE = 1 << 20
 
-export const BeatCards = { VERSION, MAX_NAME, MAX_SCENES, TIDY_COMMENT, read, hasCard, write, fromPatterns, fromScenes, fxOf, padOf, applyFx, applyPad, resolveSounds, soundNames, soundList, silentPads, synthsByPad, notesByPad, suggestSound, isCardFile, MAX_CARD_FILE, plan, planScenes } as const
+export const BeatCards = { VERSION, MAX_NAME, MAX_SCENES, TIDY_COMMENT, read, hasCard, write, lessonPads, fromPatterns, fromScenes, fxOf, padOf, applyFx, applyPad, resolveSounds, soundNames, soundList, silentPads, synthsByPad, notesByPad, suggestSound, isCardFile, MAX_CARD_FILE, plan, planScenes } as const

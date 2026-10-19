@@ -43,10 +43,14 @@ describe('a card lesson', () => {
     expect(err('lesson Odd | A7 Q9')).toContain("'Q9'")
     expect(err(Array.from({ length: 13 }, (_, i) => `lesson Step ${i + 1} | A7`).join('\n'))).toContain('more than 12')
   })
+
+  it("a step's pads read in keypad order, or the group's letter for all of them", () => {
+    expect(BeatCards.lessonPads({ title: 'x', group: 0, pads: [6, 11, 9], speed: 100, tip: null })).toBe('A7 A9 A4')
+    expect(BeatCards.lessonPads({ title: 'x', group: 1, pads: null, speed: 100, tip: null })).toBe('B')
+  })
 })
 
-// The practice texts of a lesson (PracticeText, from the same Kotlin file; the keypad-order case before it,
-// BeatCards.lessonPads, comes with the lesson run).
+// The practice texts of a lesson (PracticeText, from the same Kotlin file).
 describe('a card lesson in PRACTICE', () => {
   it('the practice texts of a lesson', () => {
     expect(PracticeText.step(2, 4)).toBe('Step 2/4')
