@@ -37,44 +37,110 @@
 }
 .take-badge__label { white-space: nowrap; font-variant-numeric: tabular-nums; }
 
-/* Live tools' takes (TakesSection). */
+/* Live tools' takes (TakesDeck): the glass, the hint and the strip. */
 .takes { display: flex; flex-direction: column; gap: var(--space-10); }
-.takes__key { width: 100%; }
-.takes__note { margin: 0; color: var(--graphite); }
-.takes__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-10); }
-.take {
+.takes__hint { margin: 0 4px; color: var(--graphite); }
+
+/* The glass (TakesGlass): radius 16, padding 16 / 12, its lines 1px of ink at 8%. */
+.takes-glass {
   display: flex;
   flex-direction: column;
-  gap: var(--space-8);
-  padding: var(--space-14) var(--space-16);
-  border-radius: var(--radius-plate);
-  background: var(--plate);
+  padding: 12px 16px;
+  border-radius: 16px;
+  background: var(--display);
+  color: var(--display-ink);
 }
-.take__row { display: flex; align-items: center; gap: var(--space-10); }
-.take__fold {
-  flex: 1 1 auto;
-  min-width: 0;
+.takes-glass__head {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+.takes-glass__grow { flex: 1 1 auto; min-width: 0; }
+/* GlassHead: displaySub at 13, tracked .08em, upper case. */
+.takes-glass__sub {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--display-dim);
+}
+.takes-glass__sub.is-signal { color: var(--signal); }
+.takes-glass__dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+.takes-glass__dot.is-blinking { animation: rec-blink 450ms ease-in-out infinite alternate; }
+@media (prefers-reduced-motion: reduce) {
+  .takes-glass__dot.is-blinking { animation: none; }
+}
+/* statNum at 26. */
+.takes-glass__time {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: var(--track-stat-num);
+  font-variant-numeric: tabular-nums;
+  color: var(--signal);
+}
+.takes-glass__armed { margin: 2px 0 8px; color: var(--display-dim); }
+.takes-glass__empty {
+  margin: 0;
+  padding: 14px 0;
+  border-top: 1px solid color-mix(in srgb, var(--display-ink) 8%, transparent);
+}
+.takes-glass__list { display: flex; flex-direction: column; }
+/* A take: number (38 wide), length, date, and ▶ in 14 at the end, 14 apart, at least 48 high. */
+.take-line {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 48px;
   padding: 0;
   border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--display-ink) 8%, transparent);
   background: none;
-  color: var(--ink);
+  color: var(--display-ink);
   font: inherit;
   text-align: start;
   cursor: pointer;
 }
-.take__fold:focus-visible { outline: var(--focus-ring); outline-offset: 4px; border-radius: 4px; }
-.take__when {
-  max-width: 100%;
+.take-line:focus-visible { outline: var(--focus-ring); outline-offset: -3px; border-radius: 4px; }
+/* GlassRow: displayHead at 17, semibold, tracked .06em. */
+.take-line__row {
+  flex: none;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.take-line__number { width: 38px; }
+.take-line__when {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 700;
 }
-.take__length { color: var(--graphite); font-variant-numeric: tabular-nums; }
-.take__more { display: flex; flex-direction: column; gap: var(--space-10); }
-.take__ask { margin: var(--space-6) 0 0; color: var(--graphite); }
-.take__keys { display: flex; gap: var(--space-10); }
-.take__keys > .key { flex: 1 1 0; min-width: 0; }
+.take-line__mark { flex: none; display: flex; width: 14px; height: 14px; }
+.take-line.is-lit,
+.take-line.is-lit .take-line__when { color: var(--signal); }
+/* A delete asked for: signal words in a signal outline, at least 48 high. */
+.takes-glass__confirm {
+  margin-top: 8px;
+  min-height: 48px;
+  padding: 14px 12px;
+  border: 1px solid var(--signal);
+  border-radius: 8px;
+  background: none;
+  color: var(--signal);
+  text-align: center;
+  cursor: pointer;
+}
+.takes-glass__confirm:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }

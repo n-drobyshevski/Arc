@@ -192,7 +192,8 @@ export function trimIndexOf(sheets: readonly string[]): number | null {
 export function DeviceUploadSheet(props: { view: NavView }): JSX.Element {
   const c = useController()
   const nav = useNav()
-  const state = c.state.value
+  // Not the mirror or KEYS's pad: a publish doesn't re-render it.
+  const state = c.stateShell.value
   const playing = c.playing.value
   const draft = state.browser.draft
   const sheets = props.view.sheets

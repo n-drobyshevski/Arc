@@ -72,6 +72,8 @@ async function boot(): Promise<void> {
   })
   const c = createController(deps)
   controller = c
+  // ?demo: the render and press-to-sound counters test/e2e/perf.spec.ts reads (dev/perf.ts).
+  if (demo) (await import('./dev/demo')).installPerf(window, c, deps)
   // Settings → Theme and Skin, and another tab's change.
   effect(() => {
     const s = c.settings.value

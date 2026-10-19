@@ -14,6 +14,7 @@ import {
   groupGlow,
   keysLayout,
   keysStart,
+  litAttr,
   showNoPushes,
   transportText,
 } from '../../src/ui/live/glow'
@@ -66,6 +67,13 @@ describe('glow', () => {
     expect(glowCss(0.123456)).toBe('0.1235')
     expect(glowCss(-1)).toBe('0')
     expect(glowCss(2)).toBe('1')
+  })
+
+  it('marks a pad lit only while it shows a glow', () => {
+    expect(litAttr(0)).toBeUndefined()
+    expect(litAttr(0.00001)).toBeUndefined()
+    expect(litAttr(0.001)).toBe('')
+    expect(litAttr(1)).toBe('')
   })
 })
 

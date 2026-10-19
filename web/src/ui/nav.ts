@@ -39,8 +39,9 @@ export type Screen =
 /**
  * The overlay layers. [id] says which one, for sheets and dialogs:
  * 'detail:<backupId>', 'restore:<backupId>', 'comparePick:<backupId>',
- * 'pads:backup:<id>:<n>', 'pads:device:<n>', 'upload', 'trim:<i>', 'licence', 'keys' (the Keyboard keys sheet), 'progress' (app.tsx keeps it in step with state.task);
- * dialogs: 'delete', 'prune:<keep>', 'forget', 'pick:scale' / 'pick:octave' (Live's KEYS lists).
+ * 'pads:backup:<id>:<n>', 'pads:device:<n>', 'upload', 'trim:<i>', 'licence', 'keys' (the Keyboard keys sheet),
+ * 'scale:<part>' (Live's KEYS sheet), 'progress' (app.tsx keeps it in step with state.task);
+ * dialogs: 'delete', 'prune:<keep>', 'forget', 'pick:scale' / 'pick:octave' / 'pick:key' (KEYS' lists, where a screen has no sheet).
  */
 export type OverlayKind = 'dialog' | 'side' | 'menu' | 'coach' | 'tour' | 'sheet'
 

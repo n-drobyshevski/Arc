@@ -29,12 +29,15 @@ import { PhaseAnchors } from "../../src/core/features/sequencer";
 import { MirrorText } from "../../src/core/text/mirrorText";
 import {
   ClipMode,
+  LIGHTS,
+  NO_LIGHTS,
   PadStage,
   SceneDesk,
   closedAt,
   cycledSwitch,
   filledPatterns,
   queueTick,
+  stepLights,
   wrapPattern,
   type QueuedPick,
 } from "../../src/state/scenePlan";
@@ -809,5 +812,27 @@ describe("ScenePlanTest", () => {
     const seq = withP(withP(idle, 0, 4, 2, note(0)), 0, 9, 1);
     expect(filledPatterns(seq, 0)).toEqual(new Set([4]));
     expect(filledPatterns(seq, 1).size).toBe(0);
+  });
+
+  it("a pattern's first bar as sixteen step lights, the hardest hit in each", () => {
+    const step = Seq.TICKS_PER_BAR / LIGHTS;
+    const p = pattern(2, [
+      patternNote(0, 9, 10, null, 120),
+      patternNote(0, 4, 10, null, 60),
+      // A little early for step 5: to the nearest.
+      patternNote(4 * step - 3, 11, 10, null, 100),
+      patternNote(8 * step, 2, 10, null, 40),
+      // Late in the bar's last half step: round to the first.
+      patternNote(Seq.TICKS_PER_BAR - 2, 2, 10, null, 127),
+      // The second bar isn't drawn.
+      patternNote(Seq.TICKS_PER_BAR + step, 2, 10),
+    ]);
+    const lights = stepLights(p);
+    expect(lights).toHaveLength(LIGHTS);
+    expect(lights[0]).toBe("ACCENT");
+    expect(lights[4]).toBe("NORMAL");
+    expect(lights[8]).toBe("GHOST");
+    expect(lights.filter((it) => it !== null)).toHaveLength(3);
+    expect(stepLights(pattern())).toEqual(NO_LIGHTS);
   });
 });

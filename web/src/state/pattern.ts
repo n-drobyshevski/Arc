@@ -21,14 +21,17 @@
 // - STEP (StepPlan.kt's StepDesk) and CORRECT are this desk's, as ERASE is:
 //   ArcController's STEP section lives here, the controller routing the
 //   presses to it.
+// - PRACTICE (ArcController's PRACTICE section) is this desk's too, as it
+//   owns the transport and the tick heard; the line's PLAY, STEP and scene
+//   chip, which stay beside its panel here, play, stop or end it.
 // - The follow loop is a timer (setTimeout), not a coroutine; the click for
 //   the count-in is the sequencer's own (PatternScheduler).
 // - Times are performance.now() milliseconds where Kotlin's are System.nanoTime.
 
-import type { FactoryKit } from '../core/features/factorySounds'
+import { Chain } from '../core/features/chain'
 import { signal, type ReadonlySignal, type Signal } from '@preact/signals'
-import { physicalPad, type PhysicalPad } from '../core/features/padNotes'
-import { Pattern, Patterns, ProjectPatterns, ProjectSeq, Seq, TimingSettings, type Timing } from '../core/features/pattern'
+import { LABELS, padKey, physicalPad, type PhysicalPad } from '../core/features/padNotes'
+import { Pattern, Patterns, ProjectPatterns, ProjectSeq, Seq, TimingSettings, sameSeq, type Timing } from '../core/features/pattern'
 import { PatternRecorder } from '../core/features/patternRecorder'
 import { frameAt } from '../core/features/sampleTiming'
 import { Steps } from '../core/features/steps'
@@ -40,10 +43,17 @@ import { ClockFollow, TapTempo, Tempo, type Beat, type BeatGrid } from '../core/
 import type { MidiEvent } from '../core/protocol/midiInput'
 import { ArpSettings, type ArpNote, type ArpOrder } from '../core/features/arp'
 import { OutputDelay } from '../core/features/outputDelay'
-import { BeatCards, type CardRead } from '../core/features/beatCard'
+import { Practice, PracticeCounts, PracticeScore, PracticeWait, practiceSpec, type HitMark, type PracticeSpec, type PracticeTarget } from '../core/features/practice'
+import { BeatCards, LESSON_MAX, type BeatCard, type CardFx, type CardPad, type CardRead, type LessonStep } from '../core/features/beatCard'
+import type { PadTarget } from '../core/features/liveMirror'
+import { OfflinePadSettings } from '../core/features/offlinePadSettings'
+import { OfflinePads } from '../core/features/offlinePads'
+import type { FxSettings } from '../core/features/fxSettings'
+import type { PadSettings } from '../core/features/padSettings'
 import { ClaudeText } from '../core/text/claudeText'
 import { FeatureText } from '../core/text/featureText'
 import { MirrorText } from '../core/text/mirrorText'
+import { PracticeText } from '../core/text/practiceText'
 import type { PatternPrefs, PatternSettings } from '../platform/storage/settings'
 import type { VoiceShape } from '../core/formats/voiceMixer'
 import type { ArpStep, Deps, LiveTimeline } from './deps'
@@ -65,8 +75,9 @@ import {
   type PatternUiState,
 } from './patternPlan'
 import { ARP_PRESSURE_MS, ARP_UI, ArpDesk, type ArpUi } from './arpPlan'
-import { applyBeat, beatImportUi, beatImported, beatShare, type BeatApplied, type BeatImportUi, type BeatShare } from './beatPlan'
+import { applyBeat, beatImportUi, beatImported, beatShare, beatShareChain, isBefore, padShapes, type BeatApplied, type BeatBlocks, type BeatImportUi, type BeatShare, type ShareParts } from './beatPlan'
 import { ClipMode, PadStage, SCENE_UI, SceneDesk, type SceneUi } from './scenePlan'
+import { keypadOrder, practiceGroup, type LessonRecord, type PracticeFrame, type PracticeUi } from './practicePlan'
 import { CORRECT_SHOWN_MS, STEP_UI, StepDesk, arpTakesPress, auditionMs, stepOpens, stepWord, type StepNote, type StepUi } from './stepPlan'
 import type { Store } from './store'
 import type { UiState } from './types'
@@ -87,6 +98,12 @@ export const PATTERN_ERASE_MS = 20
 const CLICK_WATCH_MS = 500
 
 
+/** WAIT's lane shows this many steps ahead. */
+const PRACTICE_WAIT_AHEAD = 6
+
+/** A lesson's step opens the next after this many clean passes in a row. */
+export const LESSON_CLEAN_PASSES = 4
+
 /** A pick waiting takes over once the playhead heard is this far past its tick (Kotlin SCENE_GRACE_NS). */
 const SCENE_GRACE_MS = 100
 
@@ -105,6 +122,45 @@ interface EraseHold {
 
 const eraseKey = (pad: PhysicalPad, semitones: number | null): string => `${pad.group}:${pad.offset}:${semitones ?? 'n'}`
 
+/** A practice going on: its [spec], the patterns the sequencer plays meanwhile, the hits to play and how they score. */
+interface PracticeRun {
+  readonly spec: PracticeSpec
+  readonly place: string
+  readonly patterns: ProjectPatterns
+  readonly targets: readonly PracticeTarget[]
+  readonly length: number
+  readonly bpm: number
+  readonly names: ReadonlyMap<number, string>
+  score: PracticeScore
+  wait: PracticeWait | null
+}
+
+/**
+ * A lesson going on: the card's [name] and [steps], the step on ([at], from
+ * 0), each step's record so far, whether every step is [done], and [moving]
+ * while the next step is on its way (so a pass closing meanwhile counts once).
+ */
+class LessonRun {
+  at = 0
+  readonly records: (LessonRecord | null)[]
+  done = false
+  moving = false
+
+  constructor(
+    readonly name: string | null,
+    readonly steps: readonly LessonStep[],
+  ) {
+    this.records = steps.map(() => null)
+  }
+}
+
+/** Whether [a] and [b] practise the same (Kotlin's data class equality: the pads by what is in them). */
+function sameSpec(a: PracticeSpec, b: PracticeSpec): boolean {
+  if (a.group !== b.group || a.bars !== b.bars || a.speed !== b.speed || a.wait !== b.wait || a.backing !== b.backing) return false
+  if (a.pads === null || b.pads === null) return a.pads === b.pads
+  return a.pads.size === b.pads.size && [...a.pads].every((o) => b.pads!.has(o))
+}
+
 export interface PatternHost {
   store: Store<UiState>
   deps: Pick<Deps, 'liveAudio' | 'library' | 'perfNow' | 'setTimeout' | 'clearTimeout'>
@@ -119,7 +175,106 @@ export interface PatternHost {
   noteNames?(): NoteNames
   /** [pad]'s sound name as Live shows it (a beat card's rows), or null. */
   padName?(pad: PhysicalPad): string | null
+  /** A practice started: Live shows its group's pads (one group, PADS), as Kotlin's startPractice sets them. */
+  practiceStarted?(): void
+  /** A beat card's FX, SOUNDS, PAD SHAPING and SILENT PADS blocks as the pads are now (the controller knows them). */
+  beatBlocks?(): BeatBlocks
+  /** A card came in, or was imported: Claude's reply is here, the Claude page stops waiting for it (the controller's claudeWaiting). */
+  claudeAnswered?(): void
+  /**
+   * IMPORT's FX: the card's [fx] replace the project's, the kinds it has a
+   * line for (BeatCards.applyFx), at once; [entry] keeps the FX before and
+   * after when they changed.
+   */
+  applyBeatFx?(fx: CardFx, entry: BeatUndo): void
+  /** UNDO of an import that applied FX: the old ones back while they are still as it left them (true when put back). */
+  restoreBeatFx?(entry: BeatUndo): boolean
+  /**
+   * IMPORT's sounds: those of the ticked pads ([soundPads], pad keys) and
+   * the ones [picked] for silent pads (pad key to slot) put on their pads,
+   * [entry] keeping what UNDO needs; the [pads] (pad keys) they were to go on,
+   * and the writes ([put]). Null when none changes a pad now.
+   */
+  putBeatSounds?(card: BeatCard, soundPads: ReadonlySet<number>, picked: ReadonlyMap<number, number>, entry: BeatUndo): { readonly pads: ReadonlySet<number>; readonly put: Promise<SoundsPut> } | null
+  /** IMPORT's pad settings: the card's `pad` lines ([shapes]) put on their pads once the sounds are on, [entry] keeping what UNDO needs. */
+  shapeBeatPads?(entry: BeatUndo, shapes: readonly (readonly [PhysicalPad, CardPad])[]): Promise<ShapingPut>
+  /** UNDO took back an import that put sounds on pads or shaped them ([entry]): they get their old sounds and settings back. */
+  putBackBeat?(entry: BeatUndo): Promise<void>
+  /** A toast with a key ([label]: UNDO) that runs [run] once. */
+  toastWith?(text: string, label: string, run: () => void, error?: boolean): void
 }
+
+/** A pad an IMPORT put a sound on: the [pad] and its [target], whose slot is the sound it had (null when none was known). */
+export interface PadBack {
+  readonly pad: PhysicalPad
+  readonly target: PadTarget
+}
+
+/** The sounds an IMPORT put on: the pads [done], the [skipped] picks, the recordings that went to Takes ([moved]) and why it stopped ([failure]; null when it didn't). */
+export interface SoundsPut {
+  readonly done: readonly PadBack[]
+  readonly skipped: number
+  readonly moved: number
+  readonly failure: string | null
+}
+
+/** One pad shaped by an IMPORT, to be taken back by UNDO: the [pad], its [target], and its settings [before] and [after] the card's line. */
+export interface ShapeBack {
+  readonly pad: PhysicalPad
+  readonly target: PadTarget
+  readonly before: PadSettings
+  readonly after: PadSettings
+}
+
+/** The pad settings an IMPORT wrote: the pads [done], the [skipped] ones (no target or sound, or settings not known) and why it stopped ([failure]). */
+export interface ShapingPut {
+  readonly done: readonly ShapeBack[]
+  readonly skipped: number
+  readonly failure: string | null
+}
+
+/**
+ * One IMPORT, to be taken back by UNDO: the [recorder] it went through, the
+ * sequencer as it was [before] and as it stood [after] it (the toast's UNDO
+ * only acts while it still does). While its sounds are being [writing], UNDO
+ * only marks it [undone]: the writes stop and put back what they did. If it
+ * put sounds on [pads], their targets hold the sound each pad had, and an
+ * import made [offline] keeps the offline pad changes and settings as they
+ * were ([padsBefore], [settingsBefore]).
+ */
+export class BeatUndo {
+  pads: readonly PadBack[] = []
+  writing = false
+  undone = false
+  offline = false
+  padsBefore: OfflinePads = OfflinePads.EMPTY
+  settingsBefore: OfflinePadSettings = OfflinePadSettings.EMPTY
+
+  /** The FX it replaced: project [fxProject]'s FX [fxBefore] became [fxAfter]; null when it left them as they were. [fxRestored]: UNDO put them back. */
+  fxProject = 0
+  fxBefore: FxSettings | null = null
+  fxAfter: FxSettings | null = null
+  fxRestored = false
+
+  /** The pads whose settings it wrote (ShapeBack), and for an import made [shapedOffline] the offline settings as they were before. */
+  shaped: readonly ShapeBack[] = []
+  shapedOffline = false
+  shapeSettingsBefore: OfflinePadSettings = OfflinePadSettings.EMPTY
+
+  constructor(
+    readonly recorder: PatternRecorder,
+    readonly before: ProjectSeq,
+    readonly after: ProjectSeq,
+  ) {}
+
+  /** Whether UNDO went back to the sequencer before this import ([c], what the recorder gave back; open groups come back closed). */
+  restores(c: ProjectSeq): boolean {
+    return isBefore(c, this.before)
+  }
+}
+
+/** The imports UNDO can still take back, at most. */
+const MAX_BEAT_UNDOS = 8
 
 /** The plan last handed to the sequencer, to tell when a new one changes anything. */
 interface SentPlan {
@@ -309,7 +464,8 @@ export class PatternDesk {
   /** The device's tempo changed (or stopped coming): the plan follows. */
   tempoChanged(): void {
     this.refreshPlan()
-    this.publishArp()
+    // The arp's plan has the tempo too, but only while it has notes: with none it stays null.
+    if (this.settings.arpOn && this.arpDesk.notes.length > 0) this.publishArp()
   }
 
   private get recorder(): PatternRecorder {
@@ -376,7 +532,9 @@ export class PatternDesk {
   refreshPlan(): void {
     const audio = this.host.deps.liveAudio
     if (!audio.seqPlan) return
-    const p = this.current
+    // A practice plays the scene with the player's hits taken out, at its own speed.
+    const practising = this.practiceRun
+    const p = practising?.patterns ?? this.current
     // Where each pattern started, for the recording's ticks as for the sequencer's.
     const phase = this.sceneDesk.phase
     this.recorder.phase = phase
@@ -385,8 +543,9 @@ export class PatternDesk {
     for (const [g, q] of this.sceneDesk.targets(this.seq)) queued.set(g, { pattern: ProjectSeq.pattern(this.seq, g, q.to), atTick: q.at })
     const pads = ProjectPatterns.usedPads(p)
     for (const [g, q] of queued) for (const n of Pattern.playable(q.pattern)) pads.add(g * 12 + n.offset)
+    if (practising !== null) for (const t of practising.targets) pads.add(practising.spec.group * 12 + t.offset)
     const { voices, missing } = patternVoices(pads, (pad) => this.host.live.patternVoice(pad))
-    const bpm = this.bpm()
+    const bpm = practising?.bpm ?? this.bpm()
     const shapes = new Map<number, Partial<VoiceShape>>()
     const keysShapes = new Map<number, Partial<VoiceShape>>()
     const shapeOf = this.host.shapeOf
@@ -397,17 +556,22 @@ export class PatternDesk {
       }
     }
     const old = this.sent
-    if (
-      old === null ||
-      old.patterns !== p ||
-      old.skip !== this.skip ||
-      old.bpm !== bpm ||
-      old.phase !== phase ||
-      !sameQueued(old.queued, queued) ||
-      !sameVoices(old.voices, voices) ||
-      !sameShapes(old.shapes, shapes) ||
-      !sameShapes(old.keysShapes, keysShapes)
-    ) {
+    const kept =
+      old !== null &&
+      old.patterns === p &&
+      old.skip === this.skip &&
+      old.phase === phase &&
+      sameQueued(old.queued, queued) &&
+      sameVoices(old.voices, voices) &&
+      sameShapes(old.shapes, shapes) &&
+      sameShapes(old.keysShapes, keysShapes)
+    if (kept && old.bpm === bpm) {
+      // Nothing changed.
+    } else if (kept && audio.seqTempo) {
+      // Only the tempo moved: it goes alone, not the whole plan (web only).
+      this.sent = { ...old, bpm }
+      audio.seqTempo(bpm)
+    } else {
       this.sent = { patterns: p, skip: this.skip, bpm, voices, shapes, keysShapes, queued, phase }
       audio.seqPlan({ patterns: p, voices, skip: this.skip, bpm, phase, shapes, keysShapes, queued })
     }
@@ -491,6 +655,8 @@ export class PatternDesk {
 
   /** RECORD goes down at [at]: armed or disarmed; running, recording on or off. */
   recordDown(at: number): void {
+    // RECORD ends a practice: what is recorded goes into the scene as it is.
+    this.endPractice()
     this.act(() => this.transport.recordDown(at))
   }
 
@@ -505,6 +671,12 @@ export class PatternDesk {
    * pressed ([recordHeld]); running, they stop.
    */
   play(recordHeld = false): void {
+    // Web: the line's PLAY stays while a practice is on (Android's line is its header): its ▶ or ■.
+    if (this.practiceRun !== null) {
+      if (this.running()) this.practiceStop()
+      else this.practicePlay()
+      return
+    }
     this.act(() => this.transport.play(recordHeld, this.settings.countIn))
   }
 
@@ -907,6 +1079,8 @@ export class PatternDesk {
       return
     }
     if (!stepOpens(this.transport.state.phase)) return
+    // Web: the line's STEP stays while a practice is on (Android's line is its header): the practice ends.
+    this.endPractice()
     if (this.transport.state.phase === 'ARMED') this.stop()
     this.setErase(false)
     this.closeScene()
@@ -1151,6 +1325,8 @@ export class PatternDesk {
       return
     }
     this.closeStep()
+    // Web: so does its scene chip; the practice ends.
+    this.endPractice()
     this.sceneDesk.openOn(group)
     this.publishScene()
   }
@@ -1545,6 +1721,320 @@ export class PatternDesk {
     return this.host.noteNames?.() ?? NoteNames.LETTERS
   }
 
+  // ---------- PRACTICE: play along with a pattern, Live's pads lit ahead of each hit (an addition) ----------
+
+  private practiceRun: PracticeRun | null = null
+  private readonly _practice = signal<PracticeUi | null>(null)
+  /** PRACTICE as Live's panel shows it; null when no practice is on. */
+  readonly practice: ReadonlySignal<PracticeUi | null> = this._practice
+
+  /** The tempo practice plays at: Live's, at [speed] percent. */
+  private practiceBpm(speed: number): number {
+    return (this.bpm() * speed) / 100.0
+  }
+
+  /**
+   * PRACTICE on [spec]'s group's pattern in the scene showing ([spec]'s pads,
+   * bars and speed): STEP's and SCENE's panels close, the transport stops,
+   * and the pattern plays from a bar counted in with the player's hits taken
+   * out, the rest of the scene underneath (Practice.patterns). Nothing is
+   * recorded. A toast, and no practice, when the group has no pad hits there.
+   * A lesson going on ends. True when it started (web: Live then shows one
+   * group's pads through host.practiceStarted, as Kotlin's startPractice
+   * changes the settings itself).
+   */
+  practise(spec: PracticeSpec): boolean {
+    this.lessonRun = null
+    return this.startPractice(spec)
+  }
+
+  /** [practise], a lesson going on kept (its step's spec, or the step's settings changed). */
+  private startPractice(spec: PracticeSpec): boolean {
+    const g = Math.min(Math.max(spec.group, 0), 3)
+    const pat = ProjectPatterns.group(this.current, g)
+    const targets = Practice.targets(pat, spec)
+    const place = ClaudeText.place(g, ProjectSeq.selected(this.seq, g))
+    if (targets.length === 0) {
+      this.host.toast(PracticeText.nothingToPlay(place), true)
+      return false
+    }
+    if (this.running()) this.stop()
+    this.closeStep()
+    this.closeScene()
+    const bpm = this.practiceBpm(spec.speed)
+    const length = Practice.length(pat, spec)
+    const names = new Map<number, string>()
+    for (const t of targets) if (!names.has(t.offset)) names.set(t.offset, this.host.padName?.(physicalPad(g, t.offset)) ?? LABELS[t.offset]!)
+    this.practiceRun = {
+      spec,
+      place,
+      patterns: Practice.patterns(this.current, spec),
+      targets,
+      length,
+      bpm,
+      names,
+      score: new PracticeScore(targets, length, bpm),
+      wait: spec.wait ? new PracticeWait(targets) : null,
+    }
+    this.host.practiceStarted?.()
+    this.refreshPlan()
+    this.showPractice()
+    if (!spec.wait) this.practicePlay()
+    return true
+  }
+
+  /** The settings of the practice on changed by [change] (speed, bars, WAIT, the backing): it starts over with them. */
+  changePractice(change: (spec: PracticeSpec) => PracticeSpec): void {
+    const run = this.practiceRun
+    if (run === null) return
+    const next = change(run.spec)
+    if (sameSpec(next, run.spec)) return
+    this.keepLessonRecord()
+    this.startPractice(next)
+  }
+
+  /** PRACTICE's ▶: from the top again, the counts cleared (in WAIT, the first step). */
+  practicePlay(): void {
+    const run = this.practiceRun
+    if (run === null) return
+    this.keepLessonRecord()
+    if (this.lessonRun !== null) this.lessonRun.moving = false
+    run.score = new PracticeScore(run.targets, run.length, run.bpm)
+    run.wait = run.spec.wait ? new PracticeWait(run.targets) : null
+    if (!run.spec.wait) {
+      if (this.running()) this.stop()
+      this.act(() => this.transport.practise())
+    }
+    this.showPractice()
+  }
+
+  /** PRACTICE's ■: the transport stops and the counts stay, with the pad most often off. */
+  practiceStop(): void {
+    if (this.practiceRun === null) return
+    if (this.running()) this.stop()
+    this.showPractice()
+  }
+
+  /** PRACTICE's ✕: it ends, the sequencer plays the scene as it is again. */
+  endPractice(): void {
+    if (this.practiceRun === null) return
+    if (this.running()) this.stop()
+    this.practiceRun = null
+    this.lessonRun = null
+    this._practice.value = null
+    this.refreshPlan()
+  }
+
+  /** Whether a practice is on. */
+  get practising(): boolean {
+    return this.practiceRun !== null
+  }
+
+  /** [pad] pressed at [at] while practising: scored by its time heard, or in WAIT by whether the step waits for it. */
+  practicePress(pad: PhysicalPad, at: number): void {
+    const run = this.practiceRun
+    if (run === null || pad.group !== run.spec.group) return
+    const w = run.wait
+    if (w !== null) {
+      w.press(pad.offset)
+    } else {
+      const tick = this.practiceTick(run, at)
+      if (tick === null) return
+      run.score.advance(tick)
+      run.score.press(pad.offset, tick)
+    }
+    this.showPractice()
+  }
+
+  /** Where the practised group's loop is heard at [at], from its first start (negative counting in); null stopped. */
+  private practiceTick(run: PracticeRun, at: number): number | null {
+    const t = this.heardTickAt(at)
+    return t === null ? null : t - PhaseAnchors.of(this.sceneDesk.phase, run.spec.group)
+  }
+
+  /**
+   * The practice running at [now], for the pads and the lane: the tick heard,
+   * each pad's next hits (WAIT: the step's pads, now), the counts; the hits
+   * passed by are let go of. Null when no practice is on.
+   */
+  practiceFrame(now: number): PracticeFrame | null {
+    const run = this.practiceRun
+    if (run === null) return null
+    const w = run.wait
+    if (w !== null) {
+      const waiting = w.waiting
+      const upcoming: [PracticeTarget, number][] = []
+      for (const s of w.steps.slice(w.step, w.step + PRACTICE_WAIT_AHEAD)) {
+        for (const t of s) {
+          const d = t.tick - w.tick
+          if (d > 0 || waiting.has(t.offset)) upcoming.push([t, d])
+        }
+      }
+      return { tick: w.tick, upcoming, counts: w.counts }
+    }
+    const tick = this.practiceTick(run, now)
+    if (tick === null) return { tick: 0, upcoming: [], counts: run.score.counts }
+    const passes = run.score.counts.passes
+    run.score.advance(tick)
+    if (run.score.counts.passes !== passes) {
+      this.showPractice()
+      this.lessonPassed()
+    }
+    return { tick, upcoming: run.score.upcoming(tick), counts: run.score.counts }
+  }
+
+  private lessonRun: LessonRun | null = null
+
+  /** The card and where the last IMPORT put it (IMPORT AND PRACTISE); null when it put nothing. */
+  private lastImport: { readonly applied: BeatApplied; readonly card: BeatCard } | null = null
+
+  /**
+   * IMPORT AND PRACTISE: practice on what the last import placed, in the
+   * scene it selected: a card with a lesson runs its steps from the first
+   * ([LessonRun]), else the first of its groups with pad hits
+   * (practiceGroup), at [speed].
+   */
+  practiseImport(speed: number): void {
+    const last = this.lastImport
+    if (last === null) return
+    const lesson = last.card.lesson ?? []
+    if (lesson.length > 0) {
+      this.lessonRun = new LessonRun(last.card.name, lesson.slice(0, LESSON_MAX))
+      this.startLessonStep(0)
+      return
+    }
+    const first = last.applied.placed[0]?.[0] ?? 0
+    this.practise(practiceSpec(practiceGroup(this.current, first), { speed }))
+  }
+
+  /** A lesson's step [i] (from 0, kept in range): practice on its group's pattern in the scene showing, its pads, at its speed. */
+  private startLessonStep(i: number): void {
+    const l = this.lessonRun
+    if (l === null) return
+    l.at = Math.min(Math.max(i, 0), l.steps.length - 1)
+    l.moving = false
+    const s = l.steps[l.at]!
+    this.startPractice(practiceSpec(s.group, { pads: s.pads === null ? null : new Set(s.pads), speed: s.speed }))
+  }
+
+  /** PRACTICE's ‹ and ›: the lesson's step before or after, its record of how it went kept. */
+  lessonStep(delta: number): void {
+    const l = this.lessonRun
+    if (l === null) return
+    const next = Math.min(Math.max(l.at + delta, 0), l.steps.length - 1)
+    if (next === l.at) return
+    this.keepLessonRecord()
+    this.startLessonStep(next)
+  }
+
+  /** How the lesson's step on went, kept as its record once it has hits ([done]: its clean passes were played). */
+  private keepLessonRecord(done = false): void {
+    const l = this.lessonRun
+    const run = this.practiceRun
+    if (l === null || run === null) return
+    const counts = run.wait?.counts ?? run.score.counts
+    if (PracticeCounts.hits(counts) === 0 && !done) return
+    const old = l.records[l.at]
+    l.records[l.at] = { percent: PracticeCounts.percent(counts), passes: counts.passes, done: done || old?.done === true, worst: this.worstNamed(run) }
+  }
+
+  // The pad most often off in [run], by its name, and how.
+  private worstNamed(run: PracticeRun): readonly [string, HitMark] | null {
+    const w = run.score.worst()
+    return w === null ? null : [run.names.get(w[0]) ?? LABELS[w[0]]!, w[1]]
+  }
+
+  /**
+   * A pass closed in a lesson's step: enough clean ones in a row open the
+   * next (LessonPlace.passesToGo); after the last, the lesson is done. The
+   * next step starts (or the transport stops) once the frame is drawn, as
+   * Kotlin's scope.launch.
+   */
+  private lessonPassed(): void {
+    const l = this.lessonRun
+    const run = this.practiceRun
+    if (l === null || run === null || l.moving || run.score.counts.cleanRun < LESSON_CLEAN_PASSES) return
+    l.moving = true
+    this.keepLessonRecord(true)
+    const step = l.at
+    if (step < l.steps.length - 1) {
+      this.host.toast(PracticeText.stepDone(step + 1, l.steps[step + 1]!.title))
+      this.host.deps.setTimeout(() => {
+        if (this.lessonRun === l && l.at === step) this.startLessonStep(step + 1)
+      }, 0)
+    } else {
+      l.done = true
+      this.host.toast(PracticeText.LESSON_DONE)
+      this.host.deps.setTimeout(() => {
+        if (this.lessonRun === l) this.practiceStop()
+      }, 0)
+    }
+  }
+
+  /**
+   * COPY HOW IT WENT: a short report of the practice on, for Claude: with a
+   * lesson, each step with its share in time, passes and the pad most often
+   * off; else the counts. Null when no practice is on.
+   */
+  practiceReport(): string | null {
+    const run = this.practiceRun
+    if (run === null) return null
+    const t = PracticeText
+    const l = this.lessonRun
+    const worstText = (w: readonly [string, HitMark] | null): string | null => (w === null ? null : t.worst(w[0], w[1]))
+    if (l === null) {
+      const n = run.wait?.counts ?? run.score.counts
+      return [
+        t.reportHead(run.place, Math.round(run.bpm), run.spec.speed),
+        t.reportPlain(t.counts(PracticeCounts.hits(n), n.onTime, n.early, n.late, n.missed, n.extra), n.passes, worstText(this.worstNamed(run))),
+        t.REPORT_ASK,
+      ].join('\n')
+    }
+    this.keepLessonRecord()
+    const lines = [t.reportLessonHead(l.name, Math.round(this.bpm()))]
+    l.steps.forEach((s, i) => {
+      const r = l.records[i] ?? null
+      const result = r === null ? t.REPORT_NOT_PLAYED : t.reportResult(r.percent, r.passes, r.done, worstText(r.worst))
+      lines.push(t.reportStep(i + 1, s.title, BeatCards.lessonPads(s), s.speed, result))
+    })
+    lines.push(t.REPORT_ASK)
+    return lines.join('\n')
+  }
+
+  private showPractice(): void {
+    const run = this.practiceRun
+    if (run === null) return
+    const w = run.wait
+    const counts = w?.counts ?? run.score.counts
+    const l = this.lessonRun
+    this._practice.value = {
+      spec: run.spec,
+      place: run.place,
+      pads: keypadOrder(run.names.keys()),
+      names: run.names,
+      bpm: Math.round(run.bpm),
+      bars: Math.trunc(run.length / Seq.TICKS_PER_BAR),
+      running: w === null && this.running(),
+      counts,
+      worst: run.score.worst(),
+      waiting: w?.waiting ?? new Set(),
+      waitStep: w?.step ?? 0,
+      waitSteps: w?.steps.length ?? 0,
+      lesson:
+        l === null
+          ? null
+          : {
+              step: l.at + 1,
+              steps: l.steps.length,
+              title: l.steps[l.at]!.title,
+              tip: l.steps[l.at]!.tip,
+              passesToGo: Math.max(LESSON_CLEAN_PASSES - counts.cleanRun, 0),
+              records: [...l.records],
+              done: l.done,
+            },
+    }
+  }
+
   // ---------- BEAT CARDS: share a pattern or scene to Claude, paste Claude's card back (an addition) ----------
 
   private readonly _beat = signal<BeatImportUi | null>(null)
@@ -1554,13 +2044,20 @@ export class PatternDesk {
   /**
    * What SHARE sends: [group]'s playing pattern, or (null) the scene playing,
    * as an ARC BEAT card at the tempo Live plays at and the TIMING swing, with
-   * the pads' names; null when there are no notes in it. The patterns are the
-   * project's as they stand, a pattern still recording included. The [kit]
-   * Live plays is named before the card when it isn't the EP-133's.
+   * the pads' names and the [parts] the controller knows (the sound lines, the
+   * sound list, FX, pad settings, silent pads, the kit; beatShare); null when
+   * there are no notes in it. The patterns are the project's as they stand, a
+   * pattern still recording included.
    */
-  beatShare(group: number | null, kit?: FactoryKit): BeatShare | null {
+  beatShare(group: number | null, parts: ShareParts = {}): BeatShare | null {
     if (group !== null && (group < 0 || group > 3)) return null
-    return beatShare(this.seq, group, this.bpm(), this.settings.timing.swing, (pad) => this.padName(pad), kit)
+    return beatShare(this.seq, group, this.bpm(), this.settings.timing.swing, (pad) => this.padName(pad), parts)
+  }
+
+  /** What SHARE CHAIN sends: the project's chain as a card of scenes, as [beatShare] has the rest (beatShareChain); null when it has no steps. */
+  beatShareChain(parts: ShareParts = {}): BeatShare | null {
+    if (Chain.isBlank(this.seq.chain)) return null
+    return beatShareChain(this.seq, this.bpm(), this.settings.timing.swing, (pad) => this.padName(pad), parts)
   }
 
   /**
@@ -1575,13 +2072,15 @@ export class PatternDesk {
       this.host.toast(ClaudeText.NO_CARD)
       return
     }
+    // The reply is here.
+    this.host.claudeAnswered?.()
     await this.load()
     this.showBeat(BeatCards.read(text))
   }
 
   // The sheet for [read], planned into the project's patterns as they are now.
   private showBeat(read: CardRead): void {
-    this._beat.value = beatImportUi(read, this.seq, this.bpm(), (pad) => this.padName(pad))
+    this._beat.value = beatImportUi(read, this.seq, this.bpm(), (pad) => this.padName(pad), this.host.beatBlocks?.() ?? {})
   }
 
   /** The sheet closes (CANCEL, a tap outside, Back, another section): nothing was imported. */
@@ -1597,14 +2096,47 @@ export class PatternDesk {
    * card's tempo becomes the phone's. It takes over at once, stopped or
    * playing, as COMMIT does; the picks waiting go. Where a group has no free
    * pattern now the sheet stays, with the reason.
+   *
+   * [soundPads] are the pads (pad keys) whose sound lines the sheet had
+   * ticked: after the patterns each is matched again to the sounds as they
+   * are now and put on its pad (host.putBeatSounds), in the same UNDO step,
+   * and so are the sounds the user [picked] for the pads the card leaves
+   * silent (pad key to slot; they are in [soundPads] too, being ticked). The
+   * toast, with UNDO, waits for them.
+   *
+   * With [applyFx] the card's FX replace the project's, the kinds it has a
+   * line for, at once (host.applyBeatFx). [shapePads] are the pads (pad keys)
+   * whose `pad` lines the sheet had ticked: once their sounds are on, each
+   * pad's settings are written on the EP-133, or kept as offline pad
+   * settings (host.shapeBeatPads). All of it is one UNDO step with the
+   * patterns and the sounds (BeatUndo).
+   *
+   * A card of scenes adds a scene for each of its own, and with [setChain]
+   * (the sheet's SET CHAIN) its chain replaces the project's, on the new
+   * scenes, and is turned on: part of the same one UNDO step, the
+   * sequencer's. With [replaceScenes] (the sheet's REPLACE) the card's scenes
+   * take the place of the project's, from S01, in that same step. Web delta:
+   * [picked] comes before [applyFx] and [shapePads], where the Kotlin has it
+   * after them.
    */
-  importBeat(setTempo: boolean): void {
+  importBeat(
+    setTempo: boolean,
+    soundPads: ReadonlySet<number> = new Set(),
+    picked: ReadonlyMap<number, number> = new Map(),
+    applyFx = false,
+    shapePads: ReadonlySet<number> = new Set(),
+    setChain = true,
+    replaceScenes = false,
+  ): void {
     const ui = this._beat.peek()
     const card = ui?.read.card ?? null
     if (ui === null || card === null) return
+    this.lastImport = null
     let applied: BeatApplied | null = null
+    // The sequencer as it was: UNDO is that one, once the sounds are back with it.
+    const before = this.seq
     this.sceneEdit(() => {
-      const a = applyBeat(this.seq, card, this.recorder)
+      const a = applyBeat(this.seq, card, this.recorder, setChain, replaceScenes)
       applied = a
       if (a.seq !== this.seq) this.sceneDesk.cancel()
       return a.seq
@@ -1616,9 +2148,109 @@ export class PatternDesk {
       this.host.toast(ClaudeText.groupFull(a.fullGroup), true)
       return
     }
+    this.lastImport = { applied: a, card }
     this._beat.value = null
+    this.host.claudeAnswered?.()
     if (setTempo && card.tempo !== null) this.setTempo(Tempo.round(card.tempo))
-    this.host.toast(beatImported(a))
+    const entry = new BeatUndo(this.recorder, before, a.seq)
+    this.beatUndos.push(entry)
+    while (this.beatUndos.length > MAX_BEAT_UNDOS) this.beatUndos.shift()
+    // The FX go on at once; UNDO puts the project's old ones back while they are still as the import left them.
+    if (applyFx && card.fx !== null) this.host.applyBeatFx?.(card.fx, entry)
+    const fxApplied = entry.fxBefore !== null
+    const put = soundPads.size === 0 ? null : (this.host.putBeatSounds?.(card, soundPads, picked, entry) ?? null)
+    const shapes = this.host.shapeBeatPads ? padShapes(card, shapePads) : []
+    if (put === null && shapes.length === 0) {
+      this.importToast(beatImported(a, 0, 0, fxApplied), entry)
+      return
+    }
+    entry.writing = true
+    void this.putTail(a, entry, put, shapes)
+  }
+
+  // The imports whose UNDO is still ahead, the latest last.
+  private readonly beatUndos: BeatUndo[] = []
+
+  /**
+   * IMPORT's second half, after the patterns (and the FX) went in
+   * ([applied]): the sounds ([put], to go on the pads it names), then the
+   * pad settings ([shapes]) of the pads whose sound, if it was to change,
+   * went on (settings written before a new sound would be reset by it, and
+   * written to the old sound if it didn't go on). No toast until all is done:
+   * it says what was done, or what stopped it. UNDO during the writes
+   * ([BeatUndo.undone]) stops them, and what they did is put back. Web
+   * addition: writes that throw stop like a failure reported, with the pads
+   * done so far.
+   */
+  private async putTail(
+    applied: BeatApplied,
+    entry: BeatUndo,
+    put: { readonly pads: ReadonlySet<number>; readonly put: Promise<SoundsPut> } | null,
+    shapes: readonly (readonly [PhysicalPad, CardPad])[],
+  ): Promise<void> {
+    const why = (e: unknown): string => (e instanceof Error ? e.message || String(e) : String(e))
+    let s: SoundsPut = { done: [], skipped: 0, moved: 0, failure: null }
+    let sh: ShapingPut = { done: [], skipped: 0, failure: null }
+    let toShape = shapes
+    try {
+      if (put !== null) {
+        try {
+          s = await put.put
+        } catch (e) {
+          s = { done: entry.pads, skipped: 0, moved: 0, failure: why(e) }
+        }
+        // A pad whose sound didn't go on (a failed or skipped pick) isn't shaped.
+        const done = new Set(s.done.map((b) => padKey(b.pad)))
+        toShape = shapes.filter(([pad]) => !put.pads.has(padKey(pad)) || done.has(padKey(pad)))
+      }
+      if (s.failure === null && !entry.undone && toShape.length > 0 && this.host.shapeBeatPads) {
+        try {
+          sh = await this.host.shapeBeatPads(entry, toShape)
+        } catch (e) {
+          sh = { done: entry.shaped, skipped: 0, failure: why(e) }
+        }
+      }
+    } finally {
+      entry.writing = false
+    }
+    if (entry.undone) {
+      // The patterns (and the FX) are back already: the pads done follow them, with no import toast.
+      if (entry.pads.length > 0 || entry.shaped.length > 0) await this.host.putBackBeat?.(entry)
+      return
+    }
+    const fx = entry.fxBefore !== null
+    if (s.failure !== null) this.importToast(ClaudeText.soundsFailed(s.failure, s.done.length), entry, true)
+    else if (sh.failure !== null) this.importToast(ClaudeText.shapingFailed(sh.failure, sh.done.length, fx), entry, true)
+    else {
+      const skippedShapes = shapes.length - toShape.length + sh.skipped
+      this.importToast(beatImported(applied, s.done.length, s.skipped, fx, sh.done.length, skippedShapes) + (s.moved > 0 ? ' ' + MirrorText.samplesToTakes(s.moved) : ''), entry)
+    }
+  }
+
+  // An import's toast, with UNDO when the host has keys on its toasts.
+  private importToast(text: string, entry: BeatUndo, error = false): void {
+    if (this.host.toastWith) this.host.toastWith(text, MirrorText.UNDO, () => this.undoImport(entry), error)
+    else this.host.toast(text, error)
+  }
+
+  /** The import's toast UNDO: UNDO on the pattern line, while the import is still the last edit of the sequencer. */
+  private undoImport(entry: BeatUndo): void {
+    if (this.beatUndos.at(-1) !== entry || entry.recorder !== this.recorder || !sameSeq(entry.after, this.seq)) return
+    this.undo()
+  }
+
+  /** The offline pad changes of imports are written or dropped: UNDO of those imports leaves the pads alone. */
+  forgetOfflineUndos(): void {
+    for (const e of this.beatUndos) {
+      if (e.offline) {
+        e.pads = []
+        e.offline = false
+      }
+      if (e.shapedOffline) {
+        e.shaped = []
+        e.shapedOffline = false
+      }
+    }
   }
 
   private padName(pad: PhysicalPad): string | null {
@@ -1652,7 +2284,8 @@ export class PatternDesk {
 
   /** UNDO: back to before the last pass recorded, clear or length change. */
   undo(): void {
-    const seq = this.recorder.undo(this.seq)
+    const rec = this.recorder
+    const seq = rec.undo(this.seq)
     // A pick waiting goes.
     if (seq !== null) this.sceneDesk.cancel()
     if (seq !== null && seq !== this.seq) {
@@ -1662,6 +2295,17 @@ export class PatternDesk {
       if (!this.transport.state.recording) this.save()
     }
     this.show()
+    // An IMPORT that put sounds on pads is one step with them: they go back too.
+    const taken = seq === null ? undefined : this.beatUndos.findLast((e) => e.recorder === rec && e.restores(seq))
+    if (taken === undefined) return
+    this.beatUndos.splice(this.beatUndos.indexOf(taken), 1)
+    // Marked even with no pads yet: the writes still running see it and put back what they did (putTail).
+    taken.undone = true
+    taken.fxRestored = this.host.restoreBeatFx?.(taken) ?? false
+    if (!taken.writing) {
+      if (taken.pads.length > 0 || taken.shaped.length > 0) void this.host.putBackBeat?.(taken)
+      else if (taken.fxRestored) this.host.toast(ClaudeText.importUndone(0, 0, 0, true))
+    }
   }
 
   /** TIMING: the grid recorded notes snap to ('off': free time). Kept. */

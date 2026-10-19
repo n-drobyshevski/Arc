@@ -1,7 +1,8 @@
 // Tests for web/src/ui/live/keys.ts and press.ts (KEYS maths and holdToPlay of
-// MirrorScreen.kt), and glow.ts's offline display helpers.
+// MirrorScreen.kt), glow.ts's offline display helpers, and the scale and
+// octave words' swipe (Words.tsx PickWord; a web addition, Kotlin has no test).
 import { describe, expect, it } from 'vitest'
-import { Keys, Scale, NoteNames } from '../../src/core/features/keys'
+import { Keys, Scale, NoteNames, SCALES } from '../../src/core/features/keys'
 import type { Hit, PadLight } from '../../src/core/features/liveMirror'
 import { physicalPad } from '../../src/core/features/padNotes'
 import { MirrorText } from '../../src/core/text/mirrorText'
@@ -9,7 +10,8 @@ import { emptyMirrorState, type MirrorUi } from '../../src/state/types'
 import { displayLine, displayLineSmall, glow, showOffline } from '../../src/ui/live/glow'
 import { DEFAULT_KEYS, PICK_PREFIX, keysDisplayNote, keysLit, keysPickerOf, octaves, upperOctave, type KeysUi } from '../../src/ui/live/keys'
 import { backStack, dialogLayer, initialStack, overlayLayer, push, viewOf } from '../../src/ui/nav'
-import { PRESS_DELAY_MS, PressTracker, ticking, type PressTarget, type PressTimers } from '../../src/ui/live/press'
+import { PRESS_DELAY_MS, PressTracker, TOUCH_SLOP, ticking, type PressTarget, type PressTimers } from '../../src/ui/live/press'
+import { PICK_SWIPE, pickStepped, pickSwipeStep } from '../../src/ui/live/Words'
 
 const light = (velocity: number, offAt: number | null = null): PadLight => ({ velocity, channel: 1, onAt: 0, offAt })
 
@@ -335,5 +337,26 @@ describe('KEYS lists as navigation layers', () => {
     expect(keysPickerOf(v.dialogs)).toBeNull()
     expect(v.tab).toBe('live')
     expect(v.side).toBe(true)
+  })
+})
+
+describe('KEYS words: a short swipe steps the choice', () => {
+  it('steps once the travel past the touch slop reaches the swipe, right the next, left the one before', () => {
+    const far = TOUCH_SLOP + PICK_SWIPE
+    expect(pickSwipeStep(far)).toBe(1)
+    expect(pickSwipeStep(-far)).toBe(-1)
+    expect(pickSwipeStep(far - 1)).toBe(0)
+    expect(pickSwipeStep(-(far - 1))).toBe(0)
+    expect(pickSwipeStep(0)).toBe(0)
+  })
+
+  it('stops at either end', () => {
+    const all = octaves()
+    expect(pickStepped(all, 4, 1)).toBe(5)
+    expect(pickStepped(all, 4, -1)).toBe(3)
+    expect(pickStepped(all, all[all.length - 1]!, 1)).toBeNull()
+    expect(pickStepped(all, all[0]!, -1)).toBeNull()
+    expect(pickStepped(SCALES, SCALES[0]!, 1)).toBe(SCALES[1])
+    expect(pickStepped(SCALES, SCALES[0]!, -1)).toBeNull()
   })
 })

@@ -4,6 +4,7 @@
 // lit each key is from the device's notes, which octave colour a key's ring
 // takes, the note the display names, and the octave word's choices.
 
+import { signal, type ReadonlySignal } from '@preact/signals'
 import type { PadLight } from '../../core/features/liveMirror'
 import { Keys, MAX_OCTAVE, MIN_OCTAVE, type NoteNames, type Scale } from '../../core/features/keys'
 import type { PhysicalPad } from '../../core/features/padNotes'
@@ -33,12 +34,16 @@ export interface KeysUi {
   readonly pianoWhites: number | null
 }
 
+/** The sound KEYS plays, and its sample's name (KeysUi's pad and padName). */
+export type KeysSound = Pick<KeysUi, 'pad' | 'padName'>
+
 /**
  * KeysUi less what plays on the phone: Live reads that from its own signals
  * (MirrorScreen's LivePlaying), so a voice starting or ending re-renders only
- * the keys it rings, not the screen.
+ * the keys it rings, not the screen. The sound is a signal too (web
+ * addition): another pad played re-renders only what names it.
  */
-export type KeysShown = Omit<KeysUi, 'playingNotes'>
+export type KeysShown = Omit<KeysUi, 'playingNotes' | 'pad' | 'padName'> & { readonly sound: ReadonlySignal<KeysSound> }
 
 /** KeysUi() with its defaults. */
 export const DEFAULT_KEYS: KeysUi = Object.freeze({
@@ -52,6 +57,18 @@ export const DEFAULT_KEYS: KeysUi = Object.freeze({
   padName: null,
   playingNotes: new Set<number>(),
   pianoWhites: null,
+})
+
+/** KeysShown with KeysUi()'s defaults. */
+export const DEFAULT_KEYS_SHOWN: KeysShown = Object.freeze({
+  on: DEFAULT_KEYS.on,
+  root: DEFAULT_KEYS.root,
+  scale: DEFAULT_KEYS.scale,
+  octave: DEFAULT_KEYS.octave,
+  names: DEFAULT_KEYS.names,
+  showNames: DEFAULT_KEYS.showNames,
+  pianoWhites: DEFAULT_KEYS.pianoWhites,
+  sound: signal<KeysSound>({ pad: null, padName: null }),
 })
 
 /** How lit each key is now: the brightest device note that falls on it (key index -> 0..1). */
@@ -100,6 +117,26 @@ export function keysPickerOf(dialogs: readonly string[]): KeysPicker | null {
     if (d === PICK_PREFIX + 'scale') return 'scale'
     if (d === PICK_PREFIX + 'octave') return 'octave'
     if (d === PICK_PREFIX + 'key') return 'key'
+  }
+  return null
+}
+
+/** Which of KEYS' words opened the KEYS sheet (ui/sheets/ScaleSheet.tsx): its section is scrolled into view. */
+export const KeysSheetPart = { SCALE: 'scale', KEY: 'key', OCTAVE: 'octave' } as const
+export type KeysSheetPart = (typeof KeysSheetPart)[keyof typeof KeysSheetPart]
+
+/**
+ * The KEYS sheet's layer id prefix: 'scale:<part>' (web: 'keys' is the keyboard keys sheet), so
+ * Back, Escape and the scrim close it.
+ */
+export const SCALE_SHEET_PREFIX = 'scale:'
+
+/** The KEYS sheet open, and the part it opened at, from the navigation stack's open sheets. */
+export function scaleSheetOf(sheets: readonly string[]): KeysSheetPart | null {
+  for (const s of sheets) {
+    if (!s.startsWith(SCALE_SHEET_PREFIX)) continue
+    const part = s.slice(SCALE_SHEET_PREFIX.length)
+    return part === KeysSheetPart.KEY || part === KeysSheetPart.OCTAVE ? part : KeysSheetPart.SCALE
   }
   return null
 }

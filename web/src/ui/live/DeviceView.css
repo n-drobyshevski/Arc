@@ -538,7 +538,6 @@
     inset -3px -8px 2px -1px color-mix(in srgb, var(--lip) 60%, transparent),
     inset 0 -14px 12px -8px color-mix(in srgb, var(--lip) 35%, transparent),
     inset 0 0 0 1px rgb(0 0 0 / 0.18);
-  transition: transform 60ms, box-shadow 60ms;
 }
 .ep-key:active:not(:disabled),
 .ep-pad:active:not(:disabled),
@@ -546,6 +545,12 @@
   transform: translate(1px, 3px);
   box-shadow: inset 0 2px 0 rgb(255 255 255 / calc(var(--rim) * 0.6)), inset -2px -4px 0 var(--lip), inset 0 0 0 1px rgb(0 0 0 / 0.25);
 }
+.ep-key { transition: transform 60ms, box-shadow 60ms; }
+/* A pad's rim follows its glow (--rim, --lip), so it eases only into a press and snaps back on
+ * release: at rest each --glow write of a fade would start a box-shadow transition (web only). */
+.ep-pad { transition: transform 60ms; }
+.ep-pad:active:not(:disabled),
+.ep-pad[data-down] { transition: transform 60ms, box-shadow 60ms; }
 .ep-key:disabled { cursor: default; }
 .ep-key[aria-disabled='true'] { opacity: 0.6; cursor: default; }
 .ep-key--black { color: var(--ep-black-ink); }
@@ -678,6 +683,8 @@
   .ep-key__num.is-queued { animation: none; }
   .ep-key,
   .ep-pad,
+  .ep-pad:active:not(:disabled),
+  .ep-pad[data-down],
   .ep-key--split > .ep-h:first-child { transition: none; }
 }
 
@@ -695,8 +702,11 @@
   color: var(--ep-pad-ink);
   touch-action: none;
   -webkit-touch-callout: none;
-  filter: drop-shadow(0 0 calc(24px * var(--glow, 0)) rgb(255 76 0 / calc(0.55 * var(--glow, 0))));
 }
+/* The halo only while lit (data-lit, set with --glow, or the arp's full glow): at 0 it draws nothing
+ * but still costs a filter pass. */
+.ep-pad[data-lit],
+.ep-pad.is-arp-lit { filter: drop-shadow(0 0 calc(24px * var(--glow, 0)) rgb(255 76 0 / calc(0.55 * var(--glow, 0)))); }
 .ep-pad:disabled { cursor: default; }
 .ep-pad.is-playing::after { content: ''; position: absolute; inset: -3px; border: 4px solid #FF4C00; border-radius: 11px; pointer-events: none; }
 .ep-pad__num { position: absolute; left: 19px; top: 12px; font-size: 40px; font-weight: var(--ep-thin); line-height: 1; letter-spacing: 0; }
@@ -779,12 +789,16 @@
 .ep-pad.is-sample-empty,
 .ep-pad.is-sample-filled { outline: 5px solid #FF4C00; outline-offset: -14px; }
 .ep-pad.is-step-picked,
+.ep-pad.is-cue,
+.ep-pad.is-cue-now,
 .ep-pad.is-sample-waiting,
 .ep-pad.is-sample-recording { outline: 8px solid #FF4C00; outline-offset: -16px; }
 .ep-pad.is-step-lit .ep-pad__num,
 .ep-pad.is-step-picked .ep-pad__num { color: #FF4C00; }
 .ep-pad.is-step-picked { filter: drop-shadow(0 0 10px rgb(255 76 0 / 0.45)); }
 .ep-pad.is-sample-recording { --cap: #FF4C00; --cap-hi: #FF5A1E; --lip: #A33000; }
+/* PRACTICE: the beats to its next hit, in orange at the digit's right. */
+.ep-pad__cue { position: absolute; right: 22px; top: 14px; font-size: 28px; line-height: 1; color: #FF4C00; pointer-events: none; }
 .ep-pad__nudge {
   position: absolute;
   left: 14px;

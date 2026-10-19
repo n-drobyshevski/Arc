@@ -6,13 +6,18 @@
 // Web deltas:
 // - Kotlin's enums are string unions with const objects (ClipMode, PadStage).
 // - SwitchTime.cycled() is [cycledSwitch]; SceneUi's groups are an array.
+// - Weight (BeatPlan.kt) is beatPlan.ts's string union, Weight.of its weightOf.
+// - SceneUi.chain is the project chain's steps alone (Kotlin's ChainUi.chain.steps),
+//   which SHARE CHAIN names; the CHAIN row itself is not on the web yet.
 
+import type { ChainStep } from '../core/features/chain'
 import type { PhysicalPad } from '../core/features/padNotes'
 import { Pattern, ProjectPatterns, ProjectSeq, Seq, pattern } from '../core/features/pattern'
 import type { PatternRecorder } from '../core/features/patternRecorder'
 import { SWITCH_TIMES, SceneErase, SceneOps, SwitchTime, type Clip, type SceneErased } from '../core/features/scenes'
 import { PhaseAnchors, localTick } from '../core/features/sequencer'
 import { MirrorText } from '../core/text/mirrorText'
+import { weightOf, type Weight } from './beatPlan'
 
 /** What the CLIP row copies and pastes: a whole pattern, one bar of it, or one pad's notes. */
 export const ClipMode = { PTN: 'PTN', BAR: 'BAR', PAD: 'PAD' } as const
@@ -37,7 +42,8 @@ export interface ClipUi {
  * A group's column in the scene panel: the pattern it plays ([number], 1..99),
  * the one waiting to take over ([queued]; null for none), the numbers with
  * notes ([filled], for the 1–99 grid), the next free one after the number
- * shown ([nextFree]) and the pattern's length ([bars]).
+ * shown ([nextFree]), the pattern's length ([bars]) and its first bar as
+ * [lights] (Live tools' Claude page draws them on its glass).
  */
 export interface SceneGroupUi {
   readonly number: number
@@ -45,6 +51,28 @@ export interface SceneGroupUi {
   readonly filled: ReadonlySet<number>
   readonly nextFree: number
   readonly bars: number
+  readonly lights: readonly (Weight | null)[]
+}
+
+/** The steps a bar is drawn in as lights. */
+export const LIGHTS = 16
+export const NO_LIGHTS: readonly (Weight | null)[] = Array.from({ length: LIGHTS }, () => null)
+
+/**
+ * [p]'s first bar as [LIGHTS] step lights: the hardest hit starting in each
+ * sixteenth (on any pad, to the nearest one, the last half step going round
+ * to the first), null where none does.
+ */
+export function stepLights(p: Pattern): (Weight | null)[] {
+  const step = Seq.TICKS_PER_BAR / LIGHTS
+  const top = new Array<number>(LIGHTS).fill(-1)
+  const end = Math.min(Seq.TICKS_PER_BAR, Pattern.lengthTicks(p))
+  for (const n of p.notes) {
+    if (n.tick < 0 || n.tick >= end) continue
+    const i = Math.floor((n.tick + step / 2) / step) % LIGHTS
+    top[i] = Math.max(top[i]!, n.velocity)
+  }
+  return top.map((v) => (v < 0 ? null : weightOf(v)))
 }
 
 /**
@@ -54,8 +82,9 @@ export interface SceneGroupUi {
  * 1), whether the CLR hold key is DEL ([canDelete]), the setting for when a
  * pick takes over ([switchTime]), the clipboard ([clip]) and the CLIP row
  * ([clipMode], [bar], [padStage]), the 1–99 grid open for a group
- * ([gridGroup]), the status line ([status]; null shows the scene), and what
- * a screen reader says of the last change ([said]).
+ * ([gridGroup]), the status line ([status]; null shows the scene), what
+ * a screen reader says of the last change ([said]), and the project chain's
+ * steps ([chain]).
  */
 export interface SceneUi {
   readonly open: boolean
@@ -74,6 +103,7 @@ export interface SceneUi {
   readonly gridGroup: number | null
   readonly status: string | null
   readonly said: string | null
+  readonly chain: readonly ChainStep[]
 }
 
 export const SCENE_UI: SceneUi = Object.freeze({
@@ -82,7 +112,7 @@ export const SCENE_UI: SceneUi = Object.freeze({
   count: 1,
   label: MirrorText.sceneLabel(0),
   group: 0,
-  groups: [0, 1, 2, 3].map(() => ({ number: 1, queued: null, filled: new Set<number>(), nextFree: 2, bars: Seq.DEFAULT_BARS })),
+  groups: [0, 1, 2, 3].map(() => ({ number: 1, queued: null, filled: new Set<number>(), nextFree: 2, bars: Seq.DEFAULT_BARS, lights: NO_LIGHTS })),
   sceneQueued: null,
   canDelete: false,
   switchTime: SwitchTime.DEFAULT,
@@ -93,6 +123,7 @@ export const SCENE_UI: SceneUi = Object.freeze({
   gridGroup: null,
   status: null,
   said: null,
+  chain: [],
 })
 
 /** A pattern change waiting: its group goes to pattern [to] at global tick [at] ([time], the setting it was made at). */
@@ -522,6 +553,7 @@ export class SceneDesk {
         filled: filledPatterns(seq, g),
         nextFree: SceneOps.nextFree(SceneOps.selectPattern(seq, g, this.shown(seq, g)), g),
         bars: ProjectSeq.pattern(seq, g, n).bars,
+        lights: stepLights(ProjectSeq.pattern(seq, g, n)),
       }
     })
     const c = this.clip
@@ -542,6 +574,7 @@ export class SceneDesk {
       gridGroup: this._gridGroup,
       status: this._status ?? this.stageStatus() ?? (this._gridGroup !== null ? MirrorText.gridStatus(this._gridGroup) : null) ?? this.queueStatus(),
       said: this._said,
+      chain: seq.chain.steps,
     }
   }
 

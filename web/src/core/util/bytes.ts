@@ -6,7 +6,10 @@
 /** One part of [bytes]: a number (wrapped mod 256), a byte/number list, or a string (UTF-8). */
 export type BytePart = number | Uint8Array | ArrayLike<number> | string
 
-const utf8 = new TextEncoder()
+// Made on first use, not at load: Live's AudioWorklet imports this module and
+// its scope has no TextEncoder (a web addition; the Kotlin has no such scope).
+let encoder: TextEncoder | null = null
+const utf8 = (): TextEncoder => (encoder ??= new TextEncoder())
 
 /**
  * Builds a Uint8Array from numbers (wrapped mod 256, like `Uint8Array.from`),
@@ -20,7 +23,7 @@ export function bytes(...parts: BytePart[]): Uint8Array {
       chunks.push(p)
       length += 1
     } else if (typeof p === 'string') {
-      const b = utf8.encode(p)
+      const b = utf8().encode(p)
       chunks.push(b)
       length += b.length
     } else {

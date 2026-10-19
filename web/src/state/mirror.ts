@@ -15,7 +15,8 @@
 //   time-based changes the loop caught (a faded pad dropped, a tempo gone
 //   stale) get one timer for the soonest of them. StateFlow drops an equal
 //   state; here [sameMirrorState] does, so a clock tick with the same tempo
-//   redraws nothing.
+//   redraws nothing. A frame that only had clocks takes no snapshot: it
+//   reads the tempo alone and sets it when it reads otherwise.
 // - SharedPreferences "mirror" is MirrorPrefs (localStorage arc.mirror.*).
 // - Live's sounds and last read (openOfflineMirror, saveLastRead,
 //   preloadPads, copyPadSounds, forgetPadMemory) live in live.ts; the
@@ -34,7 +35,7 @@ import { contents, projectLayout, type ProjectLayout } from '../core/features/de
 import { LearnedLinks } from '../core/features/learnedLinks'
 import { ProjectStep } from '../core/features/projectStep'
 import { FactorySounds } from '../core/features/factorySounds'
-import { CLOCK_TIMEOUT_MS, FADE_MS, LiveMirror, type Hit, type MirrorState, type PadLight, type PadTarget } from '../core/features/liveMirror'
+import { FADE_MS, LiveMirror, type Hit, type MirrorState, type PadLight, type PadTarget } from '../core/features/liveMirror'
 import type { PhysicalPad } from '../core/features/padNotes'
 import { SoundSource } from '../core/features/offlinePads'
 import { parse as parsePadPush, type PadOrder } from '../core/features/padPush'
@@ -158,6 +159,8 @@ export class MirrorController {
   private frame: (() => void) | null = null
   /** The publish for the soonest time-based change (a fade over, a tempo gone stale), or null. */
   private settle: unknown = null
+  /** Whether the waiting frame has more than clocks to show (any other event, or a push); else only the tempo. */
+  private full = false
   private openGen = 0
   // PROJECT, connected: the project the newest tap asked for, until the device's read of it lands, and
   // whether the one worker writing it runs (taps meanwhile only move the target).
@@ -198,13 +201,32 @@ export class MirrorController {
     if (this.mirror === m) this.settleLater(m, st, now)
   }
 
+  /**
+   * Only clocks came since the last publish: the tempo alone, with no
+   * snapshot. Shown when it reads otherwise (sameBpm), else nothing is done
+   * and the settle timer stays as it is.
+   */
+  private publishTempo(m: LiveMirror): void {
+    const now = this.host.perfNow()
+    const bpm = m.tempo(now)
+    const mi = this.host.store.get().mirror
+    if (!mi || sameBpm(mi.state.bpm, bpm)) return
+    const state: MirrorState = { ...mi.state, bpm }
+    this.host.store.update((cur) => (cur.mirror === mi ? { ...cur, mirror: { ...mi, state } } : cur))
+    this.settleLater(m, state, now)
+  }
+
   /** A note or push came in: [m] publishes at the next frame, once however many come before it. */
   private changed(m: LiveMirror): void {
     if (this.frame !== null || this.mirror !== m) return
     const { host } = this
     const run = (): void => {
       this.frame = null
-      if (this.mirror === m) this.publish(m)
+      const full = this.full
+      this.full = false
+      if (this.mirror !== m) return
+      if (full) this.publish(m)
+      else this.publishTempo(m)
     }
     if (host.requestFrame) {
       this.frame = host.requestFrame(run)
@@ -226,7 +248,9 @@ export class MirrorController {
     let at = Number.POSITIVE_INFINITY
     for (const l of st.pads.values()) if (l.offAt !== null) at = Math.min(at, l.offAt + FADE_MS)
     for (const l of st.notes.values()) if (l.offAt !== null) at = Math.min(at, l.offAt + FADE_MS)
-    if (st.bpm !== null) at = Math.min(at, now + CLOCK_TIMEOUT_MS)
+    // The tempo goes stale one CLOCK_TIMEOUT_MS after the last clock, however long ago this publish was.
+    const stale = st.bpm !== null ? m.clockDeadline() : null
+    if (stale !== null) at = Math.min(at, stale)
     if (at === Number.POSITIVE_INFINITY) return
     // Just past the moment, as snapshot drops what is strictly older.
     this.settle = host.setTimeout(() => {
@@ -259,15 +283,17 @@ export class MirrorController {
       // An armed take starts with the device's PLAY, and one it started ends with its STOP.
       if (e.type === 'Start' || e.type === 'Continue') host.transport?.(true)
       else if (e.type === 'Stop') host.transport?.(false)
+      if (e.type !== 'Clock' && e.type !== 'ControlChange') this.full = true
       this.changed(m)
     })
     this.pushOff = s.onPush((f) => {
       const fid = parsePadPush(f)
       if (!fid) return
       m.onPadPush(fid, host.perfNow())
+      this.full = true
       this.changed(m)
       // Another project on the device: read its pads.
-      if (fid.project !== m.snapshot(host.perfNow()).activeProject) this.loadProject(m, fid.project)
+      if (fid.project !== m.project) this.loadProject(m, fid.project)
     })
     // The names and pads are read once. If the device is busy (a transfer, or the
     // read of a mirror opened just before), wait for it rather than give up.
@@ -405,7 +431,7 @@ export class MirrorController {
     }
     const m = this.mirror
     if (!m) return
-    this.selectProject(ProjectStep.next(this.projectTarget ?? m.snapshot(this.host.perfNow()).activeProject))
+    this.selectProject(ProjectStep.next(this.projectTarget ?? m.project))
   }
 
   /**
@@ -432,7 +458,7 @@ export class MirrorController {
     if (s === null || m === null || this.mirrorSession !== s || host.store.get().device === null || mi.loading) return
     // Another action holds the device (the key is greyed out); PROJECT's own switch takes more.
     if (host.store.get().busy && this.projectTarget === null) return
-    if (this.projectTarget === null && n === m.snapshot(host.perfNow()).activeProject) return
+    if (this.projectTarget === null && n === m.project) return
     this.projectTarget = n
     this.showProjectTarget()
     if (!this.switching) void this.switchProjects()
@@ -621,7 +647,7 @@ export class MirrorController {
 
   /** The pad order Live uses (for the settings page). */
   padOrder(): PadOrder {
-    return this.mirror?.snapshot(this.host.perfNow()).padOrder ?? this.host.prefs.savedPadOrder()
+    return this.mirror?.order ?? this.host.prefs.savedPadOrder()
   }
 
   notConnected(): MirrorUi {
@@ -641,6 +667,7 @@ export class MirrorController {
     this.host.live.stopCopy()
     this.frame?.()
     this.frame = null
+    this.full = false
     if (this.settle !== null) this.host.clearTimeout(this.settle)
     this.settle = null
     this.unlisten?.()

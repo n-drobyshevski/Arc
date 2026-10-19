@@ -1,6 +1,8 @@
 // TAKE and takes end to end, on the simulated EP-133 of ?demo: TAKE in Live
 // tools arms a take, a pad played starts it, the display's badge stops it, the
-// take is listed with its actions, and the device's PLAY starts an armed take.
+// take is numbered on the glass and the keys under it act on it (TRIM keeps a
+// part of it, its handles moved by a drag sideways, a tap or the keys; DUP
+// copies it), and the device's PLAY starts an armed take.
 import type { Page } from '@playwright/test'
 import { demo, expect, test } from './fixtures'
 
@@ -56,22 +58,82 @@ test('TAKE records a pad into a take that Live tools lists', async ({ page }) =>
   }
   await expect(badge).toHaveAccessibleName(/^Recording a take, \d+:\d\d\. Tap to stop\.$/)
   await expect(badge).toContainText(/^TAKE \d+:\d\d$/)
+  // A second hit a moment later: the take holds both, long enough to trim.
+  await page.waitForTimeout(500)
+  await page.mouse.down()
+  await page.waitForTimeout(200)
+  await page.mouse.up()
   await badge.click()
   await expect(page.getByRole('status').filter({ hasText: /^Take saved \(\d+:\d\d\)\. It's in Live tools\.$/ })).toBeVisible()
   await expect(badge).toHaveCount(0)
 
   tools = await openTools(page)
   const takes = tools.getByRole('region', { name: 'Takes' })
-  await expect(takes.getByRole('listitem')).toHaveCount(1)
-  await takes.locator('.take__fold').click()
-  await expect(takes.getByRole('button', { name: 'Save WAV' })).toBeVisible()
-  // A desktop browser can't share a file: no Share, and the note says Save WAV.
-  await expect(takes.getByRole('button', { name: 'Share WAV' })).toHaveCount(0)
-  await expect(takes.getByRole('button', { name: 'To EP-133' })).toBeVisible()
-  await takes.getByRole('button', { name: 'Delete' }).click()
-  await expect(takes.getByText('Delete this take?')).toBeVisible()
-  await takes.getByRole('button', { name: 'Delete' }).click()
-  await expect(takes.getByRole('listitem')).toHaveCount(0)
+  // The glass: the takes numbered, T01 the oldest, the newest lit; the keys act on it.
+  const glass = takes.getByRole('radiogroup', { name: 'Takes' })
+  await expect(glass.getByRole('radio')).toHaveCount(1)
+  await expect(glass.getByRole('radio', { name: /^T01, \d+:\d\d, / })).toHaveAttribute('aria-checked', 'true')
+  await expect(takes).toContainText('Takes · 1')
+  await expect(takes.getByRole('button', { name: 'Save WAV, T01' })).toBeEnabled()
+  // A desktop browser can't share a file: no SHARE, and the note says Save WAV.
+  await expect(takes.getByRole('button', { name: 'Share WAV, T01' })).toHaveCount(0)
+  await expect(takes.getByRole('button', { name: 'To EP-133, T01' })).toBeEnabled()
+  await expect(takes.getByRole('button', { name: 'Play, T01' })).toBeEnabled()
+  // TRIM: the glass shows the wave, the start handle focused.
+  await takes.getByRole('button', { name: 'Trim, T01' }).click()
+  await expect(takes).toContainText('✂ TRIM')
+  const startHandle = takes.getByRole('slider', { name: 'Start' })
+  const endHandle = takes.getByRole('slider', { name: 'End' })
+  await expect(startHandle).toHaveAttribute('aria-valuetext', '0:00.0')
+  await expect(startHandle).toBeFocused()
+  const whole = await endHandle.getAttribute('aria-valuetext')
+  const wave = takes.locator('.take-trim__wave')
+  await wave.scrollIntoViewIfNeeded()
+  const waveBox = (await wave.boundingBox())!
+  const x = (f: number): number => waveBox.x + waveBox.width * f
+  const y = waveBox.y + waveBox.height / 2
+  // Up and down moves no handle; a drag sideways past the slop moves the nearer one; a tap moves the nearer one there.
+  await page.mouse.move(x(0.2), y)
+  await page.mouse.down()
+  await page.mouse.move(x(0.2) + 4, y + 30, { steps: 5 })
+  await page.mouse.up()
+  await expect(startHandle).toHaveAttribute('aria-valuetext', '0:00.0')
+  await expect(endHandle).toHaveAttribute('aria-valuetext', whole!)
+  await page.mouse.move(x(0.2), y)
+  await page.mouse.down()
+  await page.mouse.move(x(0.4), y, { steps: 5 })
+  await page.mouse.up()
+  await expect(startHandle).not.toHaveAttribute('aria-valuetext', '0:00.0')
+  await expect(endHandle).toHaveAttribute('aria-valuetext', whole!)
+  await page.mouse.click(x(0.9), y)
+  await expect(endHandle).not.toHaveAttribute('aria-valuetext', whole!)
+  // The keys: Home takes the start back to the take's, the arrows step it; DONE keeps the part, the focus back on TRIM.
+  await startHandle.focus()
+  await page.keyboard.press('Home')
+  await expect(startHandle).toHaveAttribute('aria-valuetext', '0:00.0')
+  await page.keyboard.press('ArrowRight')
+  await expect(startHandle).not.toHaveAttribute('aria-valuetext', '0:00.0')
+  await expect(takes.getByRole('button', { name: 'Reset' })).toBeEnabled()
+  await takes.getByRole('button', { name: 'Done' }).click()
+  await expect(takes.getByRole('button', { name: 'Trim, T01' })).toBeFocused()
+  await expect(glass.getByRole('radio', { name: /^T01, \d+:\d\d trimmed, / })).toBeVisible()
+  await expect(takes).toContainText(/✂ T01 is trimmed to \d+:\d\d: SHARE, SAVE and EP send that part/)
+  // DUP: a copy, its trim with it, lit as the newest.
+  await takes.getByRole('button', { name: 'Duplicate, T01' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'T02, a copy of T01' })).toBeVisible()
+  await expect(glass.getByRole('radio')).toHaveCount(2)
+  await expect(glass.getByRole('radio', { name: /^T02, \d+:\d\d trimmed, / })).toHaveAttribute('aria-checked', 'true')
+  await takes.getByRole('button', { name: 'Delete, T02' }).click()
+  await takes.locator('.deck-key').filter({ hasText: 'DEL' }).click()
+  await expect(glass.getByRole('radio')).toHaveCount(1)
+  // DEL asks again on the glass; DEL again deletes.
+  await takes.getByRole('button', { name: 'Delete, T01' }).click()
+  await expect(takes.getByRole('button', { name: 'Delete T01? Press DEL again' })).toHaveCount(2)
+  await takes.locator('.deck-key').filter({ hasText: 'DEL' }).click()
+  await expect(glass).toHaveCount(0)
+  await expect(takes).toContainText('No takes yet')
+  // Nothing to light: the keys but TAKE are dimmed.
+  await expect(takes.locator('.deck-key').filter({ hasText: 'DEL' })).toBeDisabled()
 })
 
 test("an armed take starts with the EP-133's PLAY and ends with its STOP", async ({ page }) => {

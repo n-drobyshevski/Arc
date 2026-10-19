@@ -362,7 +362,8 @@ describe('PATTERN', () => {
     expect(p.metronome.value.bpm).toBe(97)
     expect(h.liveAudio.clickLog.at(-1)).toBe('click:true:97:free')
     // The pattern plays at the phone's tempo too while the EP-133 sends no clock.
-    expect(h.liveAudio.plans.at(-1)?.bpm).toBe(97)
+    // (Only the tempo goes: the plan is otherwise as it was.)
+    expect(h.liveAudio.tempos.at(-1)).toBe(97)
     p.setTempo(500)
     expect(p.metronome.value.bpm).toBe(240)
     p.setClick(false)
@@ -387,6 +388,24 @@ describe('PATTERN', () => {
     expect(p.tapTempo(1500)).toBe(120)
     expect(p.tapTempo(1900)).toBe(133)
     expect(p.metronome.value.bpm).toBe(133)
+  })
+
+  it("TEMPO: the EP-133's clock's jitter sends nothing, and a new tempo only the tempo", async () => {
+    const h = await liveOn()
+    const tempo = (bpm: number): void => h.c.store.update((s) => ({ ...s, mirror: { ...s.mirror!, state: { ...s.mirror!.state, bpm } } }))
+    tempo(120.02)
+    const plans = h.liveAudio.plans.length
+    const arps = h.liveAudio.arps.length
+    expect(plans).toBeGreaterThan(0)
+    // Below 0.1 BPM (as the pattern has it): no plan, no arp, no tempo.
+    tempo(119.98)
+    tempo(120.04)
+    expect(h.liveAudio.plans.length).toBe(plans)
+    expect(h.liveAudio.arps.length).toBe(arps)
+    expect(h.liveAudio.tempos).toEqual([])
+    tempo(121.03)
+    expect(h.liveAudio.tempos).toEqual([121])
+    expect(h.liveAudio.plans.length).toBe(plans)
   })
 
   it("TEMPO: the EP-133's clock lights TEMPO, and the click follows its beats", async () => {

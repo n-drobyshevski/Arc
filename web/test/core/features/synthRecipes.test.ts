@@ -4,15 +4,18 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { BeatCards, SYNTH_TYPES, allSections, synthText, type CardRead } from '../../../src/core/features/beatCard'
 import { PlayMode } from '../../../src/core/features/padSettings'
+import { SynthVoice } from '../../../src/core/features/synthVoice'
 
 const recipes = readFileSync(new URL('../../../../skill/arc-beats/references/synth-sounds.md', import.meta.url), 'utf8')
 const cards = [...recipes.matchAll(/```\n(ARC BEAT 1\n[\s\S]*?)\n```/g)].map((m) => m[1]!)
 
-// The golden file's bodies, in its order: the 17 types, then the 23 recipes, then the extremes.
+// The golden file's cases (body, frames, CRC, device name), in its order: the 17 types, then the 23 recipes, then the extremes.
 const golden = readFileSync(new URL('../../../../skill/arc-beats/scripts/test_synth_golden.txt', import.meta.url), 'utf8')
   .split(/\r?\n/)
   .filter((l) => l.trim() !== '' && !l.startsWith('#'))
-  .map((l) => l.split(' | ')[0]!)
+  .map((l) => l.split(' | '))
+// Each body's device name, the golden file's last column.
+const names = new Map(golden.map((c) => [c[0]!, c[3]!]))
 
 const problems = (r: CardRead): string[] => r.problems.map((p) => `${p.line} ${p.error ? 'error' : 'warning'} ${p.message}`)
 
@@ -36,7 +39,7 @@ describe('synth recipes in the skill', () => {
     const lines = cards.flatMap((t) => t.split('\n').filter((l) => l.startsWith('synth ')))
     // The body is the line without "synth <pad> ".
     const bodies = lines.map((l) => l.split(' ').slice(2).join(' '))
-    const recipeBodies = golden.slice(SYNTH_TYPES.length, SYNTH_TYPES.length + 23)
+    const recipeBodies = golden.slice(SYNTH_TYPES.length, SYNTH_TYPES.length + 23).map((c) => c[0]!)
     expect([...bodies].sort()).toEqual([...recipeBodies].sort())
     for (const t of cards) {
       const text = t.split('\n')
@@ -46,9 +49,14 @@ describe('synth recipes in the skill', () => {
     }
   })
 
-  it('melodic recipes play in KEYS', () => {
+  it('each recipe makes the device name the golden file has, and melodic ones play in KEYS', () => {
     const melodic = new Set(['sub', 'bass', 'pluck', 'stab', 'bell', 'lead', 'pad'])
     for (const t of cards) {
+      for (const line of t.split('\n').filter((l) => l.startsWith('synth '))) {
+        const body = line.split(' ').slice(2).join(' ')
+        const synth = BeatCards.read(`ARC BEAT 1\n[A]\nsynth A1 ${body}\n`).card!.sections[0]!.synths!.get(3)!
+        expect(SynthVoice.deviceName(synth), body).toBe(names.get(body))
+      }
       for (const s of allSections(BeatCards.read(t).card!)) {
         for (const [offset, synth] of s.synths ?? new Map()) {
           if (melodic.has(synth.type)) expect(s.pads.get(offset)?.mode, `${s.group} ${offset} ${synth.type}`).toBe(PlayMode.KEY)

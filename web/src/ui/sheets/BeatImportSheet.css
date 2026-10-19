@@ -6,6 +6,8 @@
 .beat-sheet__blocked { margin: 0; color: var(--danger); }
 .beat-sheet__blocked:empty { display: none; }
 .beat-sheet__actions { display: flex; gap: 10px; }
+/* The sheet scrolls: its plates keep their height. */
+.beat-sheet .grid-plate { flex: none; }
 .beat-sheet__actions > * { flex: 1 1 0; }
 .beat-sheet__paste {
   width: 100%;
@@ -21,7 +23,7 @@
 }
 .beat-sheet__paste:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
 
-/* A row of the plate: label, value, then the chip; 48 high. */
+/* A row of the plate: label, value, then the switch; 48 high. */
 .beat-row {
   display: flex;
   align-items: center;
@@ -31,25 +33,179 @@
   box-sizing: border-box;
 }
 .beat-row__value { flex: 1 1 auto; min-width: 0; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A stacked row (a card scene, the chain): the label over its value, which wraps to three lines. */
+.beat-row__stack { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.beat-row__label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.beat-row__long { color: var(--ink); overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 
-/* The tempo chip: a flat pill, navy while on. */
-.tempo-chip {
+/* A card scene's title over its grids: "SCENE 2 · DROP". */
+.beat-scene__title { margin: 0; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* A block's switch (SET, PUT ON PADS, APPLY FX, SET CHAIN) as a device key on
+ * theme/cap.css's cap: a light, the words, and ON or OFF; lit, the light is
+ * signal orange with a glow a little past its edge, and ON is in signal. */
+.beat-switch {
+  --cap-face: var(--key);
+  --cap-edge: var(--key-edge);
+  --cap-ink: var(--ink);
   flex: none;
-  min-height: 40px;
-  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin-bottom: var(--cap-dy);
+  padding: 0 12px;
   border: 0;
-  border-radius: 999px;
-  background: var(--shell);
-  color: var(--ink);
+  border-radius: 10px;
   font: inherit;
-  font-size: var(--size-caps-key);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.beat-switch:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+.beat-switch__light {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--graphite) 45%, transparent);
+}
+.beat-switch.is-on .beat-switch__light {
+  background: var(--signal);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--signal) 30%, transparent);
+}
+/* capsKeySmall */
+.beat-switch__text {
+  font-size: var(--size-caps-key-small);
   font-weight: 700;
+  line-height: 1.1;
   letter-spacing: var(--track-caps-key);
   text-transform: uppercase;
-  cursor: pointer;
 }
-.tempo-chip.is-on { background: var(--navy); color: var(--on-navy); }
-.tempo-chip:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+/* caps at 10 */
+.beat-switch__state {
+  color: var(--graphite);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+}
+.beat-switch.is-on .beat-switch__state { color: var(--signal); }
+
+.beat-sheet__ink { color: var(--ink); }
+.beat-sheet__strong { color: var(--ink); font-weight: 700; }
+.beat-sheet__clamp { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+/* A block's header on its plate (FX, SILENT PADS, SOUNDS, PAD SHAPING): the caps, and the switch at the end; 48 high. */
+.beat-block__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 16px;
+  box-sizing: border-box;
+}
+.beat-block__head > .t-caps { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.beat-block__bar { flex: none; width: 4px; height: 16px; border-radius: 2px; }
+.beat-block__bar.is-warn { background: var(--warn); }
+
+/* A silent pad: the amber bar (navy once a sound is picked), its words, then PICK SOUND; 56 high. */
+.beat-silent {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 8px 16px;
+  box-sizing: border-box;
+}
+.beat-silent__bar { flex: none; width: 4px; height: 32px; border-radius: 2px; background: var(--warn); }
+.beat-silent__bar.is-picked { background: var(--navy); }
+.beat-silent__text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.beat-silent__line { display: flex; align-items: center; gap: 8px; }
+/* A pick Arc suggested: SUGGESTED in orange beside the pad. */
+.beat-silent__suggested { font-size: 10px; color: var(--signal); white-space: nowrap; }
+
+/* PICK SOUND's head: the pad's cap, its title and what it plays. */
+.beat-pick__head { display: flex; align-items: center; gap: 14px; }
+.beat-pick__cap {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  background: var(--key);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+/* A sound line: the tick box (or the amber bar), the pad, what changes; 48 high. The whole row is the box's. */
+.beat-sound {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 16px;
+  box-sizing: border-box;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+}
+.beat-sound.is-tickable { cursor: pointer; }
+.beat-sound.is-tickable:disabled { cursor: default; }
+.beat-sound:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+.beat-sound__mark { flex: none; width: 22px; display: grid; place-items: center; }
+.beat-sound__bar { width: 4px; height: 28px; border-radius: 2px; background: var(--warn); }
+.beat-sound__pad { flex: none; width: 28px; color: var(--ink); white-space: nowrap; }
+.beat-sound__what { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; color: var(--ink); }
+.beat-sound__what.is-dim { opacity: 0.5; }
+.beat-sound__one { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.beat-tick {
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border: 2px solid var(--graphite);
+  border-radius: 3px;
+}
+.beat-tick.is-on { border-color: var(--signal); background: var(--signal); position: relative; }
+.beat-tick.is-on::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 0;
+  width: 5px;
+  height: 10px;
+  border: solid var(--on-signal);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.beat-sound:disabled .beat-tick { opacity: 0.5; }
+/* A synth row IMPORT makes: the row's box, then its small play key (32 round) beside it. */
+.beat-sound-make { display: flex; align-items: center; padding-inline-end: 16px; }
+.beat-sound-make > .beat-sound { flex: 1 1 auto; min-width: 0; padding-inline-end: 8px; }
+.beat-sound-make__play.play-key { width: 32px; height: 32px; }
+
+/* An FX row: the kind's label in a 62 wide column, the project's value struck through over the card's; 48 high. Dimmed while APPLY FX is off. */
+.beat-fx {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 16px;
+  box-sizing: border-box;
+}
+.beat-fx.is-dim { opacity: 0.5; }
+.beat-fx__label { flex: none; width: 62px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.beat-fx__what { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; color: var(--ink); }
+.beat-fx__new { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+
+/* A pad shaping row's settings, old to new: up to three lines. */
+.beat-shape__parts { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 
 /* A problem: an amber (warning) or red (error) bar, then its words. */
 .beat-sheet__problems { display: flex; flex-direction: column; gap: 8px; }
@@ -90,3 +246,17 @@
 .beat-cell.is-accent { background: var(--signal); }
 .beat-cell.is-normal { background: var(--navy); }
 .beat-cell.is-ghost { background: color-mix(in srgb, var(--navy) 40%, transparent); }
+
+/* A lesson's step: its number in an 18 wide column, the title over the tip, the pads and speed at the end; 48 high. */
+.beat-lesson {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 16px;
+  box-sizing: border-box;
+}
+.beat-lesson__n { flex: none; width: 18px; white-space: nowrap; }
+.beat-lesson__what { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.beat-lesson__title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.beat-lesson__pads { flex: none; white-space: nowrap; }

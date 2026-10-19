@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { Pak } from '../../../src/core/backup/pak'
 import { FactoryKit, FactorySounds } from '../../../src/core/features/factorySounds'
@@ -15,6 +16,25 @@ const script =
   'b="/apps/ep-sample-tool/assets/ep-133-factory-content-DRyE_DHC.pak";'
 
 describe('FactorySounds', () => {
+  it("tells a device's kit by its slots, its own pack, not another kit's that shares some", () => {
+    // The two packs' slots as the skill lists them (factory-sounds.md).
+    const text = readFileSync(new URL('../../../../skill/arc-beats/references/factory-sounds.md', import.meta.url), 'utf8')
+    const at = text.indexOf('## EP-133 factory sounds')
+    const riddim = text.indexOf('## EP-40 Riddim factory sounds')
+    const slots = (t: string) => new Set([...t.matchAll(/^(\d+) \S/gm)].map((m) => Number(m[1])))
+    const ep133 = slots(text.substring(at, riddim))
+    const ep40 = slots(text.substring(riddim))
+    const both = new Map([[FactoryKit.EP133, ep133], [FactoryKit.EP40, ep40]])
+    expect(FactorySounds.kitOf(ep133, both)).toBe(FactoryKit.EP133)
+    expect(FactorySounds.kitOf(ep40, both)).toBe(FactoryKit.EP40)
+    // An EP-133 with its own sounds, a few gone and some of the player's own added: still its kit.
+    const own = new Set([...[...ep133].slice(30), ...Array.from({ length: 41 }, (_, i) => 900 + i)])
+    expect(FactorySounds.kitOf(own, both)).toBe(FactoryKit.EP133)
+    // Only the EP-40's pack saved: an EP-133's sounds aren't it.
+    expect(FactorySounds.kitOf(ep133, new Map([[FactoryKit.EP40, ep40]]))).toBeNull()
+    expect(FactorySounds.kitOf(new Set(), both)).toBeNull()
+  })
+
   it("finds the pack through the tool's page and script", async () => {
     expect(FactorySounds.scriptPath(page)).toBe('/apps/ep-sample-tool/assets/index-C1wBjhTa.js')
     expect(FactorySounds.pakPath(script)).toBe('/apps/ep-sample-tool/assets/ep-133-factory-content-DRyE_DHC.pak')

@@ -74,7 +74,7 @@ import '@fontsource/fredoka/latin-600.css'
 import '@fontsource/unifrakturmaguntia/latin-400.css'
 import type { ButtonHTMLAttributes, Component, ComponentChildren, CSSProperties, FunctionComponent, HTMLAttributes, JSX } from 'preact'
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { signal, type ReadonlySignal } from '@preact/signals'
+import { computed, signal, type ReadonlySignal } from '@preact/signals'
 import { FADER_PARAMS, faderParamSupported, type FaderParam, type FxType } from '../../core/features/fxSettings'
 import type { MirrorState } from '../../core/features/liveMirror'
 import { ROWS } from '../../core/features/padNotes'
@@ -88,7 +88,7 @@ import type { CoachId } from '../components/Coach'
 import { ComboLine } from '../components/GuideKeys'
 import { EDIT_PAGES, padPage } from '../sheets/PadEditPages'
 import { useDeviceKeys, useLayerPress, type DeviceKeysUi } from './DeviceKeys'
-import { groupKey, held, keyLit, type DeviceKey, type DeviceKeys, type DevicePage } from './deviceKeys'
+import { groupKey, held, keyLit, type DeviceKey, type DeviceKeys, type DevicePage, type MinusPlusRoute } from './deviceKeys'
 import { FunctionKeysContext, TempoContext } from './FunctionRow'
 import { PatternGridOver, useScene, worthSaying } from './ScenePanel'
 import { useSample } from './SamplePanel'
@@ -109,6 +109,7 @@ import {
 import { of as keymapOf } from '../../core/text/guideKeymap'
 import { displayLine, glowCss, groupGlow } from './glow'
 import type { KeysShown } from './keys'
+import { memo, sameProps } from './memo'
 import { cardName, cardSearch, shortcutsFor, type CardKey } from './shortcuts'
 import type { TakeUi } from './Takes'
 import { Spoken } from './spoken'
@@ -256,6 +257,161 @@ const at = (x: number, y: number, w?: number, h?: number): CSSProperties => ({
 /** The near-black well a key sits in. */
 const well = (x: number, y: number, w: number, h: number): JSX.Element => <i key={`w${x}:${y}`} class="ep-a ep-well" style={at(x, y, w, h)} aria-hidden="true" />
 
+/** An LED centred on (x, y). */
+const led = (x: number, y: number, extra?: HTMLAttributes<HTMLSpanElement>): JSX.Element => (
+  <span class="ep-a ep-led" style={at(x - 10, y - 10)} aria-hidden="true" {...extra} />
+)
+
+/** A printed word, its middle on y: from x, or centred on it. */
+const label = (x: number, y: number, text: ComponentChildren, centre = false): JSX.Element => (
+  <span class="ep-a ep-lbl" style={{ ...at(x, y), transform: `translate(${centre ? '-50%' : '0'}, -50%)` }} aria-hidden="true">
+    {text}
+  </span>
+)
+
+// The places of the keys and knobs that render on their own, made once (so they keep their props).
+const VOLUME_PLACE = at(68, KROW)
+const KNOB_X_PLACE = at(1049, KROW)
+const KNOB_Y_PLACE = at(1245, KROW)
+const MINUS_PLACE = at(1050, ROW_Y[2]!, 130, 128)
+const PLUS_PLACE = at(1246, ROW_Y[2]!, 130, 128)
+const RECORD_PLACE = at(1050, ROW_Y[3]!, 130, 128)
+const PLAY_PLACE = at(1246, ROW_Y[3]!, 130, 128)
+const GROUP_PLACES = ROW_Y.map((y) => at(265, y, 130, 128))
+
+/** − / +'s route and whether each can step ([DeviceKeys.route]). */
+export interface Steps {
+  readonly route: MinusPlusRoute
+  readonly minus: boolean
+  readonly plus: boolean
+}
+
+/** [s] as one string ('' for none), read through a computed so the device renders again only when it changes. */
+export function stepsKey(s: Steps | null): string {
+  return s === null ? '' : `${s.route}|${s.minus}|${s.plus}`
+}
+
+/** The steps a [stepsKey] holds. */
+export function stepsOf(key: string): Steps | null {
+  if (key === '') return null
+  const [route, minus, plus] = key.split('|')
+  return { route: route as MinusPlusRoute, minus: minus === 'true', plus: plus === 'true' }
+}
+
+/** What the device shows of the pattern: RECORD's light, PLAY's, ERASE, and whether the plate has its words. */
+export interface PatternBits {
+  readonly light: 'live' | 'armed' | null
+  readonly runs: boolean
+  readonly erase: boolean
+  readonly words: boolean
+}
+
+/** The pattern's [PatternBits] as one string ('' with no pattern), as [stepsKey]. */
+export function patternKey(t: TransportUi | null): string {
+  if (t === null) return ''
+  const ui = t.ui
+  return `${recordLight(ui) ?? ''}|${patternRuns(ui)}|${ui.erase}|${hasWords(ui)}`
+}
+
+/** The bits a [patternKey] holds. */
+export function patternBitsOf(key: string): PatternBits | null {
+  if (key === '') return null
+  const [light, runs, erase, words] = key.split('|')
+  return { light: light === 'live' || light === 'armed' ? light : null, runs: runs === 'true', erase: erase === 'true', words: words === 'true' }
+}
+
+// The drawing's parts that never change, each drawn once where it lies (so the DOM and its order stay the device's).
+
+/** The top: the jacks, the plate and its screws. */
+const TopPrint = once(function TopPrint(): JSX.Element {
+  return (
+    <>
+      <span class="ep-a ep-jack ep-jack--out" aria-hidden="true">OUTPUT</span>
+      <span class="ep-a ep-jack ep-jack--in" aria-hidden="true">INPUT</span>
+      <span class="ep-a ep-jack ep-jack--sync" aria-hidden="true">
+        <span><i style={{ left: '-6px' }}>I</i><i style={{ right: '-8px' }}>O</i>SYNC</span>
+        <span><i style={{ left: '-4px' }}>I</i><i style={{ right: '-10px' }}>O</i>MIDI</span>
+      </span>
+      <span class="ep-a ep-jack ep-jack--usb" aria-hidden="true">USB</span>
+      <span class="ep-a ep-jack ep-jack--pow" aria-hidden="true">POWER</span>
+      <span class="ep-a ep-pow" aria-hidden="true" />
+      <div class="ep-a ep-plate" aria-hidden="true" />
+      {[[14, 80], [928, 80], [14, 406], [928, 406]].map(([x, y]) => <span key={`${x}:${y}`} class="ep-a ep-screw" style={at(x!, y!)} aria-hidden="true" />)}
+    </>
+  )
+})
+
+/** The display's glass and its reflection. */
+const Glass = once(function Glass(): JSX.Element {
+  return (
+    <>
+      <div class="ep-a ep-disp" aria-hidden="true" />
+      <div class="ep-a ep-disp__gloss" aria-hidden="true" />
+    </>
+  )
+})
+
+/** The display's two pins, and the controls' printing: VOLUME, BPM and METRONOME and their lines. */
+const ControlsPrint = once(function ControlsPrint(): JSX.Element {
+  return (
+    <>
+      <span class="ep-a ep-disp__pin" style={at(715, 466)} aria-hidden="true" />
+      <span class="ep-a ep-disp__pin" style={at(715, 818)} aria-hidden="true" />
+      {label(133, 886, 'VOLUME', true)}
+      <span class="ep-a ep-line" style={at(721, 885, 2, 34)} aria-hidden="true" />
+      <span class="ep-a ep-line" style={at(721, 885, 336, 2)} aria-hidden="true" />
+      {label(1114, 886, 'BPM', true)}
+      <span class="ep-a ep-line" style={at(1160, 885, 68, 2)} aria-hidden="true" />
+      {label(1310, 886, 'METRONOME', true)}
+    </>
+  )
+})
+
+/** The wells of SOUND, MAIN and TEMPO. */
+const TopWells = once(function TopWells(): JSX.Element {
+  return <>{[265, 461, 657].map((x) => well(x, KROW, 130, 130))}</>
+})
+
+/** X's and Y's badges, and the GAIN (orange) and SWING (black) brackets, the line broken round the word. */
+const KnobPrint = once(function KnobPrint(): JSX.Element {
+  return (
+    <>
+      <span class="ep-a ep-badge ep-badge--x" style={at(1098, 1067)} aria-hidden="true">X</span>
+      <span class="ep-a ep-badge ep-badge--y" style={at(1294, 1067)} aria-hidden="true">Y</span>
+      <span class="ep-a ep-line ep-line--red" style={at(1016, 984, 2, 50)} aria-hidden="true" />
+      <span class="ep-a ep-line ep-line--red" style={at(1016, 1098, 2, 48)} aria-hidden="true" />
+      <span class="ep-a ep-line ep-line--red" style={at(1016, 984, 24, 2)} aria-hidden="true" />
+      <span class="ep-a ep-line ep-line--red" style={at(1016, 1144, 24, 2)} aria-hidden="true" />
+      <span class="ep-a ep-lbl ep-lbl--red ep-lbl--up" style={at(1017, 1066)} aria-hidden="true">GAIN</span>
+      <span class="ep-a ep-line" style={at(1408, 984, 2, 40)} aria-hidden="true" />
+      <span class="ep-a ep-line" style={at(1408, 1108, 2, 38)} aria-hidden="true" />
+      <span class="ep-a ep-line" style={at(1388, 984, 22, 2)} aria-hidden="true" />
+      <span class="ep-a ep-line" style={at(1388, 1144, 22, 2)} aria-hidden="true" />
+      <span class="ep-a ep-lbl ep-lbl--up" style={at(1409, 1066)} aria-hidden="true">SWING</span>
+    </>
+  )
+})
+
+/** The group keys' wells. */
+const GroupWells = once(function GroupWells(): JSX.Element {
+  return <>{ROW_Y.map((y) => well(265, y, 130, 128))}</>
+})
+
+/** The pads' wells. */
+const PadWells = once(function PadWells(): JSX.Element {
+  return <>{ROW_Y.map((y) => COLS.map((x) => well(x, y, 130, 128)))}</>
+})
+
+/** The wells right of the pads: SAMPLE, TIMING, FX and ERASE's. */
+const UpperWells = once(function UpperWells(): JSX.Element {
+  return <>{[ROW_Y[0]!, ROW_Y[1]!].map((y) => [1050, 1246].map((x) => well(x, y, 130, 130)))}</>
+})
+
+/** − / +, RECORD and PLAY's wells. */
+const LowerWells = once(function LowerWells(): JSX.Element {
+  return <>{[ROW_Y[2]!, ROW_Y[3]!].map((y) => [1050, 1246].map((x) => well(x, y, 130, 128)))}</>
+})
+
 export function DeviceView(props: DeviceViewProps): JSX.Element {
   // The skin's device (Settings → Skin): its colours are the stylesheet's, its name and speaker drawn here.
   const skin = resolvedSkin.value
@@ -282,6 +438,9 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
   const offline = mirror?.offline != null && st.playing === null
   const digits = displayDigits(st, mirror, take)
   const glows = [0, 1, 2, 3].map((g) => groupGlow(st.pads, g, now))
+  // The display's groups: the one shown (-1 offline), and a bit for each sounding.
+  const shown = offline ? -1 : group
+  const sounding = glows.reduce((m, v, g) => (v > 0 ? m | (1 << g) : m), 0)
 
   // The key layer: the device's combos on the drawn keys, its page shown on the display and the plate.
   const dk = useDeviceKeys()
@@ -290,8 +449,10 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
   const page: DevicePage = ks?.page ?? 'MAIN'
   const lit = (k: DeviceKey): boolean => ks !== null && keyLit(ks, k)
   const shiftLit = layer !== null && layer.shiftHeld()
-  // − and +: what they step now (their names), and where they can.
-  const steps = layer?.route() ?? null
+  // − and +: what they step now (their names), and where they can; read as one key, so only its change
+  // re-renders the device. route() reads the layer's signals and is given the group shown, so a new group makes
+  // a new key. useMemo, not useComputed: that would keep the first layer and group.
+  const steps = stepsOf(useMemo(() => computed(() => stepsKey(layer?.route(group) ?? null)), [layer, group]).value)
   // The computer's Shift held is SHIFT, while the device shows. The window left (or the page hidden) lets go of
   // every key held down, by the mouse, a finger or the keyboard (no key up comes then); latched ones stay.
   useEffect(() => {
@@ -327,11 +488,13 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
   const sample = useSample()
   const scene = useScene()
   const numbers = scene !== null && worthSaying(scene.ui) ? scene.ui.groups : null
-  const pat = transport?.ui ?? null
-  const patLight = pat !== null ? recordLight(pat) : null
+  // The pattern's bits shown here, read as one key: its counter or a step moving re-renders only what shows them.
+  const pat = patternBitsOf(useMemo(() => computed(() => patternKey(transport)), [transport]).value)
   const recLight: 'live' | 'armed' | null =
-    patLight ?? (take?.state.kind === 'recording' ? 'live' : take?.state.kind === 'armed' ? 'armed' : null)
-  const patternOn = pat !== null && patternRuns(pat)
+    pat?.light ?? (take?.state.kind === 'recording' ? 'live' : take?.state.kind === 'armed' ? 'armed' : null)
+  const patternOn = pat?.runs === true
+  // FREE on the display, read on its own: the pattern's other changes (a note recorded, count-in) don't reach the device.
+  const free = useMemo(() => computed(() => dk !== null && !dk.quantize), [dk]).value
   // The knobs and the fader: what each turns now, and the one turned last, shown on the plate for a moment.
   const turning = useMemo(() => signal<DeviceControl | null>(null), [])
   const turnTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -358,16 +521,16 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
     setCard(card?.key === key ? null : { key, x: r.left - b.left, y: r.bottom - b.top + 8, above: r.top - b.top - 8 })
   }
   const fine = (): boolean => layer?.shiftHeld() === true
-
-  // An LED centred on (x, y).
-  const led = (x: number, y: number, extra?: HTMLAttributes<HTMLSpanElement>): JSX.Element => (
-    <span class="ep-a ep-led" style={at(x - 10, y - 10)} aria-hidden="true" {...extra} />
-  )
-  // A printed word, its middle on y: from x, or centred on it.
-  const label = (x: number, y: number, text: ComponentChildren, centre = false): JSX.Element => (
-    <span class="ep-a ep-lbl" style={{ ...at(x, y), transform: `translate(${centre ? '-50%' : '0'}, -50%)` }} aria-hidden="true">
-      {text}
-    </span>
+  // The knobs and the fader keep these (they render on their own), each calling the latest.
+  const latest = useRef({ openCard, turned, fine })
+  latest.current = { openCard, turned, fine }
+  const acts = useMemo(
+    () => ({
+      onCard: (key: CardKey, el: HTMLElement): void => latest.current.openCard(key, el),
+      onTurned: (which: DeviceControl): void => latest.current.turned(which),
+      fine: (): boolean => latest.current.fine(),
+    }),
+    [],
   )
   // A drawn key on the layer (inert without one).
   const splitKey = (k: DeviceKey, d: DrawnKey, name: string, on: boolean, extra: { held?: boolean; coach?: CoachId; coachLabel?: string } = {}): JSX.Element => (
@@ -397,7 +560,9 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
     !faderHeld ? '' : (dk?.faderAssign[group] ?? 'LEVEL') === p ? ' is-on' : faderParamSupported(p) ? ' is-avail' : ''
   const fxType = dk?.fxType ?? 'NONE'
   const fxPage = page === 'FX' || page === 'OUTPUT' || page === 'SIDECHAIN'
-  const plateHit = keys.on ? (keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND) : displayLine(st, mirror)
+  // KEYS: the sound read only then, so another pad played re-renders the device only with KEYS on.
+  const sound = keys.on ? keys.sound.value : null
+  const plateHit = sound !== null ? (sound.pad !== null ? MirrorText.keysSound(sound.pad, sound.padName) : MirrorText.NO_SOUND) : displayLine(st, mirror)
   const said = layer?.said.value ?? null
   // What a key just did is newer than a knob's value: it takes the line.
   useEffect(() => {
@@ -413,22 +578,12 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
       <div class="ko-device__box" style={{ width: `${DEVICE_W * scale}px`, height: `${DEVICE_H * scale}px` }}>
         <div class="ep" role="group" aria-label={WebText.DEVICE_VIEW} style={{ transform: `scale(${scale})` }}>
           {/* The top: jacks, the plate and the speaker. */}
-          <span class="ep-a ep-jack ep-jack--out" aria-hidden="true">OUTPUT</span>
-          <span class="ep-a ep-jack ep-jack--in" aria-hidden="true">INPUT</span>
-          <span class="ep-a ep-jack ep-jack--sync" aria-hidden="true">
-            <span><i style={{ left: '-6px' }}>I</i><i style={{ right: '-8px' }}>O</i>SYNC</span>
-            <span><i style={{ left: '-4px' }}>I</i><i style={{ right: '-10px' }}>O</i>MIDI</span>
-          </span>
-          <span class="ep-a ep-jack ep-jack--usb" aria-hidden="true">USB</span>
-          <span class="ep-a ep-jack ep-jack--pow" aria-hidden="true">POWER</span>
-          <span class="ep-a ep-pow" aria-hidden="true" />
-          <div class="ep-a ep-plate" aria-hidden="true" />
-          {[[14, 80], [928, 80], [14, 406], [928, 406]].map(([x, y]) => <span key={`${x}:${y}`} class="ep-a ep-screw" style={at(x!, y!)} aria-hidden="true" />)}
+          <TopPrint />
           <PlateTitle skin={skin} />
           {/* A page's line (a key to arc's own sheet for it), else the pattern's words, else the status. */}
           {dk !== null && page !== 'MAIN' ? (
             <PageLine dk={dk} page={page} group={group} />
-          ) : transport !== null && hasWords(transport.ui) ? (
+          ) : transport !== null && pat?.words === true ? (
             <PlateWords t={transport} still={props.still} />
           ) : (
             <span class="ep-a ep-plate__status" aria-live="polite">{plateStatus(st, mirror, take)}</span>
@@ -445,14 +600,13 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           </div>
 
           {/* The display: the glass, its reflection, the icons and two pins. */}
-          <div class="ep-a ep-disp" aria-hidden="true" />
-          <div class="ep-a ep-disp__gloss" aria-hidden="true" />
+          <Glass />
           <svg class="ep-a ep-lcd" viewBox="0 0 1444 396" aria-hidden="true">
             <LcdPrint />
             <LcdLit
               fx={fxPage}
               swing={page === 'TIMING'}
-              free={dk !== null && !dk.quantize}
+              free={free}
               main={page === 'MAIN' && !offline}
               tempo={page === 'TEMPO'}
               erase={pat?.erase === true}
@@ -463,76 +617,40 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
             {ic(98, R[2], C.white, PIANO, keys.on)}
             {wordBox(273, 384, C.white, keys.on ? MirrorText.MODE_KEYS.toUpperCase() : 'SOUND', keys.on || page === 'SOUND' || page === 'EDIT')}
             {/* The group cards: the group shown lit, a sounding group's offset lit. */}
-            {[0, 1, 2, 3].map((g) => {
-              const on = !offline && g === group
-              const ghost = 'var(--lcd-ghost)'
-              return (
-                <g key={g} class="ic on ep-dgrp" style={{ '--c': GROUP_COLOURS[g] }} transform={`translate(222 ${R[g]})`}>
-                  <path d="M15 -16H21V22H-14V16H15Z" style={{ opacity: on || glows[g]! > 0 ? 1 : ghost }} />
-                  <g style={{ opacity: on ? 1 : 'var(--lcd-ghost-w)' }}>
-                    <rect x="-20" y="-22" width="35" height="38" style={{ fill: C.white }} />
-                    {t(-3, -3, MirrorText.groupKey(g), 24, 'k', 500)}
-                  </g>
-                </g>
-              )
-            })}
+            <GroupCards shown={shown} sounding={sounding} />
             <LcdDigits base={digits} turning={turning} group={group} dk={dk} />
             {ic(820, R[1] + 2, C.white, METRONOME, st.playing === true || tempo?.clickOn === true, 'ep-metro')}
             {ic(557, R[2], C.red, <circle r="21" />, recLight !== null, `ep-rec${recLight === 'armed' && !props.still ? ' is-armed' : ''}`)}
             {ic(624, R[2], C.white, <path d="M-15 -21L21 0L-15 21z" />, st.playing === true || patternOn, `ep-play${st.playing === true || patternOn ? ' is-on' : ''}`)}
             {/* The X ring: a quarter a group (A bottom left, B top left, C top right, D bottom right), the group shown and the sounding ones lit. */}
-            <g class="ic on ep-ring">
-              {QUARTER_GROUP.map((g, k) => quarter(1113, RING_Y, k, GROUP_COLOURS[g]!, (!offline && g === group) || glows[g]! > 0 ? 1 : 'var(--lcd-ghost)'))}
-            </g>
-            <Meter level={Math.max(...glows)} />
+            <Ring shown={shown} sounding={sounding} />
+            <Meter lit={Math.round(Math.max(...glows) * 20)} />
           </svg>
-          <span class="ep-a ep-disp__pin" style={at(715, 466)} aria-hidden="true" />
-          <span class="ep-a ep-disp__pin" style={at(715, 818)} aria-hidden="true" />
-
-          {/* The controls' printing. */}
-          {label(133, 886, 'VOLUME', true)}
-          <span class="ep-a ep-line" style={at(721, 885, 2, 34)} aria-hidden="true" />
-          <span class="ep-a ep-line" style={at(721, 885, 336, 2)} aria-hidden="true" />
-          {label(1114, 886, 'BPM', true)}
-          <span class="ep-a ep-line" style={at(1160, 885, 68, 2)} aria-hidden="true" />
-          {label(1310, 886, 'METRONOME', true)}
-          <Knob kind="vol" which="volume" label="Volume" card="VOLUME" place={at(68, KROW)} group={group} onCard={openCard} onTurned={turned} fine={fine} />
-          {[265, 461, 657].map((x) => well(x, KROW, 130, 130))}
+          {/* The display's pins and the controls' printing. */}
+          <ControlsPrint />
+          <Knob kind="vol" which="volume" label="Volume" card="VOLUME" place={VOLUME_PLACE} group={group} onCard={acts.onCard} onTurned={acts.onTurned} fine={acts.fine} />
+          <TopWells />
           {splitKey('SOUND', DRAWN.SOUND, MirrorText.FN_SOUND, page === 'SOUND' || page === 'EDIT' || lit('SOUND'), { coach: 'live.sound' })}
           {/* MAIN: the MAIN page; held, a pad 1 to 9 picks a project (as the EP-133 loads one), − / + the scene. */}
           {splitKey('MAIN', DRAWN.MAIN, WebText.DEVICE_MAIN_KEY, lit('MAIN') || fn?.project?.switching === true, { coach: 'live.project', coachLabel: WebText.COACH_DEVICE_MAIN })}
           {splitKey('TEMPO', DRAWN.TEMPO, MirrorText.FN_TEMPO, page === 'TEMPO' || lit('TEMPO'), { coach: 'live.tempo', coachLabel: WebText.COACH_DEVICE_TEMPO })}
-          <Knob kind="x" which="x" label="Knob X" card="KNOBX" place={at(1049, KROW)} group={group} onCard={openCard} onTurned={turned} fine={fine} />
-          <Knob kind="y" which="y" label="Knob Y" card="KNOBY" place={at(1245, KROW)} group={group} onCard={openCard} onTurned={turned} fine={fine} />
-          <span class="ep-a ep-badge ep-badge--x" style={at(1098, 1067)} aria-hidden="true">X</span>
-          <span class="ep-a ep-badge ep-badge--y" style={at(1294, 1067)} aria-hidden="true">Y</span>
-          {/* GAIN (orange) and SWING (black) brackets, the line broken round the word. */}
-          <span class="ep-a ep-line ep-line--red" style={at(1016, 984, 2, 50)} aria-hidden="true" />
-          <span class="ep-a ep-line ep-line--red" style={at(1016, 1098, 2, 48)} aria-hidden="true" />
-          <span class="ep-a ep-line ep-line--red" style={at(1016, 984, 24, 2)} aria-hidden="true" />
-          <span class="ep-a ep-line ep-line--red" style={at(1016, 1144, 24, 2)} aria-hidden="true" />
-          <span class="ep-a ep-lbl ep-lbl--red ep-lbl--up" style={at(1017, 1066)} aria-hidden="true">GAIN</span>
-          <span class="ep-a ep-line" style={at(1408, 984, 2, 40)} aria-hidden="true" />
-          <span class="ep-a ep-line" style={at(1408, 1108, 2, 38)} aria-hidden="true" />
-          <span class="ep-a ep-line" style={at(1388, 984, 22, 2)} aria-hidden="true" />
-          <span class="ep-a ep-line" style={at(1388, 1144, 22, 2)} aria-hidden="true" />
-          <span class="ep-a ep-lbl ep-lbl--up" style={at(1409, 1066)} aria-hidden="true">SWING</span>
+          <Knob kind="x" which="x" label="Knob X" card="KNOBX" place={KNOB_X_PLACE} group={group} onCard={acts.onCard} onTurned={acts.onTurned} fine={acts.fine} />
+          <Knob kind="y" which="y" label="Knob Y" card="KNOBY" place={KNOB_Y_PLACE} group={group} onCard={acts.onCard} onTurned={acts.onTurned} fine={acts.fine} />
+          <KnobPrint />
 
           {/* The LEDs over the pads and their labels; the LED above each group key is its group's. */}
           {LED_Y.map((y, r) => (
-            <span key={y}>
-              {led(297, y, {
-                class: `ep-a ep-led ep-led--group${groupLed(r)}`,
-                'data-group': String(r),
-                style: { ...at(287, y - 10), '--glow': glowCss(r === group ? glows[r]! : glows[r]! * 0.5) },
-              } as HTMLAttributes<HTMLSpanElement>)}
-              {COLS.map((x, i) => (
-                <span key={x}>
-                  {led(x + 32, y, { class: `ep-a ep-led ep-led--pad${faderLed(FADER_PARAMS[r * 3 + i]!)}` })}
-                  {label(x + 62, y, LED_LABELS[r]![i] === '→ FX' ? <><span class="ep-arr">→</span> FX</> : LED_LABELS[r]![i])}
-                </span>
-              ))}
-            </span>
+            <LedRow
+              key={y}
+              r={r}
+              y={y}
+              cls={groupLed(r)}
+              current={r === group}
+              glow={glowCss(r === group ? glows[r]! : glows[r]! * 0.5)}
+              f0={faderLed(FADER_PARAMS[r * 3]!)}
+              f1={faderLed(FADER_PARAMS[r * 3 + 1]!)}
+              f2={faderLed(FADER_PARAMS[r * 3 + 2]!)}
+            />
           ))}
           {led(1082, 1669, { class: `ep-a ep-led${steps?.minus === true ? ' is-on' : ''}` })}
           {led(1147, 1669, { class: `ep-a ep-led${steps?.plus === true ? ' is-on' : ''}` })}
@@ -541,36 +659,36 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           {slim('KEYS', ROW_Y[0]!, MirrorText.MODE_KEYS, keys.on || lit('KEYS'), 'ep-key--black', { coach: 'live.mode', sel: keys.on })}
           {well(68, 1246, 130, 64)}
           {slim('FADER', 1246, WebText.DEVICE_FADER_KEY, lit('FADER'), 'ep-key--black')}
-          <Fader group={group} onCard={openCard} onTurned={turned} fine={fine} layer={layer} />
+          <Fader group={group} onCard={acts.onCard} onTurned={acts.onTurned} fine={acts.fine} layer={layer} />
           {well(68, 1769, 130, 64)}
           {slim('SHIFT', 1769, WebText.DEVICE_SHIFT_KEY, shiftLit, 'ep-key--shift')}
 
           {/* The guide's tags on the group keys and the pads: boxes over them (their keys are placed one by one). */}
           <span class="ep-a ep-area" style={at(265, ROW_Y[0]!, 130, 716)} data-coach="live.groups" aria-hidden="true" />
           <span class="ep-a ep-area" style={at(461, ROW_Y[0]!, 522, 716)} data-coach={keys.on ? 'live.keys' : 'live.pads'} aria-hidden="true" />
-          {ROW_Y.map((y) => well(265, y, 130, 128))}
+          <GroupWells />
           <div role="tablist" aria-label={MirrorText.GROUP}>
             {[0, 1, 2, 3].map((g) => (
               <GroupKey key={g} layer={layer} g={g} selected={g === group} held={lit(groupKey(g))} latched={ks?.latched.has(groupKey(g)) === true} soloed={dk?.soloed.has(g) === true} silenced={dk?.silenced.has(g) === true} col={numbers?.[g] ?? null} />
             ))}
           </div>
 
-          {ROW_Y.map((y) => COLS.map((x) => well(x, y, 130, 128)))}
+          <PadWells />
           {/* Try arc's Hear step lets touches through to these (the mark is the box above, over them). */}
           <div role="group" aria-label={keys.on ? MirrorText.MODE_KEYS : `${MirrorText.GROUP} ${MirrorText.groupKey(group)}`} data-coach-pass={keys.on ? 'live.keys' : 'live.pads'}>
             {props.pads}
           </div>
 
-          {[ROW_Y[0]!, ROW_Y[1]!].map((y) => [1050, 1246].map((x) => well(x, y, 130, 130)))}
+          <UpperWells />
           {splitKey('SAMPLE', DRAWN.SAMPLE, 'SAMPLE / CHOP', sample?.ui.on === true || lit('SAMPLE'))}
           {splitKey('TIMING', DRAWN.TIMING, WebText.DEVICE_TIMING_KEY, page === 'TIMING' || lit('TIMING'))}
           {splitKey('FX', DRAWN.FX, MirrorText.FX_EFFECTS, fxType !== 'NONE' || fxPage || lit('FX'), { held: ks?.punch === true })}
           {splitKey('ERASE', DRAWN.ERASE, MirrorText.ERASE, pat?.erase === true || lit('ERASE'), { coach: 'live.erase' })}
-          {[ROW_Y[2]!, ROW_Y[3]!].map((y) => [1050, 1246].map((x) => well(x, y, 130, 128)))}
+          <LowerWells />
           <button
             type="button"
             class="ep-a ep-key ep-key--light ep-key--sign"
-            style={at(1050, ROW_Y[2]!, 130, 128)}
+            style={MINUS_PLACE}
             aria-label={minusName}
             disabled={steps?.minus !== true}
             onClick={(e) => layer?.minusPlus(-1, e.shiftKey)}
@@ -580,7 +698,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           <button
             type="button"
             class="ep-a ep-key ep-key--light ep-key--sign"
-            style={at(1246, ROW_Y[2]!, 130, 128)}
+            style={PLUS_PLACE}
             aria-label={plusName}
             disabled={steps?.plus !== true}
             onClick={(e) => layer?.minusPlus(1, e.shiftKey)}
@@ -594,7 +712,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
               <button
                 type="button"
                 class="ep-a ep-key ep-key--orange ep-key--word"
-                style={at(1050, ROW_Y[3]!, 130, 128)}
+                style={RECORD_PLACE}
                 aria-haspopup="dialog"
                 onClick={(e) => openCard('RECORD', e.currentTarget)}
               >
@@ -603,7 +721,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
               <button
                 type="button"
                 class={`ep-a ep-key ep-key--grey ep-key--word${st.playing === true ? ' is-lit' : ''}`}
-                style={at(1246, ROW_Y[3]!, 130, 128)}
+                style={PLAY_PLACE}
                 aria-label={`PLAY, ${st.playing === true ? MirrorText.PLAYING : st.playing === false ? MirrorText.STOPPED : MirrorText.OFFLINE}`}
                 aria-haspopup="dialog"
                 onClick={(e) => openCard('PLAY', e.currentTarget)}
@@ -684,7 +802,7 @@ function GroupKey(props: {
       // A tab has no pressed state: held, latched, soloed or silenced is said first in its description.
       aria-description={[WebText.groupKeyState(props.latched, props.held, props.soloed, props.silenced), WebText.DEVICE_KEY_HINTS.GROUP, WebText.DEVICE_KEY_HINTS.RIGHT_CLICK].filter((t) => t !== '').join('. ')}
       class={`ep-a ep-key ep-key--group${queued !== null ? ' is-queued' : ''}${props.held ? ' is-held' : ''}`}
-      style={at(265, ROW_Y[g]!, 130, 128)}
+      style={GROUP_PLACES[g]}
       {...press}
     >
       <span class="ep-key__letter" aria-hidden="true">{MirrorText.groupKey(g)}</span>
@@ -700,6 +818,33 @@ function GroupKey(props: {
     </button>
   )
 }
+
+/**
+ * A row of LEDs over the pads ([r], at [y]): its group's LED ([cls] its state, lit at half where its group
+ * isn't the one shown), then each pad's ([f0] to [f2]: FADER's light on its parameter) with its printed word.
+ * Renders again only when one of them changes.
+ */
+const LedRow = memo(function LedRow(props: { r: number; y: number; cls: string; current: boolean; glow: string; f0: string; f1: string; f2: string }): JSX.Element {
+  const { r, y } = props
+  const fader = [props.f0, props.f1, props.f2]
+  return (
+    <span>
+      {led(297, y, {
+        class: `ep-a ep-led ep-led--group${props.cls}`,
+        'data-group': String(r),
+        // The glow pass lights a group not shown at half, as this render does.
+        'data-glow-scale': props.current ? '1' : '0.5',
+        style: { ...at(287, y - 10), '--glow': props.glow },
+      } as HTMLAttributes<HTMLSpanElement>)}
+      {COLS.map((x, i) => (
+        <span key={x}>
+          {led(x + 32, y, { class: `ep-a ep-led ep-led--pad${fader[i]}` })}
+          {label(x + 62, y, LED_LABELS[r]![i] === '→ FX' ? <><span class="ep-arr">→</span> FX</> : LED_LABELS[r]![i])}
+        </span>
+      ))}
+    </span>
+  )
+}, sameProps)
 
 /**
  * The plate's orange line on a page: its name and what it shows, then what
@@ -862,9 +1007,39 @@ const METRONOME = (
   </>
 )
 
-/** The level meter: four stacks of 2 × 4, filling from the bottom with the loudest group's glow. */
-function Meter(props: { level: number }): JSX.Element {
-  const lit = Math.round(props.level * 20)
+/** The display's group cards: the group shown ([shown], -1 for none) lit, a sounding group's ([sounding], a bit each) offset lit. */
+const GroupCards = memo(function GroupCards(props: { shown: number; sounding: number }): JSX.Element {
+  return (
+    <>
+      {[0, 1, 2, 3].map((g) => {
+        const on = g === props.shown
+        const ghost = 'var(--lcd-ghost)'
+        return (
+          <g key={g} class="ic on ep-dgrp" style={{ '--c': GROUP_COLOURS[g] }} transform={`translate(222 ${R[g]})`}>
+            <path d="M15 -16H21V22H-14V16H15Z" style={{ opacity: on || (props.sounding & (1 << g)) !== 0 ? 1 : ghost }} />
+            <g style={{ opacity: on ? 1 : 'var(--lcd-ghost-w)' }}>
+              <rect x="-20" y="-22" width="35" height="38" style={{ fill: C.white }} />
+              {t(-3, -3, MirrorText.groupKey(g), 24, 'k', 500)}
+            </g>
+          </g>
+        )
+      })}
+    </>
+  )
+}, sameProps)
+
+/** The X ring: a quarter a group (A bottom left, B top left, C top right, D bottom right), the group shown and the sounding ones lit (as [GroupCards]). */
+const Ring = memo(function Ring(props: { shown: number; sounding: number }): JSX.Element {
+  return (
+    <g class="ic on ep-ring">
+      {QUARTER_GROUP.map((g, k) => quarter(1113, RING_Y, k, GROUP_COLOURS[g]!, g === props.shown || (props.sounding & (1 << g)) !== 0 ? 1 : 'var(--lcd-ghost)'))}
+    </g>
+  )
+}, sameProps)
+
+/** The level meter: four stacks of 2 × 4, filling from the bottom with the loudest group's glow ([lit] of 20 squares). */
+const Meter = memo(function Meter(props: { lit: number }): JSX.Element {
+  const { lit } = props
   return (
     <>
       {[C.red, C.pink, C.blue, C.white].map((col, r) => (
@@ -883,7 +1058,7 @@ function Meter(props: { level: number }): JSX.Element {
       ))}
     </>
   )
-}
+}, sameProps)
 
 /** The fourteen segments of a digit (62 × 112); a 1 lights the right-hand pair, a full gap clear of the next digit. */
 const SEGMENTS: Record<string, string> = {
@@ -946,8 +1121,8 @@ const GLYPHS: Record<string, readonly string[]> = {
 /** The characters the digits can draw. */
 export const DIGIT_GLYPHS: ReadonlySet<string> = new Set([' ', ...Object.keys(GLYPHS)])
 
-/** Digit [i] of three in fourteen segments, the unlit ones faintly visible; [dot]: the point after it. */
-function Digit(props: { ch: string; i: number; dot: boolean }): JSX.Element {
+/** Digit [i] of three in fourteen segments, the unlit ones faintly visible; [dot]: the point after it. Renders only as it changes. */
+const Digit = memo(function Digit(props: { ch: string; i: number; dot: boolean }): JSX.Element {
   const on = GLYPHS[props.ch] ?? []
   const segs = Object.entries(SEGMENTS)
   return (
@@ -959,7 +1134,7 @@ function Digit(props: { ch: string; i: number; dot: boolean }): JSX.Element {
       {props.i < 2 && <rect class={`dot ${props.dot ? 'on' : 'off'}`} x="65" y="104" width="8" height="8" rx="1" />}
     </g>
   )
-}
+}, sameProps)
 
 /** Everything the display prints that never lights here (the battery always does): drawn once. What the key layer lights is [LcdLit]. */
 const LcdPrint = once(function LcdPrint(): JSX.Element {
@@ -1027,8 +1202,9 @@ const fxBars = (x: number, on: boolean): JSX.Element =>
  * on the FX, OUTPUT and SIDECHAIN pages, SWING on TIMING, FREE in free time,
  * the MAIN and TEMPO boxes on their pages, ERASE's while erase is on, MUTE
  * with a group muted or soloed, COPY and PASTE for a moment as they go.
+ * Renders only as one of them changes.
  */
-function LcdLit(props: { fx: boolean; swing: boolean; free: boolean; main: boolean; tempo: boolean; erase: boolean; mute: boolean; clip: 'COPY' | 'PASTE' | null }): JSX.Element {
+const LcdLit = memo(function LcdLit(props: { fx: boolean; swing: boolean; free: boolean; main: boolean; tempo: boolean; erase: boolean; mute: boolean; clip: 'COPY' | 'PASTE' | null }): JSX.Element {
   return (
     <>
       {ic(98, R[1], C.white, <><path d="M-26 -17h52a4 4 0 0 1 4 4v20a4 4 0 0 1-4 4h-19l-7 10v-10h-26a4 4 0 0 1-4-4v-20a4 4 0 0 1 4-4z" />{t(0, -3, 'MUTE', 14, 'k', 700)}</>, props.mute, 'ep-mute')}
@@ -1044,10 +1220,10 @@ function LcdLit(props: { fx: boolean; swing: boolean; free: boolean; main: boole
       {ic(1312, R[3], C.red, <>{t(16, -8, 'SWING', 17, '', 700)}<path d="M-4 18c12 0 26 -4 36 -14" class="s" stroke-width="3" style={{ stroke: C.pink }} /><circle cx="-38" cy="-8" r="6" style={{ fill: C.tan }} /><rect x="-44" y="-2" width="13" height="14" style={{ fill: C.tan }} /><rect x="-44" y="12" width="13" height="10" style={{ fill: C.blue }} /><circle cx="-24" cy="-4" r="4" /></>, props.swing, 'ep-swing')}
     </>
   )
-}
+}, sameProps)
 
-/** The plate's name: the K.O. II's (Roman two drawn), the EP-40's RIDDIM, the EP-1320's Medieval. */
-function PlateTitle({ skin }: { skin: SkinChoice }): JSX.Element {
+/** The plate's name: the K.O. II's (Roman two drawn), the EP-40's RIDDIM, the EP-1320's Medieval. Renders only as the skin changes. */
+const PlateTitle = memo(function PlateTitle({ skin }: { skin: SkinChoice }): JSX.Element {
   if (skin === SkinChoice.EP40) {
     return (
       <span class="ep-a ep-plate__title ep-plate__title--riddim" aria-hidden="true">
@@ -1071,7 +1247,7 @@ function PlateTitle({ skin }: { skin: SkinChoice }): JSX.Element {
       </svg>
     </span>
   )
-}
+}, sameProps)
 
 /** The EP-40's speaker: cream slats across a black opening, each with a lit top and a shaded lip. Drawn once. */
 const SlatGrille = once(function SlatGrille(): JSX.Element {
@@ -1190,8 +1366,8 @@ const NOTES: Partial<Record<CardKey, string>> = {
   FADER: WebText.DEVICE_FADER_NOTE,
 }
 
-/** A drawn knob ([which]: VOLUME, X or Y) turning what it turns now; a tap opens its [card]. */
-function Knob(props: {
+/** A drawn knob ([which]: VOLUME, X or Y) turning what it turns now; a tap opens its [card]. Renders on its own (its place and callbacks kept). */
+const Knob = memo(function Knob(props: {
   kind: 'vol' | 'x' | 'y'
   which: DeviceControl
   label: string
@@ -1207,14 +1383,14 @@ function Knob(props: {
   return (
     <DrawnKnob kind={props.kind} label={props.label} place={props.place} t={t} onTap={(el) => props.onCard(props.card, el)} onTurned={() => props.onTurned(props.which)} fine={props.fine} />
   )
-}
+}, sameProps)
 
 /**
  * The drawn fader on group [group]'s level (its send on the FX page); a tap
  * opens FADER's card. Moved with RECORD held it rests, and the plate says arc
- * records no automation.
+ * records no automation. Renders on its own, as [Knob].
  */
-function Fader(props: { group: number; onCard: (key: CardKey, el: HTMLElement) => void; onTurned: (which: DeviceControl) => void; fine: () => boolean; layer: DeviceKeys | null }): JSX.Element {
+const Fader = memo(function Fader(props: { group: number; onCard: (key: CardKey, el: HTMLElement) => void; onTurned: (which: DeviceControl) => void; fine: () => boolean; layer: DeviceKeys | null }): JSX.Element {
   const t = useTurnable('fader', props.group)
   const { layer } = props
   return (
@@ -1227,7 +1403,7 @@ function Fader(props: { group: number; onCard: (key: CardKey, el: HTMLElement) =
       <DrawnFader t={t} onTap={(el) => props.onCard('FADER', el)} onTurned={() => props.onTurned('fader')} fine={props.fine} />
     </div>
   )
-}
+}, sameProps)
 
 /** The plate's hit line: [hit], or while a control turns ([turning]) its name and value ("FX X · 62"). */
 function PlateHit(props: { hit: string; turning: ReadonlySignal<DeviceControl | null>; group: number }): JSX.Element {
@@ -1365,7 +1541,7 @@ function DeviceTransport(props: { t: TransportUi; still?: boolean; layer: Device
       <button
         type="button"
         class={`ep-a ep-key ep-key--orange ep-key--word${light === 'live' || (light === 'armed' && props.still === true) ? ' is-on' : light === 'armed' ? ' is-armed' : ''}`}
-        style={at(1050, ROW_Y[3]!, 130, 128)}
+        style={RECORD_PLACE}
         aria-label={recordName(ui)}
         aria-description={MirrorText.RECORD_HOLD}
         data-coach="live.record"
@@ -1376,7 +1552,7 @@ function DeviceTransport(props: { t: TransportUi; still?: boolean; layer: Device
       <button
         type="button"
         class={`ep-a ep-key ep-key--grey ep-key--word${patternRuns(ui) ? ' is-lit' : ''}`}
-        style={at(1246, ROW_Y[3]!, 130, 128)}
+        style={PLAY_PLACE}
         aria-label={playName(ui, beat)}
         {...press.play}
       >

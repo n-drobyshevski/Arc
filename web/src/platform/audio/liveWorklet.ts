@@ -3,7 +3,8 @@
 // `import url from './liveWorklet?worker&url'`, so Vite bundles it (with the
 // core mixer) into one self-contained script.
 
-import { LIVE_PROCESSOR, MixerHost, type ToMixer } from './liveMixer'
+import { MixerHost, type ToMixer } from './liveMixer'
+import { LIVE_PROCESSOR } from './liveProtocol'
 
 // AudioWorkletGlobalScope, which the DOM lib leaves out.
 declare const sampleRate: number

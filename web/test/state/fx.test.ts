@@ -4,7 +4,7 @@
 import 'fake-indexeddb/auto'
 import { effect } from '@preact/signals'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { FADER_ENV_MS, FxBook, FxSettings, levelGain } from '../../src/core/features/fxSettings'
+import { FADER_ENV_MS, FxBook, FxSettings, FxType, levelGain } from '../../src/core/features/fxSettings'
 import { physicalPad } from '../../src/core/features/padNotes'
 import { FxControl } from '../../src/core/formats/fx/fxBus'
 import { memoryStorage } from '../../src/platform/storage/settings'
@@ -196,6 +196,31 @@ describe('FxDesk', () => {
     expect(d.fx.value.x).toBeCloseTo(0.3)
     // Read once.
     expect(d.load(new Map())).toBe(false)
+  })
+
+  it("(web) a project's FX replaced whole: the one shown is sent, another kept for when it is shown", () => {
+    const { d, sent, edits } = desk()
+    d.load(null)
+    d.switchTo(1)
+    sent.length = 0
+    const reverb = FxSettings.of({ type: FxType.REVERB, sends: [0.4, 0, 0, 0] })
+    d.replace(1, reverb)
+    expect(d.of(1)).toEqual(reverb)
+    expect(d.fx.value).toEqual(reverb)
+    expect(sent.some((c) => c[0] === FxControl.FX_TYPE)).toBe(true)
+    expect(edits[0]).toBe(1)
+    // The same again: nothing.
+    d.replace(1, reverb)
+    expect(edits[0]).toBe(1)
+    // Another project's: kept, not sent, until it is shown.
+    sent.length = 0
+    d.replace(2, reverb)
+    expect(sent).toEqual([])
+    expect(d.of(2)).toEqual(reverb)
+    expect(d.of(3)).toEqual(FxSettings.DEFAULT)
+    expect([...d.kept().keys()].sort()).toEqual([1, 2])
+    d.switchTo(2)
+    expect(d.fx.value).toEqual(reverb)
   })
 })
 

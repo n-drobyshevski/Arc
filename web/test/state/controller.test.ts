@@ -3,10 +3,14 @@
 // webmidi code, a fake-indexeddb Library, and in-memory stand-ins for the
 // rest of the platform.
 import 'fake-indexeddb/auto'
+import { effect } from '@preact/signals'
 import { afterEach, describe, expect, it } from 'vitest'
+import { physicalPad } from '../../src/core/features/padNotes'
+import { PadOrder } from '../../src/core/features/padPush'
 import { encodeWav } from '../../src/core/formats/wav'
 import { TrafficLog } from '../../src/core/protocol/trafficLog'
 import { RestoreSelection } from '../../src/core/text/libraryRules'
+import { MirrorText } from '../../src/core/text/mirrorText'
 import { SettingsText, ThemeChoice } from '../../src/core/text/settingsText'
 import { Strings } from '../../src/core/text/strings'
 import { WebText } from '../../src/core/text/webText'
@@ -21,7 +25,7 @@ import { CoachPrefs, LastReadPrefs, OfflinePadsPrefs, MirrorPrefs, SettingsStore
 import { connectionPhase } from '../../src/state/connection'
 import { createController, type ArcController } from '../../src/state/controller'
 import { unavailableLibrary, type Deps } from '../../src/state/deps'
-import type { ToastMsg, UiState } from '../../src/state/types'
+import { emptyMirrorState, type ToastMsg, type UiState } from '../../src/state/types'
 import { memoryPadSoundStore } from '../../src/core/features/padSoundCache'
 import { fakeLiveAudio, type FakeLiveAudio } from './fakeLiveAudio'
 import { DemoData, tone } from '../helpers/demoData'
@@ -821,6 +825,72 @@ describe('failures', () => {
       expect(toasts[toasts.length - 1]).toBe(Strings.importFailed('a.pak', 'blocked'))
     } finally {
       c.dispose()
+    }
+  })
+})
+
+describe('the shell state', () => {
+  it('stays the same object while only the mirror or KEYS pad changes, and follows anything else', async () => {
+    const h = await harness()
+    const runs: UiState[] = []
+    const off = effect(() => {
+      runs.push(h.c.stateShell.value)
+    })
+    try {
+      const first = h.c.stateShell.value
+      h.c.store.update((s) => ({ ...s, mirror: { state: emptyMirrorState(), loading: false, error: null } }))
+      h.c.store.update((s) => ({ ...s, keysPad: physicalPad(1, 2) }))
+      expect(h.c.stateShell.value).toBe(first)
+      expect(runs).toHaveLength(1)
+      // The whole state still has them.
+      expect(h.c.state.value.keysPad).toEqual(physicalPad(1, 2))
+      h.c.store.update((s) => ({ ...s, busy: true }))
+      expect(h.c.stateShell.value).toBe(h.c.state.value)
+      expect(h.c.stateShell.value.busy).toBe(true)
+      expect(runs).toHaveLength(2)
+    } finally {
+      off()
+    }
+  })
+})
+
+describe("Live's mirror and KEYS's sound", () => {
+  it('keep their identity while what they show is the same', async () => {
+    const h = await harness()
+    const sounds: unknown[] = []
+    const off = effect(() => {
+      sounds.push(h.c.keysSound.value)
+    })
+    try {
+      // Not connected and no read: one note to connect, the same each time.
+      h.c.store.update((s) => ({ ...s, device: null, mirror: null }))
+      const none = h.c.liveMirror.value
+      expect(none?.error).toBe(MirrorText.NOT_CONNECTED)
+      h.c.store.update((s) => ({ ...s, busy: true }))
+      expect(h.c.liveMirror.value).toBe(none)
+      // The pad order set in Settings: the note follows it, though no state changed.
+      const other = none?.state.padOrder === PadOrder.FROM_TOP ? PadOrder.FROM_BOTTOM : PadOrder.FROM_TOP
+      h.c.setPadOrder(other)
+      expect(h.c.liveMirror.value?.state.padOrder).toBe(other)
+      // A mirror: Live shows it as it is.
+      const m = { state: emptyMirrorState(), loading: false, error: null }
+      h.c.store.update((s) => ({ ...s, mirror: m }))
+      expect(h.c.liveMirror.value).toBe(m)
+
+      expect(h.c.keysSound.value).toEqual({ pad: null, padName: null })
+      h.c.store.update((s) => ({ ...s, keysPad: physicalPad(1, 2) }))
+      const sound = h.c.keysSound.value
+      expect(sound.pad).toEqual(physicalPad(1, 2))
+      // The same pad again, as a new object, and a publish: nothing new.
+      h.c.store.update((s) => ({ ...s, keysPad: physicalPad(1, 2) }))
+      h.c.store.update((s) => ({ ...s, mirror: { ...m } }))
+      expect(h.c.keysSound.value).toBe(sound)
+      expect(sounds).toHaveLength(2)
+      h.c.store.update((s) => ({ ...s, keysPad: physicalPad(2, 0) }))
+      expect(h.c.keysSound.value.pad).toEqual(physicalPad(2, 0))
+      expect(sounds).toHaveLength(3)
+    } finally {
+      off()
     }
   })
 })

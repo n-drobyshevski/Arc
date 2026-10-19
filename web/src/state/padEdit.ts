@@ -1,7 +1,9 @@
 // Port of app/src/main/kotlin/dev/arc/ep133/controller/ArcController.kt (EDIT: a pad's sound settings;
 // PadEditState, openPadEdit, closePadEdit, adjustPad, writePadSettings, padsRead,
 // forgetPadSettings, load/saveOfflinePadSettings, and the settings' part of
-// offerOfflinePads / writeOfflinePadsNow)
+// offerOfflinePads / writeOfflinePadsNow; a beat card's IMPORT reads and writes
+// pads quietly through readFresh and writeQuiet, Kotlin's readPad and
+// writePadSettingsQuiet)
 //
 // What arc knows of the pads' SOUND EDIT settings (an addition): those of
 // Live's project, read with its pads, the ones turned since, and EDIT's sheet
@@ -163,6 +165,49 @@ export class PadEditDesk {
       update((e) => ({ ...e, settings: settings ?? e.settings, base: settings ?? e.base, reading: false }))
       if (settings !== null && (known === null || !sameSettings(settings, known))) this.host.changed()
     })()
+  }
+
+  /** [t]'s pad's settings are [s] in arc (a beat card's IMPORT kept them offline, or UNDO took them back). */
+  setKnown(t: PadTarget, s: PadSettings): void {
+    this.settings.set(targetKey(t), s)
+  }
+
+  /**
+   * [t]'s pad's settings as the EP-133 has them now (they may have been
+   * turned on the device), over what arc knows; what arc knows when there is
+   * no answer, and null when neither is known (a write would put guesses
+   * over the pad). No toast.
+   */
+  async readFresh(t: PadTarget): Promise<PadSettings | null> {
+    const meta = await this.device((s) => readPad(s, t.project, t.group, t.pad))
+    const known = this.settings.get(targetKey(t)) ?? null
+    const read = meta !== null && PadSettings.written(meta) ? PadSettings.fromMeta(meta, known ?? PadSettings.DEFAULT) : null
+    return read ?? known
+  }
+
+  /**
+   * [settings] put on [t]'s pad, the whole record, with no toast: null once
+   * written (arc knows them then), else why not. The pattern is not told:
+   * the caller does once its writes are done.
+   */
+  async writeQuiet(t: PadTarget, settings: PadSettings, frames: number | null): Promise<string | null> {
+    const slot = t.slot
+    if (slot === null) return MirrorText.EDIT_OFFLINE
+    let error: string | null = null
+    const ok = await this.device(async (s) => {
+      try {
+        await writePadSettings(s, t.project, t.group, t.pad, slot, settings, frames)
+        return true
+      } catch (e) {
+        error = errorText(e)
+        return false
+      }
+    })
+    if (ok !== true) return error ?? MirrorText.EDIT_OFFLINE
+    const key = targetKey(t)
+    this.settings.set(key, settings)
+    this.saved.set(key, settings)
+    return null
   }
 
   /** EDIT's sheet closed: a turn not yet written still goes on the device. */

@@ -1,16 +1,40 @@
 // BEAT CARDS in the controller (ArcController.kt's BEAT CARDS section, state/pattern.ts and
-// controller.ts): SHARE sends the card through the share sheet (or copies it where there is
-// none), PASTE BEAT reads the clipboard (or waits for a paste where the page can't read it),
+// controller.ts): SHARE sends the Claude page's prompt with the card it picks through the share sheet (or copies it where there is
+// none) and the Claude page then waits for the reply until STOP or a card comes in, PASTE BEAT reads the clipboard (or waits for a paste where the page can't read it),
+// a prompt without a card goes alone, COPY puts it on the clipboard, and the prompt and the saved ones are kept as they change,
 // a card opens its sheet, IMPORT places it as one UNDO step, and COPY PROBLEMS copies them.
+// A share carries the pads' sound lines and, with "With my sound list" on, the sounds Arc knows;
+// SHARE CHAIN shares the project's chain; a card of scenes imported sets its chain unless SET CHAIN is off,
+// and with REPLACE takes the place of the project's scenes. IMPORT puts the card's ticked sounds and the ones
+// picked for silent pads on the pads (on the EP-133, or offline in arc), in the same UNDO step;
+// writes that throw stop it with its error toast. The card's FX replace the project's and its
+// pad lines shape the ticked pads (on the EP-133, or as offline pad settings), in that same step.
+// A card's sound no slot holds that a saved factory pack has is uploaded into a free slot first.
+// A card's synth line no slot holds is made: uploaded under its device name while connected, kept
+// in arc's samples store offline (UNDO throws it away), and put on or uploaded at the next Write;
+// its row's play key plays it first.
 import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { BeatCards } from '../../src/core/features/beatCard'
-import { physicalPad } from '../../src/core/features/padNotes'
+import { BeatCards, SoundStatus, cardSynth } from '../../src/core/features/beatCard'
+import { SynthVoice } from '../../src/core/features/synthVoice'
+import { FxSettings, FxType } from '../../src/core/features/fxSettings'
+import { OfflinePadSettings } from '../../src/core/features/offlinePadSettings'
+import { PadSettings } from '../../src/core/features/padSettings'
+import { FactoryKit } from '../../src/core/features/factorySounds'
+import { padKey, physicalPad } from '../../src/core/features/padNotes'
 import { ProjectPatterns } from '../../src/core/features/pattern'
 import { ClaudeText } from '../../src/core/text/claudeText'
+import { ClaudePrompt, PromptGoal, PromptTask, SavedPrompt, SharePick, claudePrompt } from '../../src/core/features/claudePrompt'
+import { PromptText } from '../../src/core/text/promptText'
+import { MirrorText } from '../../src/core/text/mirrorText'
+import { BackupDevice, type BackupRecord } from '../../src/core/text/libraryRules'
 import { WebText } from '../../src/core/text/webText'
-import { memoryStorage } from '../../src/platform/storage/settings'
+import { encodeWav } from '../../src/core/formats/wav'
+import { writeZip } from '../../src/core/formats/zip'
+import { tone } from '../helpers/demoData'
+import { LIVE_PAD_SETTINGS_KEY, memoryStorage } from '../../src/platform/storage/settings'
 import type { Deps } from '../../src/state/deps'
+import type { NullPlayer } from '../../src/platform/audio/player'
 import { disposeAll, liveHarness, until, type LiveHarness } from './liveHarness'
 
 let clockSpy: { mockRestore(): void } | null = null
@@ -43,6 +67,9 @@ function mutable(h: LiveHarness): { -readonly [K in keyof Deps]: Deps[K] } {
 }
 
 const CARD = ['ARC BEAT 1', 'name Four on the floor', 'tempo 124', '[A]', 'A7 | X... X... X... X... |'].join('\n')
+const SCENES = ['ARC BEAT 1', 'name Two', 'chain 1x2 2', '', 'scene One', '[A]', 'A7 | X... .... X... .... |', '', 'scene Two', '[A]', 'A7 | X.X. X.X. X.X. X.X. |'].join('\n')
+/** The Claude page's prompt as it starts: an IMPROVE of the card picked, which asks what the plain share always has. */
+const IMPROVE = claudePrompt()
 const BAD = ['ARC BEAT 1', '[A]', 'A9 | X... .... .... ... |'].join('\n')
 
 async function recordOne(h: LiveHarness): Promise<void> {
@@ -57,20 +84,213 @@ async function recordOne(h: LiveHarness): Promise<void> {
 describe('BEAT CARDS', () => {
   it('SHARE: nothing with no notes; a card through the share sheet, or copied where there is none', async () => {
     const h = await liveOn()
-    expect(h.c.pattern.beatShare(0)).toBeNull()
+    expect(h.c.beatShare(0)).toBeNull()
     await recordOne(h)
-    const share = h.c.pattern.beatShare(0)
+    const share = h.c.beatShare(0)
     expect(share?.text).toContain('ARC BEAT 1')
     const shared: string[] = []
     mutable(h).share = { ...h.deps.share, shareText: async (_t, text) => (shared.push(text), 'shared') }
-    await h.c.shareBeat(0)
+    await h.c.sharePrompt(IMPROVE, SharePick.PATTERN, 0)
     expect(shared).toEqual([share!.text])
     const copied: string[] = []
     mutable(h).share = { ...h.deps.share, shareText: async () => 'unsupported' }
     mutable(h).clipboard = { writeText: async (t) => void copied.push(t) }
-    await h.c.shareBeat(null)
+    await h.c.sharePrompt(IMPROVE, SharePick.SCENE, 0)
     expect(copied[0]).toContain('ARC BEAT 1')
     expect(h.toasts.at(-1)?.text).toBe(WebText.CARD_COPIED)
+  })
+
+  // Web addition (Kotlin has no test of claudeWaiting): what went is waited for until STOP, a card or its import.
+  it("a share waits for Claude's reply until STOP or a card comes in; one called off does not wait", async () => {
+    const h = await liveOn()
+    await recordOne(h)
+    let result: 'shared' | 'cancelled' = 'cancelled'
+    mutable(h).share = { ...h.deps.share, shareText: async () => result }
+    await h.c.sharePrompt(IMPROVE, SharePick.PATTERN, 0)
+    expect(h.c.claudeWaiting.value).toBeNull()
+    result = 'shared'
+    await h.c.sharePrompt(IMPROVE, SharePick.PATTERN, 0)
+    expect(h.c.claudeWaiting.value).toBe('A · 01')
+    h.c.stopWaitingForClaude()
+    expect(h.c.claudeWaiting.value).toBeNull()
+    await h.c.sharePrompt(IMPROVE, SharePick.SCENE, 0)
+    expect(h.c.claudeWaiting.value).toBe(ClaudeText.sharedScene('S01'))
+    // No card in the text: still waiting.
+    await h.c.receiveBeat('hello')
+    expect(h.c.claudeWaiting.value).toBe('Scene S01')
+    await h.c.receiveBeat(SCENES)
+    expect(h.c.claudeWaiting.value).toBeNull()
+    h.c.waitForClaude(ClaudeText.CHAIN_CARD_NAME)
+    h.c.pattern.importBeat(false)
+    expect(h.c.claudeWaiting.value).toBeNull()
+    await h.c.sharePrompt(IMPROVE, SharePick.CHAIN, 0)
+    expect(h.c.claudeWaiting.value).toBe('Chain')
+  })
+
+  it("SHARE names the EP-133's own kit, not the one Live plays offline", async () => {
+    const h = await liveOn()
+    await recordOne(h)
+    // Live is on the EP-40's kit, its pack saved; the EP-133 connected holds sounds of its own.
+    const slots = Array.from({ length: 120 }, (_, i) => 600 + i)
+    const riddim: BackupRecord = { id: 'r', title: 'r', notes: '', createdAt: 1, source: FactoryKit.EP40.source, fileName: null, device: BackupDevice(), soundCount: slots.length, projectCount: 0, projects: [], slots, projectSlots: {}, size: 0 }
+    h.c.store.update((s) => ({ ...s, backups: [...s.backups, riddim] }))
+    h.c.setFactoryKit(FactoryKit.EP40)
+    expect(h.c.factoryKit).toBe(FactoryKit.EP40)
+    expect(h.c.shareKit()).toBe(FactoryKit.EP133)
+    const shared: string[] = []
+    mutable(h).share = { ...h.deps.share, shareText: async (_t, text) => (shared.push(text), 'shared') }
+    await h.c.sharePrompt(IMPROVE, SharePick.PATTERN, 0)
+    expect(shared[0]).toContain(ClaudeText.SHARE_PROMPT + '\n\n' + ClaudeText.EP133_LINE + '\n\n```\nARC BEAT 1\n')
+    expect(shared[0]).not.toContain(ClaudeText.kitLine(FactoryKit.EP40)!)
+  })
+
+  it('SHARE has a sound line for each pad it uses, and the sound list after the card while "With my sound list" is on', async () => {
+    const h = await liveOn()
+    await recordOne(h)
+    await vi.waitFor(() => expect(h.c.shareSoundCount.value).toBeGreaterThan(0))
+    expect(h.c.shareSoundCount.value).toBe(h.mock.sounds.size)
+    const header = ClaudeText.soundListHeader(ClaudeText.SOUNDS_FROM_DEVICE)
+    const share = h.c.beatShare(0)!
+    // The pad's line names the slot Live shows on it, one of the EP-133's.
+    const line = BeatCards.read(share.text).card!.sections[0]!.sounds.get(A0.offset)!
+    expect(h.mock.sounds.has(line.slot)).toBe(true)
+    expect(share.text).toContain('\n```\n\n' + header + '\n')
+    // Off: the card alone, its sound lines kept; kept as a setting.
+    h.c.setShareSounds(false)
+    expect(h.c.settings.value.shareSounds).toBe(false)
+    const plain = h.c.beatShare(0)!
+    expect(plain.text).not.toContain(header)
+    expect(plain.text.endsWith('\n```\n')).toBe(true)
+    expect(BeatCards.read(plain.text).card).toEqual(BeatCards.read(share.text).card)
+    expect(JSON.parse(h.storage.getItem('arc.settings')!).shareSounds).toBe(false)
+  })
+
+  it('SHARE CHAIN: nothing without a chain; a card of scenes imported sets one, and its share is the chain as a card', async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    expect(h.c.beatShareChain()).toBeNull()
+    expect(p.scene.value.chain).toEqual([])
+    await h.c.receiveBeat(SCENES)
+    p.importBeat(false)
+    expect(p.scene.value.chain.length).toBe(2)
+    const shared: string[] = []
+    mutable(h).share = { ...h.deps.share, shareText: async (_t, text) => (shared.push(text), 'shared') }
+    await h.c.sharePrompt(IMPROVE, SharePick.CHAIN, 0)
+    expect(shared[0]!.startsWith(ClaudeText.SHARE_CHAIN_PROMPT + '\n\n' + ClaudeText.EP133_LINE + '\n\n```\nARC BEAT 1\nname Chain\n')).toBe(true)
+    const card = BeatCards.read(shared[0]!).card!
+    expect(card.scenes.length).toBe(2)
+    expect(card.chain).toEqual([[1, 2], [2, 1]])
+  })
+
+  it("the Claude page's prompt: its words before the card, or alone; COPY puts it on the clipboard; a lesson isn't waited for", async () => {
+    const h = await liveOn()
+    await recordOne(h)
+    await vi.waitFor(() => expect(h.c.shareSoundCount.value).toBeGreaterThan(0))
+    const shared: string[] = []
+    mutable(h).share = { ...h.deps.share, shareText: async (_t, text) => (shared.push(text), 'shared') }
+    // An IMPROVE with an ask: its words go before the pattern's card.
+    const busier = claudePrompt({ goal: PromptGoal.BUSIER })
+    await h.c.sharePrompt(busier, SharePick.PATTERN, 0)
+    const words = PromptText.prompt(busier, SharePick.PATTERN, true)
+    expect(shared[0]!.startsWith(words + '\n\n' + ClaudeText.EP133_LINE + '\n\n```\nARC BEAT 1\n')).toBe(true)
+    expect(h.c.claudeWaiting.value).toBe('A \u00B7 01')
+    // A new beat goes without a card, the sound list after it; the glass waits for "New beat".
+    const beat = claudePrompt({ task: PromptTask.BEAT })
+    const share = (await h.c.promptShare(beat, SharePick.SCENE, 0))!
+    expect(share.subject).toBe('Arc \u00B7 New beat')
+    expect(share.text).not.toContain('ARC BEAT 1')
+    expect(share.text).toContain('\n\n' + ClaudeText.soundListHeader(ClaudeText.SOUNDS_FROM_DEVICE) + '\n')
+    await h.c.sharePrompt(beat, SharePick.SCENE, 0)
+    expect(shared[1]).toBe(share.text)
+    expect(h.c.claudeWaiting.value).toBe(PromptText.NEW_BEAT)
+    // A lesson: its words alone, without the sound list, and nothing waited for.
+    h.c.stopWaitingForClaude()
+    const lesson = claudePrompt({ task: PromptTask.LEARN, lesson: 3 })
+    await h.c.sharePrompt(lesson, SharePick.SCENE, 0)
+    expect(shared[2]).toBe(PromptText.prompt(lesson, SharePick.SCENE, false) + '\n')
+    expect(h.c.claudeWaiting.value).toBeNull()
+    // COPY: the same text on the clipboard, said; then the glass waits.
+    const copied: string[] = []
+    mutable(h).clipboard = { writeText: async (t) => void copied.push(t) }
+    await h.c.sharePrompt(busier, SharePick.PATTERN, 0, true)
+    expect(copied).toEqual([shared[0]])
+    expect(h.toasts.at(-1)?.text).toBe(PromptText.COPIED)
+    expect(h.c.claudeWaiting.value).toBe('A \u00B7 01')
+    // A pick with nothing in it (no chain): nothing goes.
+    await h.c.sharePrompt(busier, SharePick.CHAIN, 0, true)
+    expect(copied.length).toBe(1)
+  })
+
+  it('the prompt is kept as it changes, apart from the settings the shell reads; SAVE keeps it under a name of its own, and a saved one is deleted', async () => {
+    const h = await liveOn()
+    const before = h.c.settings.value
+    const dub = claudePrompt({ task: PromptTask.BEAT, genre: 'dub-techno', tempo: 122 })
+    await h.c.setClaudePrompt(dub)
+    expect(ClaudePrompt.equals(ClaudePrompt.decode(h.c.claudePrompt.value), dub)).toBe(true)
+    expect(JSON.parse(h.storage.getItem('arc.settings')!).claudePrompt).toBe(ClaudePrompt.encode(dub))
+    // Web: the shell's settings keep their object, so a word tapped re-renders the Claude page only.
+    expect(h.c.settings.value).toBe(before)
+    await h.c.saveClaudePrompt(dub)
+    const names = (): string[] => SavedPrompt.decodeAll(h.c.claudePrompts.value).map((x) => x.name)
+    expect(names()).toEqual(['Dub techno 122'])
+    expect(h.toasts.at(-1)?.text).toBe(PromptText.saved('Dub techno 122'))
+    // Kept already: not again.
+    await h.c.saveClaudePrompt(dub)
+    expect(names()).toEqual(['Dub techno 122'])
+    await h.c.saveClaudePrompt(IMPROVE)
+    expect(names()).toEqual(['Dub techno 122', PromptText.name(IMPROVE)])
+    await h.c.deleteClaudePrompt(0)
+    expect(names()).toEqual([PromptText.name(IMPROVE)])
+    expect(h.toasts.at(-1)?.text).toBe(PromptText.deleted('Dub techno 122'))
+    await h.c.deleteClaudePrompt(5)
+    expect(names()).toEqual([PromptText.name(IMPROVE)])
+    // Another setting changed: the settings follow, the prompt with them.
+    h.c.setShareSounds(false)
+    expect(h.c.settings.value.claudePrompt).toBe(ClaudePrompt.encode(dub))
+  })
+
+  it("IMPORT of a card of scenes: its scenes, the chain with SET CHAIN and one UNDO; SET CHAIN off leaves the project's chain", async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    await h.c.receiveBeat(SCENES)
+    const ui = p.beat.value!
+    expect(ui.scenes.map((s) => [s.name, s.index])).toEqual([['One', 1], ['Two', 2]])
+    expect(ui.chain?.steps.length).toBe(2)
+    expect(ui.noRoom).toBe(false)
+    p.importBeat(false)
+    const done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    expect(done.toast?.text).toBe('Imported to scenes S02\u2013S03. Chain set. UNDO takes it back.')
+    expect(p.scene.value.chain.length).toBe(2)
+    p.undo()
+    expect(p.scene.value.chain).toEqual([])
+    // SET CHAIN off: the scenes go in, the chain stays the project's (none).
+    await h.c.receiveBeat(SCENES)
+    p.importBeat(false, new Set(), new Map(), false, new Set(), false)
+    const off = await until(h, (st) => st.toast?.text === 'Imported to scenes S02\u2013S03. UNDO takes it back.')
+    expect(off.toast).not.toBeNull()
+    expect(p.scene.value.chain).toEqual([])
+  })
+
+  it("IMPORT with REPLACE: the card's scenes take the project's place from S01, the chain names them, and one UNDO puts the project's back; the choice is kept", async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    expect(h.c.settings.value.replaceScenes).toBe(false)
+    h.c.setReplaceScenes(true)
+    expect(h.c.settings.value.replaceScenes).toBe(true)
+    expect(JSON.parse(h.storage.getItem('arc.settings')!).replaceScenes).toBe(true)
+    await h.c.receiveBeat(SCENES)
+    const ui = p.beat.value!
+    expect(ui.projectScenes).toBe(1)
+    expect(ui.replace?.scenes.map((s) => [s.name, s.index])).toEqual([['One', 0], ['Two', 1]])
+    expect(ui.replace?.chain?.steps.map((s) => s.scene)).toEqual([0, 1])
+    p.importBeat(false, new Set(), new Map(), false, new Set(), true, true)
+    const done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    expect(done.toast?.text).toBe('Imported to scenes S01–S02. Chain set. UNDO takes it back.')
+    expect(p.scene.value.count).toBe(2)
+    expect(p.scene.value.chain.map((s) => s.scene)).toEqual([0, 1])
+    p.undo()
+    expect(p.scene.value.count).toBe(1)
+    expect(p.scene.value.chain).toEqual([])
   })
 
   it('PASTE BEAT: a card opens its sheet, IMPORT places it as one UNDO step', async () => {
@@ -135,5 +355,334 @@ describe('BEAT CARDS', () => {
     expect(h.toasts.at(-1)?.text).toBe(ClaudeText.PROBLEMS_COPIED)
     // Nothing changed: the project's patterns are as they were.
     expect(ProjectPatterns.isEmpty(h.c.pattern.patternsNow)).toBe(true)
+  })
+
+  // ---- SOUNDS and SILENT PADS ----
+
+  // The keypad's 2 (offset 4) is the demo's pad 5, clap (slot 5); the keypad's D9 (offset 11) is D's pad 12, which has no sound.
+  const A2 = physicalPad(0, 4)
+  const D9 = physicalPad(3, 11)
+  const SOUNDS = ['ARC BEAT 1', 'name Snare swap', '[A]', 'sound A2 2 snare', 'A2 | X... X... X... X... |', '[D]', 'D9 | X... .... X... .... |'].join('\n')
+
+  /** The slot on project 1's pad [n] of group [group], read back from the device. */
+  async function onDevice(h: LiveHarness, group: string, n: number): Promise<number | null | undefined> {
+    await h.c.loadProjectSounds(1)
+    return h.c.state.value.browser.projectPads.get(1)?.find((g) => g.name === group)?.pads.get(n)
+  }
+
+  it('IMPORT puts the ticked sounds and the one picked for a silent pad on the pads, and UNDO puts the old ones back', async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    await h.c.receiveBeat(SOUNDS)
+    const ui = p.beat.value!
+    expect(ui.sounds!.rows.map((r) => [r.pad, r.pick.status, r.oldName])).toEqual([[A2, SoundStatus.CHANGE, 'clap']])
+    expect(ui.sounds!.offline).toBe(false)
+    expect(ui.silent!.rows.map((r) => [r.pad, r.notes])).toEqual([[D9, 2]])
+    expect(ui.silent!.choices!.names.get(3)).toBe(h.c.liveSounds().find((snd) => snd.slot === 3)?.name)
+    p.importBeat(false, new Set([padKey(A2), padKey(D9)]), new Map([[padKey(D9), 3]]))
+    const done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    expect(done.toast?.text).toBe(ClaudeText.imported([[0, 2], [3, 1]], 'S02', 2) )
+    expect(done.toast?.action).toBe(MirrorText.UNDO)
+    expect(await onDevice(h, 'a', 5)).toBe(2)
+    expect(await onDevice(h, 'd', 12)).toBe(3)
+    expect(h.c.mirrorName(A2)).toBe('snare')
+    // UNDO on the toast: the patterns, and the old sound on the pad that had one; the empty pad keeps its new one.
+    h.c.runToastAction(done.toast!.id)
+    await until(h, (st) => st.toast?.text === ClaudeText.importUndone(1, 1, 0, false))
+    expect(p.ui.value.hasNotes.some(Boolean)).toBe(false)
+    expect(await onDevice(h, 'a', 5)).toBe(5)
+    expect(h.c.mirrorName(A2)).toBe('clap')
+  })
+
+  it('IMPORT leaves an unticked sound where it is, and PUT ON PADS off writes none', async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    await h.c.receiveBeat(SOUNDS)
+    p.importBeat(false)
+    const done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    expect(done.toast?.text).toBe(ClaudeText.imported([[0, 2], [3, 1]], 'S02'))
+    expect(await onDevice(h, 'a', 5)).toBe(5)
+  })
+
+  it('writes that throw stop IMPORT with its error toast, and UNDO still takes the import back', async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    await h.c.receiveBeat(SOUNDS)
+    vi.spyOn(h.c as unknown as { putSounds(): Promise<unknown> }, 'putSounds').mockRejectedValue(new Error('gone'))
+    p.importBeat(false, new Set([padKey(A2)]))
+    const done = await until(h, (st) => st.toast?.text === ClaudeText.soundsFailed('gone', 0))
+    expect(done.toast?.error).toBe(true)
+    h.c.runToastAction(done.toast!.id)
+    await vi.waitFor(() => expect(p.ui.value.hasNotes.some(Boolean)).toBe(false))
+  })
+
+  it('offline, IMPORT keeps the sounds as offline pad changes, and UNDO takes them back', async () => {
+    const h = await liveOn()
+    // The pads' sounds copied, then unplugged: Live shows the last read, offering its sounds.
+    await vi.waitFor(
+      async () => {
+        for (const slot of [1, 2, 3, 4, 5]) expect(await h.padSounds.has(`s${slot}.wav`)).toBe(true)
+        expect(h.c.state.value.backgroundRead).toBe(false)
+      },
+      { timeout: 5000 },
+    )
+    h.ep.access.unplug(h.ep.input, h.ep.output)
+    await until(h, (st) => st.mirror?.offlineSounds != null)
+    const p = h.c.pattern
+    await h.c.receiveBeat(SOUNDS)
+    const ui = p.beat.value!
+    expect(ui.sounds!.offline).toBe(true)
+    expect(ui.sounds!.changes.map((r) => r.pad)).toEqual([A2])
+    p.importBeat(false, new Set([padKey(A2), padKey(D9)]), new Map([[padKey(D9), 3]]))
+    const done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    expect(done.toast?.text).toBe(ClaudeText.imported([[0, 2], [3, 1]], 'S02', 2))
+    expect(h.c.state.value.offlinePads).toBe(2)
+    expect(h.c.mirrorName(A2)).toBe('snare')
+    h.c.runToastAction(done.toast!.id)
+    await until(h, (st) => st.toast?.text === ClaudeText.importUndone(2, 0, 0, false))
+    expect(h.c.state.value.offlinePads).toBe(0)
+    expect(h.c.mirrorName(A2)).toBe('clap')
+  })
+
+  /** The EP-40's pack saved in the library, holding "mpc hh" in slot 234, and its names read. */
+  async function saveRiddim(h: LiveHarness): Promise<void> {
+    const wav = encodeWav(tone(2000, 220), 1, 46875)
+    const meta = { pak_type: 'factory', device_name: FactoryKit.EP40.model, generated_at: '2023-11-24T00:00:00.000Z' }
+    const bytes = await writeZip(
+      [
+        { path: 'meta.json', data: new TextEncoder().encode(JSON.stringify(meta)), compress: false },
+        { path: 'sounds/234 mpc hh.wav', data: wav, compress: false },
+      ],
+      { date: 0, offsetMin: 0 },
+    )
+    const record: BackupRecord = { id: '', title: 'EP-40', notes: '', createdAt: 1, source: FactoryKit.EP40.source, fileName: null, device: BackupDevice(), soundCount: 1, projectCount: 0, projects: [], slots: [234], projectSlots: {}, size: 0 }
+    await h.library.save(record, bytes, { 234: 'mpc hh' })
+    await vi.waitFor(() => expect((h.c as unknown as { kitNames: ReadonlyMap<FactoryKit, ReadonlyMap<number, string>> }).kitNames.get(FactoryKit.EP40)?.get(234)).toBe('mpc hh'))
+  }
+
+  const FROM_PACK = ['ARC BEAT 1', 'name Hats', '[A]', 'sound A2 234 mpc hh', 'A2 | x.x. x.x. x.x. x.x. |'].join('\n')
+
+  it("IMPORT uploads a card's sound no slot holds from the saved pack into a free slot, puts it on the pad, and UNDO puts the old one back", async () => {
+    const h = await liveOn()
+    await saveRiddim(h)
+    const p = h.c.pattern
+    await h.c.receiveBeat(FROM_PACK)
+    const row = p.beat.value!.sounds!.rows[0]!
+    expect(row.pick.status).toBe(SoundStatus.MISSING)
+    expect(row.fromPack).toEqual({ kit: FactoryKit.EP40, slot: 234, name: 'mpc hh' })
+    expect(row.uploadable).toBe(true)
+    expect(row.changes).toBe(true)
+    p.importBeat(false, new Set([padKey(A2)]))
+    const done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    expect(done.toast?.text).toBe(ClaudeText.imported([[0, 2]], null, 1))
+    const into = [...h.mock.sounds].find(([, snd]) => snd.name === 'mpc hh')?.[0]
+    expect(into).toBeDefined()
+    expect(into).not.toBe(234)
+    expect(await onDevice(h, 'a', 5)).toBe(into)
+    expect(h.c.mirrorName(A2)).toBe('mpc hh')
+    // UNDO: the old sound back on the pad; the uploaded one stays on the EP-133.
+    h.c.runToastAction(done.toast!.id)
+    await until(h, (st) => st.toast?.text === ClaudeText.importUndone(1, 0, 0, false))
+    expect(await onDevice(h, 'a', 5)).toBe(5)
+    expect(h.mock.sounds.get(into!)?.name).toBe('mpc hh')
+  })
+
+  it('an upload that fails stops IMPORT with UPLOAD_STOPPED, and the other sounds are not put on', async () => {
+    const h = await liveOn()
+    await saveRiddim(h)
+    const p = h.c.pattern
+    await h.c.receiveBeat(FROM_PACK.replace('[A]', '[A]\nsound A3 2 snare\nA3 | X... .... .... .... |'))
+    const snare = p.beat.value!.sounds!.rows.find((r) => r.pick.wanted.slot === 2)!
+    expect(snare.pick.status).toBe(SoundStatus.CHANGE)
+    const before = h.c.mirrorName(snare.pad)
+    vi.spyOn(h.c as unknown as { uploadBytesToPad(): Promise<number | null> }, 'uploadBytesToPad').mockResolvedValue(null)
+    p.importBeat(false, new Set([padKey(A2), padKey(snare.pad)]))
+    const done = await until(h, (st) => st.toast?.text === ClaudeText.soundsFailed(ClaudeText.UPLOAD_STOPPED, 0))
+    expect(done.toast?.error).toBe(true)
+    expect(h.c.mirrorName(snare.pad)).toBe(before)
+    expect(h.c.mirrorName(A2)).toBe('clap')
+  })
+
+  // ---- synth lines ----
+
+  const KICK = cardSynth('kick')
+  const KICK_NAME = SynthVoice.deviceName(KICK)
+  const SYNTH = ['ARC BEAT 1', 'name Made', '[A]', 'synth A2 kick', 'A2 | X... X... X... X... |'].join('\n')
+
+  it('IMPORT makes a synth line into a free slot under its device name and puts it on the pad; imported again it reuses the slot', async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    await h.c.receiveBeat(SYNTH)
+    const row = p.beat.value!.sounds!.rows[0]!
+    expect([row.pad, row.makes, row.changes, row.synth]).toEqual([A2, true, true, KICK])
+    expect(row.pick.wanted.name).toBe(KICK_NAME)
+    p.importBeat(false, new Set([padKey(A2)]))
+    const done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    expect(done.toast?.text).toBe(ClaudeText.imported([[0, 2]], null, 1))
+    const into = [...h.mock.sounds].find(([, snd]) => snd.name === KICK_NAME)?.[0]
+    expect(into).toBeDefined()
+    expect(h.mock.sounds.get(into!)!.pcm.length).toBe(2 * SynthVoice.frames(KICK))
+    expect(await onDevice(h, 'a', 5)).toBe(into)
+    expect(h.c.mirrorName(A2)).toBe(KICK_NAME)
+    // UNDO: the old sound back on the pad; the made one stays on the EP-133.
+    h.c.runToastAction(done.toast!.id)
+    await until(h, (st) => st.toast?.text === ClaudeText.importUndone(1, 0, 0, false))
+    expect(await onDevice(h, 'a', 5)).toBe(5)
+    // The same line again: found by its name, nothing made.
+    await h.c.receiveBeat(SYNTH)
+    const again = p.beat.value!.sounds!.rows[0]!
+    expect([again.pick.status, again.pick.slot, again.makes]).toEqual([SoundStatus.FOUND_BY_NAME, into, false])
+  })
+
+  it("a synth row's play key plays the sound made in the browser, before IMPORT makes it", async () => {
+    const h = await liveOn()
+    const player = h.deps.player as NullPlayer
+    await h.c.playSynth(KICK)
+    const play = player.plays.at(-1)!
+    expect([play.key, play.channels, play.sampleRate]).toEqual([`synth:${SynthVoice.tag(KICK)}`, 1, SynthVoice.RATE])
+    expect(play.pcm.length).toBe(2 * SynthVoice.frames(KICK))
+    expect(player.resumed).toBeGreaterThan(0)
+    // Nothing is made on the EP-133.
+    expect([...h.mock.sounds.values()].some((snd) => snd.name === KICK_NAME)).toBe(false)
+  })
+
+  it('offline, IMPORT keeps the made sound in arc, UNDO throws it away, and at the next Write the device takes it', async () => {
+    const h = await liveOn()
+    await vi.waitFor(
+      async () => {
+        for (const slot of [1, 2, 3, 4, 5]) expect(await h.padSounds.has(`s${slot}.wav`)).toBe(true)
+        expect(h.c.state.value.backgroundRead).toBe(false)
+      },
+      { timeout: 5000 },
+    )
+    h.ep.access.unplug(h.ep.input, h.ep.output)
+    await until(h, (st) => st.mirror?.offlineSounds != null)
+    const p = h.c.pattern
+    const file = SynthVoice.fileName(KICK, 1, 0, 5)
+    await h.c.receiveBeat(SYNTH)
+    expect(p.beat.value!.sounds!.offline).toBe(true)
+    expect(p.beat.value!.sounds!.rows[0]!.makes).toBe(true)
+    p.importBeat(false, new Set([padKey(A2)]))
+    let done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    expect(h.c.state.value.offlinePads).toBe(1)
+    expect(h.c.mirrorName(A2)).toBe(KICK_NAME)
+    expect(h.samples.rows.get(file)?.wav.length).toBe(44 + 2 * SynthVoice.frames(KICK))
+    // UNDO: the change and the made sound go.
+    h.c.runToastAction(done.toast!.id)
+    await until(h, (st) => st.toast?.text === ClaudeText.importUndone(1, 0, 0, false))
+    expect(h.c.state.value.offlinePads).toBe(0)
+    expect(h.samples.rows.has(file)).toBe(false)
+    // Again; meanwhile the EP-133 got the sound by its name, so Write puts that slot on the pad, uploading nothing.
+    await h.c.receiveBeat(SYNTH)
+    p.importBeat(false, new Set([padKey(A2)]))
+    done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true && st.toast.id !== done.toast!.id)
+    expect(h.samples.rows.has(file)).toBe(true)
+    h.mock.addSound({ slot: 700, name: KICK_NAME, pcm: new Uint8Array(64) })
+    const sounds = h.mock.sounds.size
+    h.ep.access.plug(h.ep.input, h.ep.output)
+    await until(h, (st) => st.offlinePrompt !== null && st.mirror !== null && !st.mirror.loading && !st.busy)
+    expect(h.c.state.value.offlinePrompt).toEqual({ changes: 0, samples: 1 })
+    await h.c.writeOfflinePads()
+    expect(h.toasts.at(-1)?.text).toBe(MirrorText.offlineWritten(1, 0))
+    expect(await onDevice(h, 'a', 5)).toBe(700)
+    expect(h.mock.sounds.size).toBe(sounds)
+    expect(h.samples.rows.has(file)).toBe(false)
+    expect(h.c.state.value.offlinePads).toBe(0)
+  })
+
+  it('a synth sound made offline goes up under its device name at the next Write', async () => {
+    const h = await liveOn()
+    await vi.waitFor(() => expect(h.c.state.value.backgroundRead).toBe(false), { timeout: 5000 })
+    h.ep.access.unplug(h.ep.input, h.ep.output)
+    await until(h, (st) => st.mirror?.offline != null)
+    await h.c.receiveBeat(SYNTH)
+    h.c.pattern.importBeat(false, new Set([padKey(A2)]))
+    await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    h.ep.access.plug(h.ep.input, h.ep.output)
+    await until(h, (st) => st.offlinePrompt !== null && st.mirror !== null && !st.mirror.loading && !st.busy)
+    await h.c.writeOfflinePads()
+    const into = [...h.mock.sounds].find(([, snd]) => snd.name === KICK_NAME)?.[0]
+    expect(into).toBeDefined()
+    expect(await onDevice(h, 'a', 5)).toBe(into)
+    expect(h.samples.rows.size).toBe(0)
+  })
+
+  // ---- FX and PAD SHAPING ----
+
+  const SHAPED = ['ARC BEAT 1', 'name Shaped', 'fx reverb 60 40', 'send A 40', '[A]', 'pad A2 pitch +2 level 90', 'A2 | X... X... X... X... |'].join('\n')
+
+  it("IMPORT applies the card's FX and writes its pad lines on the EP-133, and one UNDO puts both back", async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    // The pad's settings turned once (EDIT), so the EP-133 has a record of them to read.
+    h.c.openPadEdit(A2)
+    await vi.waitFor(() => expect(h.c.padEdit.edit.value?.reading).toBe(false))
+    h.c.adjustPad({ ...h.c.padEdit.edit.value!.settings, pan: -4 })
+    await h.c.padEdit.flushed()
+    h.c.closePadEdit()
+    await h.c.receiveBeat(SHAPED)
+    const ui = p.beat.value!
+    expect(ui.fx!.rows.map((r) => r.label)).toEqual([ClaudeText.FX_EFFECT, ClaudeText.FX_SENDS])
+    expect(ui.fx!.changes).toBe(true)
+    expect(ui.shaping!.offline).toBe(false)
+    const row = ui.shaping!.rows[0]!
+    expect(row.pad).toEqual(A2)
+    expect(row.hasSound).toBe(true)
+    expect(row.changes(false)).toBe(true)
+    const t = h.c.editTarget(A2)!
+    const was = PadSettings.fromMeta(h.mock.padMeta(t.project, t.group, t.pad) as never, row.now)
+    p.importBeat(false, new Set(), new Map(), true, new Set([padKey(A2)]))
+    const done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    expect(done.toast?.text).toBe(ClaudeText.imported([[0, 2]], null, 0, 0, true, 1))
+    expect(h.c.fx.desk.fx.value.type).toBe(FxType.REVERB)
+    expect(h.c.fx.desk.fx.value.sends[0]).toBeCloseTo(0.4)
+    const meta = PadSettings.fromMeta(h.mock.padMeta(t.project, t.group, t.pad) as never)
+    expect([meta.pitch, meta.level]).toEqual([2, 90])
+    expect(h.c.padEdit.settingsOf(t)).toMatchObject({ pitch: 2, level: 90 })
+    // UNDO on the toast: the patterns, the old FX and the pad's old settings.
+    h.c.runToastAction(done.toast!.id)
+    await until(h, (st) => st.toast?.text === ClaudeText.importUndone(0, 0, 1, true))
+    expect(p.ui.value.hasNotes.some(Boolean)).toBe(false)
+    expect(h.c.fx.desk.fx.value).toEqual(FxSettings.DEFAULT)
+    const back = PadSettings.fromMeta(h.mock.padMeta(t.project, t.group, t.pad) as never)
+    expect([back.pitch, back.level, back.pan]).toEqual([was.pitch, was.level, -4])
+  })
+
+  it('APPLY FX off leaves the FX, and an unticked pad line leaves the pad', async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    await h.c.receiveBeat(SHAPED)
+    const t = h.c.editTarget(A2)!
+    const writes = h.mock.metaWrites.length
+    p.importBeat(false)
+    const done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    expect(done.toast?.text).toBe(ClaudeText.imported([[0, 2]], null))
+    expect(h.c.fx.desk.fx.value).toEqual(FxSettings.DEFAULT)
+    expect(h.mock.metaWrites.length).toBe(writes)
+    expect(h.c.padEdit.settingsOf(t)?.pitch ?? 0).toBe(0)
+  })
+
+  it('offline, IMPORT keeps the pad lines as offline pad settings, and UNDO takes them back', async () => {
+    const storage = memoryStorage(ORDER)
+    const h = await liveHarness({ storage })
+    await h.c.connect()
+    h.c.setLive(true)
+    await until(h, (s) => s.mirror !== null && !s.mirror.loading && !s.busy && s.mirror.offline == null)
+    await vi.waitFor(() => expect(h.c.pattern.ui.value.project).toBe(1))
+    h.ep.access.unplug(h.ep.input, h.ep.output)
+    await until(h, (st) => st.mirror?.offline != null)
+    const p = h.c.pattern
+    await h.c.receiveBeat(SHAPED)
+    expect(p.beat.value!.shaping!.offline).toBe(true)
+    p.importBeat(false, new Set(), new Map(), true, new Set([padKey(A2)]))
+    const done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    expect(done.toast?.text).toBe(ClaudeText.imported([[0, 2]], null, 0, 0, true, 1))
+    await vi.waitFor(() => expect(storage.getItem(LIVE_PAD_SETTINGS_KEY)).not.toBeNull())
+    const kept = OfflinePadSettings.fromJson(storage.getItem(LIVE_PAD_SETTINGS_KEY)!)!
+    expect(kept.list.map((s) => [s.group, s.pad, s.settings.pitch, s.settings.level])).toEqual([[0, 5, 2, 90]])
+    h.c.runToastAction(done.toast!.id)
+    await until(h, (st) => st.toast?.text === ClaudeText.importUndone(0, 0, 1, true))
+    await vi.waitFor(() => expect(storage.getItem(LIVE_PAD_SETTINGS_KEY)).toBeNull())
+    expect(h.c.fx.desk.fx.value).toEqual(FxSettings.DEFAULT)
   })
 })

@@ -15,8 +15,13 @@ import { Library } from '../../src/platform/storage/library'
 import { CoachPrefs, LastReadPrefs, OfflinePadsPrefs, MirrorPrefs, SettingsStore, memoryStorage, type KeyValueStorage } from '../../src/platform/storage/settings'
 import { createController, type ArcController } from '../../src/state/controller'
 import type { Deps } from '../../src/state/deps'
-import { activeProject, sameBpm, sameMirrorState } from '../../src/state/mirror'
-import { emptyMirrorState as emptyMirrorStateFor, type UiState } from '../../src/state/types'
+import { MIRROR_FRAME_MS, MirrorController, activeProject, sameBpm, sameMirrorState, type MirrorHost } from '../../src/state/mirror'
+import { emptyMirrorState as emptyMirrorStateFor, initialState, type UiState } from '../../src/state/types'
+import { createStore } from '../../src/state/store'
+import type { LiveSounds } from '../../src/state/live'
+import { CLOCK_TIMEOUT_MS, FADE_MS, LiveMirror } from '../../src/core/features/liveMirror'
+import type { MidiEvent } from '../../src/core/protocol/midiInput'
+import type { Session } from '../../src/core/protocol/session'
 import { memoryPadSoundStore } from '../../src/core/features/padSoundCache'
 import { fakeLiveAudio } from './fakeLiveAudio'
 import { DemoData } from '../helpers/demoData'
@@ -374,5 +379,149 @@ describe('mirror helpers', () => {
     expect(sameBpm(null, 120)).toBe(false)
     expect(sameBpm(119.96, 120.04)).toBe(true)
     expect(sameBpm(120.04, 120.06)).toBe(false)
+  })
+})
+
+/**
+ * A MirrorController on a hand-driven clock (its timers and perfNow), listening
+ * to events sent straight in, beside a LiveMirror fed the same: after every
+ * timer (each frame and settle), what is shown must be that mirror's snapshot.
+ */
+async function clockedMirror() {
+  let t = 1000
+  let ids = 0
+  const timers = new Map<number, { at: number; fn: () => void }>()
+  const calls = { setTimeout: 0, clearTimeout: 0 }
+  let listener: ((e: MidiEvent) => void) | null = null
+  const store = createStore<UiState>({ ...initialState(), device: {} as UiState['device'] })
+  const session = { onPush: () => () => {} } as unknown as Session
+  const host: MirrorHost = {
+    store,
+    prefs: new MirrorPrefs(memoryStorage()),
+    // The first read fails: the mirror runs on the events alone.
+    tasks: { exclusive: async () => null } as unknown as MirrorHost['tasks'],
+    session: () => session,
+    liveEvents: () => (cb) => {
+      listener = cb
+      return () => {
+        listener = null
+      }
+    },
+    perfNow: () => t,
+    setTimeout: (fn, ms) => {
+      calls.setTimeout++
+      timers.set(++ids, { at: t + ms, fn })
+      return ids
+    },
+    clearTimeout: (h) => {
+      calls.clearTimeout++
+      timers.delete(h as number)
+    },
+    syncIndex: () => {},
+    toast: () => {},
+    live: { stopCopy: () => {}, showPack: () => {} } as unknown as LiveSounds,
+    fmtDateTime: String,
+    fmtMonthDay: String,
+    deviceRead: () => {},
+  }
+  const ctl = new MirrorController(host)
+  await ctl.open()
+  const ref = new LiveMirror()
+  const shown = () => store.get().mirror!.state
+  let publishes = 0
+  let last = store.get().mirror
+  store.subscribe((st) => {
+    if (st.mirror !== last) publishes++
+    last = st.mirror
+  })
+  return {
+    calls,
+    shown,
+    get now() {
+      return t
+    },
+    get publishes() {
+      return publishes
+    },
+    send(e: MidiEvent) {
+      ref.onMidi(e)
+      listener!(e)
+    },
+    /** Runs the timers due in the next [ms], each at its time, checking the state shown after each. */
+    advance(ms: number) {
+      const end = t + ms
+      for (;;) {
+        let id = -1
+        let due = { at: Number.POSITIVE_INFINITY, fn: () => {} }
+        for (const [k, v] of timers) if (v.at < due.at) [id, due] = [k, v]
+        if (due.at > end) break
+        timers.delete(id)
+        t = due.at
+        due.fn()
+        expect(sameMirrorState(shown(), ref.snapshot(t))).toBe(true)
+      }
+      t = end
+    },
+  }
+}
+
+// 120 BPM: 24 clocks a quarter note.
+const TICK = 60000 / (120 * 24)
+
+describe('mirror clock frames', () => {
+  it('a frame of clocks alone shows the same tempo as a full snapshot, and moves no timer while it reads the same', async () => {
+    const h = await clockedMirror()
+    const before = h.publishes
+    for (let i = 0; i < 200; i++) {
+      h.send({ type: 'Clock', time: h.now })
+      if (i % 50 === 7) h.send({ type: 'ControlChange', channel: 1, controller: 7, value: 100, time: h.now })
+      h.advance(TICK)
+    }
+    expect(h.shown().bpm).toBeCloseTo(120, 6)
+    // The tempo once, from unknown to 120.0; nothing else changed.
+    expect(h.publishes - before).toBe(1)
+    // One settle timer for its staleness, moved only when it fired (every CLOCK_TIMEOUT_MS), not every frame.
+    expect(h.calls.clearTimeout).toBeLessThanOrEqual(3)
+  })
+
+  it('a jittery clock shows each tempo that reads otherwise, as a full snapshot would', async () => {
+    const h = await clockedMirror()
+    for (let i = 0; i < 300; i++) {
+      h.send({ type: 'Clock', time: h.now })
+      h.advance(TICK + (i % 7 === 0 ? 3 : -0.5))
+    }
+    expect(h.shown().bpm).not.toBeNull()
+  })
+
+  it('clocks with notes and a stop show what a full snapshot shows', async () => {
+    const h = await clockedMirror()
+    h.send({ type: 'Start', time: h.now })
+    for (let i = 0; i < 150; i++) {
+      h.send({ type: 'Clock', time: h.now })
+      if (i % 12 === 0) h.send({ type: 'NoteOn', channel: 1, note: 36 + (i % 5), velocity: 100, time: h.now })
+      if (i % 12 === 6) h.send({ type: 'NoteOff', channel: 1, note: 36 + ((i - 6) % 5), time: h.now })
+      h.advance(TICK)
+    }
+    expect(h.shown().pads.size).toBeGreaterThan(0)
+    h.send({ type: 'Stop', time: h.now })
+    h.advance(MIRROR_FRAME_MS + 1)
+    expect(h.shown().playing).toBe(false)
+    h.advance(FADE_MS + 10)
+    expect(h.shown().pads.size).toBe(0)
+  })
+
+  it('the tempo clears about CLOCK_TIMEOUT_MS after the last clock', async () => {
+    const h = await clockedMirror()
+    let lastClock = 0
+    for (let i = 0; i < 120; i++) {
+      lastClock = h.now
+      h.send({ type: 'Clock', time: h.now })
+      h.advance(TICK)
+    }
+    expect(h.shown().bpm).toBeCloseTo(120, 6)
+    h.advance(lastClock + CLOCK_TIMEOUT_MS - 0.5 - h.now)
+    expect(h.shown().bpm).not.toBeNull()
+    h.advance(2)
+    expect(h.shown().bpm).toBeNull()
   })
 })

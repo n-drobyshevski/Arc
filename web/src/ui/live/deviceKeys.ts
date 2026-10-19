@@ -957,9 +957,8 @@ export class DeviceKeys {
     return this._state.peek().page
   }
 
-  private ctx(shift = false): DeviceContext {
+  private ctx(shift = false, group = this.view?.group() ?? 0): DeviceContext {
     const h = this.host.context()
-    const group = this.view?.group() ?? 0
     return { ...h, group, bars: h.bars[group] ?? Seq.DEFAULT_BARS, shift: shift || this._shiftKey.peek(), now: this.clock.now() }
   }
 
@@ -1052,10 +1051,14 @@ export class DeviceKeys {
     this.apply(minusPlus(this._state.peek(), dir, this.ctx(shift)))
   }
 
-  /** What − / + do now, and whether each can step (read as signals). */
-  route(): { readonly route: MinusPlusRoute; readonly minus: boolean; readonly plus: boolean } {
+  /**
+   * What − / + do now with [group] shown, and whether each can step (read as
+   * signals). The group is given, not the view's: a computed over this made
+   * before the view attaches reads the same as one made after.
+   */
+  route(group: number): { readonly route: MinusPlusRoute; readonly minus: boolean; readonly plus: boolean } {
     const s = this._state.value
-    const ctx = { ...this.ctx(), shift: this._shiftKey.value }
+    const ctx = { ...this.ctx(false, group), shift: this._shiftKey.value }
     return { route: minusPlusRoute(s, ctx), minus: canStep(s, ctx, -1), plus: canStep(s, ctx, 1) }
   }
 

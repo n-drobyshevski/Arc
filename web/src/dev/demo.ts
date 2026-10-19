@@ -29,11 +29,16 @@
 //   __arcDemo.noteOn(note, vel) / noteOff(note)  pad notes (36..83 are the pads)
 //   __arcDemo.clock('start' | 'stop' | 'continue' | 'tick' | bpm)
 //   __arcDemo.mock / access                      the simulator and the fake MIDIAccess
+//
+// It also carries the perf counters (dev/perf.ts, `window.__arcPerf`), so they
+// come in this chunk: main.tsx installs them under ?demo only.
 
 import type { MidiAccessLike, NavigatorLike } from '../platform/midi/webmidi'
 import { demoDevice } from '../../test/helpers/demoData'
 import { FakeMidiAccess, fakePair, type FakeMidiInput, type FakeMidiOutput } from '../../test/helpers/fakeMidiAccess'
 import { MockEP133 } from '../../test/helpers/mockDevice'
+
+export { installPerf, type ArcPerf } from './perf'
 
 export type ClockCommand = 'start' | 'stop' | 'continue' | 'tick' | number
 

@@ -1,26 +1,35 @@
-// Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/LiveClaude.kt (ClaudeUi, ClaudeSection)
+// Port of LiveClaude.kt's ClaudeUi and LiveTools.kt's ClaudePage (app/src/main/kotlin/dev/arc/ep133/ui/screens/)
 //
-// Live tools' CLAUDE (an addition): the header with its info key (what a beat
-// card is, and how to give Claude the arc-beats skill), a card with SHARE
-// SCENE, SHARE for the group shown and PASTE BEAT (the shares dimmed, and still
-// announced, when there is nothing to share), and two links under it: the
-// skill's zip, and a starter prompt to learn the EP-133 with Claude.
+// Live tools' Claude page: the deck (ClaudeDeck.tsx: the prompt builder on
+// the glass, the keys under it, the saved prompts and the skill's link), and
+// what a beat card is folded at the foot.
 //
 // Web deltas:
 // - The state is read from [ClaudeContext] by the section itself.
-// - SHARE uses the browser's share sheet, or copies the card where there is
-//   none; "Learn with Claude" opens claude.ai with the prompt (a link, where
-//   Android sends it to the Claude app).
-// - PASTE BEAT where the page may not read the clipboard opens a box a paste
-//   goes into ([ClaudeActions.pasting]); a paste anywhere on Live works too.
+// - Live tools are one page here, not pages: the section keeps its CLAUDE
+//   caption over the glass.
+// - The deck is a chunk of its own with the prompt builder's genres and words
+//   (lazy.ts, fetched once the app is idle: [preloadClaudeDeck]); the section
+//   shows its caption and the fold until it is in.
+// - SHARE uses the browser's share sheet, or copies the prompt where there is
+//   none; COPY copies it.
+// - PASTE CARD where the page may not read the clipboard opens a box a paste
+//   goes into (the beat sheet's); a paste anywhere on Live works too.
+// - The glass waits only for a share that went: a share sheet called off
+//   doesn't (Android can't tell, once its chooser opened); a prompt copied
+//   where there is no share sheet does.
+// - Memoized on [group]: Live's tools render again on each of the mirror's
+//   publishes, and the deck reads what it shows from signals (the getters).
 import { createContext, type JSX } from 'preact'
-import { useContext, useId, useState } from 'preact/hooks'
+import { useContext, useId } from 'preact/hooks'
+import type { ClaudePrompt, SharePick } from '../../core/features/claudePrompt'
+import type { FactoryKit } from '../../core/features/factorySounds'
+import type { Weight } from '../../state/beatPlan'
 import { ClaudeText } from '../../core/text/claudeText'
-import { CoachText } from '../../core/text/coachText'
-import { WebText } from '../../core/text/webText'
 import { Caption } from '../components/Caption'
-import { Key } from '../components/Key'
-import { InfoKey, RowCard } from '../components/SettingRow'
+import { Disclosure } from '../components/SettingRow'
+import { lazy } from '../lazy'
+import { memo, sameProps } from './memo'
 import './ClaudeSection.css'
 
 /** The CLAUDE section's state and what its keys do (Kotlin ClaudeUi), read as it renders. */
@@ -31,13 +40,42 @@ export interface ClaudeActions {
   readonly numbers: readonly number[]
   /** Whether each group's playing pattern has notes. */
   readonly hasNotes: readonly boolean[]
-  onShareScene(): void
-  onSharePattern(group: number): void
+  /** How many sounds Arc knows (0 leaves SOUNDS off), and whether the sound list follows a share. */
+  readonly sounds: number
+  readonly withSounds: boolean
+  /** The project's chain: its steps, over its scenes (no steps leaves CHAIN off). */
+  readonly chainSteps: number
+  readonly chainScenes: number
+  /** Each group's pattern, its first bar as step lights (stepLights), for the glass. */
+  readonly lights: readonly (readonly (Weight | null)[])[]
+  /**
+   * The prompt on the glass as kept (AppSettings.claudePrompt: ClaudePrompt.encode) and the saved
+   * prompts (claudePrompts: SavedPrompt.encodeAll), which the deck decodes (web: Kotlin's ClaudeUi
+   * has them decoded).
+   */
+  readonly prompt: string
+  readonly saved: string
+  /** The kit the EP-133's sounds are (the prompt's own when it names none). */
+  readonly kit: FactoryKit
+  /** The tempo Live plays at: the tempo's LIVE answer. */
+  readonly liveTempo: number
+  /** What was shared to Claude and not yet answered ("Scene S02", "A · 01", "Chain"); null when no reply is awaited. */
+  readonly waiting: string | null
+  onWithSounds(on: boolean): void
+  onPrompt(p: ClaudePrompt): void
+  /** SHARE: the prompt, with the card [pick] names ([group]'s pattern for PATTERN) when it goes with one. */
+  onShare(pick: SharePick, group: number): void
+  /** COPY: as SHARE, onto the clipboard. */
+  onCopy(pick: SharePick, group: number): void
+  /** PRACTICE (the PLAY tab): play along with [pick] on Live's pads ([group]'s pattern for PATTERN). */
+  onPractice(pick: SharePick, group: number): void
+  onSavePrompt(p: ClaudePrompt): void
+  onDeletePrompt(index: number): void
   onPaste(): void
-  /** The link under PASTE BEAT: a .txt or .md file with Claude's card in it. */
+  /** PASTE CARD held, or the link under it: a .txt or .md file with Claude's card in it. */
   onOpenFile(): void
-  /** Learn with Claude's link: claude.ai with the starter prompt. */
-  readonly learnUrl: string
+  /** The glass's STOP: stop waiting. */
+  onDismissWaiting(): void
 }
 
 export const ClaudeContext = createContext<ClaudeActions | null>(null)
@@ -46,81 +84,24 @@ export function useClaude(): ClaudeActions | null {
   return useContext(ClaudeContext)
 }
 
-/** Live tools' CLAUDE for [group] (the group shown, as SHARE A · 01 names it). */
-export function ClaudeSection(props: { group: number }): JSX.Element | null {
+const ClaudeDeck = lazy('ClaudeDeck', () => import('./ClaudeDeck').then((m) => m.ClaudeDeck))
+
+/** Fetches the deck's chunk (the app does once it is idle). */
+export const preloadClaudeDeck = ClaudeDeck.preload
+
+/** Live tools' CLAUDE for [group] (the group shown, as the pattern's key names it). */
+export const ClaudeSection = memo(function ClaudeSection(props: { group: number }): JSX.Element | null {
   const claude = useClaude()
-  const [info, setInfo] = useState(false)
-  const notesId = useId()
   const titleId = useId()
   if (claude === null) return null
-  const g = Math.min(Math.max(props.group, 0), 3)
-  const number = claude.numbers[g] ?? 1
-  const patternEmpty = !(claude.hasNotes[g] ?? false)
-  const sceneEmpty = !claude.hasNotes.some((h) => h)
   return (
     <section class="claude" aria-labelledby={titleId}>
-      <div class="claude__head">
-        <Caption text={ClaudeText.CLAUDE} align="start" as="h3" id={titleId} />
-        <InfoKey open={info} onToggle={() => setInfo(!info)} controls={notesId} describedBy={titleId} />
-      </div>
-      {info && (
-        <div id={notesId} class="claude__notes t-small">
-          <p>{ClaudeText.INFO_CARDS}</p>
-          <p>{ClaudeText.INFO_SKILL}</p>
-        </div>
-      )}
-      <div
-        class="grid-plate claude__card"
-        data-coach="live.claude"
-        data-coach-label={CoachText.CLAUDE}
-        data-coach-face="var(--navy)"
-        data-coach-ink="var(--on-navy)"
-      >
-        <p class="t-semi claude__title">{ClaudeText.BEAT_CARDS}</p>
-        <p class="t-small claude__hint">{ClaudeText.BEAT_HINT}</p>
-        <Key
-          text={ClaudeText.shareScene(claude.scene)}
-          size="small"
-          block
-          disabled={sceneEmpty}
-          aria-label={ClaudeText.shareSceneName(claude.scene, sceneEmpty)}
-          onClick={claude.onShareScene}
-        />
-        <Key
-          text={ClaudeText.sharePattern(g, number)}
-          size="small"
-          block
-          disabled={patternEmpty}
-          aria-label={ClaudeText.sharePatternName(g, number, patternEmpty)}
-          onClick={() => claude.onSharePattern(g)}
-        />
-        <Key text={ClaudeText.PASTE_BEAT} size="small" block variant="signal" aria-label={ClaudeText.PASTE_BEAT_NAME} onClick={claude.onPaste} />
-        <Key text={ClaudeText.OPEN_CARD_FILE} size="small" block variant="quiet" onClick={claude.onOpenFile} />
-      </div>
-      {/* Links, not LinkRow's buttons: the zip downloads and claude.ai opens in a tab. */}
-      <RowCard>
-        <a class="setting-row link-row claude__link" href="/arc-beats-skill.zip" download>
-          <span class="setting-row__line">
-            <span class="setting-row__text">
-              <span class="setting-row__title">{ClaudeText.GET_SKILL}</span>
-            </span>
-          </span>
-        </a>
-      </RowCard>
-      <RowCard>
-        <a class="setting-row link-row claude__link" href={claude.learnUrl} target="_blank" rel="noopener">
-          <span class="setting-row__line">
-            <span class="setting-row__text">
-              <span class="setting-row__title">{ClaudeText.LEARN}</span>
-            </span>
-          </span>
-        </a>
-      </RowCard>
+      <Caption text={ClaudeText.CLAUDE} align="start" as="h3" id={titleId} />
+      <ClaudeDeck claude={claude} group={props.group} />
+      <Disclosure title={ClaudeText.ABOUT_CARDS}>
+        <p>{ClaudeText.INFO_CARDS}</p>
+        <p>{ClaudeText.INFO_SKILL}</p>
+      </Disclosure>
     </section>
   )
-}
-
-/** Learn with Claude's link: claude.ai's new chat with the starter prompt. */
-export function learnUrl(): string {
-  return `https://claude.ai/new?q=${encodeURIComponent(WebText.LEARN_PROMPT)}`
-}
+}, sameProps)

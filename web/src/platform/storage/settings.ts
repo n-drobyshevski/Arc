@@ -72,6 +72,17 @@ export interface AppSettings {
   readonly haptics: boolean
   /** Make up for Bluetooth delay: the playhead, a press's place and the click on the EP-133's clock follow what is heard. */
   readonly makeUpDelay: boolean
+  /** CLAUDE's "With my sound list": a shared beat card is followed by the sounds Arc knows, for Claude to choose from. */
+  readonly shareSounds: boolean
+  /** CLAUDE's prompt as built on its glass (ClaudePrompt.encode; empty: as it starts). */
+  readonly claudePrompt: string
+  /** CLAUDE's saved prompts (SavedPrompt.encodeAll). */
+  readonly claudePrompts: string
+  /**
+   * The beat card sheet's REPLACE (Scenes): a card's scenes take the place of the project's (S01 on), or, off,
+   * follow them. The choice is kept for the next card.
+   */
+  readonly replaceScenes: boolean
   /** SAMPLE's input (an addition): its source and whether it records in stereo. */
   readonly sampleSource: SampleSource
   readonly sampleStereo: boolean
@@ -167,6 +178,10 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   pianoWhites: null,
   haptics: true,
   makeUpDelay: true,
+  shareSounds: true,
+  claudePrompt: '',
+  claudePrompts: '',
+  replaceScenes: false,
   sampleSource: 'mic',
   sampleStereo: false,
   sampleGainMic: SAMPLE_GAIN_MIC,
@@ -204,6 +219,10 @@ export const SETTING_KEYS = Object.freeze([
   'pianoWhites',
   'haptics',
   'makeUpDelay',
+  'shareSounds',
+  'claudePrompt',
+  'claudePrompts',
+  'replaceScenes',
   'sampleSource',
   'sampleStereo',
   'sampleGainMic',
@@ -391,6 +410,10 @@ export function readSettings(raw: string | null): AppSettings {
     pianoWhites: pianoChoiceOf(int('pianoWhites', 0)),
     haptics: bool('haptics', true),
     makeUpDelay: bool('makeUpDelay', true),
+    shareSounds: bool('shareSounds', true),
+    claudePrompt: typeof o.claudePrompt === 'string' ? o.claudePrompt : '',
+    claudePrompts: typeof o.claudePrompts === 'string' ? o.claudePrompts : '',
+    replaceScenes: bool('replaceScenes', false),
     sampleSource: (typeof o.sampleSource === 'string' ? SampleSource.of(o.sampleSource) : null) ?? 'mic',
     sampleStereo: bool('sampleStereo', false),
     sampleGainMic: sampleGainOf(o.sampleGainMic as number) ?? SAMPLE_GAIN_MIC,
@@ -452,6 +475,10 @@ export function settingValues(s: AppSettings): Record<SettingKey, string> {
     pianoWhites: String(s.pianoWhites ?? 0),
     haptics: String(s.haptics),
     makeUpDelay: String(s.makeUpDelay),
+    shareSounds: String(s.shareSounds),
+    claudePrompt: s.claudePrompt,
+    claudePrompts: s.claudePrompts,
+    replaceScenes: String(s.replaceScenes),
     sampleSource: s.sampleSource,
     sampleStereo: String(s.sampleStereo),
     sampleGainMic: ktFloat(s.sampleGainMic),
@@ -528,6 +555,10 @@ export function settingsFromIndex(map: Readonly<Record<string, string>>, cur: Ap
     pianoWhites: whites === null ? cur.pianoWhites : whites === 0 ? null : (pianoChoiceOf(whites) ?? cur.pianoWhites),
     haptics: b('app.haptics') ?? cur.haptics,
     makeUpDelay: b('app.makeUpDelay') ?? cur.makeUpDelay,
+    shareSounds: b('app.shareSounds') ?? cur.shareSounds,
+    claudePrompt: get(map, 'app.claudePrompt') ?? cur.claudePrompt,
+    claudePrompts: get(map, 'app.claudePrompts') ?? cur.claudePrompts,
+    replaceScenes: b('app.replaceScenes') ?? cur.replaceScenes,
     sampleSource: SampleSource.of(get(map, 'app.sampleSource') ?? '') ?? cur.sampleSource,
     sampleStereo: b('app.sampleStereo') ?? cur.sampleStereo,
     sampleGainMic: sampleGainOf(floatOf('app.sampleGainMic')) ?? cur.sampleGainMic,

@@ -558,6 +558,8 @@
   justify-content: center;
 }
 .live__side-tools .word svg { transform: rotate(90deg); }
+/* The turned scale and octave words step up and down (PickWord's quick): that drag is theirs. */
+.live__side-end .pick > .word--quick { touch-action: pan-x; }
 
 /* KEYS' grid on its side: the view switch on the left (none where it isn't offered: no column,
  * nor the gap before it), the scale and the octave on the right, both in the middle of the keys'
@@ -1422,6 +1424,25 @@
   pointer-events: none;
 }
 
+/* PRACTICE (MirrorScreen.kt's pad cue): a pad whose hit comes within four beats ringed thick in signal orange, the
+ * beats to go at its label's right; lit full when it is time to play it, over the frame loop's glow. */
+.live-pad.is-cue,
+.live-pad.is-cue-now { outline: 3px solid var(--signal); outline-offset: -5px; }
+.live-pad.is-cue-now,
+.ep-pad.is-cue-now { --glow: 1 !important; }
+.live-pad__cue {
+  position: absolute;
+  top: 5px;
+  right: 7px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--signal);
+  pointer-events: none;
+}
+.live-pad--big .live-pad__cue { top: var(--space-10); right: var(--space-10); font-size: 20px; }
+.live-deck--ko .live-pad__cue { font-size: clamp(11px, calc(var(--u) * 0.19), 24px); }
+
 /* STEP open (LiveStep.kt PadStep): the pads (KEYS keys) on the cursor's step outlined in signal orange,
  * their digit orange; the one picked for − / + ringed thicker. An outline, so the cap keeps its edge. */
 .live-pad.is-step-lit,
@@ -1571,19 +1592,19 @@
  * and the function keys come back over PANEL_CLOSE_MS 240, rising and growing back (web delta). None of it where the
  * system asks for less motion (Android's animations off). */
 @media (prefers-reduced-motion: no-preference) {
-  .live__fn:is(.sample-panel, .step-panel, .scene-panel) {
+  .live__fn:is(.sample-panel, .practice-panel, .step-panel, .scene-panel) {
     animation: panel-unroll 300ms cubic-bezier(0.05, 0.7, 0.1, 1) both;
   }
   :is(.live__side-panel, .live-piano__step) > .live__fn:is(.step-panel) {
     animation-name: panel-unroll-side;
   }
-  .live__fn:is(.sample-panel, .step-panel, .scene-panel) > * {
+  .live__fn:is(.sample-panel, .practice-panel, .step-panel, .scene-panel) > * {
     animation: panel-fade 200ms cubic-bezier(0, 0, 0.2, 1) both;
   }
-  .live__fn:is(.sample-panel, .step-panel, .scene-panel) > :first-child { animation-duration: 120ms; }
-  .live__fn:is(.sample-panel, .step-panel, .scene-panel) > :nth-child(2) { animation-delay: 40ms; }
-  .live__fn:is(.sample-panel, .step-panel, .scene-panel) > :nth-child(3) { animation-delay: 70ms; }
-  .live__fn:is(.sample-panel, .step-panel, .scene-panel) > :nth-child(n + 4) { animation-delay: 100ms; }
+  .live__fn:is(.sample-panel, .practice-panel, .step-panel, .scene-panel) > :first-child { animation-duration: 120ms; }
+  .live__fn:is(.sample-panel, .practice-panel, .step-panel, .scene-panel) > :nth-child(2) { animation-delay: 40ms; }
+  .live__fn:is(.sample-panel, .practice-panel, .step-panel, .scene-panel) > :nth-child(3) { animation-delay: 70ms; }
+  .live__fn:is(.sample-panel, .practice-panel, .step-panel, .scene-panel) > :nth-child(n + 4) { animation-delay: 100ms; }
   .live__fn.fn-return { animation: fn-return 240ms cubic-bezier(0.3, 0, 1, 1) both; }
 }
 @keyframes panel-unroll {

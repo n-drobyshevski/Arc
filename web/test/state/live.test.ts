@@ -19,7 +19,7 @@ import { NullPlayer } from '../../src/platform/audio/player'
 import { MemoryTarget } from '../../src/platform/storage/external'
 import { LIVE_KEY, memoryStorage, SETTINGS_KEY } from '../../src/platform/storage/settings'
 import { LIVE_AUDIO_KEEP_MS } from '../../src/state/controller'
-import { LATE_LOAD_MS, latencyRows, packKey, PRESS_STAMP_MAX_MS, pressTime } from '../../src/state/live'
+import { LATE_LOAD_MS, latencyRows, packKey, padAudioOf, PRESS_STAMP_MAX_MS, pressTime } from '../../src/state/live'
 import { WebLatencyHint } from '../../src/core/text/latencyText'
 import { createStore } from '../../src/state/store'
 import { Tasks } from '../../src/state/tasks'
@@ -81,16 +81,21 @@ function record(id: string, createdAt: number): BackupRecord {
 
 /** A backup holding [name] in [slot], as a real WAV. */
 async function backupWith(h: LiveHarness, id: string, slot: number, name: string, createdAt = 1000): Promise<void> {
+  await backupOf(h, id, { [slot]: name }, createdAt)
+}
+
+/** A backup holding each of [sounds] (names by slot), as real WAVs. */
+async function backupOf(h: LiveHarness, id: string, sounds: Record<number, string>, createdAt = 1000): Promise<void> {
   const wav = encodeWav(tone(2000, 220), 1, 46875)
   const bytes = await writeZip(
     [
       { path: 'meta.json', data: new TextEncoder().encode(JSON.stringify({ generated_at: '2026-01-02T03:04:05.000Z' })), compress: false },
-      { path: `sounds/${slot} ${name}.wav`, data: wav, compress: false },
+      ...Object.entries(sounds).map(([slot, name]) => ({ path: `sounds/${slot} ${name}.wav`, data: wav, compress: false })),
     ],
     { date: 0, offsetMin: 0 },
   )
   const before = h.c.state.value.backups.length
-  await h.library.save(record(id, createdAt), bytes, { [slot]: name })
+  await h.library.save(record(id, createdAt), bytes, sounds)
   await until(h, (s) => s.backups.length === before + 1)
   // The names reload with the list.
   await sleep(10)
@@ -218,6 +223,15 @@ describe('Live: copies of the pad sounds', () => {
     expect(await h.padSounds.has('s6.wav')).toBe(false)
   })
 
+  it("Live's own read of the sounds is one sorted list, the same array until the next read (the Sounds tab keeps its rows)", async () => {
+    const h = await liveOn()
+    expect(h.c.state.value.browser.contents).toBeNull()
+    const list = h.c.liveSounds()
+    expect(list.length).toBeGreaterThan(0)
+    expect(list.map((snd) => snd.slot)).toEqual([...list.map((snd) => snd.slot)].sort((a, b) => a - b))
+    expect(h.c.liveSounds()).toBe(list)
+  })
+
   it('a sound played from the device list is kept for Live', async () => {
     const h = await liveHarness()
     await h.c.connect()
@@ -289,6 +303,21 @@ describe('Live: playing pads', () => {
     voices.value = new Set()
     expect(h.c.arpPads.value.size).toBe(0)
     expect(h.c.arpNotes.value.size).toBe(0)
+  })
+
+  it("the KEYS notes keep their set while only pads' voices change, so the piano doesn't render again", async () => {
+    const h = await liveOn()
+    await copied(h)
+    const voices = h.liveAudio.voices as Signal<ReadonlySet<string>>
+    voices.value = new Set(['note:60', 'live:0:1'])
+    const notes = h.c.playingNotes.value
+    voices.value = new Set(['note:60', 'live:0:1', 'live:0:2'])
+    expect(h.c.playingNotes.value).toBe(notes)
+    voices.value = new Set(['note:60'])
+    expect(h.c.playingNotes.value).toBe(notes)
+    voices.value = new Set(['note:60', 'note:64'])
+    expect(h.c.playingNotes.value).not.toBe(notes)
+    expect([...h.c.playingNotes.value]).toEqual([60, 64])
   })
 
   it('plays a pad from the copy while held, rings it, and fades it on release', async () => {
@@ -470,6 +499,84 @@ describe('Live: playing pads', () => {
     expect(h.c.liveLate.value).toBe(140)
     late.value = null
     expect(h.c.liveLate.value).toBeNull()
+  })
+})
+
+describe('Live: a backup opened once for the pads', () => {
+  /** Offline, the copies cleared, a backup with the kick (a/p01) and the clap (a/p05). */
+  async function fromBackup(): Promise<LiveHarness> {
+    const h = await liveOn()
+    await copied(h)
+    h.ep.access.unplug(h.ep.input, h.ep.output)
+    await until(h, (s) => s.mirror?.offline != null)
+    await h.c.clearPadSounds()
+    await backupOf(h, 'b', { 1: 'kick', 5: 'clap' })
+    return h
+  }
+
+  it('presses that overlap read the backup once', async () => {
+    const h = await fromBackup()
+    const bytes = vi.spyOn(h.library, 'bytes')
+    await Promise.all([h.c.playPad(A1), h.c.playPad(A5)])
+    expect(bytes).toHaveBeenCalledTimes(1)
+    expect(h.liveAudio.presses.map((p) => p.key).sort()).toEqual(['1:kick', '5:clap'])
+  })
+
+  it('a backup that failed to open is opened again by the next press', async () => {
+    const h = await fromBackup()
+    const bytes = vi.spyOn(h.library, 'bytes').mockRejectedValueOnce(new Error('read failed'))
+    await h.c.playPad(A1)
+    expect(h.liveAudio.presses).toHaveLength(0)
+    expect(h.toasts.at(-1)).toMatchObject({ error: true })
+    await h.c.playPad(A1)
+    expect(bytes).toHaveBeenCalledTimes(2)
+    expect(h.liveAudio.presses.at(-1)).toMatchObject({ key: '1:kick' })
+  })
+
+  it('a press while the preload loads its sound waits for that load', async () => {
+    const h = await fromBackup()
+    let open!: () => void
+    const gate = new Promise<void>((r) => (open = r))
+    const read = h.library.bytes.bind(h.library)
+    const bytes = vi.spyOn(h.library, 'bytes').mockImplementation(async (id) => {
+      await gate
+      return read(id)
+    })
+    const preload = vi.spyOn(h.liveAudio, 'preload')
+    await h.c.clearPadSounds()
+    await vi.waitFor(() => expect(bytes).toHaveBeenCalled())
+    const playing = h.c.playPad(A1)
+    open()
+    await playing
+    expect(h.liveAudio.presses.at(-1)).toMatchObject({ key: '1:kick' })
+    expect(bytes).toHaveBeenCalledTimes(1)
+    expect(preload.mock.calls.filter(([key]) => key === '1:kick')).toHaveLength(1)
+  })
+
+  it('a preload that runs past its slice still loads every pad, a task later', async () => {
+    const h = await fromBackup()
+    // Each read of the clock 10 ms on: every pad waits for a later task first.
+    let t = 0
+    const now = vi.spyOn(performance, 'now').mockImplementation(() => (t += 10))
+    try {
+      const preload = vi.spyOn(h.liveAudio, 'preload')
+      await h.c.clearPadSounds()
+      await vi.waitFor(() => expect(preload.mock.calls.map(([key]) => key).sort()).toEqual(['1:kick', '5:clap']))
+    } finally {
+      now.mockRestore()
+    }
+  })
+})
+
+describe('padAudioOf', () => {
+  it('reads s16le from an odd offset, drops a partial sample and keeps its own copy', () => {
+    const backing = new Uint8Array([0xff, 0x00, 0x40, 0x00, 0x80, 0x7f])
+    const pcm = backing.subarray(1) // 0x4000, 0x8000 and a stray byte
+    const a = padAudioOf(pcm, 3, 46875)
+    expect(Array.from(a.pcm)).toEqual([16384, -32768])
+    expect(a.channels).toBe(2)
+    backing.fill(0)
+    expect(Array.from(a.pcm)).toEqual([16384, -32768])
   })
 })
 

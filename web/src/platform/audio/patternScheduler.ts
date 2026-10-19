@@ -350,18 +350,20 @@ export class PatternScheduler {
       this.switched = q
       this.switchedPhase = ph
     }
-    PatternPlayer.window(this.switched, c, from, to, new Map(), this.switchedNotes, this.switchedPhase)
-    const kept = this.notes.filter((n) => {
+    PatternPlayer.window(this.switched, c, from, to, EMPTY_SKIP, this.switchedNotes, this.switchedPhase)
+    // In place (web: no garbage a block in the worklet), in the same order.
+    const notes = this.notes
+    let w = 0
+    for (const n of notes) {
       const sw = queued.get(n.group)
-      return sw === undefined || n.startTick < sw.atTick
-    })
+      if (sw === undefined || n.startTick < sw.atTick) notes[w++] = n
+    }
+    notes.length = w
     for (const n of this.switchedNotes) {
       const sw = queued.get(n.group)
-      if (sw !== undefined && n.startTick >= sw.atTick) kept.push(n)
+      if (sw !== undefined && n.startTick >= sw.atTick) notes.push(n)
     }
-    kept.sort((a, b) => a.startTick - b.startTick || a.group - b.group)
-    this.notes.length = 0
-    this.notes.push(...kept)
+    notes.sort(byTickThenGroup)
   }
 
   private anchor(a: Extract<Ask, { kind: 'play' }>, rendered: number, rate: number): void {
@@ -410,8 +412,10 @@ export class PatternScheduler {
 
   // The releases that fall before [to] are sent; a note is forgotten once its release is rendered.
   private releases(sink: ScheduleSink, c: TransportClock, to: number, rendered: number): void {
-    const kept: Held[] = []
-    for (const h of this.held) {
+    const held = this.held
+    if (held.length === 0) return
+    let w = 0
+    for (const h of held) {
       if (h.sent === UNSENT) {
         const f = frameOf(c, h.end)
         if (f < to) {
@@ -420,9 +424,9 @@ export class PatternScheduler {
         }
       }
       if (h.sent !== UNSENT && h.sent < rendered) continue
-      kept.push(h)
+      held[w++] = h
     }
-    this.held = kept
+    held.length = w
   }
 
   // What waits is dropped first, then every note sent and not over is let go of now (the arp's too).
@@ -433,6 +437,12 @@ export class PatternScheduler {
     this.arpRunner.flushed(sink)
   }
 }
+
+/** No skipped groups, for the queued patterns' window (one map, not one a block). */
+const EMPTY_SKIP: ReadonlyMap<number, number> = new Map()
+
+/** Notes by start tick, then group (a switch's notes merged in). */
+const byTickThenGroup = (a: SeqNote, b: SeqNote): number => a.startTick - b.startTick || a.group - b.group
 
 // The first tick whose frame is at or after [frame].
 function firstTick(c: TransportClock, frame: number): number {
@@ -646,17 +656,18 @@ export class ArpRunner {
 
   // The releases that fall before [to] are sent; a note is forgotten once its release is rendered.
   private releases(sink: ScheduleSink, to: number, rendered: number): void {
-    if (this.held.length === 0) return
-    const kept: ArpHeld[] = []
-    for (const h of this.held) {
+    const held = this.held
+    if (held.length === 0) return
+    let w = 0
+    for (const h of held) {
       if (!h.sent && h.end < to) {
         sink.releaseAt(h.key, h.end, h.tag)
         h.sent = true
       }
       if (h.sent && h.end < rendered) continue
-      kept.push(h)
+      held[w++] = h
     }
-    this.held = kept
+    held.length = w
   }
 }
 

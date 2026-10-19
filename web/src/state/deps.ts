@@ -219,6 +219,8 @@ export interface LiveAudioDeps {
   // PATTERN (LiveAudio.kt's sequencer, PatternScheduler); an output without them has no pattern playback.
   /** What the pattern sequencer plays; kept for the next output too. */
   seqPlan?(plan: LiveSeqPlan): void
+  /** The plan as it is but at [bpm] (the EP-133's clock moved): only the tempo is sent. Web only. */
+  seqTempo?(bpm: number): void
   /**
    * Starts it: tick 0 after [countInBars] bars a lookahead on, and [leadMs]
    * later still, or (a pad's press) on the frame heard at [atMs]

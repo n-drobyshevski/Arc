@@ -236,7 +236,7 @@ test.describe(() => {
   // take the message slot from the toast this test reads (a race with the key presses).
   test.use({ serviceWorkers: 'block' })
 
-  test('a phone on its side: the display line and toasts in the top bar, the piano by keyboard, Back closes the key list', async ({ page }) => {
+  test('a phone on its side: the display line and toasts in the top bar, the piano by keyboard, Back closes the KEYS sheet', async ({ page }) => {
     await page.setViewportSize({ width: 867, height: 388 })
     await page.goto('/?demo#/live')
     await expect(page.locator('[data-pad]')).toHaveCount(12)
@@ -266,11 +266,12 @@ test.describe(() => {
     expect((await toast.boundingBox())!.y).toBeLessThan(56)
     await page.keyboard.press('Enter')
     await expect(toast).toHaveCount(1)
-    // The key word's list is a navigation layer: Back closes it.
+    // The key word opens the KEYS sheet, a navigation layer: Back closes it.
+    const keysSheet = page.getByRole('dialog', { name: 'Scale, key and octave' })
     await page.getByRole('button', { name: /^Key: DO\. Tap to change\./ }).click()
-    await expect(page.getByRole('listbox', { name: /^Key: / })).toBeVisible()
+    await expect(keysSheet.getByRole('radio', { name: 'Key DO' })).toBeInViewport()
     await page.goBack()
-    await expect(page.getByRole('listbox', { name: /^Key: / })).toHaveCount(0)
+    await expect(keysSheet).toHaveCount(0)
     await expect(piano).toBeVisible()
     // The guide overlay over the piano: every tag in view, none on another or over a control
     // (the row of words under the top bar, the octave's − and +, the GUIDE and EDIT tabs).

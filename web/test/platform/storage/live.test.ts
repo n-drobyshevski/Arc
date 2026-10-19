@@ -109,12 +109,28 @@ describe('IdbPadSoundStore sizes', () => {
     expect(await store.size('s1.wav')).toBe(7)
     await store.remove('s2.wav')
     expect(await store.size('s2.wav')).toBe(0)
-    // A row this page never saw (another tab, an earlier visit) is read once.
+    // A row this page never saw (another tab, an earlier visit) is sized by its Blob, its sample never read.
     const other = new IdbPadSoundStore(db)
     const otherReads = vi.spyOn(other, 'read')
     expect(await other.size('s1.wav')).toBe(7)
     expect(await other.size('s1.wav')).toBe(7)
-    expect(otherReads).toHaveBeenCalledTimes(1)
+    expect(otherReads).not.toHaveBeenCalled()
+    expect(await other.read('s1.wav')).toEqual(new Uint8Array(7))
+    db.close()
+  })
+
+  it('a row written before as a Uint8Array is still read and sized', async () => {
+    const db = await openArcDb({ name: fresh() })
+    await new Promise<void>((resolve, reject) => {
+      const t = db.transaction('padSounds', 'readwrite')
+      t.objectStore('padSounds').put({ name: 's3.wav', bytes: new Uint8Array([1, 2, 3]) })
+      t.oncomplete = () => resolve()
+      t.onerror = () => reject(t.error)
+    })
+    const store = new IdbPadSoundStore(db)
+    expect(await store.size('s3.wav')).toBe(3)
+    expect(await store.read('s3.wav')).toEqual(new Uint8Array([1, 2, 3]))
+    expect(await store.size('none.wav')).toBe(0)
     db.close()
   })
 })

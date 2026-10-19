@@ -40,6 +40,13 @@
   padding-block: var(--trim-1-1);
 }
 
+/* A word a short swipe steps or a hold fans out (PickWord's quick): a drag along it is its own, one across
+ * it the page's scroll; a long press brings no callout. */
+.word--quick {
+  touch-action: pan-y;
+  -webkit-touch-callout: none;
+}
+
 /* The choices, over the grid: bottom on the word's bottom, so it opens upward. */
 .pick { position: relative; }
 .pick__list {
