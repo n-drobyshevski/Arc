@@ -31,8 +31,15 @@ object CrashReport {
         }
     }
 
-    /** Puts the last run's crash, and Android's word on the last exit when it wasn't a normal one, in [log]. */
+    /**
+     * Puts the last run's crash, and Android's word on the last exit when it wasn't a normal one, in [log]. Off the
+     * main thread: asking Android and reading a kept trace would hold arc's first screen back.
+     */
     fun report(context: Context, log: TrafficLog) {
+        Thread({ runCatching { reportNow(context, log) } }, "crash-report").start()
+    }
+
+    private fun reportNow(context: Context, log: TrafficLog) {
         val file = File(context.filesDir, FILE)
         if (file.exists()) {
             runCatching { log.note("last run: ${file.readText()}") }
@@ -57,8 +64,9 @@ object CrashReport {
             else -> return
         }
         // A Java crash's trace is the file above; Android keeps one for native crashes and ANRs.
+        // Only the lines kept are read: a native crash's tombstone can be megabytes.
         val trace = if (exit.reason == ApplicationExitInfo.REASON_CRASH) null else runCatching {
-            exit.traceInputStream?.bufferedReader()?.use { it.readText() }
+            exit.traceInputStream?.bufferedReader()?.use { r -> r.lineSequence().take(MAX_LINES).joinToString("\n") }
         }.getOrNull()
         log.note("last exit: $kind" + exit.description?.let { ": $it" }.orEmpty() + trace?.let { "\n${it.trimmed()}" }.orEmpty())
     }

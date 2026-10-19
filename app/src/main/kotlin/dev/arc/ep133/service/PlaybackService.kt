@@ -217,6 +217,16 @@ class PlaybackService : Service() {
         return builder.build()
     }
 
+    // Swiped out of recents: the beat stops with the app, and its output, mirror and notification go.
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        controller.patternStop()
+        controller.releaseAway()
+        getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         scope.cancel()
         letGo()
