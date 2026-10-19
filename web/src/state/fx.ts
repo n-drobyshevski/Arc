@@ -263,6 +263,27 @@ export class FxDesk {
     return k.size === 0 ? null : FxBook.toJson(k)
   }
 
+  /** The FX of project [p]: the one shown, or the one kept for when Live shows it. */
+  of(p: number): FxSettings {
+    return p === this._project ? this._fx.peek() : (this.book.get(p) ?? FxSettings.DEFAULT)
+  }
+
+  /**
+   * [s] whole as project [p]'s FX (a beat card's, or taken back): the project
+   * shown has them sent at once, another project keeps them for when Live
+   * shows it. Both are kept.
+   */
+  replace(p: number, s: FxSettings): void {
+    const c = FxSettings.clamped(s)
+    if (p === this._project) {
+      if (this.edit(c)) sendFx(c, this.send)
+      return
+    }
+    this.book = new Map(this.book).set(p, c)
+    if (!this._loaded) this.touched.add(p)
+    this.edited()
+  }
+
   /**
    * The effect: [t], or none when [t] is the one on already (its key tapped
    * again). Its knobs stay. An effect put on while no group sends to it would

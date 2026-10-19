@@ -2,8 +2,8 @@
 //
 // BEAT CARDS (an addition): sharing a pattern or scene to Claude as an ARC BEAT
 // card, and the sheet a pasted card opens: its grids, where it goes, the tempo
-// and swing it says, its SOUNDS and SILENT PADS, its problems; IMPORT applies
-// it as one UNDO step.
+// and swing it says, its FX, SOUNDS, SILENT PADS and PAD SHAPING, its
+// problems; IMPORT applies it as one UNDO step.
 //
 // Web deltas: [placed] pairs are [group, n] tuples; Weight is a string union
 // ordered by [WEIGHT_RANK]; names give null rather than Kotlin's null String?.
@@ -12,15 +12,15 @@
 // Kotlin has MirrorUi.sounds). beatShare and beatShareChain take what Kotlin
 // passes as named arguments in one [ShareParts] object, beatImportUi its
 // blocks in one [BeatBlocks]. SoundRowUi's and SoundsUi's getters are fields,
-// set by soundRowUi and soundsUiOf. The picks for silent pads are keyed by
-// padKey. Not yet here: the synth rows (SynthVoice), the suggested sounds,
-// the FX and PAD SHAPING blocks.
+// set by soundRowUi and soundsUiOf, BeatFxUi's [changes] is a field set by
+// beatFxUi. The picks for silent pads and the pads padShapes takes are keyed
+// by padKey. Not yet here: the synth rows (SynthVoice) and the suggested sounds.
 
 import { FactoryKit, FactorySounds } from '../core/features/factorySounds'
-import { BeatCards, SoundStatus, allSections, cardSection, cardSound, type BeatCard, type CardProblem, type CardRead, type CardSection, type CardSound, type SoundPick } from '../core/features/beatCard'
+import { BeatCards, SoundStatus, allSections, cardPadIsEmpty, cardSection, cardSound, type BeatCard, type CardPad, type CardProblem, type CardRead, type CardSection, type CardSound, type SoundPick } from '../core/features/beatCard'
 import type { ChainStep } from '../core/features/chain'
 import type { FxSettings } from '../core/features/fxSettings'
-import type { PadSettings } from '../core/features/padSettings'
+import { PadSettings } from '../core/features/padSettings'
 import type { PadTarget } from '../core/features/liveMirror'
 import { OfflinePads, SoundSource } from '../core/features/offlinePads'
 import { PadSoundCache } from '../core/features/padSoundCache'
@@ -32,7 +32,7 @@ import type { PatternRecorder } from '../core/features/patternRecorder'
 import { SceneOps } from '../core/features/scenes'
 import { Steps } from '../core/features/steps'
 import { Tempo } from '../core/features/tempo'
-import { ClaudeText } from '../core/text/claudeText'
+import { ClaudeText, type Change, type PadPart } from '../core/text/claudeText'
 import { MirrorText } from '../core/text/mirrorText'
 import type { MirrorUi } from './types'
 
@@ -515,6 +515,108 @@ export function pickedSounds(picked: ReadonlyMap<number, number>, names: Readonl
 }
 
 /**
+ * The sheet's FX block: a row for each kind of FX the card has a line for
+ * (effect, sends, comp, duck), the project's FX now and what they become
+ * (ClaudeText.fxRows); a row the project has already says so
+ * (ClaudeText.isSame). [changes]: whether some row changes the project's FX
+ * (APPLY FX has something to do).
+ */
+export interface BeatFxUi {
+  readonly rows: readonly Change[]
+  readonly changes: boolean
+}
+
+/** [card]'s FX line(s) against the project's FX [now] (BeatCards.applyFx); null when the card has none. */
+export function beatFxUi(card: BeatCard, now: FxSettings): BeatFxUi | null {
+  const fx = card.fx
+  if (fx === null) return null
+  const rows = ClaudeText.fxRows(now, BeatCards.applyFx(now, fx), fx)
+  return rows.length === 0 ? null : { rows, changes: rows.some((r) => !ClaudeText.isSame(r)) }
+}
+
+/**
+ * A card's `pad` line on the sheet: the [pad], its sound [name], what the
+ * card says ([card]) and the pad's settings [now] ([hasSound]: it plays a
+ * sound now, which its settings shape). A pad whose sound is changed by the
+ * same import starts from the defaults, because a new sound resets its
+ * settings ([base]).
+ */
+export class PadShapeRowUi {
+  constructor(
+    readonly pad: PhysicalPad,
+    readonly name: string | null,
+    readonly card: CardPad,
+    readonly now: PadSettings,
+    readonly hasSound: boolean,
+  ) {}
+
+  /** What the card is applied to: the pad's settings, or the defaults when a new sound is going onto it ([soundChanges]). */
+  base(soundChanges: boolean): PadSettings {
+    return soundChanges ? PadSettings.DEFAULT : this.now
+  }
+
+  /** The settings after the card's line (BeatCards.applyPad). */
+  after(soundChanges: boolean): PadSettings {
+    return BeatCards.applyPad(this.base(soundChanges), this.card)
+  }
+
+  /** The settings that change, old to new (ClaudeText.padParts); empty when the pad has them already. */
+  parts(soundChanges: boolean): PadPart[] {
+    return ClaudeText.padParts(this.base(soundChanges), this.after(soundChanges))
+  }
+
+  /** Whether the row can be ticked: there is a sound to shape (or one going on) and something to change. */
+  changes(soundChanges: boolean): boolean {
+    return (this.hasSound || soundChanges) && this.parts(soundChanges).length > 0
+  }
+}
+
+/** The sheet's PAD SHAPING block: a [rows] for each pad line of the card, [offline] when the settings stay in Arc until the EP-133 connects. */
+export interface PadShapingUi {
+  readonly rows: readonly PadShapeRowUi[]
+  readonly offline: boolean
+}
+
+/**
+ * [card]'s pad lines as the sheet's rows, in keypad order for each section:
+ * each pad's settings [now] (the defaults when not known), whether it has a
+ * sound ([hasSound]) and its sound's name [names]. Null when the card has no
+ * pad line.
+ */
+export function padShapingUi(
+  card: BeatCard,
+  now: (pad: PhysicalPad) => PadSettings | null,
+  hasSound: (pad: PhysicalPad) => boolean,
+  names: PadNames,
+  offline: boolean,
+): PadShapingUi | null {
+  const rows: PadShapeRowUi[] = []
+  for (const s of allSections(card)) {
+    for (const offset of KEYPAD) {
+      const line = s.pads.get(offset)
+      if (line === undefined || cardPadIsEmpty(line)) continue
+      const pad = physicalPad(s.group, offset)
+      rows.push(new PadShapeRowUi(pad, names(pad), line, now(pad) ?? PadSettings.DEFAULT, hasSound(pad)))
+    }
+  }
+  return rows.length === 0 ? null : { rows, offline }
+}
+
+/** [card]'s pad lines for the pads in [pads] (pad keys), in section and keypad order: what IMPORT shapes. */
+export function padShapes(card: BeatCard, pads: ReadonlySet<number>): [PhysicalPad, CardPad][] {
+  const out: [PhysicalPad, CardPad][] = []
+  for (const s of allSections(card)) {
+    for (const offset of KEYPAD) {
+      const line = s.pads.get(offset)
+      if (line === undefined || cardPadIsEmpty(line)) continue
+      const pad = physicalPad(s.group, offset)
+      if (pads.has(padKey(pad))) out.push([pad, line])
+    }
+  }
+  return out
+}
+
+/**
  * The pad changes [after] an import put on [targets] offline, taken back: each
  * pad has the change it had [before] (none: the read's sound again). A
  * recording that was on a pad went to Takes when the import replaced it, so
@@ -543,8 +645,10 @@ export function isBefore(c: ProjectSeq, before: ProjectSeq): boolean {
  * the scene it adds), the [tempo] it offers (null when it has none or Arc's is
  * the same; [tempoNow] is Arc's), the [swing] it says (null when straight),
  * why IMPORT is off ([blocked]; null when it isn't), the [sounds] its sound
- * lines choose (null when it has none) and the [silent] pads it plays that
- * have no sound (null when it has none, or the pads aren't known).
+ * lines choose (null when it has none), its [fx] against the project's and
+ * the [shaping] its pad lines give (null when it has none), and the [silent]
+ * pads it plays that have no sound (null when it has none, or the pads aren't
+ * known).
  */
 export interface BeatImportUi {
   readonly read: CardRead
@@ -558,12 +662,20 @@ export interface BeatImportUi {
   readonly swing: number | null
   readonly blocked: string | null
   readonly sounds: SoundsUi | null
+  readonly fx: BeatFxUi | null
+  readonly shaping: PadShapingUi | null
   readonly silent: SilentUi | null
 }
 
-/** The sheet's blocks as the pads are now (Kotlin's named arguments of beatImportUi): the card's [sounds] (soundsUi) and its [silent] pads (silentUi). */
+/**
+ * The sheet's blocks as the pads are now (Kotlin's named arguments of
+ * beatImportUi): the card's [sounds] (soundsUi), its [fx] (beatFxUi), its
+ * pad lines' [shaping] (padShapingUi) and its [silent] pads (silentUi).
+ */
 export interface BeatBlocks {
   readonly sounds?: (card: BeatCard) => SoundsUi | null
+  readonly fx?: (card: BeatCard) => BeatFxUi | null
+  readonly shaping?: (card: BeatCard) => PadShapingUi | null
   readonly silent?: (card: BeatCard) => SilentUi | null
 }
 
@@ -590,14 +702,15 @@ const KEYPAD: readonly number[] = ROWS.flat()
  * [read] (a card read from a text, say) planned into [seq] (BeatCards.plan) and
  * drawn for the sheet: the pads of each section by [names], Arc's tempo [now].
  * The tempo is offered as a whole number, which is what Arc keeps. The
- * [blocks] give the card's sound lines matched (soundsUi) and its pads with
- * no sound (silentUi).
+ * [blocks] give the card's sound lines matched (soundsUi), its FX against the
+ * project's (beatFxUi), its pad lines (padShapingUi) and its pads with no
+ * sound (silentUi).
  */
 export function beatImportUi(read: CardRead, seq: ProjectSeq, now: number, names: PadNames, blocks: BeatBlocks = {}): BeatImportUi {
   const card = read.card
   const nowBpm = Tempo.round(now)
   if (card === null) {
-    return { read, title: ClaudeText.CARD, summary: null, grids: [], placed: [], scene: null, tempo: null, tempoNow: nowBpm, swing: null, blocked: ClaudeText.FIX_ERRORS, sounds: null, silent: null }
+    return { read, title: ClaudeText.CARD, summary: null, grids: [], placed: [], scene: null, tempo: null, tempoNow: nowBpm, swing: null, blocked: ClaudeText.FIX_ERRORS, sounds: null, fx: null, shaping: null, silent: null }
   }
   const plan = BeatCards.plan(seq, card)
   // The plan places the sections in the card's order, or none when a group is full.
@@ -618,6 +731,8 @@ export function beatImportUi(read: CardRead, seq: ProjectSeq, now: number, names
     swing: card.swing > TimingSettings.SWING_MIN ? card.swing : null,
     blocked: plan.fullGroup === null ? null : ClaudeText.groupFull(plan.fullGroup),
     sounds: blocks.sounds?.(card) ?? null,
+    fx: blocks.fx?.(card) ?? null,
+    shaping: blocks.shaping?.(card) ?? null,
     silent: blocks.silent?.(card) ?? null,
   }
 }
@@ -684,7 +799,11 @@ export function applyBeat(seq: ProjectSeq, card: BeatCard, recorder: PatternReco
   return { seq: out, placed: plan.placed, scene: plan.newScene ? out.scene : null, fullGroup: null }
 }
 
-/** IMPORT's toast for [applied], with the [sounds] put on pads and the [skipped] ones that had no pad to go on. */
-export function beatImported(applied: BeatApplied, sounds = 0, skipped = 0): string {
-  return ClaudeText.imported(applied.placed, applied.scene === null ? null : MirrorText.sceneLabel(applied.scene), sounds, skipped)
+/**
+ * IMPORT's toast for [applied], with the [sounds] put on pads and the
+ * [skipped] ones that had no pad to go on, the card's [fx] put on, and the
+ * [pads] shaped and the [padsSkipped] that could not be.
+ */
+export function beatImported(applied: BeatApplied, sounds = 0, skipped = 0, fx = false, pads = 0, padsSkipped = 0): string {
+  return ClaudeText.imported(applied.placed, applied.scene === null ? null : MirrorText.sceneLabel(applied.scene), sounds, skipped, fx, pads, padsSkipped)
 }

@@ -1597,9 +1597,9 @@ function LiveBeatSheet(props: { view: NavView }): JSX.Element | null {
       ui={beat}
       pasting={pasting}
       onCancel={closeBeat}
-      onImport={(setTempo, soundPads, picked) => {
+      onImport={(setTempo, soundPads, picked, applyFx, shapePads) => {
         stopPickPreview()
-        p.importBeat(setTempo, soundPads, picked)
+        p.importBeat(setTempo, soundPads, picked, applyFx, shapePads)
       }}
       onCopyProblems={(problems) => void c.copyProblems(problems)}
       onPaste={(text) => void c.receiveBeat(text)}

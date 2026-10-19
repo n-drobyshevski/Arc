@@ -5,10 +5,14 @@
 // A share carries the pads' sound lines and, with "With my sound list" on, the sounds Arc knows;
 // SHARE CHAIN shares the project's chain. IMPORT puts the card's ticked sounds and the ones
 // picked for silent pads on the pads (on the EP-133, or offline in arc), in the same UNDO step;
-// writes that throw stop it with its error toast.
+// writes that throw stop it with its error toast. The card's FX replace the project's and its
+// pad lines shape the ticked pads (on the EP-133, or as offline pad settings), in that same step.
 import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BeatCards, SoundStatus } from '../../src/core/features/beatCard'
+import { FxSettings, FxType } from '../../src/core/features/fxSettings'
+import { OfflinePadSettings } from '../../src/core/features/offlinePadSettings'
+import { PadSettings } from '../../src/core/features/padSettings'
 import { FactoryKit } from '../../src/core/features/factorySounds'
 import { padKey, physicalPad } from '../../src/core/features/padNotes'
 import { ProjectPatterns } from '../../src/core/features/pattern'
@@ -16,7 +20,7 @@ import { ClaudeText } from '../../src/core/text/claudeText'
 import { MirrorText } from '../../src/core/text/mirrorText'
 import { BackupDevice, type BackupRecord } from '../../src/core/text/libraryRules'
 import { WebText } from '../../src/core/text/webText'
-import { memoryStorage } from '../../src/platform/storage/settings'
+import { LIVE_PAD_SETTINGS_KEY, memoryStorage } from '../../src/platform/storage/settings'
 import type { Deps } from '../../src/state/deps'
 import { disposeAll, liveHarness, until, type LiveHarness } from './liveHarness'
 
@@ -285,5 +289,84 @@ describe('BEAT CARDS', () => {
     await until(h, (st) => st.toast?.text === ClaudeText.importUndone(2, 0, 0, false))
     expect(h.c.state.value.offlinePads).toBe(0)
     expect(h.c.mirrorName(A2)).toBe('clap')
+  })
+
+  // ---- FX and PAD SHAPING ----
+
+  const SHAPED = ['ARC BEAT 1', 'name Shaped', 'fx reverb 60 40', 'send A 40', '[A]', 'pad A2 pitch +2 level 90', 'A2 | X... X... X... X... |'].join('\n')
+
+  it("IMPORT applies the card's FX and writes its pad lines on the EP-133, and one UNDO puts both back", async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    // The pad's settings turned once (EDIT), so the EP-133 has a record of them to read.
+    h.c.openPadEdit(A2)
+    await vi.waitFor(() => expect(h.c.padEdit.edit.value?.reading).toBe(false))
+    h.c.adjustPad({ ...h.c.padEdit.edit.value!.settings, pan: -4 })
+    await h.c.padEdit.flushed()
+    h.c.closePadEdit()
+    await h.c.receiveBeat(SHAPED)
+    const ui = p.beat.value!
+    expect(ui.fx!.rows.map((r) => r.label)).toEqual([ClaudeText.FX_EFFECT, ClaudeText.FX_SENDS])
+    expect(ui.fx!.changes).toBe(true)
+    expect(ui.shaping!.offline).toBe(false)
+    const row = ui.shaping!.rows[0]!
+    expect(row.pad).toEqual(A2)
+    expect(row.hasSound).toBe(true)
+    expect(row.changes(false)).toBe(true)
+    const t = h.c.editTarget(A2)!
+    const was = PadSettings.fromMeta(h.mock.padMeta(t.project, t.group, t.pad) as never, row.now)
+    p.importBeat(false, new Set(), new Map(), true, new Set([padKey(A2)]))
+    const done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    expect(done.toast?.text).toBe(ClaudeText.imported([[0, 2]], null, 0, 0, true, 1))
+    expect(h.c.fx.desk.fx.value.type).toBe(FxType.REVERB)
+    expect(h.c.fx.desk.fx.value.sends[0]).toBeCloseTo(0.4)
+    const meta = PadSettings.fromMeta(h.mock.padMeta(t.project, t.group, t.pad) as never)
+    expect([meta.pitch, meta.level]).toEqual([2, 90])
+    expect(h.c.padEdit.settingsOf(t)).toMatchObject({ pitch: 2, level: 90 })
+    // UNDO on the toast: the patterns, the old FX and the pad's old settings.
+    h.c.runToastAction(done.toast!.id)
+    await until(h, (st) => st.toast?.text === ClaudeText.importUndone(0, 0, 1, true))
+    expect(p.ui.value.hasNotes.some(Boolean)).toBe(false)
+    expect(h.c.fx.desk.fx.value).toEqual(FxSettings.DEFAULT)
+    const back = PadSettings.fromMeta(h.mock.padMeta(t.project, t.group, t.pad) as never)
+    expect([back.pitch, back.level, back.pan]).toEqual([was.pitch, was.level, -4])
+  })
+
+  it('APPLY FX off leaves the FX, and an unticked pad line leaves the pad', async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    await h.c.receiveBeat(SHAPED)
+    const t = h.c.editTarget(A2)!
+    const writes = h.mock.metaWrites.length
+    p.importBeat(false)
+    const done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    expect(done.toast?.text).toBe(ClaudeText.imported([[0, 2]], null))
+    expect(h.c.fx.desk.fx.value).toEqual(FxSettings.DEFAULT)
+    expect(h.mock.metaWrites.length).toBe(writes)
+    expect(h.c.padEdit.settingsOf(t)?.pitch ?? 0).toBe(0)
+  })
+
+  it('offline, IMPORT keeps the pad lines as offline pad settings, and UNDO takes them back', async () => {
+    const storage = memoryStorage(ORDER)
+    const h = await liveHarness({ storage })
+    await h.c.connect()
+    h.c.setLive(true)
+    await until(h, (s) => s.mirror !== null && !s.mirror.loading && !s.busy && s.mirror.offline == null)
+    await vi.waitFor(() => expect(h.c.pattern.ui.value.project).toBe(1))
+    h.ep.access.unplug(h.ep.input, h.ep.output)
+    await until(h, (st) => st.mirror?.offline != null)
+    const p = h.c.pattern
+    await h.c.receiveBeat(SHAPED)
+    expect(p.beat.value!.shaping!.offline).toBe(true)
+    p.importBeat(false, new Set(), new Map(), true, new Set([padKey(A2)]))
+    const done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    expect(done.toast?.text).toBe(ClaudeText.imported([[0, 2]], null, 0, 0, true, 1))
+    await vi.waitFor(() => expect(storage.getItem(LIVE_PAD_SETTINGS_KEY)).not.toBeNull())
+    const kept = OfflinePadSettings.fromJson(storage.getItem(LIVE_PAD_SETTINGS_KEY)!)!
+    expect(kept.list.map((s) => [s.group, s.pad, s.settings.pitch, s.settings.level])).toEqual([[0, 5, 2, 90]])
+    h.c.runToastAction(done.toast!.id)
+    await until(h, (st) => st.toast?.text === ClaudeText.importUndone(0, 0, 1, true))
+    await vi.waitFor(() => expect(storage.getItem(LIVE_PAD_SETTINGS_KEY)).toBeNull())
+    expect(h.c.fx.desk.fx.value).toEqual(FxSettings.DEFAULT)
   })
 })

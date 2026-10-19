@@ -645,6 +645,13 @@ export class LiveSounds {
     return a
   }
 
+  /** The frames of [pad]'s sound when it is in memory (a pad's settings carry its trim); null when not known. */
+  cachedFrames(pad: PhysicalPad): number | null {
+    const sample = this.padSample(pad)
+    const a = sample === null ? undefined : this.padMemory.get(this.keyOf(sample))
+    return a === undefined ? null : Math.floor(a.pcm.length / a.channels)
+  }
+
   /** Whether [slot]'s sample with this name is decoded in memory. */
   inMemory(slot: number, name: string): boolean {
     return this.padMemory.has(memoryKey(slot, name))

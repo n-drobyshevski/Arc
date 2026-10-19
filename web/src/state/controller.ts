@@ -77,7 +77,7 @@ import { frames, seconds, type TrimRange } from '../core/features/sampleTrim'
 import { nameFor, nextFree, upload, uploadToPad, UploadItem } from '../core/features/sampleUpload'
 import { FxControl } from '../core/formats/fx/fxBus'
 import type { VoiceShape } from '../core/formats/voiceMixer'
-import type { PadSettings } from '../core/features/padSettings'
+import { PadSettings } from '../core/features/padSettings'
 import { OfflinePadSettings } from '../core/features/offlinePadSettings'
 import { OGG_MIME, oggOpusFile, preSkipOf, voicePcm } from '../core/formats/oggOpus'
 import { decodeWav } from '../core/formats/wav'
@@ -99,7 +99,7 @@ import { WebText } from '../core/text/webText'
 import { ktTrim } from '../core/util/kotlinText'
 import { APP_BUILD } from '../version'
 import { describeFile, PAK_ACCEPT, WAV_ACCEPT, type ReadableFile } from '../platform/files/pick'
-import { BeatCards, SoundStatus, cardSound, type BeatCard, type SoundPick } from '../core/features/beatCard'
+import { BeatCards, SoundStatus, cardSound, type BeatCard, type CardFx, type CardPad, type SoundPick } from '../core/features/beatCard'
 import { logFileName } from '../platform/files/save'
 import type { FileData } from '../platform/files/save'
 import { FileListTarget, type ExternalTarget } from '../platform/storage/external'
@@ -109,18 +109,20 @@ import { keepScreenOn } from '../platform/wakelock/wakeLock'
 import { Connection, connectionPhase, type ConnectionPhase } from './connection'
 import type { Deps, LiveEngineInfo } from './deps'
 import { LiveSounds, noteVoice, padVoice, pressTime, type LiveLatency } from './live'
-import { FxKeeper, duckSource } from './fx'
+import { FxKeeper, duckSource, sameFx } from './fx'
 import { voiceShape } from './padShape'
 import { stepWord } from './stepPlan'
-import { PadEditDesk } from './padEdit'
-import { PatternDesk, type BeatUndo, type PadBack, type SoundsPut } from './pattern'
+import { PadEditDesk, sameSettings } from './padEdit'
+import { PatternDesk, type BeatUndo, type PadBack, type ShapeBack, type ShapingPut, type SoundsPut } from './pattern'
 import { SampleDesk } from './sample'
 import { physicalPadOf, recordingsLetGo } from './samplePlan'
 import {
+  beatFxUi,
   cardPicks,
   deviceKitOf,
   foreignTo,
   offlineRestore,
+  padShapingUi,
   pickedSounds,
   silentUi,
   soundChoicesOf,
@@ -479,8 +481,11 @@ export class ArcController {
       noteNames: () => this.deps.settings.settings.keysNames,
       padName: (pad) => this.mirrorName(pad),
       beatBlocks: () => this.beatBlocks(),
+      applyBeatFx: (fx, entry) => this.applyBeatFx(fx, entry),
+      restoreBeatFx: (entry) => this.restoreBeatFx(entry),
       putBeatSounds: (card, soundPads, picked, entry) => this.putBeatSounds(card, soundPads, picked, entry),
-      putBackBeatSounds: (entry) => this.putBackBeatSounds(entry),
+      shapeBeatPads: (entry, shapes) => this.shapeBeatPads(entry, shapes),
+      putBackBeat: (entry) => this.putBackBeat(entry),
       toastWith: (text, label, run, error) => this.toastWith(text, label, run, error),
     })
     this.padEdit = new PadEditDesk({
@@ -3045,11 +3050,13 @@ export class ArcController {
   }
 
   /**
-   * The beat card sheet's SOUNDS and SILENT PADS blocks as the pads are now
+   * The beat card sheet's blocks as the pads are now
    * (ArcController.showBeat): the card's sound lines matched to the sounds
-   * Arc knows (soundsUi, the pads' slots and names as Live shows them), and
-   * the pads it plays that have no sound, once the pads are read (silentUi):
-   * PICK SOUND chooses among the sounds the SOUNDS block uses.
+   * Arc knows (soundsUi, the pads' slots and names as Live shows them), its
+   * FX against the project's (beatFxUi), its pad lines against the pads'
+   * settings (padShapingUi), and the pads it plays that have no sound, once
+   * the pads are read (silentUi): PICK SOUND chooses among the sounds the
+   * SOUNDS block uses.
    */
   private beatBlocks(): BeatBlocks {
     const st = this.store.get()
@@ -3063,6 +3070,15 @@ export class ArcController {
     const packs = new Map<FactoryKit, ReadonlyMap<number, string>>()
     return {
       sounds: (card) => soundsUi(card, set, (pad) => m?.slotOf(pad) ?? null, (pad) => this.mirrorName(pad), offline, project, packs, dk.kit),
+      fx: (card) => beatFxUi(card, this.fx.desk.fx.peek()),
+      shaping: (card) =>
+        padShapingUi(
+          card,
+          (pad) => this.padSettingsOf(pad),
+          (pad) => (m?.target(pad)?.slot ?? null) !== null,
+          (pad) => this.mirrorName(pad),
+          offline,
+        ),
       silent: (card) => silentUi(card, (pad) => m?.soundSlot(pad) ?? null, m?.padsKnown() === true, soundChoicesOf(st.mirror, sounds, dk.names), offline, project),
     }
   }
@@ -3071,9 +3087,15 @@ export class ArcController {
    * IMPORT's sounds (ArcController.importBeat after the patterns): the ticked
    * pads ([soundPads], pad keys) planned again as the sounds are now, as the
    * sheet plans them (cardPicks), and the sounds [picked] for silent pads,
-   * put on their pads (putSounds); null when none of them changes a pad now.
+   * put on their pads (putSounds), with the pads they go on; null when none
+   * of them changes a pad now.
    */
-  private putBeatSounds(card: BeatCard, soundPads: ReadonlySet<number>, picked: ReadonlyMap<number, number>, entry: BeatUndo): Promise<SoundsPut> | null {
+  private putBeatSounds(
+    card: BeatCard,
+    soundPads: ReadonlySet<number>,
+    picked: ReadonlyMap<number, number>,
+    entry: BeatUndo,
+  ): { readonly pads: ReadonlySet<number>; readonly put: Promise<SoundsPut> } | null {
     const dk = this.shareDeviceKit()
     const m = this.mirror.current
     const packs = new Map<FactoryKit, ReadonlyMap<number, string>>()
@@ -3082,7 +3104,108 @@ export class ArcController {
       soundPads.has(padKey(p.pick.pad)),
     )
     const picks = this.importPicks(plan, soundPads, picked)
-    return picks.length === 0 ? null : this.putSounds(entry, picks)
+    return picks.length === 0 ? null : { pads: new Set(picks.map((p) => padKey(p.pad))), put: this.putSounds(entry, picks) }
+  }
+
+  /**
+   * IMPORT's FX (ArcController.importBeat): the card's [fx] replace the
+   * project's, the kinds it has a line for (BeatCards.applyFx), at once and
+   * through the FX desk, so the mixer plays them and they are kept. [entry]
+   * keeps them before and after, for UNDO, when they changed.
+   */
+  private applyBeatFx(fx: CardFx, entry: BeatUndo): void {
+    const desk = this.fx.desk
+    const project = desk.project
+    const old = desk.of(project)
+    const next = BeatCards.applyFx(old, fx)
+    if (sameFx(next, old)) return
+    desk.replace(project, next)
+    entry.fxProject = project
+    entry.fxBefore = old
+    entry.fxAfter = next
+  }
+
+  /**
+   * UNDO of an import that applied FX ([BeatUndo.fxBefore]): the project's
+   * old FX are put back, but only while they are still as the import left
+   * them. FX turned since stay as they are (the card's FX can't be told from
+   * the edits then). True when they were put back.
+   */
+  private restoreBeatFx(e: BeatUndo): boolean {
+    const before = e.fxBefore
+    const after = e.fxAfter
+    if (before === null || after === null) return false
+    if (!sameFx(this.fx.desk.of(e.fxProject), after)) return false
+    this.fx.desk.replace(e.fxProject, before)
+    return true
+  }
+
+  /**
+   * The card's `pad` lines ([shapes]) put on their pads, in order, as EDIT's
+   * knobs would (BeatCards.applyPad on the settings the pad has now):
+   * connected, the EP-133 is asked for the pad's own settings first (they may
+   * have been turned on the device), and the whole record is written
+   * (PadEditDesk.writeQuiet); offline they become offline pad settings in one
+   * go, as EDIT keeps them. A pad whose settings are not known (nothing read,
+   * no answer) or that has no sound is skipped and counted; a pad that has
+   * the settings already is left alone. The pad plays with them on the phone
+   * from its next note. A failed write stops it ([ShapingPut.failure]); the
+   * pads done stay.
+   */
+  private async shapeBeatPads(entry: BeatUndo, shapes: readonly (readonly [PhysicalPad, CardPad])[]): Promise<ShapingPut> {
+    const offline = !this.deviceReady
+    const m = this.mirror.offline
+    const done: ShapeBack[] = []
+    let skipped = 0
+    let failure: string | null = null
+    const storeBefore = offline ? await this.padEdit.loadOffline() : OfflinePadSettings.EMPTY
+    let store = storeBefore
+    for (const [pad, line] of shapes) {
+      if (entry.undone) break
+      const t = this.editTarget(pad, true)
+      const slot = t?.slot ?? null
+      if (t === null || slot === null) {
+        skipped++
+        continue
+      }
+      const frames = this.live.cachedFrames(pad)
+      if (offline) {
+        const at = OfflinePadSettings.at(store, t.project, t.group, t.pad)
+        const kept = at !== null && at.slot === slot ? at : null
+        const base = kept?.settings ?? this.padEdit.settingsOf(t) ?? PadSettings.DEFAULT
+        const after = BeatCards.applyPad(base, line)
+        if (sameSettings(after, base)) continue
+        store = OfflinePadSettings.put(store, { project: t.project, group: t.group, pad: t.pad, slot, settings: after, base: kept?.base ?? base, frames })
+        done.push({ pad, target: t, before: base, after })
+        continue
+      }
+      // No answer and nothing known: a write would put guesses over the pad.
+      const base = await this.padEdit.readFresh(t)
+      if (base === null) {
+        skipped++
+        continue
+      }
+      const after = BeatCards.applyPad(base, line)
+      if (sameSettings(after, base)) continue
+      const error = await this.padEdit.writeQuiet(t, after, frames)
+      if (error !== null) {
+        failure = error
+        break
+      }
+      done.push({ pad, target: t, before: base, after })
+      entry.shaped = [...done]
+    }
+    if (offline && done.length > 0) {
+      // Offline nothing is awaited above: kept in one go, unless the connection came meanwhile.
+      if (this.mirror.offline !== m || entry.undone) return { done: [], skipped: skipped + done.length, failure: null }
+      this.padEdit.saveOffline(store)
+      for (const b of done) this.padEdit.setKnown(b.target, b.after)
+      entry.shaped = [...done]
+      entry.shapedOffline = true
+      entry.shapeSettingsBefore = storeBefore
+    }
+    if (done.length > 0) this.pattern.refreshPlan()
+    return { done, skipped, failure }
   }
 
   /**
@@ -3195,35 +3318,75 @@ export class ArcController {
   }
 
   /**
-   * UNDO of an import that put sounds on pads (BeatUndo). Connected, each pad
-   * gets the slot it had written back ([writePad]; one that was empty can't
-   * be emptied again); a failure says why and stops. Offline, the pads'
-   * offline changes and settings are put back as they were
-   * (offlineRestore), while arc is still offline: once the EP-133 connected,
-   * the changes were asked about, and written or dropped, so there is
-   * nothing of the import's left.
+   * UNDO of an import that put sounds on pads or shaped them (BeatUndo); the
+   * FX are back already (restoreBeatFx). Connected, each shaped pad gets its
+   * old settings written back (PadEditDesk.writeQuiet), unless it was turned
+   * since or its sound was changed by the import too (the new sound reset
+   * the settings, and the old ones are gone: the pad gets the sound back, and
+   * with it what the device gives that sound), then each pad gets the slot it
+   * had written back ([writePad]; one that was empty can't be emptied again);
+   * a failure says why and stops. Offline, the pads' offline changes and
+   * settings are put back as they were (offlineRestore), while arc is still
+   * offline: once the EP-133 connected, the changes were asked about, and
+   * written or dropped, so there is nothing of the import's left.
    */
-  private async putBackBeatSounds(e: BeatUndo): Promise<void> {
-    if (e.offline) {
+  private async putBackBeat(e: BeatUndo): Promise<void> {
+    const fx = e.fxRestored
+    // The shaped pads whose sound the import kept, and that nobody has turned since: the ones whose settings come back.
+    const targetKey = (t: PadTarget): string => OfflinePadSettings.padKey(t.project, t.group, t.pad)
+    const soundKeys = new Set(e.pads.map((b) => targetKey(b.target)))
+    const shaped = e.shaped.filter((b) => {
+      const now = this.padEdit.settingsOf(b.target)
+      return !soundKeys.has(targetKey(b.target)) && now !== null && sameSettings(now, b.after)
+    })
+    if (e.offline || e.shapedOffline) {
       const m = this.mirror.offline
-      if (m === null || this.deviceReady) return
+      if (m === null || this.deviceReady) {
+        if (fx) this.toast(ClaudeText.importUndone(0, 0, 0, true))
+        return
+      }
       const targets = e.pads.map((b) => b.target)
-      const pads = offlineRestore(await this.live.loadOfflinePads(), e.padsBefore, targets)
+      let pads = await this.live.loadOfflinePads()
       let settings = await this.padEdit.loadOffline()
-      for (const t of targets) {
-        const was = OfflinePadSettings.at(e.settingsBefore, t.project, t.group, t.pad)
-        settings = was !== null ? OfflinePadSettings.put(settings, was) : OfflinePadSettings.drop(settings, t.project, t.group, t.pad)
+      if (e.offline) {
+        pads = offlineRestore(pads, e.padsBefore, targets)
+        for (const t of targets) {
+          const was = OfflinePadSettings.at(e.settingsBefore, t.project, t.group, t.pad)
+          settings = was !== null ? OfflinePadSettings.put(settings, was) : OfflinePadSettings.drop(settings, t.project, t.group, t.pad)
+        }
+      }
+      if (e.shapedOffline) {
+        for (const b of shaped) {
+          const t = b.target
+          const was = OfflinePadSettings.at(e.shapeSettingsBefore, t.project, t.group, t.pad)
+          settings = was !== null ? OfflinePadSettings.put(settings, was) : OfflinePadSettings.drop(settings, t.project, t.group, t.pad)
+        }
       }
       if (this.mirror.offline !== m) return
-      this.live.setOfflinePads(pads)
+      if (e.offline) this.live.setOfflinePads(pads)
       this.padEdit.saveOffline(settings)
-      await this.padEdit.padsOffline()
-      m.setLocal(pads)
-      this.mirror.localChanged()
+      if (e.offline) await this.padEdit.padsOffline()
+      // What Arc knew of each pad before the import.
+      for (const b of shaped) this.padEdit.setKnown(b.target, b.before)
+      if (e.offline) {
+        m.setLocal(pads)
+        this.mirror.localChanged()
+      }
       this.pattern.refreshPlan()
-      this.toast(ClaudeText.importUndone(targets.length, 0, 0, false))
+      // Sounds written while connected can't be put back offline: only an offline import's sounds are restored here.
+      this.toast(ClaudeText.importUndone(e.offline ? targets.length : 0, 0, shaped.length, fx))
       return
     }
+    let restored = 0
+    for (const b of shaped) {
+      const error = await this.padEdit.writeQuiet(b.target, b.before, this.live.cachedFrames(b.pad))
+      if (error !== null) {
+        this.toast(MirrorText.padSettingsFailed(error), true)
+        return
+      }
+      restored++
+    }
+    if (restored > 0) this.pattern.refreshPlan()
     let back = 0
     let empty = 0
     for (const b of e.pads) {
@@ -3240,7 +3403,7 @@ export class ArcController {
       this.mirror.assigned(b.target, old)
       back++
     }
-    this.toast(ClaudeText.importUndone(back, empty, 0, false))
+    this.toast(ClaudeText.importUndone(back, empty, restored, fx))
   }
 
   /** Learn with Claude where there is no link to follow: the starter prompt, shared or copied. */

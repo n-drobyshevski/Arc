@@ -4,7 +4,8 @@
 // PASTE BEAT reading the clipboard. A card of scenes imported sets a chain: SHARE CHAIN
 // shares it, followed by the sound list while "With my sound list" is ticked. A card's
 // SOUNDS and SILENT PADS: its sound ticked, a sound picked for a silent pad with PICK
-// SOUND, both put on the pads by IMPORT.
+// SOUND, both put on the pads by IMPORT. A card's FX and PAD SHAPING: APPLY FX switched,
+// a pad line ticked, and IMPORT applying the FX.
 import { expect, test } from './fixtures'
 
 test.use({ viewport: { width: 412, height: 915 } })
@@ -141,4 +142,40 @@ test('SOUNDS and SILENT PADS: a card\'s sound and one picked for a silent pad go
   await sheet.getByRole('button', { name: 'Import' }).click()
   await expect(sheet).toBeHidden()
   await expect(page.getByRole('status').filter({ hasText: /^Imported to scene S02 and 2 sounds\./ })).toBeVisible()
+})
+
+test("FX and PAD SHAPING: the card's FX old to new with APPLY FX, its pad line ticked, applied by IMPORT", async ({ page }) => {
+  const card = ['ARC BEAT 1', 'name Shaped', 'fx reverb 60 40', 'send A 40', '[A]', 'pad A7 pitch +2 level 90', 'A7 | X... X... X... X... |'].join('\n')
+  await page.goto('/?demo#/live')
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
+  await page.evaluate((text) => {
+    const data = new DataTransfer()
+    data.setData('text/plain', text)
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }))
+  }, card)
+  const sheet = page.getByRole('dialog', { name: 'Shaped' })
+  await expect(sheet).toBeVisible()
+  const fx = sheet.getByRole('group', { name: 'FX' })
+  await expect(fx.getByRole('note', { name: /^Effect: OFF becomes REVERB/ })).toBeVisible()
+  await expect(fx.getByRole('note', { name: /^Sends: A 0 .* becomes A 40%/ })).toBeVisible()
+  await expect(sheet).toContainText("Replaces this project's FX on the phone")
+  // APPLY FX off leaves the project's FX; on again for the import.
+  await fx.getByRole('switch', { name: "Apply the card's FX to this project" }).click()
+  await expect(fx.getByRole('switch', { name: "Leave this project's FX as they are" })).toHaveAttribute('aria-checked', 'false')
+  await expect(sheet).not.toContainText("Replaces this project's FX on the phone")
+  await fx.getByRole('switch').click()
+
+  const shaping = sheet.getByRole('group', { name: 'Pad shaping' })
+  const row = shaping.getByRole('checkbox', { name: /^A7: .* becomes .*Level 90/ })
+  await expect(row).toHaveAttribute('aria-checked', 'true')
+  await row.click()
+  await expect(row).toHaveAttribute('aria-checked', 'false')
+  await expect(sheet).not.toContainText("Writes the ticked pads' settings on the EP-133")
+  await row.press('Space')
+  await expect(row).toHaveAttribute('aria-checked', 'true')
+  await expect(sheet).toContainText("Writes the ticked pads' settings on the EP-133")
+
+  await sheet.getByRole('button', { name: 'Import' }).click()
+  await expect(sheet).toBeHidden()
+  await expect(page.getByRole('status').filter({ hasText: /^Imported to A · 02\. FX/ })).toBeVisible()
 })

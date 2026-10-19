@@ -13,10 +13,15 @@
 // preview). A pick doesn't touch the pad: it adds a ticked row to SOUNDS
 // (nothing to something) that IMPORT puts on the pad with the card's own
 // sounds, in the same UNDO step; the silent row then says "→ 512 PIANO" with
-// a CHANGE key. IMPORT puts it all in as one UNDO step; it is off, and says
-// why, when the card can't be read or a group is full. [onImport] gets
-// whether the tempo is to be set, the pads whose sounds are to be put on and
-// the sounds picked for silent pads.
+// a CHANGE key. A card with FX lines has an FX block before the silent pads:
+// a row for each kind it sets, the project's struck through and the card's
+// after it, with APPLY FX (on to begin with). Its `pad` lines are a PAD
+// SHAPING block after the sounds: a row for each pad, each setting old to
+// new, ticked; a pad a new sound is going onto starts from the defaults.
+// IMPORT puts it all in as one UNDO step; it is off, and says why, when the
+// card can't be read or a group is full. [onImport] gets whether the tempo
+// is to be set, the pads whose sounds are to be put on, the sounds picked
+// for silent pads, whether the FX are applied and the pads to shape.
 //
 // Web deltas:
 // - The grid's cells are spans in a row that scrolls sideways when long,
@@ -28,8 +33,10 @@
 // - Opening the picker focuses its title and leaving it focuses the pad's
 //   PICK SOUND / CHANGE key again, as the upload sheet's trim view does.
 // - PUT ON PADS is a pill like the tempo chip, until the sheet's switches
-//   become LED keys. The rows of a pack's sound to upload, the synth rows,
-//   the suggested sounds, FX and PAD SHAPING come with their ports.
+//   become LED keys; so is APPLY FX. The rows of a pack's sound to upload,
+//   the synth rows and the suggested sounds come with their ports.
+// - A pad shaping row is a checkbox button like a sound row; the FX and pad
+//   rows' screen reader names are on the row (Kotlin's merged semantics).
 import type { JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type { ReadonlySignal } from '@preact/signals'
@@ -42,7 +49,21 @@ import { MirrorText } from '../../core/text/mirrorText'
 import { SettingsText } from '../../core/text/settingsText'
 import { Strings } from '../../core/text/strings'
 import { WebText } from '../../core/text/webText'
-import { pickedRow, soundsUiOf, type BeatGridUi, type BeatImportUi, type SilentRowUi, type SilentUi, type SoundRowUi, type SoundsUi, type Weight } from '../../state/beatPlan'
+import type { Change } from '../../core/text/claudeText'
+import {
+  pickedRow,
+  soundsUiOf,
+  type BeatFxUi,
+  type BeatGridUi,
+  type BeatImportUi,
+  type PadShapeRowUi,
+  type PadShapingUi,
+  type SilentRowUi,
+  type SilentUi,
+  type SoundRowUi,
+  type SoundsUi,
+  type Weight,
+} from '../../state/beatPlan'
 import { GridPlate, PlateLine } from '../components/GridPlate'
 import { Key } from '../components/Key'
 import { Sheet } from '../components/Sheet'
@@ -56,8 +77,12 @@ export interface BeatImportSheetProps {
   /** PASTE BEAT is waiting for a paste. */
   pasting: boolean
   onCancel(): void
-  /** IMPORT: whether the tempo is set, the pads (pad keys) whose sounds go on, and the sounds picked for silent pads (pad key to slot). */
-  onImport(setTempo: boolean, soundPads: ReadonlySet<number>, picked: ReadonlyMap<number, number>): void
+  /**
+   * IMPORT: whether the tempo is set, the pads (pad keys) whose sounds go
+   * on, the sounds picked for silent pads (pad key to slot), whether the
+   * card's FX are applied, and the pads (pad keys) whose settings are shaped.
+   */
+  onImport(setTempo: boolean, soundPads: ReadonlySet<number>, picked: ReadonlyMap<number, number>, applyFx: boolean, shapePads: ReadonlySet<number>): void
   onCopyProblems(problems: readonly CardProblem[]): void
   /** A text pasted into the box. */
   onPaste(text: string): void
@@ -69,16 +94,22 @@ export interface BeatImportSheetProps {
   busy: boolean
 }
 
-/** What the card's sheet chose so far: the tempo, PUT ON PADS, the unticked rows (pad keys), the picks for silent pads (pad key to slot) and the pad whose picker is open. */
+/**
+ * What the card's sheet chose so far: the tempo, PUT ON PADS, the unticked
+ * rows (pad keys), the picks for silent pads (pad key to slot), the pad whose
+ * picker is open, APPLY FX and the unticked pad shaping rows (pad keys).
+ */
 interface Choices {
   readonly setTempo: boolean
   readonly putOnPads: boolean
   readonly unticked: ReadonlySet<number>
   readonly picked: ReadonlyMap<number, number>
   readonly picking: number | null
+  readonly applyFx: boolean
+  readonly shapeOff: ReadonlySet<number>
 }
 
-const NO_CHOICES: Choices = { setTempo: false, putOnPads: true, unticked: new Set(), picked: new Map(), picking: null }
+const NO_CHOICES: Choices = { setTempo: false, putOnPads: true, unticked: new Set(), picked: new Map(), picking: null, applyFx: true, shapeOff: new Set() }
 
 export function BeatImportSheet(props: BeatImportSheetProps): JSX.Element {
   const { ui } = props
@@ -156,7 +187,7 @@ function PasteBox(props: { onPaste(text: string): void; onCancel(): void }): JSX
 
 function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; choices: Choices; onChoices(c: Choices): void }): JSX.Element {
   const { ui, choices } = props
-  const { setTempo, putOnPads, unticked, picked } = choices
+  const { setTempo, putOnPads, unticked, picked, applyFx, shapeOff } = choices
   const tempo = ui.tempo
   const silent = ui.silent
   // The picks as SOUNDS rows, in pad order: only for pads the card still leaves silent.
@@ -172,6 +203,9 @@ function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; choices: Cho
     pickedRows.length === 0 || silent === null ? ui.sounds : soundsUiOf([...(ui.sounds?.rows ?? []), ...pickedRows], ui.sounds?.offline ?? silent.offline, ui.sounds?.project ?? silent.project)
   const isTicked = (row: SoundRowUi): boolean => putOnPads && !unticked.has(padKey(row.pad))
   const ticked = sounds?.changes.filter(isTicked) ?? []
+  // Whether a new sound is going onto the pad (its row ticked): its settings start again, which the shaping rows start from.
+  const going = new Set(ticked.map((r) => padKey(r.pad)))
+  const soundGoing = (pad: PhysicalPad): boolean => going.has(padKey(pad))
   const goes = ui.grids.filter((g) => g.goesTo !== null)
   const rows: JSX.Element[] = []
   for (const g of goes) rows.push(<ValueRow key={`g${g.group}`} label={ClaudeText.GOES_TO} value={ClaudeText.goesTo(g.group, g.goesTo!)} />)
@@ -188,7 +222,8 @@ function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; choices: Cho
     const pads = new Set(ticked.map((r) => padKey(r.pad)))
     // The picked sounds that are ticked: they are in [pads] too, being SOUNDS rows.
     const chosen = new Map(pickedRows.filter((r) => pads.has(padKey(r.pad))).map((r) => [padKey(r.pad), r.pick.slot!]))
-    props.onImport(setTempo && tempo !== null, pads, chosen)
+    const shaped = new Set((ui.shaping?.rows ?? []).filter((r) => r.changes(soundGoing(r.pad)) && !shapeOff.has(padKey(r.pad))).map((r) => padKey(r.pad)))
+    props.onImport(setTempo && tempo !== null, pads, chosen, applyFx && ui.fx !== null, shaped)
   }
   return (
     <>
@@ -204,6 +239,7 @@ function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; choices: Cho
           {rows.flatMap((r, i) => (i === 0 ? [r] : [<PlateLine key={`l${i}`} />, r]))}
         </GridPlate>
       )}
+      {ui.fx !== null && <FxBlock fx={ui.fx} on={applyFx} onToggle={() => props.onChoices({ ...choices, applyFx: !applyFx })} />}
       {silent !== null && (
         <SilentBlock
           silent={silent}
@@ -228,6 +264,19 @@ function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; choices: Cho
             const key = padKey(row.pad)
             if (!next.delete(key)) next.add(key)
             props.onChoices({ ...choices, unticked: next })
+          }}
+        />
+      )}
+      {ui.shaping !== null && (
+        <PadShapingBlock
+          shaping={ui.shaping}
+          soundGoing={soundGoing}
+          isTicked={(row) => !shapeOff.has(padKey(row.pad))}
+          onTick={(row) => {
+            const next = new Set(shapeOff)
+            const key = padKey(row.pad)
+            if (!next.delete(key)) next.add(key)
+            props.onChoices({ ...choices, shapeOff: next })
           }}
         />
       )}
@@ -485,6 +534,152 @@ function SoundRow(props: { row: SoundRowUi; ticked: boolean; chipOn: boolean; on
   }
   return (
     <button type="button" class="beat-sound is-tickable" role="checkbox" aria-checked={ticked && chipOn} aria-label={description} disabled={!chipOn} onClick={props.onTick}>
+      {body}
+    </button>
+  )
+}
+
+/**
+ * The FX block: its header with the APPLY FX chip (on by default; shown when
+ * some row changes the FX), a row for each kind of FX the card has a line for
+ * ([FxRow]), and under them what applying does ([on]). With the chip off the
+ * rows are dimmed: the project's FX stay as they are.
+ */
+function FxBlock(props: { fx: BeatFxUi; on: boolean; onToggle(): void }): JSX.Element {
+  const { fx, on } = props
+  return (
+    <>
+      <GridPlate role="group" aria-label={ClaudeText.FX}>
+        <div class="beat-block__head">
+          <span class="t-caps beat-sheet__dim">{ClaudeText.FX}</span>
+          {fx.changes && <SwitchChip text={ClaudeText.APPLY_FX} description={ClaudeText.applyFxName(on)} on={on} onToggle={props.onToggle} />}
+        </div>
+        {fx.rows.map((row) => (
+          <div key={row.label}>
+            <PlateLine />
+            <FxRow row={row} on={on} />
+          </div>
+        ))}
+      </GridPlate>
+      {on && fx.changes && <p class="t-small beat-sheet__dim">{ClaudeText.FX_BLOCK_NOTE}</p>}
+    </>
+  )
+}
+
+/**
+ * One kind of FX: its label (EFFECT, SENDS, COMP, DUCK), the project's value
+ * struck through and the card's after an arrow; "Already set" under the
+ * value when the project has it. Dimmed while APPLY FX is off ([on]).
+ */
+function FxRow(props: { row: Change; on: boolean }): JSX.Element {
+  const { row, on } = props
+  const same = ClaudeText.isSame(row)
+  return (
+    <div class={`beat-fx${same || on ? '' : ' is-dim'}`} role="note" aria-label={ClaudeText.changeName(row)}>
+      <span class="t-caps beat-sheet__dim beat-fx__label" aria-hidden="true">{row.label}</span>
+      {same ? (
+        <span class="beat-fx__what" aria-hidden="true">
+          <b class="t-small beat-sheet__strong beat-sheet__clamp">{row.new}</b>
+          <span class="t-tiny beat-sheet__dim">{ClaudeText.ALREADY_SET}</span>
+        </span>
+      ) : (
+        <span class="beat-fx__what" aria-hidden="true">
+          <s class="t-small beat-sheet__dim beat-sheet__clamp">{row.old}</s>
+          <b class="t-small beat-sheet__strong beat-fx__new">{'\u2192 ' + row.new}</b>
+        </span>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The PAD SHAPING block: its header and a row for each pad line of the card
+ * ([PadShapeRow]), and under them what writing them does when some row is
+ * ticked: on the EP-133, or kept in Arc until it connects. [soundGoing]: a
+ * new sound is going onto the pad (the rows start from the defaults then).
+ */
+function PadShapingBlock(props: {
+  shaping: PadShapingUi
+  soundGoing(pad: PhysicalPad): boolean
+  isTicked(row: PadShapeRowUi): boolean
+  onTick(row: PadShapeRowUi): void
+}): JSX.Element {
+  const { shaping } = props
+  const ticked = shaping.rows.filter((r) => r.changes(props.soundGoing(r.pad)) && props.isTicked(r)).length
+  return (
+    <>
+      <GridPlate role="group" aria-label={ClaudeText.PAD_SHAPING}>
+        <div class="beat-block__head">
+          <span class="t-caps beat-sheet__dim">{ClaudeText.PAD_SHAPING}</span>
+        </div>
+        {shaping.rows.map((row) => (
+          <div key={padKey(row.pad)}>
+            <PlateLine />
+            <PadShapeRow row={row} soundGoing={props.soundGoing(row.pad)} ticked={props.isTicked(row)} onTick={() => props.onTick(row)} />
+          </div>
+        ))}
+      </GridPlate>
+      {ticked > 0 && <p class="t-small beat-sheet__dim">{shaping.offline ? ClaudeText.PAD_SHAPING_OFFLINE_NOTE : ClaudeText.PAD_SHAPING_NOTE}</p>}
+    </>
+  )
+}
+
+/**
+ * One pad line: a tick box (when there is something to change), the pad, and
+ * each setting it changes, the old value struck through and the new one
+ * after an arrow ("pitch 0 → +2 · release 255 → 40"). A pad that has them
+ * says "Already set", and one with no sound (and none going onto it) is amber
+ * with the reason; neither has a box.
+ */
+function PadShapeRow(props: { row: PadShapeRowUi; soundGoing: boolean; ticked: boolean; onTick(): void }): JSX.Element {
+  const { row, soundGoing, ticked } = props
+  const parts = row.parts(soundGoing)
+  const noSound = !row.hasSound && !soundGoing
+  const changes = row.changes(soundGoing)
+  const change = parts.length === 0 ? null : ClaudeText.padChange(row.pad, row.base(soundGoing), row.after(soundGoing))
+  const description = ClaudeText.padRowName(change, row.pad, noSound)
+  const body = (
+    <>
+      <span class="beat-sound__mark" aria-hidden="true">
+        {changes ? <span class={`beat-tick${ticked ? ' is-on' : ''}`} /> : noSound ? <span class="beat-sound__bar" /> : null}
+      </span>
+      <span class="t-field-label beat-sound__pad" aria-hidden="true">{ClaudeText.padLabel(row.pad)}</span>
+      <span class={`beat-sound__what${changes && !ticked ? ' is-dim' : ''}`} aria-hidden="true">
+        {noSound ? (
+          <span class="t-small beat-sheet__ink beat-sheet__clamp">{ClaudeText.PAD_NO_SOUND}</span>
+        ) : parts.length === 0 ? (
+          <>
+            {row.name !== null && <span class="t-field-label beat-sheet__ink beat-sound__one">{row.name}</span>}
+            <span class="t-tiny beat-sheet__dim">{ClaudeText.ALREADY_SET}</span>
+          </>
+        ) : (
+          <>
+            <span class="t-small beat-shape__parts">
+              {parts.map((p, i) => (
+                <span key={p.name}>
+                  {i > 0 && '  \u00B7  '}
+                  <span class="beat-sheet__dim">{p.name.toLowerCase() + ' '}</span>
+                  <s class="beat-sheet__dim">{p.old}</s>
+                  {' \u2192 '}
+                  <b class="beat-sheet__strong">{p.new}</b>
+                </span>
+              ))}
+            </span>
+            {row.name !== null && <span class="t-tiny beat-sheet__dim beat-sound__one">{row.name}</span>}
+          </>
+        )}
+      </span>
+    </>
+  )
+  if (!changes) {
+    return (
+      <div class="beat-sound" role="note" aria-label={description}>
+        {body}
+      </div>
+    )
+  }
+  return (
+    <button type="button" class="beat-sound is-tickable" role="checkbox" aria-checked={ticked} aria-label={description} onClick={props.onTick}>
       {body}
     </button>
   )

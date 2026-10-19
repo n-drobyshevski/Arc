@@ -6,12 +6,12 @@
 // with toEqual (plain data, as Kotlin's data class equals) and assertSame is toBe. beatShare's named arguments are its
 // ShareParts object, beatImportUi's blocks its BeatBlocks; soundSetOf and soundChoicesOf take the connected list as an
 // argument (Kotlin's MirrorUi.sounds); the picks for silent pads are keyed by padKey.
-// Left for the steps that port them: the prompt share (PromptText), the scene imports with REPLACE and SET CHAIN, the
-// sheet's FX and PAD SHAPING blocks, and the synth rows (the four synth tests and "the sheet and IMPORT plan the same
-// sounds", which needs a synth line).
+// BeatFxUi's `same` is ClaudeText.isSame; padShapes takes pad keys.
+// Left for the steps that port them: the prompt share (PromptText), the scene imports with REPLACE and SET CHAIN, and
+// the synth rows (the four synth tests and "the sheet and IMPORT plan the same sounds", which needs a synth line).
 import { describe, expect, it } from 'vitest'
 import { FactoryKit } from '../../src/core/features/factorySounds'
-import { BeatCards, SoundStatus, beatCard, cardPad, cardSection, cardSound, type BeatCard, type CardSection, type CardSound } from '../../src/core/features/beatCard'
+import { BeatCards, SoundStatus, beatCard, cardFx, cardPad, cardSection, cardSound, type BeatCard, type CardSection, type CardSound } from '../../src/core/features/beatCard'
 import type { PadTarget } from '../../src/core/features/liveMirror'
 import { OfflinePads, SoundSource, type OfflinePad } from '../../src/core/features/offlinePads'
 import { chain, chainStep } from '../../src/core/features/chain'
@@ -26,6 +26,7 @@ import { ClaudeText } from '../../src/core/text/claudeText'
 import {
   applyBeat,
   beatCardOf,
+  beatFxUi,
   beatGrid,
   beatImportUi,
   beatImported,
@@ -36,6 +37,8 @@ import {
   chainSceneCount,
   isBefore,
   offlineRestore,
+  padShapes,
+  padShapingUi,
   pickedRow,
   pickedSounds,
   silentUi,
@@ -535,6 +538,57 @@ describe('BeatPlanTest', () => {
     // The share's FX come before the first section, as the spec has them.
     const at = text.indexOf('\nfx distortion')
     expect(at >= 1 && at < text.indexOf('[A')).toBe(true)
+  })
+
+  it('the FX block has a row for each kind the card sets, and says so when the project has it already', () => {
+    const now = FxSettings.of({ type: FxType.REVERB, x: 0.5, y: 0.5, sends: [0.5, 0, 0, 0] })
+    const c: BeatCard = { ...card([section(0, pat([hit(0)]))]), fx: cardFx({ type: FxType.DISTORTION, x: 0.55, y: 0.4, sends: new Map([[0, 0.5]]), comp: comp({ on: false }) }) }
+    const ui = beatFxUi(c, now)!
+    expect(ui.rows.map((r) => r.label)).toEqual(['Effect', 'Sends', 'Comp'])
+    // The sends A 50% say the same; the comp is off already: only the effect changes.
+    expect(ui.rows.map((r) => ClaudeText.isSame(r))).toEqual([false, true, true])
+    expect(ui.changes).toBe(true)
+    expect(ui.rows[0]!.old).toBe('REVERB \u00B7 SIZE 50% \u00B7 FLAT')
+    expect(ui.rows[0]!.new).toBe('DISTORTION \u00B7 DRIVE 13x \u00B7 LP 20')
+    // Everything the card says is set already: the block stays, with nothing to apply.
+    const same = beatFxUi({ ...c, fx: cardFx({ sends: new Map([[0, 0.5]]) }) }, now)!
+    expect(same.changes).toBe(false)
+    // No FX line, no block; the sheet carries it.
+    expect(beatFxUi(card([section(0, pat([hit(0)]))]), now)).toBeNull()
+    expect(beatImportUi(read(c), ProjectSeq.DEFAULT, 120.0, nameOf, { fx: (it) => beatFxUi(it, now) }).fx!.rows.length).toBe(3)
+    expect(beatImportUi(read(c), ProjectSeq.DEFAULT, 120.0, nameOf).fx).toBeNull()
+  })
+
+  it("the pad shaping rows are the card's pad lines in keypad order, starting from the defaults when a new sound goes on", () => {
+    const shaped = { ...PadSettings.DEFAULT, pitch: 2.0 }
+    const snare = physicalPad(0, 11)
+    const c = card([
+      cardSection(0, null, pat([hit(0)]), new Map(), new Map([[11, cardPad({ pitch: 2.0, release: 40, mode: PlayMode.KEY })], [9, cardPad({ pitch: 2.0 })], [0, cardPad({ level: 90 })]])),
+    ])
+    const a0 = physicalPad(0, 0)
+    const ui = padShapingUi(c, (p) => (padKey(p) === padKey(kick) ? shaped : null), (p) => padKey(p) !== padKey(a0), nameOf, false)!
+    // Keypad order: 7 (offset 9), 9 (offset 11), then . (offset 0).
+    expect(ui.rows.map((r) => r.pad)).toEqual([kick, snare, a0])
+    expect(ui.rows.map((r) => r.name)).toEqual(['kick', 'snare', null])
+    const [k, sn, none] = ui.rows as [typeof ui.rows[0], typeof ui.rows[0], typeof ui.rows[0]]
+    // A7 has pitch +2 already; A9 changes pitch, release and mode.
+    expect(k.parts(false)).toEqual([])
+    expect(k.changes(false)).toBe(false)
+    expect(sn.parts(false).map((p) => p.name)).toEqual(['Pitch', 'Release', 'Mode'])
+    expect(sn.changes(false)).toBe(true)
+    // A new sound resets the pad: its row starts from the defaults, so A7's pitch is a change then.
+    expect(k.parts(true).map((p) => p.name)).toEqual(['Pitch'])
+    expect(k.changes(true)).toBe(true)
+    // A pad with no sound can't be shaped, unless a sound is going onto it.
+    expect(none.changes(false)).toBe(false)
+    expect(none.changes(true)).toBe(true)
+    expect(none.after(true)).toEqual({ ...PadSettings.DEFAULT, level: 90 })
+    expect(padShapingUi(card([section(0, pat([hit(0)]))]), () => null, () => true, nameOf, true)).toBeNull()
+    // IMPORT shapes the ticked pads, in section and keypad order.
+    expect(padShapes(c, new Set([padKey(snare)]))).toEqual([[snare, cardPad({ pitch: 2.0, release: 40, mode: PlayMode.KEY })]])
+    expect(padShapes(c, new Set([padKey(snare), padKey(kick)])).map(([p]) => p.offset)).toEqual([9, 11])
+    expect(padShapes(c, new Set())).toEqual([])
+    expect(beatImported({ seq: ProjectSeq.DEFAULT, placed: [[0, 2]], scene: null, fullGroup: null }, 0, 0, true)).toBe('Imported to A \u00B7 02. FX applied. UNDO takes it back.')
   })
 })
 

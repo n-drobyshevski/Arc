@@ -27,7 +27,7 @@
 
 import { Chain } from '../core/features/chain'
 import { signal, type ReadonlySignal, type Signal } from '@preact/signals'
-import { physicalPad, type PhysicalPad } from '../core/features/padNotes'
+import { padKey, physicalPad, type PhysicalPad } from '../core/features/padNotes'
 import { Pattern, Patterns, ProjectPatterns, ProjectSeq, Seq, TimingSettings, sameSeq, type Timing } from '../core/features/pattern'
 import { PatternRecorder } from '../core/features/patternRecorder'
 import { frameAt } from '../core/features/sampleTiming'
@@ -40,10 +40,12 @@ import { ClockFollow, TapTempo, Tempo, type Beat, type BeatGrid } from '../core/
 import type { MidiEvent } from '../core/protocol/midiInput'
 import { ArpSettings, type ArpNote, type ArpOrder } from '../core/features/arp'
 import { OutputDelay } from '../core/features/outputDelay'
-import { BeatCards, type BeatCard, type CardRead } from '../core/features/beatCard'
+import { BeatCards, type BeatCard, type CardFx, type CardPad, type CardRead } from '../core/features/beatCard'
 import type { PadTarget } from '../core/features/liveMirror'
 import { OfflinePadSettings } from '../core/features/offlinePadSettings'
 import { OfflinePads } from '../core/features/offlinePads'
+import type { FxSettings } from '../core/features/fxSettings'
+import type { PadSettings } from '../core/features/padSettings'
 import { ClaudeText } from '../core/text/claudeText'
 import { FeatureText } from '../core/text/featureText'
 import { MirrorText } from '../core/text/mirrorText'
@@ -68,7 +70,7 @@ import {
   type PatternUiState,
 } from './patternPlan'
 import { ARP_PRESSURE_MS, ARP_UI, ArpDesk, type ArpUi } from './arpPlan'
-import { applyBeat, beatImportUi, beatImported, beatShare, beatShareChain, isBefore, type BeatApplied, type BeatBlocks, type BeatImportUi, type BeatShare, type ShareParts } from './beatPlan'
+import { applyBeat, beatImportUi, beatImported, beatShare, beatShareChain, isBefore, padShapes, type BeatApplied, type BeatBlocks, type BeatImportUi, type BeatShare, type ShareParts } from './beatPlan'
 import { ClipMode, PadStage, SCENE_UI, SceneDesk, type SceneUi } from './scenePlan'
 import { CORRECT_SHOWN_MS, STEP_UI, StepDesk, arpTakesPress, auditionMs, stepOpens, stepWord, type StepNote, type StepUi } from './stepPlan'
 import type { Store } from './store'
@@ -122,16 +124,27 @@ export interface PatternHost {
   noteNames?(): NoteNames
   /** [pad]'s sound name as Live shows it (a beat card's rows), or null. */
   padName?(pad: PhysicalPad): string | null
-  /** A beat card's SOUNDS and SILENT PADS blocks as the pads are now (the controller knows them). */
+  /** A beat card's FX, SOUNDS, PAD SHAPING and SILENT PADS blocks as the pads are now (the controller knows them). */
   beatBlocks?(): BeatBlocks
   /**
-   * IMPORT's second half: the sounds of the ticked pads ([soundPads], pad
-   * keys) and the ones [picked] for silent pads (pad key to slot) put on their
-   * pads, [entry] keeping what UNDO needs; null when none changes a pad now.
+   * IMPORT's FX: the card's [fx] replace the project's, the kinds it has a
+   * line for (BeatCards.applyFx), at once; [entry] keeps the FX before and
+   * after when they changed.
    */
-  putBeatSounds?(card: BeatCard, soundPads: ReadonlySet<number>, picked: ReadonlyMap<number, number>, entry: BeatUndo): Promise<SoundsPut> | null
-  /** UNDO took back an import that put sounds on pads ([entry]): they get their old sounds back. */
-  putBackBeatSounds?(entry: BeatUndo): Promise<void>
+  applyBeatFx?(fx: CardFx, entry: BeatUndo): void
+  /** UNDO of an import that applied FX: the old ones back while they are still as it left them (true when put back). */
+  restoreBeatFx?(entry: BeatUndo): boolean
+  /**
+   * IMPORT's sounds: those of the ticked pads ([soundPads], pad keys) and
+   * the ones [picked] for silent pads (pad key to slot) put on their pads,
+   * [entry] keeping what UNDO needs; the [pads] (pad keys) they were to go on,
+   * and the writes ([put]). Null when none changes a pad now.
+   */
+  putBeatSounds?(card: BeatCard, soundPads: ReadonlySet<number>, picked: ReadonlyMap<number, number>, entry: BeatUndo): { readonly pads: ReadonlySet<number>; readonly put: Promise<SoundsPut> } | null
+  /** IMPORT's pad settings: the card's `pad` lines ([shapes]) put on their pads once the sounds are on, [entry] keeping what UNDO needs. */
+  shapeBeatPads?(entry: BeatUndo, shapes: readonly (readonly [PhysicalPad, CardPad])[]): Promise<ShapingPut>
+  /** UNDO took back an import that put sounds on pads or shaped them ([entry]): they get their old sounds and settings back. */
+  putBackBeat?(entry: BeatUndo): Promise<void>
   /** A toast with a key ([label]: UNDO) that runs [run] once. */
   toastWith?(text: string, label: string, run: () => void, error?: boolean): void
 }
@@ -147,6 +160,21 @@ export interface SoundsPut {
   readonly done: readonly PadBack[]
   readonly skipped: number
   readonly moved: number
+  readonly failure: string | null
+}
+
+/** One pad shaped by an IMPORT, to be taken back by UNDO: the [pad], its [target], and its settings [before] and [after] the card's line. */
+export interface ShapeBack {
+  readonly pad: PhysicalPad
+  readonly target: PadTarget
+  readonly before: PadSettings
+  readonly after: PadSettings
+}
+
+/** The pad settings an IMPORT wrote: the pads [done], the [skipped] ones (no target or sound, or settings not known) and why it stopped ([failure]). */
+export interface ShapingPut {
+  readonly done: readonly ShapeBack[]
+  readonly skipped: number
   readonly failure: string | null
 }
 
@@ -166,6 +194,17 @@ export class BeatUndo {
   offline = false
   padsBefore: OfflinePads = OfflinePads.EMPTY
   settingsBefore: OfflinePadSettings = OfflinePadSettings.EMPTY
+
+  /** The FX it replaced: project [fxProject]'s FX [fxBefore] became [fxAfter]; null when it left them as they were. [fxRestored]: UNDO put them back. */
+  fxProject = 0
+  fxBefore: FxSettings | null = null
+  fxAfter: FxSettings | null = null
+  fxRestored = false
+
+  /** The pads whose settings it wrote (ShapeBack), and for an import made [shapedOffline] the offline settings as they were before. */
+  shaped: readonly ShapeBack[] = []
+  shapedOffline = false
+  shapeSettingsBefore: OfflinePadSettings = OfflinePadSettings.EMPTY
 
   constructor(
     readonly recorder: PatternRecorder,
@@ -1678,8 +1717,22 @@ export class PatternDesk {
    * and so are the sounds the user [picked] for the pads the card leaves
    * silent (pad key to slot; they are in [soundPads] too, being ticked). The
    * toast, with UNDO, waits for them.
+   *
+   * With [applyFx] the card's FX replace the project's, the kinds it has a
+   * line for, at once (host.applyBeatFx). [shapePads] are the pads (pad keys)
+   * whose `pad` lines the sheet had ticked: once their sounds are on, each
+   * pad's settings are written on the EP-133, or kept as offline pad
+   * settings (host.shapeBeatPads). All of it is one UNDO step with the
+   * patterns and the sounds (BeatUndo). Web delta: [picked] comes before
+   * [applyFx] and [shapePads], where the Kotlin has it after them.
    */
-  importBeat(setTempo: boolean, soundPads: ReadonlySet<number> = new Set(), picked: ReadonlyMap<number, number> = new Map()): void {
+  importBeat(
+    setTempo: boolean,
+    soundPads: ReadonlySet<number> = new Set(),
+    picked: ReadonlyMap<number, number> = new Map(),
+    applyFx = false,
+    shapePads: ReadonlySet<number> = new Set(),
+  ): void {
     const ui = this._beat.peek()
     const card = ui?.read.card ?? null
     if (ui === null || card === null) return
@@ -1704,40 +1757,76 @@ export class PatternDesk {
     const entry = new BeatUndo(this.recorder, before, a.seq)
     this.beatUndos.push(entry)
     while (this.beatUndos.length > MAX_BEAT_UNDOS) this.beatUndos.shift()
+    // The FX go on at once; UNDO puts the project's old ones back while they are still as the import left them.
+    if (applyFx && card.fx !== null) this.host.applyBeatFx?.(card.fx, entry)
+    const fxApplied = entry.fxBefore !== null
     const put = soundPads.size === 0 ? null : (this.host.putBeatSounds?.(card, soundPads, picked, entry) ?? null)
-    if (put === null) {
-      this.importToast(beatImported(a), entry)
+    const shapes = this.host.shapeBeatPads ? padShapes(card, shapePads) : []
+    if (put === null && shapes.length === 0) {
+      this.importToast(beatImported(a, 0, 0, fxApplied), entry)
       return
     }
     entry.writing = true
-    void this.putTail(a, entry, put)
+    void this.putTail(a, entry, put, shapes)
   }
 
   // The imports whose UNDO is still ahead, the latest last.
   private readonly beatUndos: BeatUndo[] = []
 
   /**
-   * IMPORT's second half, once the sounds went on ([put]): the toast says what
-   * was done, or what stopped it. UNDO during the writes ([BeatUndo.undone])
-   * stops them, and what they did is put back. Web addition: writes that
-   * throw stop like a failure reported, with the pads done so far.
+   * IMPORT's second half, after the patterns (and the FX) went in
+   * ([applied]): the sounds ([put], to go on the pads it names), then the
+   * pad settings ([shapes]) of the pads whose sound, if it was to change,
+   * went on (settings written before a new sound would be reset by it, and
+   * written to the old sound if it didn't go on). No toast until all is done:
+   * it says what was done, or what stopped it. UNDO during the writes
+   * ([BeatUndo.undone]) stops them, and what they did is put back. Web
+   * addition: writes that throw stop like a failure reported, with the pads
+   * done so far.
    */
-  private async putTail(applied: BeatApplied, entry: BeatUndo, put: Promise<SoundsPut>): Promise<void> {
-    let s: SoundsPut
+  private async putTail(
+    applied: BeatApplied,
+    entry: BeatUndo,
+    put: { readonly pads: ReadonlySet<number>; readonly put: Promise<SoundsPut> } | null,
+    shapes: readonly (readonly [PhysicalPad, CardPad])[],
+  ): Promise<void> {
+    const why = (e: unknown): string => (e instanceof Error ? e.message || String(e) : String(e))
+    let s: SoundsPut = { done: [], skipped: 0, moved: 0, failure: null }
+    let sh: ShapingPut = { done: [], skipped: 0, failure: null }
+    let toShape = shapes
     try {
-      s = await put
-    } catch (e) {
-      s = { done: entry.pads, skipped: 0, moved: 0, failure: e instanceof Error ? e.message || String(e) : String(e) }
+      if (put !== null) {
+        try {
+          s = await put.put
+        } catch (e) {
+          s = { done: entry.pads, skipped: 0, moved: 0, failure: why(e) }
+        }
+        // A pad whose sound didn't go on (a failed or skipped pick) isn't shaped.
+        const done = new Set(s.done.map((b) => padKey(b.pad)))
+        toShape = shapes.filter(([pad]) => !put.pads.has(padKey(pad)) || done.has(padKey(pad)))
+      }
+      if (s.failure === null && !entry.undone && toShape.length > 0 && this.host.shapeBeatPads) {
+        try {
+          sh = await this.host.shapeBeatPads(entry, toShape)
+        } catch (e) {
+          sh = { done: entry.shaped, skipped: 0, failure: why(e) }
+        }
+      }
     } finally {
       entry.writing = false
     }
     if (entry.undone) {
-      // The patterns are back already: the pads done follow them, with no import toast.
-      if (entry.pads.length > 0) await this.host.putBackBeatSounds?.(entry)
+      // The patterns (and the FX) are back already: the pads done follow them, with no import toast.
+      if (entry.pads.length > 0 || entry.shaped.length > 0) await this.host.putBackBeat?.(entry)
       return
     }
+    const fx = entry.fxBefore !== null
     if (s.failure !== null) this.importToast(ClaudeText.soundsFailed(s.failure, s.done.length), entry, true)
-    else this.importToast(beatImported(applied, s.done.length, s.skipped) + (s.moved > 0 ? ' ' + MirrorText.samplesToTakes(s.moved) : ''), entry)
+    else if (sh.failure !== null) this.importToast(ClaudeText.shapingFailed(sh.failure, sh.done.length, fx), entry, true)
+    else {
+      const skippedShapes = shapes.length - toShape.length + sh.skipped
+      this.importToast(beatImported(applied, s.done.length, s.skipped, fx, sh.done.length, skippedShapes) + (s.moved > 0 ? ' ' + MirrorText.samplesToTakes(s.moved) : ''), entry)
+    }
   }
 
   // An import's toast, with UNDO when the host has keys on its toasts.
@@ -1755,9 +1844,14 @@ export class PatternDesk {
   /** The offline pad changes of imports are written or dropped: UNDO of those imports leaves the pads alone. */
   forgetOfflineUndos(): void {
     for (const e of this.beatUndos) {
-      if (!e.offline) continue
-      e.pads = []
-      e.offline = false
+      if (e.offline) {
+        e.pads = []
+        e.offline = false
+      }
+      if (e.shapedOffline) {
+        e.shaped = []
+        e.shapedOffline = false
+      }
     }
   }
 
@@ -1809,7 +1903,11 @@ export class PatternDesk {
     this.beatUndos.splice(this.beatUndos.indexOf(taken), 1)
     // Marked even with no pads yet: the writes still running see it and put back what they did (putTail).
     taken.undone = true
-    if (!taken.writing && taken.pads.length > 0) void this.host.putBackBeatSounds?.(taken)
+    taken.fxRestored = this.host.restoreBeatFx?.(taken) ?? false
+    if (!taken.writing) {
+      if (taken.pads.length > 0 || taken.shaped.length > 0) void this.host.putBackBeat?.(taken)
+      else if (taken.fxRestored) this.host.toast(ClaudeText.importUndone(0, 0, 0, true))
+    }
   }
 
   /** TIMING: the grid recorded notes snap to ('off': free time). Kept. */
