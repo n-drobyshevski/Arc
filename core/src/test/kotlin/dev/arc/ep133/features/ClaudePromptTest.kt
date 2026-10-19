@@ -24,8 +24,8 @@ class ClaudePromptTest {
             assertEquals(lo..hi, g.tempo, g.name)
             assertEquals(bpm, g.bpm, g.name)
         }
-        // Every recipe but the arrangement is offered, the EP-40's as the riddim family.
-        assertEquals(recipes.keys - "Breakcore arrangement", Genres.ALL.map { it.name }.toSet())
+        // Every recipe but the arrangements is offered, the EP-40's as the riddim family.
+        assertEquals(recipes.keys - setOf("Breakcore arrangement", "Schranz arrangement"), Genres.ALL.map { it.name }.toSet())
         assertEquals(setOf("One drop", "Rockers", "Steppers", "Dub", "Digital riddim", "Dancehall", "UK dub"), Genres.ALL.filter { it.ep40 }.map { it.name }.toSet())
         assertTrue(Regex("^## (.+) \\(EP-40\\)$", RegexOption.MULTILINE).findAll(text).all { m -> Genres.ALL.first { it.name == m.groupValues[1] }.ep40 })
         assertEquals(Genres.ALL.size, Genres.ALL.map { it.id }.toSet().size)

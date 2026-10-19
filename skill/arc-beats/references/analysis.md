@@ -126,11 +126,16 @@ The recipes in [genres.md](genres.md) carry these where the style needs them. St
 | Style | Lines | What they do |
 |---|---|---|
 | House | `sidechain A7 B 30 55` | the kick ducks the bass: the pump |
+| Tech house | `sidechain A7 B 25 50` | a lighter pump on the rolling bass |
+| Peak-time techno | `sidechain A7 BC 25 55` | the kick pumps the bass and the stab riff |
+| Melodic techno | `fx delay 62 45`, `send D 30`, `sidechain A7 B 25 60` | a dotted-eighth echo on the arpeggio only, and the bass pumping |
 | Dub techno | `fx delay 62 60`, `send C 30` | a dotted-eighth delay with long repeats on the chords |
+| Acid techno | `fx distortion 45 50`, `send B 50` | a pedal-style overdrive on the acid line only |
 | Industrial techno | `fx distortion 65 35`, `send A 50 B 60`, `comp 55 30` | heavy dark distortion on drums and bass, squeezed together |
-| Hard techno | `fx distortion 45 55`, `send A 25 B 35`, `comp 50 25` | a medium drive that gives the kick its edge, glued by a fast compressor |
-| Schranz | `fx distortion 60 40`, `send A 35 B 45`, `comp 65 20` | a strong drive and a hard fast compressor that pumps with the kick |
-| Breakcore | `fx distortion 55 50`, `send A 45 B 30`, `comp 60 15` | the break crushed and pumped |
+| Hard techno | `fx distortion 45 55`, `send A 25 B 35`, `comp 50 25`, `sidechain A7 B 20 50` | a medium drive that gives the kick its edge, a fast compressor, and the rumble pumping |
+| Hard groove | `fx distortion 35 45`, `send B 40`, `comp 45 60`, `sidechain A7 B 25 60` | mid-range bite on the bass, glued and bouncing off the kick |
+| Schranz | `fx distortion 55 55`, `send A 30 B 45 D 35`, `comp 65 20`, `sidechain A7 B 30 60` | a medium drive, hardest on the reese, a hard fast compressor, and the kick pumping the reese |
+| Breakcore | `fx distortion 55 50`, `send A 45 B 30`, `comp 60 15` | the break and the sub crushed and pumped, the chords left clean |
 | Lo-fi | `fx filter 27 20`, `send A 100 C 100` | a low-pass over the drums and chords: dull, tape-like |
 
 ## Vocabulary
