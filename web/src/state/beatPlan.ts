@@ -6,9 +6,15 @@
 //
 // Web deltas: [placed] pairs are [group, n] tuples; Weight is a string union
 // ordered by [WEIGHT_RANK]; names give null rather than Kotlin's null String?.
+// deviceKitOf takes the connected device's sound list as [sounds] (Live keeps
+// it, LiveDesk.deviceSoundList, where the Kotlin has MirrorUi.sounds).
 
-import type { FactoryKit } from '../core/features/factorySounds'
-import { BeatCards, cardSection, type BeatCard, type CardProblem, type CardRead, type CardSection } from '../core/features/beatCard'
+import { FactoryKit, FactorySounds } from '../core/features/factorySounds'
+import { BeatCards, cardSection, type BeatCard, type CardProblem, type CardRead, type CardSection, type CardSound } from '../core/features/beatCard'
+import { SoundSource } from '../core/features/offlinePads'
+import { PadSoundCache } from '../core/features/padSoundCache'
+import type { SoundEntry } from '../core/protocol/device'
+import type { BackupRecord } from '../core/text/libraryRules'
 import { ROWS, physicalPad, type PhysicalPad } from '../core/features/padNotes'
 import { Pattern, ProjectSeq, Seq, TimingSettings, timingTicks, type Timing } from '../core/features/pattern'
 import type { PatternRecorder } from '../core/features/patternRecorder'
@@ -17,6 +23,7 @@ import { Steps } from '../core/features/steps'
 import { Tempo } from '../core/features/tempo'
 import { ClaudeText } from '../core/text/claudeText'
 import { MirrorText } from '../core/text/mirrorText'
+import type { MirrorUi } from './types'
 
 /** A pad's sound name, or null. */
 export type PadNames = (pad: PhysicalPad) => string | null
@@ -27,15 +34,70 @@ export interface BeatShare {
   readonly text: string
 }
 
+/** The kit a device's own sounds are ([kit]), and the names its unnamed ones ("200.pcm") go by ([names]; null: none known). */
+export interface DeviceKit {
+  readonly kit: FactoryKit
+  readonly names: ReadonlyMap<number, string> | null
+}
+
+/**
+ * The kit the EP-133's sounds are, for a share and for reading a card's sound
+ * lines (DeviceKit). Live playing a pack offline (OfflineSounds.base FACTORY):
+ * the [active] kit and its pack's names. Otherwise the device's slots
+ * (connected, [sounds], or as last read) told against the saved packs'
+ * (FactorySounds.kitOf), with that pack's names; failing that, the connected
+ * device's own kit ([sku]) with no names, or, with no list known, [active]. An
+ * EP-133 whose slots match no saved pack is the EP-133's kit, its unnamed
+ * sounds left unnamed: never another kit's names.
+ */
+export function deviceKitOf(
+  m: MirrorUi | null,
+  sounds: readonly SoundEntry[],
+  backups: readonly BackupRecord[],
+  kitNames: ReadonlyMap<FactoryKit, ReadonlyMap<number, string>>,
+  sku: string | null,
+  active: FactoryKit,
+): DeviceKit {
+  const own = (kit: FactoryKit): DeviceKit => ({ kit, names: kitNames.get(kit) ?? null })
+  let list: readonly SoundEntry[] | null
+  if (m === null) list = null
+  else if (m.offline == null) list = sounds
+  else if (m.offlineSounds?.base === SoundSource.FACTORY) return own(active)
+  else list = m.offlineSounds?.device ?? null
+  if (list === null || list.length === 0) return own(active)
+  const packs = new Map<FactoryKit, ReadonlySet<number>>()
+  for (const k of FactoryKit.SHOWN) {
+    const b = FactorySounds.inLibrary(backups, k)
+    if (b !== null) packs.set(k, new Set(b.slots))
+  }
+  const matched = FactorySounds.kitOf(new Set(list.map((e) => e.slot)), packs)
+  if (matched !== null) return own(matched)
+  return { kit: FactoryKit.ofSku(sku) ?? FactoryKit.EP133, names: null }
+}
+
+/** A card line that is another kit's sound than the device's ([deviceKit]): that pack's sound of its name at its slot. */
+export function foreignTo(packs: ReadonlyMap<FactoryKit, ReadonlyMap<number, string>>, deviceKit: FactoryKit | null): (wanted: CardSound) => boolean {
+  return (w) => {
+    const name = w.name
+    if (name === null) return false
+    for (const [kit, names] of packs) {
+      if (kit === deviceKit) continue
+      const there = names.get(w.slot)
+      if (there !== undefined && PadSoundCache.sameName(there, name)) return true
+    }
+    return false
+  }
+}
+
 /**
  * The text [group]'s playing pattern in [seq] shares (null [group]: the scene
  * playing, its four patterns, the blank ones left out), as an ARC BEAT card
  * tidied and written with the pads' [names], at [tempo] and the TIMING [swing]
  * (BeatCards.fromPatterns keeps the swing only where every hit sits on it).
- * A [kit] other than the EP-133's is named before the card (ClaudeText.kitLine).
+ * The [kit] is named before the card (ClaudeText.kitLine).
  * Null when there is nothing to share: no notes in it.
  */
-export function beatShare(seq: ProjectSeq, group: number | null, tempo: number, swing: number, names: PadNames, kit?: FactoryKit): BeatShare | null {
+export function beatShare(seq: ProjectSeq, group: number | null, tempo: number, swing: number, names: PadNames, kit: FactoryKit = FactoryKit.EP133): BeatShare | null {
   const groups = group === null ? [0, 1, 2, 3] : [group]
   const sections = groups.map((g) => cardSection(g, ProjectSeq.selected(seq, g), ProjectSeq.pattern(seq, g, ProjectSeq.selected(seq, g))))
   if (sections.every((s) => Pattern.isEmpty(s.pattern))) return null

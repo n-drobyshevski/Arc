@@ -116,6 +116,7 @@ import { PadEditDesk } from './padEdit'
 import { PatternDesk } from './pattern'
 import { SampleDesk } from './sample'
 import { physicalPadOf } from './samplePlan'
+import { deviceKitOf, type DeviceKit } from './beatPlan'
 import { patternBpm } from './patternPlan'
 import { MirrorController } from './mirror'
 import { PreviewCache, type DecodedSound } from './previewCache'
@@ -2918,9 +2919,29 @@ export class ArcController {
    * clipboard with a toast saying so. Nothing when there are no notes.
    */
   async shareBeat(group: number | null): Promise<void> {
-    const share = this.pattern.beatShare(group, this.live.factoryKit())
+    const share = this.pattern.beatShare(group, this.shareKit())
     if (share === null) return
     await this.sendText(share.subject, share.text)
+  }
+
+  /**
+   * The kit the EP-133's own sounds are, and the names its unnamed ones
+   * ("200.pcm") go by: Live playing a pack offline, that pack's; else the kit
+   * whose pack its slots match (deviceKitOf: connected, or as last read), or
+   * the connected device's own, else the EP-133's with no names. What a share
+   * tells Claude, not the kit Live plays offline. The Kotlin deviceKit()
+   * (here deviceKit(sku) chooses Live's kit on connecting). Web delta: no
+   * pack's names are read yet (UiState.kitNames), so [names] is null.
+   */
+  private shareDeviceKit(): DeviceKit {
+    const st = this.store.get()
+    const sku = this.conn.session?.info?.sku ?? null
+    return deviceKitOf(st.mirror, this.live.deviceSoundList(), st.backups, new Map(), sku, this.live.factoryKit())
+  }
+
+  /** The kit a share names (shareDeviceKit). */
+  shareKit(): FactoryKit {
+    return this.shareDeviceKit().kit
   }
 
   /** Learn with Claude where there is no link to follow: the starter prompt, shared or copied. */

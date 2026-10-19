@@ -45,7 +45,7 @@ describe('BeatPlanTest', () => {
     seq = withP(seq, 2, 1, pat([hit(0, 11), hit(96, 11)], 2))
     const scene = beatShare(seq, null, 92.0, 50, nameOf)!
     expect(scene.subject).toBe('Arc beat S01')
-    expect(scene.text.startsWith(ClaudeText.SHARE_PROMPT + '\n\n```\nARC BEAT 1\nname S01\ntempo 92\nswing 50\n# tidied')).toBe(true)
+    expect(scene.text.startsWith(ClaudeText.SHARE_PROMPT + '\n\n' + ClaudeText.EP133_LINE + '\n\n```\nARC BEAT 1\nname S01\ntempo 92\nswing 50\n# tidied')).toBe(true)
     expect(scene.text.endsWith('\n```\n')).toBe(true)
     // The EP-40 kit is named before the card; the EP-133's adds nothing.
     const riddim = beatShare(seq, null, 92.0, 50, nameOf, FactoryKit.EP40)!

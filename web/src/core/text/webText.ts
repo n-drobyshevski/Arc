@@ -313,7 +313,9 @@ export const WebText = {
   PASTE_HERE: 'Paste the beat card here',
   PASTE_HERE_NOTE: 'This browser lets a page read the clipboard only from a paste: press Ctrl+V (⌘V), or long-press and Paste.',
   /** Replaces ClaudeText.LEARN_PROMPT, which says Android. */
-  LEARN_PROMPT: 'Use the arc-beats skill. Teach me the EP-133 K.O. II from lesson 1, one step at a time. I use the Arc web app.',
+  LEARN_PROMPT:
+    'Use the arc-beats skill to teach me the EP-133 K.O. II, starting at lesson 1 (Meet the pads). I use the Arc web app. ' +
+    'Go one step at a time: explain the step, give me something to try on the device, and wait for me before the next one.',
   /** After a pad's or KEYS key's name for screen readers while it is held for the arp or note repeat (Android outlines it only). */
   ARP_HELD: ', held for the arp',
   /** The plate's line while TAKE waits. */

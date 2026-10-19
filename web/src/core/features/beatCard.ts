@@ -16,6 +16,8 @@
 // - A section's `sounds` is a ReadonlyMap from pad offset to CardSound, built
 //   by `cardSound()`; `available` in resolveSounds is a ReadonlyMap from slot to
 //   name; SoundStatus is a const object plus a string union of its names.
+//   Its `foreign` comes last (optional), after `current`, where the Kotlin
+//   has it before the trailing lambda.
 // - A section's `pads` is a ReadonlyMap from pad offset to CardPad, built by
 //   `cardPad()`; the card's `fx` is a CardFx built by `cardFx()` (its `sends` a
 //   ReadonlyMap from group to send). Knobs are floats kept with Math.fround, as
@@ -2031,9 +2033,16 @@ function unnamedIn(available: ReadonlyMap<number, string>, slot: number): boolea
  * pick whose slot is already on the pad is SAME, found by name or not. The
  * sounds are the project's, not a scene's: the lines of all the card's scenes
  * are matched, and a pad given a line in more than one scene takes the last
- * (one pick, in the place of its first).
+ * (one pick, in the place of its first). A line that is [foreign] (another
+ * kit's sound, by its slot and name) is never used by an unnamed slot: that
+ * slot holds another sound.
  */
-function resolveSounds(card: BeatCard, available: ReadonlyMap<number, string>, current: (pad: PhysicalPad) => number | null): SoundPick[] {
+function resolveSounds(
+  card: BeatCard,
+  available: ReadonlyMap<number, string>,
+  current: (pad: PhysicalPad) => number | null,
+  foreign: (wanted: CardSound) => boolean = () => false,
+): SoundPick[] {
   const picks = new Map<number, SoundPick>()
   for (const s of allSections(card)) {
     for (const offset of KEYPAD) {
@@ -2045,7 +2054,7 @@ function resolveSounds(card: BeatCard, available: ReadonlyMap<number, string>, c
       const name = wanted.name !== null && wanted.name.trim() !== '' && !unnamed(wanted.slot, wanted.name) ? wanted.name : null
       const direct = available.has(wanted.slot) && (name === null || holds(available.get(wanted.slot), name)) ? wanted.slot : null
       const byName = direct === null && name !== null ? lookUp(available, name, now) : null
-      const slot = direct ?? byName ?? (unnamedIn(available, wanted.slot) ? wanted.slot : null)
+      const slot = direct ?? byName ?? (unnamedIn(available, wanted.slot) && !foreign(wanted) ? wanted.slot : null)
       if (slot === null) {
         picks.set(padKey(pad), { pad, wanted, slot: null, name: null, currentSlot: now, status: SoundStatus.MISSING, unverified: false })
         continue

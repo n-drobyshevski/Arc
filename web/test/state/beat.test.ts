@@ -5,9 +5,11 @@
 import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BeatCards } from '../../src/core/features/beatCard'
+import { FactoryKit } from '../../src/core/features/factorySounds'
 import { physicalPad } from '../../src/core/features/padNotes'
 import { ProjectPatterns } from '../../src/core/features/pattern'
 import { ClaudeText } from '../../src/core/text/claudeText'
+import { BackupDevice, type BackupRecord } from '../../src/core/text/libraryRules'
 import { WebText } from '../../src/core/text/webText'
 import { memoryStorage } from '../../src/platform/storage/settings'
 import type { Deps } from '../../src/state/deps'
@@ -71,6 +73,23 @@ describe('BEAT CARDS', () => {
     await h.c.shareBeat(null)
     expect(copied[0]).toContain('ARC BEAT 1')
     expect(h.toasts.at(-1)?.text).toBe(WebText.CARD_COPIED)
+  })
+
+  it("SHARE names the EP-133's own kit, not the one Live plays offline", async () => {
+    const h = await liveOn()
+    await recordOne(h)
+    // Live is on the EP-40's kit, its pack saved; the EP-133 connected holds sounds of its own.
+    const slots = Array.from({ length: 120 }, (_, i) => 600 + i)
+    const riddim: BackupRecord = { id: 'r', title: 'r', notes: '', createdAt: 1, source: FactoryKit.EP40.source, fileName: null, device: BackupDevice(), soundCount: slots.length, projectCount: 0, projects: [], slots, projectSlots: {}, size: 0 }
+    h.c.store.update((s) => ({ ...s, backups: [...s.backups, riddim] }))
+    h.c.setFactoryKit(FactoryKit.EP40)
+    expect(h.c.factoryKit).toBe(FactoryKit.EP40)
+    expect(h.c.shareKit()).toBe(FactoryKit.EP133)
+    const shared: string[] = []
+    mutable(h).share = { ...h.deps.share, shareText: async (_t, text) => (shared.push(text), 'shared') }
+    await h.c.shareBeat(0)
+    expect(shared[0]).toContain(ClaudeText.SHARE_PROMPT + '\n\n' + ClaudeText.EP133_LINE + '\n\n```\nARC BEAT 1\n')
+    expect(shared[0]).not.toContain(ClaudeText.kitLine(FactoryKit.EP40)!)
   })
 
   it('PASTE BEAT: a card opens its sheet, IMPORT places it as one UNDO step', async () => {

@@ -21,6 +21,7 @@ import { FeatureText } from '../../../src/core/text/featureText'
 import { MirrorText } from '../../../src/core/text/mirrorText'
 import { NavText } from '../../../src/core/text/navText'
 import { SettingsText } from '../../../src/core/text/settingsText'
+import { WebText } from '../../../src/core/text/webText'
 
 describe('FeatureTextTest', () => {
   it('browser text', () => {
@@ -503,14 +504,15 @@ describe('FeatureTextTest', () => {
       'Share B \u00B7 12 with Claude, no notes yet',
     ])
     expect(ClaudeText.SKILL_URL).toBe('https://arc-ko.vercel.app/arc-beats-skill.zip')
-    expect(ClaudeText.LEARN_PROMPT.startsWith('Use the arc-beats skill.')).toBe(true)
+    expect(ClaudeText.LEARN_PROMPT.startsWith('Use the arc-beats skill to teach me')).toBe(true)
+    expect(WebText.LEARN_PROMPT.startsWith('Use the arc-beats skill to teach me') && WebText.LEARN_PROMPT.includes('Arc web app')).toBe(true)
     expect(CoachText.CLAUDE).toBe('Share a beat with Claude, paste one back')
     // What is shared: the card in a fenced block after the prompt, named by where it sits.
     expect([ClaudeText.patternCardName(1, 1), ClaudeText.patternCardName(99, 9), ClaudeText.sceneCardName(1)]).toEqual(['P01 S02', 'P99 S10', 'S02'])
     expect(ClaudeText.shareSubject('P01 S02')).toBe('Arc beat P01 S02')
-    expect(ClaudeText.shareText('Analyse this beat:', 'ARC BEAT 1\nswing 50\n')).toBe('Analyse this beat:\n\n```\nARC BEAT 1\nswing 50\n```\n')
+    expect(ClaudeText.shareText('Analyse this beat:', 'ARC BEAT 1\nswing 50\n')).toBe("Analyse this beat:\n\nMy EP-133 plays the EP-133's own factory sounds.\n\n```\nARC BEAT 1\nswing 50\n```\n")
     // A kit other than the EP-133's is named between the prompt and the card; the EP-133's own kit adds nothing.
-    expect(ClaudeText.kitLine(FactoryKit.EP133)).toBeNull()
+    expect(ClaudeText.kitLine(FactoryKit.EP133)).toBe("My EP-133 plays the EP-133's own factory sounds.")
     expect(ClaudeText.kitLine(FactoryKit.EP40)).toBe('My EP-133 plays the EP-40 Riddim factory kit.')
     expect(ClaudeText.kitLine(FactoryKit.EP1320)).toBe('My EP-133 plays the EP-1320 Medieval factory kit.')
     expect(ClaudeText.shareText('Analyse this beat:', 'ARC BEAT 1\n', FactoryKit.EP40)).toBe(

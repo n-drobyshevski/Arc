@@ -13,7 +13,7 @@
 
 import type { CardFx, CardProblem } from '../features/beatCard'
 import type { ChainStep } from '../features/chain'
-import type { FactoryKit } from '../features/factorySounds'
+import { FactoryKit } from '../features/factorySounds'
 import { FxSettings, FxType } from '../features/fxSettings'
 import type { PadSettings } from '../features/padSettings'
 import { physicalPad, type PhysicalPad } from '../features/padNotes'
@@ -137,24 +137,29 @@ export const ClaudeText = {
   SKILL_URL: 'https://arc-ko.vercel.app/arc-beats-skill.zip',
 
   /** What Learn with Claude shares, to be sent to the Claude app as the first message. */
-  LEARN_PROMPT: 'Use the arc-beats skill. Teach me the EP-133 K.O. II from lesson 1, one step at a time. I use the Arc app on Android.',
+  LEARN_PROMPT:
+    'Use the arc-beats skill to teach me the EP-133 K.O. II, starting at lesson 1 (Meet the pads). I use the Arc app on Android. ' +
+    'Go one step at a time: explain the step, give me something to try on the device, and wait for me before the next one.',
   LEARN_TITLE: 'Learn the EP-133 with Claude',
 
   /** Said when no app can take the link or the text. */
   NO_APP: 'No app can open that.',
 
   // ---------- Sharing ----------
-  /** The line before the card in the shared text. */
+  /** The words before the card in the shared text: the skill and the task, why, the steps as a list, then the card. */
   SHARE_PROMPT:
-    'Analyse this EP-133 beat from Arc with the arc-beats skill, then suggest 2-3 edits as a new card. ' +
-    'Keep its sound, FX and pad lines, or choose sounds from my sound list if one follows the card:',
+    "Use the arc-beats skill to improve this EP-133 beat from Arc. I'll paste your new card back into Arc next to mine, so give it a short new name.\n" +
+    '- First: analyse it, its groove, its energy and what makes it work\n' +
+    '- Edits: 2-3, as one new card\n' +
+    'Keep its sound, FX and pad lines unless an edit needs to change them, or choose sounds from my sound list if one follows the card. The card:',
   SHARE_TITLE: 'Share beat card',
 
   /** The line before a shared chain: an arrangement of several scenes (its `chain` line gives their order). */
   SHARE_CHAIN_PROMPT:
-    'Analyse this EP-133 arrangement from Arc with the arc-beats skill: comment on its energy curve, contrast, length and transitions, ' +
-    'then suggest 2-3 edits as a new card of scenes with a chain line. ' +
-    'Keep its sound, FX and pad lines, or choose sounds from my sound list if one follows the card:',
+    "Use the arc-beats skill to improve this EP-133 arrangement from Arc. I'll paste your new card back into Arc next to mine, so give it a short new name.\n" +
+    '- First: analyse it, its energy curve, contrast, length and transitions\n' +
+    '- Edits: 2-3, as one new card of scenes with a chain line\n' +
+    'Keep its sound, FX and pad lines unless an edit needs to change them, or choose sounds from my sound list if one follows the card. The card:',
   SHARE_CHAIN_TITLE: 'Share chain as a beat card',
 
   /** "Chain": a chain's card, as the share's subject names it ("Arc beat Chain"). */
@@ -176,13 +181,13 @@ export const ClaudeText = {
   },
 
   /**
-   * The kit the EP-133 plays, when it isn't its own: "My EP-133 plays the EP-40 Riddim factory kit." (the skill
-   * reads its slots and pads by it). Null for the EP-133's own kit.
+   * The kit the EP-133 plays: "My EP-133 plays the EP-40 Riddim factory kit." (the skill reads its slots and pads
+   * by it); for the EP-133's own kit, [EP133_LINE].
    */
   kitLine(kit: FactoryKit): string | null {
     switch (kit.id) {
       case 'ep133':
-        return null
+        return ClaudeText.EP133_LINE
       case 'ep40':
         return `My EP-133 plays the ${FeatureText.FACTORY_40} factory kit.`
       case 'ep1320':
@@ -190,12 +195,15 @@ export const ClaudeText = {
     }
   },
 
+  /** The EP-133's own kit, said too, so Claude never takes another kit's sounds for it. */
+  EP133_LINE: "My EP-133 plays the EP-133's own factory sounds.",
+
   /**
-   * The shared text: [prompt], a blank line and [card] (which ends in a newline) in a fenced block; with a [kit]
-   * other than the EP-133's, its [kitLine] as a paragraph between them.
+   * The shared text: [prompt], a blank line and [card] (which ends in a newline) in a fenced block, with the
+   * [kit]'s [kitLine] (the EP-133's by default) as a paragraph between them.
    */
-  shareText(prompt: string, card: string, kit?: FactoryKit): string {
-    const line = kit === undefined ? null : ClaudeText.kitLine(kit)
+  shareText(prompt: string, card: string, kit: FactoryKit = FactoryKit.EP133): string {
+    const line = ClaudeText.kitLine(kit)
     return prompt + (line === null ? '' : '\n\n' + line) + '\n\n```\n' + card + '```\n'
   },
 
