@@ -12,9 +12,11 @@
 // - VOICE is a web glyph (a speech bubble): Takes' voice message key, which
 //   Android folds into SHARE.
 // - A switch is read on or off from aria-checked (Kotlin's stateDescription).
+// - [DeckKeyProps.focusable] keeps an off key in the tab order (aria-disabled),
+//   so a key that turns itself off (TRIM's END) doesn't drop the focus.
 // - KeyGrid and WordKey (the Claude page's prompt words) and DeckKey's hold
 //   (PASTE's) come with the Claude page's port.
-import type { JSX } from 'preact'
+import type { JSX, Ref } from 'preact'
 import { useLayoutEffect, useRef, useState } from 'preact/hooks'
 import './DeckKeys.css'
 
@@ -78,6 +80,10 @@ export interface DeckKeyProps {
   selected?: boolean
   /** A switch (read as on or off). */
   checked?: boolean
+  /** Off ([enabled] false), still focusable: read as unavailable, a tap does nothing. */
+  focusable?: boolean
+  /** The key's button, to put the focus back on it. */
+  keyRef?: Ref<HTMLButtonElement>
 }
 
 /**
@@ -87,6 +93,7 @@ export interface DeckKeyProps {
  */
 export function DeckKey(props: DeckKeyProps): JSX.Element {
   const { style = 'normal', enabled = true } = props
+  const off = !enabled && props.focusable === true
   const role = props.selected !== undefined ? 'radio' : props.checked !== undefined ? 'switch' : undefined
   return (
     <button
@@ -95,8 +102,12 @@ export function DeckKey(props: DeckKeyProps): JSX.Element {
       role={role}
       aria-checked={props.selected ?? props.checked}
       aria-label={props.description}
-      disabled={!enabled}
-      onClick={() => props.onClick()}
+      ref={props.keyRef}
+      disabled={!enabled && !off}
+      aria-disabled={off || undefined}
+      onClick={() => {
+        if (enabled) props.onClick()
+      }}
     >
       <Glyph glyph={props.glyph} color={props.glyphColor} />
       <span class="deck-key__label" aria-hidden="true">

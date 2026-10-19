@@ -1,7 +1,8 @@
 // TAKE and takes end to end, on the simulated EP-133 of ?demo: TAKE in Live
 // tools arms a take, a pad played starts it, the display's badge stops it, the
 // take is numbered on the glass and the keys under it act on it (TRIM keeps a
-// part of it, DUP copies it), and the device's PLAY starts an armed take.
+// part of it, its handles moved by a drag sideways, a tap or the keys; DUP
+// copies it), and the device's PLAY starts an armed take.
 import type { Page } from '@playwright/test'
 import { demo, expect, test } from './fixtures'
 
@@ -78,16 +79,43 @@ test('TAKE records a pad into a take that Live tools lists', async ({ page }) =>
   await expect(takes.getByRole('button', { name: 'Share WAV, T01' })).toHaveCount(0)
   await expect(takes.getByRole('button', { name: 'To EP-133, T01' })).toBeEnabled()
   await expect(takes.getByRole('button', { name: 'Play, T01' })).toBeEnabled()
-  // TRIM: the glass shows the wave; the start handle steps later with the arrow keys, DONE keeps the part.
+  // TRIM: the glass shows the wave, the start handle focused.
   await takes.getByRole('button', { name: 'Trim, T01' }).click()
   await expect(takes).toContainText('✂ TRIM')
   const startHandle = takes.getByRole('slider', { name: 'Start' })
+  const endHandle = takes.getByRole('slider', { name: 'End' })
   await expect(startHandle).toHaveAttribute('aria-valuetext', '0:00.0')
+  await expect(startHandle).toBeFocused()
+  const whole = await endHandle.getAttribute('aria-valuetext')
+  const wave = takes.locator('.take-trim__wave')
+  await wave.scrollIntoViewIfNeeded()
+  const waveBox = (await wave.boundingBox())!
+  const x = (f: number): number => waveBox.x + waveBox.width * f
+  const y = waveBox.y + waveBox.height / 2
+  // Up and down moves no handle; a drag sideways past the slop moves the nearer one; a tap moves the nearer one there.
+  await page.mouse.move(x(0.2), y)
+  await page.mouse.down()
+  await page.mouse.move(x(0.2) + 4, y + 30, { steps: 5 })
+  await page.mouse.up()
+  await expect(startHandle).toHaveAttribute('aria-valuetext', '0:00.0')
+  await expect(endHandle).toHaveAttribute('aria-valuetext', whole!)
+  await page.mouse.move(x(0.2), y)
+  await page.mouse.down()
+  await page.mouse.move(x(0.4), y, { steps: 5 })
+  await page.mouse.up()
+  await expect(startHandle).not.toHaveAttribute('aria-valuetext', '0:00.0')
+  await expect(endHandle).toHaveAttribute('aria-valuetext', whole!)
+  await page.mouse.click(x(0.9), y)
+  await expect(endHandle).not.toHaveAttribute('aria-valuetext', whole!)
+  // The keys: Home takes the start back to the take's, the arrows step it; DONE keeps the part, the focus back on TRIM.
   await startHandle.focus()
+  await page.keyboard.press('Home')
+  await expect(startHandle).toHaveAttribute('aria-valuetext', '0:00.0')
   await page.keyboard.press('ArrowRight')
   await expect(startHandle).not.toHaveAttribute('aria-valuetext', '0:00.0')
   await expect(takes.getByRole('button', { name: 'Reset' })).toBeEnabled()
   await takes.getByRole('button', { name: 'Done' }).click()
+  await expect(takes.getByRole('button', { name: 'Trim, T01' })).toBeFocused()
   await expect(glass.getByRole('radio', { name: /^T01, \d+:\d\d trimmed, / })).toBeVisible()
   await expect(takes).toContainText(/✂ T01 is trimmed to \d+:\d\d: SHARE, SAVE and EP send that part/)
   // DUP: a copy, its trim with it, lit as the newest.

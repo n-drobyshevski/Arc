@@ -319,8 +319,14 @@ export class ArcController {
    * (a download, a decode) plays only if nothing stopped or replaced it meanwhile.
    */
   private playToken = 0
-  /** The previews' decoded sounds (backups, pad copies), so playing one again starts at once. */
+  /** The previews' decoded sounds (backups, pad copies, takes), so playing one again starts at once. */
   private readonly previews = new PreviewCache()
+  /**
+   * The take sound read last, kept outside [previews] as well: a long take is
+   * over its byte cap (about three minutes of stereo), and TRIM reads it on
+   * opening and on each PLAY (Kotlin's SoundMemory keeps the one just put in).
+   */
+  private lastTake: { readonly key: string; readonly sound: DecodedSound } | null = null
   /** Write putting the offline pad changes on: they are cleared only at its end, so a read meanwhile doesn't ask again. */
   private offlineWrite: Promise<void> | null = null
   private searchGen = 0
@@ -2870,12 +2876,14 @@ export class ArcController {
   /** A take's whole sound, decoded (kept for playing again); null with a toast when it can't be read. */
   async takeSound(t: TakeInfo): Promise<DecodedSound | null> {
     const key = this.takeKey(t)
+    if (this.lastTake?.key === key) return this.lastTake.sound
     const hit = this.previews.get(key)
     if (hit !== null) return hit
     try {
       const w = decodeWav(await this.takeBytes(t))
       const d: DecodedSound = { pcm: w.pcm, channels: w.channels, sampleRate: Math.trunc(w.sampleRate) }
       this.previews.put(key, d)
+      this.lastTake = { key, sound: d }
       return d
     } catch (e) {
       this.toast(errorText(e), true)
@@ -2948,6 +2956,7 @@ export class ArcController {
     const playing = this.deps.player.playing.peek()
     if (playing === this.takeKey(t) || playing === this.takeTrimKey(t)) this.stopPlayback()
     this.previews.clear(this.takeKey(t))
+    if (this.lastTake?.key === this.takeKey(t)) this.lastTake = null
     try {
       await this.deps.takes?.delete(t.name)
     } catch (e) {

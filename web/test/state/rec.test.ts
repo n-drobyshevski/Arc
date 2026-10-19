@@ -7,6 +7,7 @@ import { TakeTrim } from '../../src/core/features/takeTrim'
 import { decodeWav, encodeWav } from '../../src/core/formats/wav'
 import { MirrorText } from '../../src/core/text/mirrorText'
 import type { RecordedTake } from '../../src/platform/audio/liveAudio'
+import { PREVIEW_CACHE_BYTES } from '../../src/state/previewCache'
 import { disposeAll, liveHarness, until, type LiveHarness } from './liveHarness'
 
 afterEach(() => disposeAll())
@@ -182,6 +183,17 @@ describe('REC', () => {
     await h.c.deleteTake(t)
     expect(h.deps.player.playing.peek()).toBeNull()
     expect(h.c.state.value.takes.map((x) => x.name)).toEqual(['take-20261005-142401.wav'])
+  })
+
+  it('a take over the previews\' byte cap is read and decoded once, for TRIM and its PLAY', async () => {
+    const h = await liveOn()
+    h.liveAudio.endTake(recorded(PREVIEW_CACHE_BYTES / 4 + 1))
+    const t = (await until(h, (s) => s.takes.length === 1)).takes[0]!
+    const read = vi.spyOn(h.takes, 'read')
+    const first = await h.c.takeSound(t)
+    await h.c.playTakeTrim(t, 0, 48000)
+    expect(await h.c.takeSound(t)).toBe(first)
+    expect(read).toHaveBeenCalledTimes(1)
   })
 
   it("passes the device's PLAY and STOP on", async () => {

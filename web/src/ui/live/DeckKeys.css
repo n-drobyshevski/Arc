@@ -36,7 +36,9 @@
 }
 .deck-key--signal { --cap-face: var(--signal); --cap-ink: var(--on-signal); --cap-edge: var(--signal-edge); }
 .deck-key--navy { --cap-face: var(--navy); --cap-ink: var(--on-navy); --cap-edge: color-mix(in oklab, var(--navy) 65%, black); }
-.deck-key:disabled { opacity: var(--key-disabled); cursor: default; }
+.deck-key:disabled,
+.deck-key[aria-disabled='true'] { opacity: var(--key-disabled); cursor: default; }
+.deck-key.cap-3d[aria-disabled='true']:active { --cap-p: 0; }
 .deck-key:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
 .deck-glyph { flex: none; }
 /* capsKeySmall at 11, one line. */

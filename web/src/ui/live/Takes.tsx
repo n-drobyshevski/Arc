@@ -23,8 +23,9 @@
 //   voice message, which Android's SHARE gives Telegram itself.
 // - The lit take follows the one playing through a computed, so only a change
 //   of which take that is renders the section again.
+// - DONE gives the focus back to TRIM (the trim deck takes it on opening).
 import type { JSX } from 'preact'
-import { useMemo, useRef, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { computed, type ReadonlySignal } from '@preact/signals'
 import type { RecState } from '../../core/features/takeRecorder'
 import { FeatureText } from '../../core/text/featureText'
@@ -122,6 +123,14 @@ export function TakesSection(props: { takes: TakesUi; take: TakeUi; still?: bool
   const [litName, setLitName] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<string | null>(null)
   const [trimName, setTrimName] = useState<string | null>(null)
+  // TRIM's key, given the focus back when DONE closes the deck.
+  const trimKey = useRef<HTMLButtonElement>(null)
+  const trimClosed = useRef(false)
+  useEffect(() => {
+    if (trimName !== null || !trimClosed.current) return
+    trimClosed.current = false
+    trimKey.current?.focus()
+  }, [trimName])
   const litKey = useMemo(
     () =>
       computed(() => {
@@ -185,6 +194,7 @@ export function TakesSection(props: { takes: TakesUi; take: TakeUi; still?: bool
       description={MirrorText.litTake(MirrorText.TRIM_HEAD, n)}
       onClick={act((info) => setTrimName(info.name))}
       enabled={lit !== null}
+      keyRef={trimKey}
     />,
     <DeckKey
       key="dup"
@@ -225,7 +235,11 @@ export function TakesSection(props: { takes: TakesUi; take: TakeUi; still?: bool
     <section class="takes" aria-label={MirrorText.TAKES}>
       <Caption text={MirrorText.TAKES} align="start" as="h3" />
       {trimming !== undefined ? (
-        <TakeTrimDeck key={trimming.name} t={t} info={trimming} n={number(trimming)} onClose={() => setTrimName(null)} />
+        <TakeTrimDeck key={trimming.name} t={t} info={trimming} n={number(trimming)} onClose={() => {
+            trimClosed.current = true
+            setTrimName(null)
+          }}
+        />
       ) : (
         <>
           <TakesGlass

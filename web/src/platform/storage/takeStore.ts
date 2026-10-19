@@ -131,12 +131,9 @@ export class IdbTakeStore implements TakeStore {
     })
   }
 
-  private async row(name: string): Promise<TakeRow | undefined> {
-    return (await transact(this.db, STORE.takes, 'readonly', (t) => request(t.objectStore(STORE.takes).get(name)))) as TakeRow | undefined
-  }
-
   async read(name: string): Promise<Blob | null> {
-    return (await this.row(name))?.wav ?? null
+    const row = (await transact(this.db, STORE.takes, 'readonly', (t) => request(t.objectStore(STORE.takes).get(name)))) as TakeRow | undefined
+    return row?.wav ?? null
   }
 
   async delete(name: string): Promise<void> {
