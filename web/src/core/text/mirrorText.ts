@@ -4,6 +4,8 @@
 //
 // Web deltas:
 // - jsToFixed and String.format("%.0f") are native toFixed.
+// - The take trim's trimDescription(n, start, end), a Kotlin overload of the
+//   pad TRIM's, is takeTrimDescription.
 
 import type { ArpNote, ArpOrder } from '../features/arp'
 import { Chain, ChainPlay, type ChainStep } from '../features/chain'
@@ -656,6 +658,59 @@ export const MirrorText = {
     "A take holds the pads and keys played on the phone, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Trim keeps a part of one (nothing is cut) and Dup copies it, to trim a copy another way. Save or Share copies one out, its trimmed part if it has one; Share to Telegram sends it as a voice message.",
   TO_DEVICE: 'To EP-133',
   DELETE_TAKE: 'Delete this take?',
+
+  /** "T03": a take's number on the glass, the oldest T01. */
+  takeNumber: (n: number): string => 'T' + String(n).padStart(2, '0'),
+  /** "T03, 0:12, Oct 5, 2:23 PM", and ", playing": a take on the glass, for screen readers. */
+  takeRow(n: number, seconds: number, made: string, playing: boolean, trimmed: boolean = false): string {
+    return (
+      `${MirrorText.takeNumber(n)}, ${MirrorText.takeLength(seconds)}` +
+      (trimmed ? ' trimmed' : '') +
+      `, ${made}` +
+      (playing ? ', playing' : '')
+    )
+  },
+  TAKE_TRIM: 'Trim',
+  TAKE_DUP: 'Dup',
+  DUPLICATE: 'Duplicate',
+  /** "T05, a copy of T02": a duplicate made, its trim with it. */
+  takeDuplicated(copy: number, of: number): string {
+    return `${MirrorText.takeNumber(copy)}, a copy of ${MirrorText.takeNumber(of)}`
+  },
+
+  // TRIM: a take's part, kept with it (nothing is cut), on the glass.
+  TRIM_HEAD: 'Trim',
+  TRIM_START: 'Start',
+  TRIM_END: 'End',
+  TRIM_RESET: 'Reset',
+  TRIM_DONE: 'Done',
+  TRIM_DRAG: 'Drag the handles',
+  TRIM_TAP_HINT: 'Tap START or END while it plays to cut there. Nothing is cut from the take: RESET brings it all back.',
+  /** On the list under the glass: what the lit take's trim means. */
+  trimmedHint(n: number, seconds: number): string {
+    return `✂ ${MirrorText.takeNumber(n)} is trimmed to ${MirrorText.takeLength(seconds)}: SHARE, SAVE and EP send that part`
+  },
+  /** "0:18.4": a trim's edge, to a tenth of a second. */
+  trimTime(seconds: number): string {
+    // Kotlin's toLong() and Long division: toward zero.
+    const tenths = Math.trunc(seconds * 10)
+    return `${Math.trunc(tenths / 600)}:${String(Math.trunc(tenths / 10) % 60).padStart(2, '0')}.${tenths % 10}`
+  },
+  /** "0:18.4 → 0:39.0". */
+  trimSpan(start: number, end: number): string {
+    return `${MirrorText.trimTime(start)} → ${MirrorText.trimTime(end)}`
+  },
+  /** For screen readers: the wave and its part ("Trim of T02: 0:18.4 to 0:39.0, 0:21 long"). */
+  takeTrimDescription(n: number, start: number, end: number): string {
+    return `Trim of ${MirrorText.takeNumber(n)}: ${MirrorText.trimTime(start)} to ${MirrorText.trimTime(end)}, ${MirrorText.takeLength(end - start)} long`
+  },
+  TRIM_START_LATER: 'Start later',
+  TRIM_START_EARLIER: 'Start earlier',
+  TRIM_END_LATER: 'End later',
+  TRIM_END_EARLIER: 'End earlier',
+  /** The START and END keys, for screen readers. */
+  trimMark: (edge: string, playing: boolean): string => (playing ? `${edge} here` : `${edge} (while it plays)`),
+
   NO_OUTPUT: 'There is no sound output to record from.',
   SHARE_TAKE_FAILED: 'Sharing failed. Use Save WAV instead.',
   // A take as a voice message (Ogg Opus, which Telegram sends as one): SHARE gives it to Telegram.
