@@ -192,6 +192,9 @@ export const MirrorText = {
   // The piano: − and + step the octave, and the key gets its own word.
   OCTAVE_DOWN: 'Octave down',
   OCTAVE_UP: 'Octave up',
+  /** A pick word's TalkBack actions, the same as a short swipe along it (right, left). */
+  PICK_NEXT: 'Next',
+  PICK_PREVIOUS: 'Previous',
 
   /** "KEY DO", the key word above the piano. */
   keyWord(root: number, names: NoteNames): string {

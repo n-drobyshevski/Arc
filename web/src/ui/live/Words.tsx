@@ -16,8 +16,17 @@
 //   opens downward, from a row over the piano). Like the focusable Popup, Back closes it: the screen passes
 //   [open] / [onOpen] backed by a navigation layer (dialog 'pick:<what>');
 //   without them it keeps its own state.
-import type { JSX, Ref, TargetedKeyboardEvent } from 'preact'
+// - PickWord's [swipe] reads pointer events: past the touch slop, a drag along
+//   the word is its own (captured, its click swallowed), across it the page's
+//   (touch-action lets that scroll). A word turned on its side (writing-mode
+//   vertical, read from the bottom up) steps up and down, as it reads.
+//   TalkBack's Next and Previous actions are the arrow keys right and left on
+//   the closed word, said in its aria-description.
+import type { JSX, Ref, TargetedKeyboardEvent, TargetedPointerEvent } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { MirrorText } from '../../core/text/mirrorText'
+import { WebText } from '../../core/text/webText'
+import { TOUCH_SLOP } from './press'
 import './Words.css'
 
 /** Two overlapping squares, the PO app's mark beside its chosen mode (DRUMS / KEYPAD). */
@@ -40,6 +49,8 @@ export interface WordButtonProps {
   dim?: boolean
   /** What screen readers read, when given. */
   description?: string
+  /** What screen readers read after it (its keys), when given. */
+  'aria-description'?: string
   /** Text at the top of the touch area rather than its middle (a row hugging the grid above). */
   top?: boolean
   class?: string
@@ -53,6 +64,10 @@ export interface WordButtonProps {
   'data-coach-ink'?: string
   tabIndex?: number
   onKeyDown?: (e: TargetedKeyboardEvent<HTMLButtonElement>) => void
+  onPointerDown?: (e: TargetedPointerEvent<HTMLButtonElement>) => void
+  onPointerMove?: (e: TargetedPointerEvent<HTMLButtonElement>) => void
+  onPointerUp?: (e: TargetedPointerEvent<HTMLButtonElement>) => void
+  onPointerCancel?: (e: TargetedPointerEvent<HTMLButtonElement>) => void
   ref?: Ref<HTMLButtonElement>
 }
 
@@ -67,6 +82,7 @@ export function WordButton(props: WordButtonProps): JSX.Element {
       class={cls}
       role={props.role}
       aria-label={description}
+      aria-description={props['aria-description']}
       aria-selected={props['aria-selected']}
       aria-haspopup={props['aria-haspopup']}
       aria-expanded={props['aria-expanded']}
@@ -76,6 +92,10 @@ export function WordButton(props: WordButtonProps): JSX.Element {
       data-coach-ink={props['data-coach-ink']}
       tabIndex={props.tabIndex}
       onKeyDown={props.onKeyDown}
+      onPointerDown={props.onPointerDown}
+      onPointerMove={props.onPointerMove}
+      onPointerUp={props.onPointerUp}
+      onPointerCancel={props.onPointerCancel}
       onClick={onClick}
     >
       {/* What the guide overlay points at: the word, not its whole touch area. */}
@@ -106,11 +126,32 @@ export interface PickWordProps<T> {
   down?: boolean
   /** The word in the middle of its touch area (a row over the keys) rather than at its top. */
   middle?: boolean
+  /**
+   * A short swipe along the word steps the choice without the list: right the next, left the
+   * one before (up and down on a word turned on its side, as it reads), stopping at either
+   * end. The arrow keys right and left do the same (TalkBack's Next and Previous actions).
+   */
+  swipe?: boolean
+}
+
+/** How far a [PickWord] swipe goes past the touch slop to step the choice: short, about the word's height. */
+export const PICK_SWIPE = 32
+
+/** A [PickWord] swipe that went [moved] along the word (px, forward positive): the step it makes, 1, -1 or none. */
+export function pickSwipeStep(moved: number, slop: number = TOUCH_SLOP, far: number = PICK_SWIPE): 1 | -1 | 0 {
+  if (Math.abs(moved) - slop < far) return 0
+  return moved > 0 ? 1 : -1
+}
+
+/** The choice [delta] from [selected] in [options], or null past either end. */
+export function pickStepped<T>(options: readonly T[], selected: T, delta: number): T | null {
+  const i = options.indexOf(selected) + delta
+  return i >= 0 && i < options.length ? options[i]! : null
 }
 
 /** A word showing a choice ("MAJOR ▾"); a tap lists the choices over the grid, the chosen one marked. */
 export function PickWord<T>(props: PickWordProps<T>): JSX.Element {
-  const { label, options, selected, name, onPick, description, alignEnd = false, coach, columns } = props
+  const { label, options, selected, name, onPick, description, alignEnd = false, coach, columns, swipe = false } = props
   const [own, setOwn] = useState(false)
   const open = props.open ?? own
   const onOpen = useRef(props.onOpen)
@@ -153,6 +194,78 @@ export function PickWord<T>(props: PickWordProps<T>): JSX.Element {
     return () => document.removeEventListener('pointerdown', outside, true)
   }, [open])
 
+  // The choice [delta] from the one picked, if there is one there.
+  const step = (delta: number): void => {
+    const o = pickStepped(options, selected, delta)
+    if (o !== null) onPick(o)
+  }
+  // The swipe as it goes: where it went down, whether the word is turned, and once past the slop
+  // whether it goes along the word (null before). A swipe swallows the click its lift brings.
+  const drag = useRef<{ id: number; x: number; y: number; turned: boolean; along: boolean | null } | null>(null)
+  const swallow = useRef(false)
+  // The travel along the word and across it, in its own frame: a turned word reads from the bottom up.
+  const travel = (g: { x: number; y: number; turned: boolean }, e: PointerEvent): [number, number] => {
+    const dx = e.clientX - g.x
+    const dy = e.clientY - g.y
+    return g.turned ? [-dy, dx] : [dx, dy]
+  }
+  const swiping = swipe
+    ? {
+        onPointerDown: (e: TargetedPointerEvent<HTMLButtonElement>): void => {
+          // With the list open, a touch on the word only closes it (its click).
+          if (open || (e.pointerType === 'mouse' && e.button !== 0)) return
+          swallow.current = false
+          const turned = getComputedStyle(e.currentTarget).writingMode.startsWith('vertical')
+          drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, turned, along: null }
+        },
+        onPointerMove: (e: TargetedPointerEvent<HTMLButtonElement>): void => {
+          const g = drag.current
+          if (g === null || g.id !== e.pointerId || g.along !== null) return
+          const [a, b] = travel(g, e)
+          if (Math.hypot(a, b) <= TOUCH_SLOP) return
+          // Across it: the page's (a scroll), nothing here.
+          g.along = Math.abs(a) >= Math.abs(b)
+          if (!g.along) {
+            drag.current = null
+            return
+          }
+          // Along it: the drag is the word's, so its lift doesn't open the list.
+          swallow.current = true
+          try {
+            e.currentTarget.setPointerCapture(e.pointerId)
+          } catch {
+            // Gone already: the lift will not come.
+          }
+        },
+        onPointerUp: (e: TargetedPointerEvent<HTMLButtonElement>): void => {
+          const g = drag.current
+          if (g === null || g.id !== e.pointerId) return
+          drag.current = null
+          if (g.along !== true) return
+          // The click (where the lift brings one) comes in this task; after it, a key's click is a click again.
+          setTimeout(() => {
+            swallow.current = false
+          }, 0)
+          const s = pickSwipeStep(travel(g, e)[0])
+          if (s !== 0) step(s)
+        },
+        onPointerCancel: (e: TargetedPointerEvent<HTMLButtonElement>): void => {
+          if (drag.current?.id !== e.pointerId) return
+          drag.current = null
+          swallow.current = false
+        },
+        // Right the next, left the one before, on the closed word.
+        onKeyDown: (e: TargetedKeyboardEvent<HTMLButtonElement>): void => {
+          if (open || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+          const delta = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0
+          if (delta === 0) return
+          e.preventDefault()
+          e.stopPropagation()
+          step(delta)
+        },
+      }
+    : {}
+
   const onListKey = (e: TargetedKeyboardEvent<HTMLElement>): void => {
     const items = [...(list.current?.querySelectorAll<HTMLElement>('[role=option]') ?? [])]
     const at = items.indexOf(document.activeElement as HTMLElement)
@@ -183,8 +296,14 @@ export function PickWord<T>(props: PickWordProps<T>): JSX.Element {
       <WordButton
         ref={word}
         label={`${label} ▾`}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          if (swallow.current) swallow.current = false
+          else setOpen(!open)
+        }}
         description={description}
+        aria-description={swipe ? WebText.pickSteps(MirrorText.PICK_NEXT, MirrorText.PICK_PREVIOUS) : undefined}
+        class={swipe ? 'word--swipe' : undefined}
+        {...swiping}
         top={!props.middle}
         aria-haspopup="listbox"
         aria-expanded={open}

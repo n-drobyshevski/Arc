@@ -142,6 +142,13 @@ export const WebText = {
   DEVICE_FADER_NOTE: "Drag the fader for the shown group's level in arc's sound, or what FADER + a pad gave it (on the FX page, its send to the effect). Each group keeps its own, with the project's effects.",
   /** A knob's or the fader's second action, for screen readers. */
   DEVICE_TURN_HINT: 'Arrow keys turn it, Enter shows its shortcuts',
+  /**
+   * KEYS' scale or octave word's Next and Previous (MirrorText.PICK_NEXT, PICK_PREVIOUS: TalkBack's
+   * actions on Android, a short swipe along it), here on the arrow keys, for screen readers.
+   */
+  pickSteps(next: string, previous: string): string {
+    return `${next}: right arrow. ${previous}: left arrow`
+  },
   // What the drawn knobs and fader change, for screen readers ("Knob X", "effect X, 62%").
   TURN_VOLUME: "arc's volume",
   TURN_FX_X: 'effect X',

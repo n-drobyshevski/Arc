@@ -40,6 +40,9 @@
   padding-block: var(--trim-1-1);
 }
 
+/* A word a short swipe steps (PickWord's swipe): a drag along it is its own, one across it the page's scroll. */
+.word--swipe { touch-action: pan-y; }
+
 /* The choices, over the grid: bottom on the word's bottom, so it opens upward. */
 .pick { position: relative; }
 .pick__list {
