@@ -48,7 +48,7 @@ Live's deps: `liveAudio` (`LiveAudioDeps`, platform/audio/liveAudio's
 |---|---|---|
 | `c.state` | `UiState` (`types.ts`) | the one app state; every change is a new object |
 | `c.phase` | `ConnectionPhase` | `'unsupported' \| 'disconnected' \| 'opening' \| 'handshaking' \| 'ready' \| 'task' \| 'reading'` |
-| `c.settings` | `AppSettings` | theme, autoConnect, keepScreenOn, keepLast, liveOneGroup, liveFollow, guideSeen, liveKeys, keysRoot (0..11), keysScale (`Scale`), keysOctave (0..8), keysNames (`NoteNames`) |
+| `c.settings` | `AppSettings` | theme, autoConnect, keepScreenOn, keepLast, liveOneGroup, liveFollow, guideSeen, liveKeys, keysRoot (0..11), keysScale (`Scale`), keysOctave (0..8), keysNames (`NoteNames`), shareSounds, replaceScenes, ... |
 | `c.playing` | `string \| null` | key of the sound playing in the lists: `device:N`, `backup:<id>:N`, or the key given to `playNow` |
 | `c.liveVoices` | `ReadonlySet<string>` | Live voices sounding on the phone: pads `live:<group>:<offset>`, KEYS notes `note:<midi>` (Android `liveKeys`) |
 | `c.playingPads` | `ReadonlySet<number>` | the pads sounding, as `padKey(pad)` (ring them) |
@@ -167,6 +167,33 @@ output opened with its latest reported delay; `latencyRows` lists the rows), `li
 Live's output), `resetLatency()`.
 
 **Formatting**: `fmtDay(ms)`, `fmtDateTime(ms)`.
+
+**Beat cards and the Claude page** (ported from Android 0.4.x; the sheet's
+rows are built by `beatPlan.ts`, the prompt's by `promptPlan.ts`, a lazy
+chunk with `ClaudePrompt` and `PromptText`): `beatShare(group, prompt?, kit?)`
+and `beatShareChain(prompt?, kit?)` (sound, FX, pad and silent lines; the kit
+from `shareKit()`, the EP-133's by its slots, not Live's), `setShareSounds(on)`
+(With my sound list; `shareSoundCount` is a computed count), `setReplaceScenes(on)`,
+`playSynth(s)`* (a synth row's play key; the renderer is `core/features/synthRender.ts`,
+loaded on first use). The prompt and saved prompts are signals of their own,
+`claudePrompt` / `claudePrompts` (kept in settings and library.json as
+`app.claudePrompt` / `app.claudePrompts`, but outside `c.settings`' object):
+`setClaudePrompt(p)`, `saveClaudePrompt(p)`, `deleteClaudePrompt(i)`,
+`shareClaudePrompt(pick, group, copy)`* (SHARE, or COPY to the clipboard).
+`claudeWaiting` (what was sent, or null) is set by `waitForClaude(what)` and
+cleared by `stopWaitingForClaude()` or a card coming in.
+
+**Takes**: `setTakeTrim(t, trim)` (null: the whole take), `duplicateTake(t)`,
+`playTakeTrim(t, from, to)`*, `takeSound(t)`, `takeWav(t)` (the kept part);
+SHARE, SAVE, VOICE and EP send the kept part.
+
+**PRACTICE**: `practise(spec)`, `practisePick(pick, group)` (the Claude page's
+PLAY tab), `practiseImport()` (IMPORT AND PRACTISE: a card's lesson steps,
+else its first group at 75%), `copyPracticeReport()`*. The desk itself is
+`pattern.practice` (`PracticeUi`, `state/practicePlan.ts`, a signal changing
+on a press or a step, never per frame) with `changePractice`, `practicePlay`,
+`practiceStop`, `endPractice`, `practicePress(pad, at)`, `lessonStep(delta)`;
+the lane and the pad cues read `practiceFrame(now)` on the frame clock.
 
 \* Needs a user gesture: call straight from the click handler (before any
 `await` of your own). Playback wakes the AudioContext, pickers and share sheets
