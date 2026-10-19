@@ -2387,6 +2387,217 @@ class Synth(unittest.TestCase):
             self.assertIn("wrote %s (peak 29204, PCM CRC-32 %s)" % (path, crc), r.stdout)
 
 
+def remake_analysis():
+    """An analysis as remake_audio.py writes it: 16 bars at 120 BPM, a groove of 8, a break of 2 with no drums, the groove for 6."""
+    import remake_audio as ra
+    bars = [[i * 2.0, 2.0] for i in range(16)]
+    groove = {"kick": "x...x...x..x..x.", "hat": "..x...x...x...x.", "snare": "....x.......x..."}
+    drums = {k: [v if not 8 <= b < 10 else "." * 16 for b in range(16)] for k, v in groove.items()}
+    chords = [{"name": n, "root": r, "shape": list(s)} for n, r, s in [("D#m", 3, (0, 3, 7)), ("B", 11, (0, 4, 7))] * 8]
+    bass = [[b * 2.0, b * 2.0 + 0.4, 39 if b % 2 == 0 else 47, 0.6] for b in range(16)]
+    levels = {s: [0.0 if 8 <= b < 10 and s == "drums" else 0.8 for b in range(16)] for s in ("bass", "drums", "other", "vocals")}
+    names = [c["name"] for c in chords]
+    feats = ra.bar_features(drums, levels, names)
+    sections = ra.sections_of(feats, names)
+    return {
+        "title": "Test song", "tempo": 120.0, "bars": bars, "swing": 50, "key": "D# minor", "key_fit": 0.9,
+        "drum_source": "test", "drums": drums, "bass_notes": bass, "chords": chords, "levels": levels,
+        "sections": sections, "parts": ra.group_sections(sections, feats, names),
+    }
+
+
+class RemakeAudio(unittest.TestCase):
+    """remake_audio.py's measuring after the models: grids, tempo, swing, key, chords, sections and the draft card."""
+
+    @classmethod
+    def setUpClass(cls):
+        import remake_audio
+        cls.ra = remake_audio
+
+    def test_place_and_grid(self):
+        bars = [(0.0, 2.0), (2.0, 2.0)]
+        self.assertEqual(self.ra.place(0.0, bars)[:2], (0, 0))
+        self.assertEqual(self.ra.place(0.5, bars)[:2], (0, 4))
+        self.assertEqual(self.ra.place(1.99, bars)[:2], (1, 0))  # the next bar's downbeat, a hair early
+        self.assertIsNone(self.ra.place(-1.0, bars))
+        grid = self.ra.drum_grid({"kick": [0.0, 1.0, 2.25]}, bars)
+        self.assertEqual(grid["kick"], ["x.......x.......", "..x............."])
+
+    def test_tempo_fits_all_bars(self):
+        # Bar starts on a 20 ms grid around 134 BPM: one bar's length is off, the line through them isn't.
+        bar = 240 / 134
+        bars = [(round(i * bar / 0.02) * 0.02, 1.8) for i in range(17)]
+        self.assertAlmostEqual(self.ra.tempo_of(bars), 134, delta=0.15)
+
+    def test_swing_from_late_off_sixteenths(self):
+        bars = [(float(b) * 2, 2.0) for b in range(4)]
+        step = 2.0 / 16
+        times = [b * 2 + s * step + (step / 6 if s % 2 else 0) for b in range(4) for s in range(16)]
+        self.assertEqual(self.ra.swing_of(times, bars), 58)
+        self.assertEqual(self.ra.swing_of(times[:5], bars), 50)  # too few to tell
+        self.assertEqual(self.ra.swing_ticks(58), 4)
+
+    def test_key_and_chords(self):
+        weights = [0.0] * 12
+        for pc, w in ((3, 5), (6, 3), (10, 4), (1, 2), (8, 2), (11, 2), (5, 1)):
+            weights[pc] = w
+        self.assertEqual(self.ra.key_of(weights)[0], "D# minor")
+        tones = [0.0] * 12
+        for pc in (3, 6, 10):
+            tones[pc] = 1.0
+        self.assertEqual(self.ra.chord_of(tones, bass=3)[0], "D#m")
+        self.assertEqual(self.ra.chord_of(tones, bass=6, scale=self.ra.scale_of("D# minor"))[0], "D#m")
+        self.assertIsNone(self.ra.chord_of([0.0] * 12))
+        self.assertEqual(self.ra.voicing(3, (0, 3, 7)), [63, 66, 70])
+
+    def test_sections_and_parts(self):
+        a = remake_analysis()
+        self.assertEqual(a["sections"], [(0, 8), (8, 2), (10, 6)])
+        self.assertEqual(a["parts"], [0, 1, 0])
+
+    def test_draft_card_reads(self):
+        card = self.ra.draft_card(remake_analysis())
+        parsed = bc.parse_card(card)
+        self.assertTrue(parsed.ok, [str(p) for p in parsed.problems])
+        self.assertIn("chain 1x4 2 1x3", card)  # two-bar chords loop; the groove comes back as the same scene
+        self.assertEqual(len(parsed.scenes), 2)
+        self.assertIn("[A] bars 1 step 1/16\n\n[B]", card)  # the break mutes the drums
+        self.assertIn("B7 at 1.1.1 note D#2", card)
+        self.assertIn("C7 at 1.1.1 note D#4", card)
+
+    def test_from_json_redraws_without_models(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "analysis.json")
+            with open(path, "w") as fh:
+                json.dump(remake_analysis(), fh)
+            out, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                code = self.ra.main(["--from-json", path, "--loop-bars", "4"])
+            self.assertEqual(code, 0, err.getvalue())
+            self.assertTrue(out.getvalue().startswith("ARC BEAT 1"))
+            self.assertTrue(os.path.exists(os.path.join(d, "card.txt")))
+            self.assertIn("chain 1x2 2 1x2", out.getvalue())
+
+    def test_bars_from_beats_when_downbeats_double(self):
+        # 134 BPM beats on a 20 ms grid; in the "drop" the tracker marks a downbeat every two beats.
+        gap = 60 / 134
+        beats = [round((1 + i) * gap / 0.02) * 0.02 for i in range(200)]
+        downbeats = [beats[i] for i in range(0, 200, 4)] + [beats[i] for i in range(82, 120, 4)]
+        bars = self.ra.bars_from(downbeats, beats, beats[-1] + 1)
+        self.assertAlmostEqual(self.ra.tempo_of(bars), 134, delta=0.05)
+        self.assertAlmostEqual(bars[1][0], beats[0] + 4 * gap, delta=0.02)  # the phase most downbeats agree with
+        self.assertEqual(len({round(length, 9) for _, length in bars}), 1)  # one steady grid
+        self.assertAlmostEqual(bars[0][1], 4 * gap, delta=0.005)
+
+    def test_groups_merge_and_loop_size(self):
+        quiet, busy = [0.0, 0.1], [0.9, 0.8]
+        feats = [quiet] * 4 + [busy] * 4 + [quiet] * 2 + [busy] * 4
+        chords = ["D#m", "B"] * 7
+        sections = [(0, 4), (4, 4), (8, 2), (10, 4)]
+        self.assertEqual(self.ra.group_sections(sections, feats, chords), [0, 1, 0, 1])
+        self.assertEqual(self.ra.merge_runs([(0, 4), (4, 4), (8, 2)], [0, 0, 1]), ([(0, 8), (8, 2)], [0, 1]))
+        self.assertEqual(self.ra.loop_size(chords, 0, 8), 2)
+        self.assertEqual(self.ra.loop_size(["A", "B", "C", "D", "E"], 0, 5), 5)  # no repeat: the whole section
+        self.assertEqual(self.ra.loop_size(["A"] * 40, 0, 40), 1)
+        self.assertEqual(self.ra.loop_size([str(i) for i in range(24)], 0, 24), 24)  # whole, up to 32 bars
+        self.assertEqual(self.ra.loop_size([str(i) for i in range(40)], 0, 40), 20)  # past it: whole 4s that divide
+        # Two grooves as busy as each other, one four-on-the-floor, one two-step: two parts.
+        four, two = "x...x...x...x...", "x......x..x....."
+        kicks = [four] * 4 + [two] * 4
+        feats = [[0.25, 0.8]] * 8
+        self.assertEqual(self.ra.group_sections([(0, 4), (4, 4)], feats, [None] * 8, kicks=kicks), [0, 1])
+        self.assertEqual(self.ra.group_sections([(0, 4), (4, 4)], feats, [None] * 8), [0, 0])
+
+    def test_key_by_chords_and_stray_swing(self):
+        def chord(root, shape):
+            return {"name": "", "root": root, "shape": list(shape)}
+        # A B C#m E, over and over: E major's chords (IV V vi I), though the bass leans on A and C#.
+        loop = [chord(9, (0, 4, 7)), chord(11, (0, 4, 7, 10)), chord(1, (0, 3, 7)), chord(4, (0, 4, 7, 11))] * 8
+        weights = [0.0] * 12
+        for pc, w in ((9, 10), (1, 10), (4, 5), (11, 4), (3, 2), (8, 2), (6, 1)):
+            weights[pc] = w
+        self.assertEqual(self.ra.key_of(weights)[0], "A major")  # the loudest notes alone
+        self.assertIn(self.ra.key_by_chords(loop, weights)[0], ("C# minor", "E major"))
+        # A few stray off-sixteenths among straight eighths are no swing.
+        bars = [(float(b) * 2, 2.0) for b in range(8)]
+        step = 2.0 / 16
+        eighths = [b * 2 + s * step for b in range(8) for s in range(0, 16, 2)]
+        strays = [b * 2 + 3 * step + step / 3 for b in range(8)]
+        self.assertEqual(self.ra.swing_of(eighths + strays, bars), 50)
+
+    def test_bass_lag_behind_kicks(self):
+        step = 60 / 134 / 4
+        kicks = [i * 4 * step for i in range(32)]
+        late = [[k + 1.3 * step, k + 3 * step, 39, 0.6] for k in kicks]
+        self.assertAlmostEqual(self.ra.bass_lag(late, kicks, step), 1.3 * step, places=6)
+        on_time = [[k + 0.1 * step, k + 3 * step, 39, 0.6] for k in kicks]
+        self.assertEqual(self.ra.bass_lag(on_time, kicks, step), 0.0)  # under half a sixteenth: left alone
+        self.assertEqual(self.ra.bass_lag(late[:5], kicks, step), 0.0)  # too few to tell
+
+
+class MatchSounds(unittest.TestCase):
+    """match_sounds.py after the models: pitches, chord samples and the card edits."""
+
+    @classmethod
+    def setUpClass(cls):
+        import match_sounds
+        cls.ms = match_sounds
+
+    CARD = "\n".join([
+        "ARC BEAT 1", "tempo 120", "chain 1 2", "",
+        "scene One", "[A] bars 1 step 1/16", "A7 kick        | x... x... x... x... |", "",
+        "[B] bars 1", "pad B7 mode key", "notes", "B7 at 1.1.1 note D#1 gate 96", "B7 at 1.3.1 note F#1 gate 96", "",
+        "[C] bars 2", "pad C7 mode key", "notes",
+        "C7 at 1.1.1 note A3 gate 384", "C7 at 1.1.1 note C#4 gate 384", "C7 at 1.1.1 note E4 gate 384",
+        "C7 at 2.1.1 note C#4 gate 384", "C7 at 2.1.1 note E4 gate 384", "C7 at 2.1.1 note G#4 gate 384", "",
+        "scene Two", "[B] bars 1", "notes", "B7 at 1.1.1 note B0 gate 96", "",
+    ])
+
+    def test_pitches_and_shifts(self):
+        self.assertEqual(self.ms.note_midi("C4"), 60)
+        self.assertEqual(self.ms.note_name(self.ms.note_midi("D#1")), "D#1")
+        self.assertEqual(self.ms.shift_for(43, False), 17)  # a bass recorded at G2: D#1 is written G#2
+        self.assertEqual(self.ms.shift_for(40, True), -4)  # a chord recorded at E2: by the least, octaves free
+        self.assertEqual(self.ms.nearest_with_class(41, 4), 40)
+        self.assertEqual(self.ms.score(0.8, 12), 0.8)
+        self.assertLess(self.ms.score(0.8, 24), 0.8)
+
+    def test_chord_samples(self):
+        self.assertEqual(self.ms.chord_root("liquid chord em7"), 4)
+        self.assertEqual(self.ms.chord_root("waterchord am7"), 9)
+        self.assertEqual(self.ms.chord_root("chordy f9sus4"), 5)
+        self.assertIsNone(self.ms.chord_root("pling chord"))
+        self.assertTrue(self.ms.is_chord_sample("search chord"))
+        self.assertFalse(self.ms.is_chord_sample("soothe string"))
+        self.assertTrue(self.ms.mixed_chords(self.CARD, "C7"))  # A major, then C# minor
+        self.assertFalse(self.ms.mixed_chords(self.CARD, "B7"))
+
+    def test_moving_notes(self):
+        moved = self.ms.move_notes(self.CARD, "B7", 17, False)
+        self.assertIn("B7 at 1.1.1 note G#2 gate 96", moved)
+        self.assertIn("B7 at 1.1.1 note E2 gate 96", moved)  # the second scene's too
+        self.assertIn("C7 at 1.1.1 note A3 gate 384", moved)  # another pad: as it was
+        roots = self.ms.move_notes(self.CARD, "C7", -4, True)
+        self.assertIn("C7 at 1.1.1 note F3 gate 384", roots)  # the chord's root only, moved
+        self.assertIn("C7 at 2.1.1 note A3 gate 384", roots)  # C#4, the second chord's root
+        self.assertEqual(roots.count("C7 at"), 2)
+        high = self.ms.move_notes(self.CARD, "C7", 48, False)
+        self.assertTrue(all(self.ms.note_midi(l.split()[4]) <= 96 for l in high.split("\n") if l.startswith("C7 at")))
+
+    def test_apply_picks(self):
+        picks = {
+            "kick": {"line": "sound A7 26 kick sp", "shift": None, "chord": False},
+            "bass": {"line": "sound B7 429 reese", "shift": 17, "chord": False},
+            "keys": {"line": "sound C7 542 liquid chord em7", "shift": -4, "chord": True},
+        }
+        card = self.ms.apply_picks(self.CARD, picks)
+        self.assertIn("[A] bars 1 step 1/16\nsound A7 26 kick sp\n", card)
+        self.assertIn("[B] bars 1\nsound B7 429 reese\npad B7 mode key", card)
+        self.assertEqual(card.count("sound B7"), 1)  # once, in the first section of the group
+        self.assertIn("B7 at 1.1.1 note G#2", card)
+        self.assertTrue(bc.parse_card(card).ok, [str(p) for p in bc.parse_card(card).problems])
+
+
 class SkillFiles(unittest.TestCase):
     def test_every_card_in_the_references_is_valid_and_has_no_warnings(self):
         total = 0

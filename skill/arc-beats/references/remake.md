@@ -4,6 +4,8 @@ Read this when Arc's Claude page sends *Use the arc-beats skill to remake a song
 
 The goal is a card that sounds as close to the song as the EP-133 allows, built from what is published about it. You cannot hear the song and cannot play the link: everything comes from pages and search results, so say *rebuilt from published information, not by ear*. The groove, the harmony, the sounds and the structure are copied; the hook is written fresh; there are no lyrics.
 
+**In Claude Code, with the song's audio, measure it first** ("From the audio" below): web facts and genre guesses get the bars, the drums and the chords wrong far more often than a measurement does. The Claude apps take no audio, so there the steps below are the whole method.
+
 ## 1. Pin the song
 
 - **Search even if you know it.** Names repeat, and a remix, a live take or a cover has another tempo and form. Use web search; if it is off, say so and ask the user to turn it on (Settings, Capabilities in the Claude app). Do not fill the gaps from memory.
@@ -58,6 +60,32 @@ The goal is a card that sounds as close to the song as the EP-133 allows, built 
 - `scripts/beatcard.py check` until it prints `OK`, then `analyse`.
 - Compare the arrangement's `total_bars` and `seconds` with the song's length: a 3:30 song at 120 BPM is 105 bars. Say how far apart they are and why (a fade-out, a section left as a loop).
 - A main loop is 4-8 bars: check the bars.
+
+## From the audio (Claude Code only)
+
+When you run in Claude Code on a computer and the user has the song as a file (a recording, a purchase, an export from their DAW; a streaming app's audio is theirs to capture or not), measure it with `scripts/remake_audio.py` instead of guessing. It needs Python 3.11, ffmpeg and the models in its docstring's setup (about 3 GB, once, in a virtual environment); ask before installing them.
+
+```
+python scripts/remake_audio.py song.mp3 --out song.remake        # a few minutes for a whole song
+python scripts/remake_audio.py --from-json song.remake/raw.json --loop-bars 4   # redraw, no models
+```
+
+| It measures | With | Trust it for |
+|---|---|---|
+| Bars and tempo | Beat This! (beats and downbeats); the bars from a straight line through the beats, at the phase most downbeats agree with | The tempo to a tenth, where each bar starts, even where the tracker doubles the downbeats in a loud drop |
+| Stems | Demucs: drums, bass, other, vocals | Everything below works on one stem at a time |
+| Drums | ADTOF on the drum stem (kick, snare, tom, hat, cymbal); without it, band onsets | Kick and hats; a snare or clap buried in the mix can be missed |
+| Bass and chords | Basic Pitch on the bass and other stems, each bass note started at the bass stem's own attack; one chord a bar, in the key whose scale holds the most of them | The key and the roots; the chord quality (7, sus) less so |
+| Sections | Where the bars' texture changes, grouped into parts that sound alike, neighbours of one part joined | The cuts and the repeats; the names (intro, chorus) are yours to give |
+
+It writes `raw.json` (the models' output), `analysis.json` (bar by bar) and `card.txt`: a scene for each part, looping as long as its chords run before they repeat (`--loop-bars` fixes it), and the chain with the real bar counts. `--from-json raw.json` works it all out again in a second, so try `--loop-bars` there. A song of 3 to 4 minutes gives 12 to 16 scenes. Then:
+
+- **Name the scenes** after the song's sections, from the cuts and the web (step 1 still pins the song).
+- **Pick the sounds by ear, not by name**: run `scripts/match_sounds.py song.remake` (it needs `transformers<4.48` too, and downloads the factory pack from teenage engineering, or takes it with `--pack`; `--sounds sounds.txt` keeps to the factory sounds still in the user's list). It cuts clean hits and long notes from the stems, compares them with CLAP to the factory sounds of the right kind and to a grid of `synth` lines, and writes `card-sounds.txt`: a sound or synth line on each pad, and the KEYS notes moved to the pick's own pitch. That matters: `note C4` plays a sound as it was recorded, and the factory basses and keys are recorded anywhere from C1 to C5, so notes written at the song's pitch on the wrong root play octaves off. A chord sample keeps only its chords' roots and plays its own chord quality on each; when the song mixes major and minor chords say so, and offer a keys sound with the real voicings instead. `sounds.json` holds the top five for each part.
+- **Add the FX** (step 3): the draft has none.
+- **Write the hook** on D in the song's key and register (the script reports the vocal's range in `analysis.json`; it never transcribes a melody), at the song's pitch, before `match_sounds.py`, so it moves the hook to D's pick too. Step 5 holds: no melody copied note for note, no lyrics.
+- **Compare the length**: `analyse` gives the chain's bars and seconds; a few bars over the song's length is the rounding of passes.
+- **Say it is measured**: the `#` lines it writes say what each fact came from; keep them, and add what you found on the web.
 
 ## An example: a remake loop
 
