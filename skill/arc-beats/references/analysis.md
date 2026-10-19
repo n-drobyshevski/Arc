@@ -87,7 +87,7 @@ A9 snare | .... X... .... X... |
 - Only change sounds you have a reason to change; leave the other pads without a line, so Arc keeps what is on them.
 - Say how it lands: the import sheet lists each change as old → new with a tick box, and **IMPORT** writes the ticked sounds to the pads of the active project and resets those pads' settings while **PUT ON PADS** is on (it starts on; the chip switches all the ticks off and on); offline it becomes Arc's offline pad change. The user can untick a swap they do not want, and one undo takes it back.
 - With `check --sounds sounds.txt` (their share text saved to a file) you can confirm that every slot and name is in their list.
-- Without the list, describe the swap instead ("a shorter, drier snare") and do not write a sound line.
+- Without the list, describe the swap instead ("a shorter, drier snare") and do not write a sound line. Or write a `synth` line for that pad: Arc makes the sound, so it needs no list ([synth-sounds.md](synth-sounds.md)). The same goes for a list with nothing fitting.
 
 ## FX and pad shaping
 
@@ -112,6 +112,7 @@ When the share carries `fx`, `send`, `comp`, `sidechain` or `pad` lines, they ar
 | a loop too bright and harsh | `fx filter 30 20` with the sends at 100 (low-pass) |
 | an 808 too high or too long | `pad B7 pitch -5`, `pad B7 mode key release 40` |
 | open hat ringing over the next hit | `pad A5 mode key release 15` |
+| a made hat (a `synth` line) that rings too long | lower its decay: `synth A4 hat decay 8 tone 75 name closed_hat` |
 | one pad too loud | `pad A9 level 80` |
 
 - Each kind of line is independent, and `send` sets the groups it leaves out to 0, so write the whole `send` line when you change one group. A card with no effect lines leaves the user's FX alone; to turn something off, write it (`fx none`, `comp off`, `sidechain off`).

@@ -8,6 +8,7 @@ import dev.arc.ep133.features.CardProblem
 import dev.arc.ep133.features.CardRead
 import dev.arc.ep133.features.CardSection
 import dev.arc.ep133.features.CardSound
+import dev.arc.ep133.features.CardSynth
 import dev.arc.ep133.features.FactorySounds
 import dev.arc.ep133.features.FxSettings
 import dev.arc.ep133.features.OfflinePads
@@ -24,6 +25,7 @@ import dev.arc.ep133.features.SoundPick
 import dev.arc.ep133.features.SoundSource
 import dev.arc.ep133.features.SoundStatus
 import dev.arc.ep133.features.Steps
+import dev.arc.ep133.features.SynthVoice
 import dev.arc.ep133.features.Tempo
 import dev.arc.ep133.features.Timing
 import dev.arc.ep133.features.TimingSettings
@@ -223,7 +225,7 @@ class BeatSceneUi(val number: Int, val name: String?, val grids: List<BeatGridUi
 class BeatChainUi(val steps: List<ChainStep>)
 
 /**
- * A card's sound line on the sheet: the [pick] ([BeatCards.resolveSounds]) and the name the pad plays now ([oldName], null when unknown).
+ * A card's sound line on the sheet: the [pick] ([cardPicks]) and the name the pad plays now ([oldName], null when unknown).
  * A [picked] row is not the card's: the user chose its sound for a silent pad ([pickedRow]).
  */
 class SoundRowUi(
@@ -233,11 +235,16 @@ class SoundRowUi(
     /** A missing sound a saved factory pack has ([PackSound]): IMPORT can upload it into a free slot, while connected ([uploadable]). */
     val fromPack: PackSound? = null,
     val uploadable: Boolean = false,
+    /** The pad's synth line, when the row is it: found on the device by its name, or made by IMPORT ([makes]). */
+    val synth: CardSynth? = null,
 ) {
     val pad: PhysicalPad get() = pick.pad
 
-    /** Whether the row can be ticked: the sound is somewhere in the list and not on the pad yet, or can be uploaded from a pack. */
-    val changes: Boolean get() = pick.status == SoundStatus.CHANGE || pick.status == SoundStatus.FOUND_BY_NAME || fromPack != null && uploadable
+    /** A synth line no slot holds yet: IMPORT makes it, connected or offline. */
+    val makes: Boolean get() = synth != null && pick.status == SoundStatus.MISSING
+
+    /** Whether the row can be ticked: the sound is somewhere in the list and not on the pad yet, can be uploaded from a pack, or made. */
+    val changes: Boolean get() = pick.status == SoundStatus.CHANGE || pick.status == SoundStatus.FOUND_BY_NAME || fromPack != null && uploadable || makes
 
     /**
      * The name the card gave a sound used by its slot because the EP-133 lists it unnamed ("200.pcm"), for the line
@@ -255,14 +262,14 @@ class SoundsUi(val rows: List<SoundRowUi>, val offline: Boolean, val project: In
     /** The rows that can be ticked. */
     val changes: List<SoundRowUi> get() = rows.filter { it.changes }
 
-    /** Whether no sound line is on the user's EP-133 (every row is missing): the sheet says to share with the sound list. */
-    val noneFound: Boolean get() = rows.isNotEmpty() && rows.all { it.pick.status == SoundStatus.MISSING }
+    /** Whether no sound line is on the user's EP-133 (every sound row is missing; synth rows don't count): the sheet says to share with the sound list. */
+    val noneFound: Boolean get() = rows.filter { it.synth == null }.let { it.isNotEmpty() && it.all { r -> r.pick.status == SoundStatus.MISSING } }
 }
 
 /**
- * [card]'s sound lines matched to [set] ([BeatCards.resolveSounds]) as the sheet's rows, each with the name the pad plays
- * now ([names]), the slot it plays now being [current]; null when the card has no sound line. With no [set] every line
- * is missing.
+ * [card]'s sound and synth lines matched to [set] ([cardPicks]) as the sheet's rows, each with the name the pad plays
+ * now ([names]), the slot it plays now being [current]; null when the card has neither. With no [set] every sound line
+ * is missing, and every synth line is made.
  */
 internal fun soundsUi(
     card: BeatCard,
@@ -274,12 +281,62 @@ internal fun soundsUi(
     packs: Map<dev.arc.ep133.features.FactoryKit, Map<Int, String>> = emptyMap(),
     deviceKit: dev.arc.ep133.features.FactoryKit? = null,
 ): SoundsUi? {
-    if (card.allSections.all { it.sounds.isEmpty() }) return null
-    val rows = BeatCards.resolveSounds(card, set?.names.orEmpty(), foreignTo(packs, deviceKit), current).map { p ->
-        val from = if (p.status == SoundStatus.MISSING) packSoundOf(p.wanted, packs) else null
-        SoundRowUi(p, names(p.pad), fromPack = from, uploadable = from != null && !offline)
+    if (card.allSections.all { it.sounds.isEmpty() && it.synths.isEmpty() }) return null
+    val rows = cardPicks(card, set?.names.orEmpty(), foreignTo(packs, deviceKit), current, packs, connected = !offline).map {
+        SoundRowUi(it.pick, names(it.pick.pad), fromPack = it.fromPack, uploadable = it.uploadable, synth = it.pick.synth)
     }
-    return SoundsUi(rows, offline, project)
+    // A card whose only synth lines make no sound has nothing to show.
+    return rows.takeIf { it.isNotEmpty() }?.let { SoundsUi(it, offline, project) }
+}
+
+/** A pad's sound as the sheet shows it and IMPORT does it: the [pick], and a saved pack's sound [fromPack] that IMPORT can upload ([uploadable]). */
+internal class PlannedSound(val pick: SoundPick, val fromPack: PackSound?, val uploadable: Boolean)
+
+/**
+ * One sound for each pad [card] gives a sound or synth line, the sheet's and IMPORT's alike. For each pad, project-wide, the
+ * first of: a sound line found in [names] ([BeatCards.resolveSounds]: a change, the same, or found by name); the pad's synth
+ * line already on the device, by its device name ([SynthVoice.deviceName]); a missing sound line that a saved pack has
+ * ([packSoundOf]), while [connected]; the synth line, made (MISSING, with its synth); or else the missing sound line. A synth
+ * line that makes no sound ([SynthVoice.silent]) is left out. [foreign] and [current] are as [BeatCards.resolveSounds] has them.
+ */
+internal fun cardPicks(
+    card: BeatCard,
+    names: Map<Int, String>,
+    foreign: (CardSound) -> Boolean,
+    current: (PhysicalPad) -> Int?,
+    packs: Map<dev.arc.ep133.features.FactoryKit, Map<Int, String>>,
+    connected: Boolean,
+): List<PlannedSound> {
+    val synths = BeatCards.synthsByPad(card).filterValues { !SynthVoice.silent(it) }
+    // The pad's synth line as a pick: on the device already (the same, or found by its name), or missing (to be made).
+    fun synthPick(pad: PhysicalPad, s: CardSynth, now: Int?): SoundPick {
+        val dn = SynthVoice.deviceName(s)
+        val found = BeatCards.slotNamed(names, dn, now)
+        return when (found) {
+            null -> SoundPick(pad, CardSound(0, dn), null, null, now, SoundStatus.MISSING, synth = s)
+            now -> SoundPick(pad, CardSound(found, dn), found, names[found], now, SoundStatus.SAME, synth = s)
+            else -> SoundPick(pad, CardSound(found, dn), found, names[found], now, SoundStatus.FOUND_BY_NAME, synth = s)
+        }
+    }
+    val out = LinkedHashMap<PhysicalPad, PlannedSound>()
+    for (p in BeatCards.resolveSounds(card, names, foreign, current)) {
+        val sy = synths[p.pad]
+        out[p.pad] = when {
+            p.status != SoundStatus.MISSING -> PlannedSound(p, null, false)
+            sy != null -> {
+                val sp = synthPick(p.pad, sy, p.currentSlot)
+                val pack = if (sp.status == SoundStatus.MISSING) packSoundOf(p.wanted, packs) else null
+                // A synth on the device first; then the pack's sound, while connected; else the synth is made.
+                if (pack != null && connected) PlannedSound(p, pack, true) else PlannedSound(sp, null, false)
+            }
+            else -> {
+                val pack = packSoundOf(p.wanted, packs)
+                PlannedSound(p, pack, pack != null && connected)
+            }
+        }
+    }
+    for ((pad, sy) in synths) if (pad !in out) out[pad] = PlannedSound(synthPick(pad, sy, current(pad)), null, false)
+    return out.values.toList()
 }
 
 /** A sound of a saved factory pack: its [kit], its [slot] there and its [name]. */

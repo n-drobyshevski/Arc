@@ -280,6 +280,17 @@ object ClaudeText {
     /** An upload that stopped part way: the pads before it keep their sounds. */
     const val UPLOAD_STOPPED = "The upload stopped"
 
+    /** A card's synth line that no slot holds yet: IMPORT makes it ("Make 808 kick", "Made by Arc from the card, into a free slot"). */
+    fun make(name: String) = "Make $name"
+    const val MADE_INTO_SLOT = "Made by Arc from the card, into a free slot"
+    const val MADE_OFFLINE = "Made by Arc, kept in Arc until you connect"
+    fun soundRowMake(pad: PhysicalPad, name: String, offline: Boolean) =
+        "${padLabel(pad)}: ${make(name)}, " + (if (offline) MADE_OFFLINE else MADE_INTO_SLOT).replaceFirstChar { it.lowercase() }
+    /** The progress sheet while IMPORT makes and uploads the card's synth sounds. */
+    const val MAKING_SOUNDS = "Making sounds"
+    /** The play button on a make row (content description): hear the sound before it is made. */
+    const val PLAY_SYNTH = "Play"
+
     /** What a row says when the sound is nowhere in the user's list: "Not on your EP-133: 301 Rim dusty". */
     fun soundMissing(slot: Int, name: String?) = "Not on your EP-133: ${soundName(slot, name)}"
 

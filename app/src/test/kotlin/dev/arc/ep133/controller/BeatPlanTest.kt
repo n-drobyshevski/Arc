@@ -9,6 +9,8 @@ import dev.arc.ep133.features.CardProblem
 import dev.arc.ep133.features.CardPad
 import dev.arc.ep133.features.CardSection
 import dev.arc.ep133.features.CardSound
+import dev.arc.ep133.features.CardSynth
+import dev.arc.ep133.features.FactoryKit
 import dev.arc.ep133.features.Comp
 import dev.arc.ep133.features.FxSettings
 import dev.arc.ep133.features.FxType
@@ -19,6 +21,9 @@ import dev.arc.ep133.features.PadTarget
 import dev.arc.ep133.features.PlayMode
 import dev.arc.ep133.features.SoundSource
 import dev.arc.ep133.features.SoundStatus
+import dev.arc.ep133.features.SynthType
+import dev.arc.ep133.features.SynthVoice
+import dev.arc.ep133.features.SynthWave
 import dev.arc.ep133.protocol.SoundEntry
 import dev.arc.ep133.features.Pattern
 import dev.arc.ep133.features.PatternNote
@@ -516,6 +521,102 @@ B8 bass | X... .... .... .... | .... .... .... .... |
         assertTrue(soundsUi(card, null, { null }, nameOf, offline = false, project = 1)!!.noneFound)
         // One found is enough to leave it out.
         assertFalse(soundsUi(card, set, { null }, nameOf, offline = false, project = 1)!!.noneFound)
+    }
+
+    // ---- synth lines ----
+
+    private val kickSynth = CardSynth(SynthType.KICK)
+    private val bassSynth = CardSynth(SynthType.BASS, note = 36, name = "acid")
+    private val pack = mapOf(FactoryKit.EP133 to mapOf(5 to "KICK DEEP"))
+
+    private fun synthCard(sounds: Map<Int, CardSound> = emptyMap(), synths: Map<Int, CardSynth>) =
+        card(CardSection(0, null, pattern(hit(0), hit(96, 11)), sounds, synths = synths))
+
+    private fun plan(card: BeatCard, names: Map<Int, String>, current: Map<PhysicalPad, Int> = emptyMap(), connected: Boolean = true) =
+        cardPicks(card, names, { false }, { current[it] }, pack, connected)
+
+    @Test
+    fun `a card with only synth lines has a sound row for each, made by IMPORT and tickable connected or offline`() {
+        val card = synthCard(synths = mapOf(9 to kickSynth, 11 to bassSynth))
+        for (offline in listOf(false, true)) {
+            val ui = soundsUi(card, null, { null }, nameOf, offline = offline, project = null)!!
+            assertEquals(listOf(kick, rim), ui.rows.map { it.pad })
+            assertTrue(ui.rows.all { it.makes && it.changes })
+            assertEquals(listOf(kickSynth, bassSynth), ui.rows.map { it.synth })
+            // The pick names the sound by the name it will have on the device.
+            assertEquals(listOf("kick 08bcfa", SynthVoice.deviceName(bassSynth)), ui.rows.map { it.pick.wanted.name })
+            assertEquals(2, ui.changes.size)
+            assertEquals(offline, ui.offline)
+        }
+    }
+
+    @Test
+    fun `a pad's sound is its sound line first, then its synth on the device, then a pack's upload, then the synth made`() {
+        val kickName = SynthVoice.deviceName(kickSynth)
+        // (1) The sound line is found: the synth line on the same pad is not used.
+        val found = plan(synthCard(mapOf(9 to CardSound(12, "Micro kick")), mapOf(9 to kickSynth)), mapOf(12 to "Micro kick")).single()
+        assertEquals(SoundStatus.CHANGE, found.pick.status)
+        assertNull(found.pick.synth)
+        // (2) The sound line is missing, but the synth is on the device by its device name: found there, above the pack.
+        val line = mapOf(9 to CardSound(5, "KICK DEEP"))
+        val onDevice = plan(synthCard(line, mapOf(9 to kickSynth)), mapOf(77 to kickName)).single()
+        assertEquals(SoundStatus.FOUND_BY_NAME, onDevice.pick.status)
+        assertEquals(77, onDevice.pick.slot)
+        assertEquals(kickSynth, onDevice.pick.synth)
+        assertNull(onDevice.fromPack)
+        // The pad has it already.
+        assertEquals(SoundStatus.SAME, plan(synthCard(line, mapOf(9 to kickSynth)), mapOf(77 to kickName), mapOf(kick to 77)).single().pick.status)
+        // (3) Not on the device, and a saved pack has the sound line's sound: uploaded while connected.
+        val upload = plan(synthCard(line, mapOf(9 to kickSynth)), emptyMap()).single()
+        assertEquals(SoundStatus.MISSING, upload.pick.status)
+        assertNull(upload.pick.synth)
+        assertEquals(5, upload.fromPack!!.slot)
+        assertTrue(upload.uploadable)
+        // (4) Offline the pack can't be uploaded: the synth is made.
+        val made = plan(synthCard(line, mapOf(9 to kickSynth)), emptyMap(), connected = false).single()
+        assertEquals(SoundStatus.MISSING, made.pick.status)
+        assertEquals(kickSynth, made.pick.synth)
+        assertNull(made.fromPack)
+        // (5) No synth line: the missing sound line, as before (its pack noted, but not uploadable offline).
+        val missing = plan(synthCard(line, emptyMap()), emptyMap(), connected = false).single()
+        assertEquals(SoundStatus.MISSING, missing.pick.status)
+        assertNull(missing.pick.synth)
+        assertFalse(missing.uploadable)
+        // The sheet's rows say the same, offline: the make row is ticked, the missing one can't be.
+        val rows = soundsUi(synthCard(line + (11 to CardSound(300, "Rim")), mapOf(9 to kickSynth)), null, { null }, nameOf, offline = true, project = null, packs = pack)!!.rows
+        assertEquals(listOf(true, false), rows.map { it.makes })
+        assertEquals(listOf(true, false), rows.map { it.changes })
+    }
+
+    @Test
+    fun `a pad with a sound line and a synth line has one row, and a synth line that makes no sound has none`() {
+        val card = synthCard(mapOf(9 to CardSound(300, "Rim")), mapOf(9 to kickSynth, 0 to CardSynth(SynthType.LEAD, wave = SynthWave.NONE)))
+        val rows = soundsUi(card, null, { null }, nameOf, offline = false, project = 1)!!.rows
+        assertEquals(listOf(kick), rows.map { it.pad })
+        assertTrue(rows.single().makes)
+        // A card whose only synth line is silent has nothing to show.
+        assertNull(soundsUi(synthCard(synths = mapOf(0 to CardSynth(SynthType.LEAD, wave = SynthWave.NONE))), null, { null }, nameOf, offline = false, project = 1))
+    }
+
+    @Test
+    fun `the hint to share the sound list counts sound lines only, not synth rows`() {
+        assertFalse(soundsUi(synthCard(synths = mapOf(9 to kickSynth)), null, { null }, nameOf, offline = false, project = 1)!!.noneFound)
+        val mixed = synthCard(mapOf(11 to CardSound(300, "Rim")), mapOf(9 to kickSynth))
+        assertTrue(soundsUi(mixed, null, { null }, nameOf, offline = false, project = 1)!!.noneFound)
+    }
+
+    @Test
+    fun `the sheet and IMPORT plan the same sounds from the same state`() {
+        val card = synthCard(mapOf(9 to CardSound(5, "KICK DEEP"), 11 to CardSound(12, "Rim")), mapOf(9 to kickSynth, 0 to bassSynth))
+        val names = mapOf(12 to "Rim", 40 to SynthVoice.deviceName(bassSynth))
+        fun key(p: List<PlannedSound>) = p.map { Triple(it.pick, it.fromPack?.slot, it.uploadable) }
+        for (connected in listOf(true, false)) {
+            val sheet = plan(card, names, connected = connected)
+            assertEquals(key(sheet), key(plan(card, names, connected = connected)))
+            // The order is the card's: its sound lines' pads, then the pads with only a synth line.
+            assertEquals(listOf(kick, rim, PhysicalPad(0, 0)), sheet.map { it.pick.pad })
+            assertEquals(SoundStatus.FOUND_BY_NAME, sheet[2].pick.status)
+        }
     }
 
     // ---- silent pads ----

@@ -1511,6 +1511,8 @@ class MainActivity : ComponentActivity() {
                                 onReplaceScenes = controller::setReplaceScenes,
                                 onCopyProblems = ::copyProblems,
                                 onPractise = controller::practiseImport,
+                                // A synth row's play key: the sound made on the phone, before IMPORT makes it.
+                                onPlaySynth = controller::playSynth,
                                 // PICK SOUND lists the sounds the card's sound lines choose from, played as the pad sheet plays them.
                                 player = dev.arc.ep133.ui.screens.PickPlayerUi(
                                     playing = playing,

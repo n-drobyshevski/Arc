@@ -77,6 +77,50 @@ A line `sound <pad> <slot> [name]` inside a section says which sound that pad sh
 - **Errors:** a pad from another group, or a slot outside 1–999.
 - **Picking slots:** use only slots from the user's sound list, which Arc adds after the card when it shares. Without a list, copy slots and names from the factory pack of the kit Arc plays ([factory-sounds.md](factory-sounds.md): the EP-133's, or the EP-40 Riddim's when the share says so or the user asks for it), and say they are the factory sounds, which the user may have changed; or write no sound lines and say which kind of sound fits each pad. The factory ranges are kicks 1–99, snares 100–199, hats 200–299, percussion 300–399, bass 400–499 and melodic 500–599. Arc matches each sound line by slot and name on import, so a slot that holds something else now shows on the sheet rather than going on unseen.
 
+### Synth sounds
+A `synth` line inside a section describes a sound, and Arc makes it: it renders the sound, uploads it into a free slot and puts it on the pad, or keeps it in Arc while offline. How to choose and tune them, with recipes, is in [synth-sounds.md](synth-sounds.md).
+
+```
+synth A1 kick note F1 decay 70 bend 40 click 10 drive 20 name 808_kick
+synth B9 bass note C2 wave square decay 25 tone 25 reso 75 sweep 70 drive 40 name acid
+synth C4 pad note C3 chord min7 attack 60 decay 60 length 3 tone 40 name dark_pad
+```
+
+- **Shape:** `synth <pad> <type> [<setting> <value>]...`. The pad is written as in grid rows and must be in the section's group.
+- **Where:** right after the section line and its sound lines, before pad lines, grid rows and `notes`. Never put a `|` in it. Older Arc reads a synth line there as an unknown word (a warning), but refuses the card when the line comes after `notes` or holds a `|`.
+- **Type:** one of `kick snare clap hat openhat tom rim cowbell sub bass pluck stab bell zap lead pad riser`. Each is a sound that works with no settings at all.
+- **Settings**, in any order. The type, the settings and the wave and chord words aren't case-sensitive; note names and the name are.
+
+| Setting | Values | Default | What it does |
+|---|---|---|---|
+| `note` | C0 to C7, sharps only (`F#1`) | per type | the root pitch. On drums it tunes the body |
+| `wave` | `sine tri saw square metal none` | per type | the oscillator. `metal` is six 808-hat squares; `none` is noise only |
+| `chord` | `one min maj min7 maj7 dom7 sus2 sus4 fifth oct` | per type | notes stacked on the root |
+| `attack` | 0–100 | per type | the fade-in, from none to 2 s |
+| `decay` | 0–100 | per type | how long it rings; a hit lasts about five of these. On lead, pad and riser it is the end fade |
+| `length` | 0.05–4 seconds, up to two decimals | auto for hits; lead 1, pad 3, riser 2 | the sample's length. Auto is the attack plus five times the decay |
+| `tone` | 0–100 | per type | dark to bright (the filter's cutoff). On `bell` it is the FM depth |
+| `reso` | 0–100 | per type | the filter's resonance |
+| `sweep` | 0–100 | per type | the cutoff starts this far up and falls back in half the decay |
+| `bend` | 0–100 | per type | the pitch starts higher and drops |
+| `click` | 0–100 | per type | a 1 ms tick at the start |
+| `noise` | 0–100 | per type | white noise mixed in |
+| `snap` | 0–100 | off; snare 40 | gives the noise its own decay |
+| `drive` | 0–100 | per type | saturation |
+| `detune` | 0–100 | per type | three voices per note, spread apart |
+| `level` | 1–100 | hat 60, open hat 55, clap 80, rim and cowbell 70, else 100 | loudness after the sound is made |
+| `seed` | 0–999 | 0 | another take of the noise |
+| `name` | one word, at most 13 characters | the type word | `_` shows as a space |
+
+- Knobs are whole numbers, ASCII digits only (`007` is 7; `+40`, `-1` and `1.5` are not). A setting given twice on a line keeps the later value.
+- **Name:** one word of letters, digits, `_` and `-`, starting with a letter or digit. A longer one is cut to 13 characters, with a warning. On the EP-133 the sound is called the name, with `_` as a space, then a space and a 6-character tag that the settings decide: `808 kick 29f789`. The same settings always give the same tag; the name isn't part of it.
+- **KEYS:** a pad in KEYS mode (`pad B7 mode key`) plays the sound as made when the notes list says `note C4`. So a bass made at C2 plays C2 at `note C4` and D2 at `note D4`.
+- **Errors:** a synth line before the first section ("'synth' needs a section first, such as [A]."), a `|` in it, a line without a pad and a type, a pad that isn't one or is in another group, a setting with no value, a knob, level or seed outside its range or not a whole number, a note outside C0–C7 or not written like `C2` or `F#1`, a length outside 0.05–4 or with more than two decimals, and a name that isn't one word of letters, digits, `_` or `-`. A line with an error is left out.
+- **Warnings:** a synth line after `notes` ("Put synth lines before notes, so older Arc can read the card."), an unknown type (the line is ignored), an unknown setting (ignored, with its value when the next word isn't a setting), an unknown wave or chord word (ignored), a name cut to 13 characters, and a second synth line for the same pad (the later is kept).
+- **With a sound line:** a pad may have both. On import, for each pad: a sound line that Arc finds on the EP-133 wins; then a synth already on the device, found by its name; then a missing sound that a saved factory pack has, uploaded while connected; then the synth is made; otherwise the sound line shows as missing.
+- **In Arc:** the import sheet lists each synth to make in the SOUNDS block, such as **Make 808 kick · Made by Arc from the card, into a free slot**, ticked, with a play button to hear it first. Connected, IMPORT makes it, uploads it into a free slot and puts it on the pad. Offline, the row says **Made by Arc, kept in Arc until you connect**: Live plays it on the pad, and it goes to the device on reconnect. A synth already on the device under its name is put on the pad without a new upload, so importing the same line again uses no new slot. UNDO puts the pad's old sound back and leaves the made sound in its slot. The web app reads, checks and keeps synth lines but makes no sounds.
+- **Writing:** Arc writes a section's synth lines after its sound lines and before its pad lines, in keypad order, each with only the settings the line gave, in the order `note wave chord attack decay length tone reso sweep bend click noise snap drive detune level seed name`. A length is written as `2`, `0.5` or `1.25`.
+
 ## Scenes and chains (optional)
 One card can hold several scenes, which together make a track idea (intro, drop, breakdown, drop), and the order to play them in.
 - **`scene [name]`** starts a scene. Everything up to the next `scene` line belongs to it: its `[A]`–`[D]` sections with their rows, `notes`, `sound` and `pad` lines. The name is optional and at most 40 characters. Arc shows it on the import sheet, but scenes keep no names in Arc.
@@ -148,7 +192,7 @@ These lines set the project's FX in Arc: the same master effect, sends, compress
 ## Limits and checks
 - At most 2048 notes in a pattern; more is an error.
 - Two hits on the same pad at the same tick count as one: the louder is kept, with a warning.
-- Unknown header words, section options and note options give a warning, never an error, so newer cards stay readable.
+- Unknown header words, section options and note options give a warning, never an error, so newer cards stay readable. So do unknown sound types, settings and wave or chord words on a synth line.
 - Every problem carries its line number and a short reason, which the user can paste back to Claude.
 
 ## Writing rules (Arc's export, so a card read back gives the same card)
@@ -157,6 +201,7 @@ These lines set the project's FX in Arc: the same master effect, sends, compress
 - `step` is the first of 1/16, 1/16T, 1/32 that puts every pad hit on the grid. When none does, 1/16 is used and the hits that don't fit go to `notes`.
 - **No sound:** when Arc knows the pads, a comment `# no sound on: <pads>` right after the header lists the used pads with no sound (see "FX in Arc's share").
 - **Sounds:** right after the section line, a `sound` line for each pad the section's notes use whose slot Arc knows, in keypad order, with the sound's name when Arc knows it. Pads that only appear in `notes` get one too. The `pad` lines (see "FX in Arc's share") come after them.
+- **Synth lines:** a card Arc writes back keeps its synth lines, after the section's sound lines and before its pad lines, in keypad order, with only the settings each line gave. A share made from the device writes none: a sound Arc made shows there as a sound line with its device name, such as `sound A8 612 808 kick 29f789`.
 - **Rows:** one for each pad that has grid hits, in keypad order (7 8 9 4 5 6 1 2 3 . 0 E), followed by Arc's sound name for that pad when it knows one.
   - A note goes on a row when it is a pad hit (no semi), on the swung grid, its velocity is 127, 100, 64 or 14·n, its gate is a whole number of steps, and its holds don't run into the next hit on the row. Otherwise it goes to `notes`, written exactly.
   - Steps are grouped by 4 with spaces, with `|` between bars.
@@ -174,6 +219,7 @@ These lines set the project's FX in Arc: the same master effect, sends, compress
   - Failing that, the line is skipped with a warning.
   - A pad that already plays the sound is left alone.
 - **Applying sounds:** connected, the chosen sounds are written to the EP-133's pads in the active project, and those pads' own settings reset to the sound's. Offline, they become Arc's offline pad changes, which go to the device on reconnect. The import sheet lists each change with a tick box, all ticked by default.
+- **Synth lines:** a pad with a synth line and no sound line Arc can use gets the made sound (see "Synth sounds"): connected, Arc renders it, uploads it into a free slot and puts it on the pad; offline, it keeps it in Arc and uploads it on reconnect. A sound already on the device under the synth's device name is reused, not uploaded again. The sheet lists it as **Make <name>**, ticked.
 - **FX and pad shaping:** the import sheet has an FX block, which lists the effect, sends, compressor and sidechain as old → new, with an APPLY FX switch that is on by default. It also lists each pad's shaping as old → new, ticked, next to the SOUNDS block. Importing applies what is switched on and ticked. A pad's new sound goes on first, so its shaping lands on the new sound (a sound change resets the pad's own settings). APPLY FX replaces only the kinds of FX the card has a line for.
 - **Scenes:** a card with `scene` lines adds one new scene per card scene, after the project's scenes; with **REPLACE** on in the sheet's Scenes row (a setting Arc keeps) they take the place of the project's scenes instead, from S01, the project's patterns kept in the banks and its chain cleared unless the card's is set. Each section takes its group's next free pattern; nothing is overwritten. The sheet lists each scene with its new number and patterns.
 - **Chain:** with SET CHAIN on (the default), a card's `chain` replaces the project's chain, mapped to the new scene numbers, and turns it on.

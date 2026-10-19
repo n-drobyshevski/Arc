@@ -20,6 +20,7 @@ When the user has not copied a pattern out of Arc, the card does not know what i
 | A. | cowbell | A0 | perc | AENTER | crash |
 
 - **Group B** is a bass sound on pad 7, **C** a chord or keys sound on pad 7, **D** a lead or effect sound on pad 7. They are played in KEYS mode, so they live in the `notes` list. `note C4` is the sample's own pitch (MIDI 60), so a bass line sits around C1-C3.
+- **No sound for a part?** When the user's list (or the factory pack) has nothing that fits, such as a lead on the empty group D, a real 808 sub or an acid bass, add a `synth` line for that pad so Arc makes one; the recipes and the rules are in [synth-sounds.md](synth-sounds.md). A made bass plays its own note (C2) at `note C4`, so move a card's bass line up two octaves for it: `note F1` becomes `note F3`, `note E2` becomes `note E4`. The cards below have no synth lines: they play whatever is on the pads.
 - Names after the pad are only for reading. The pattern plays whatever sound is on the pad.
 - Hats: `x` is a normal hit, `o` a quiet one, `X` an accent. A digit 1-9 is a velocity of 14 times the digit.
 

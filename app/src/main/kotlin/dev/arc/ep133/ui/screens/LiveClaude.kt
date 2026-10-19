@@ -70,9 +70,11 @@ import dev.arc.ep133.controller.SoundsUi
 import dev.arc.ep133.controller.Weight
 import dev.arc.ep133.controller.pickedRow
 import dev.arc.ep133.features.CardProblem
+import dev.arc.ep133.features.CardSynth
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.SoundSource
 import dev.arc.ep133.features.SoundStatus
+import dev.arc.ep133.features.SynthVoice
 import dev.arc.ep133.features.Tempo
 import dev.arc.ep133.text.ClaudeText
 import dev.arc.ep133.text.Format
@@ -86,6 +88,7 @@ import dev.arc.ep133.ui.components.GridPlate
 import dev.arc.ep133.ui.components.KeySize
 import dev.arc.ep133.ui.components.KeyStyle
 import dev.arc.ep133.ui.components.PlateLine
+import dev.arc.ep133.ui.components.PlayKey
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
 
@@ -202,6 +205,8 @@ fun ColumnScope.BeatImportSheetContent(
     /** The Scenes row's REPLACE (a setting, kept for the next card): the card's scenes take the place of the project's. */
     replaceScenes: Boolean = false,
     onReplaceScenes: (Boolean) -> Unit = {},
+    /** The play key on a synth row IMPORT makes: hear the sound first. */
+    onPlaySynth: (CardSynth) -> Unit = {},
 ) {
     val c = LocalArcColors.current
     // Chosen on this sheet only: a card's tempo never replaces Arc's unasked.
@@ -348,6 +353,7 @@ fun ColumnScope.BeatImportSheetContent(
             all, putOnPads, { putOnPads = !putOnPads }, ticked.size,
             isTicked = { putOnPads && padKey(it.pad) !in unticked },
             onTick = { row -> unticked = if (padKey(row.pad) in unticked) unticked - padKey(row.pad) else unticked + padKey(row.pad) },
+            onPlaySynth = onPlaySynth,
         )
     }
     ui.shaping?.let { shaping ->
@@ -538,8 +544,8 @@ private fun ColumnScope.SoundPicker(row: SilentRowUi, silent: SilentUi, player: 
 
 /**
  * The SOUNDS block: its header with the PUT ON PADS chip (shown when some row can be ticked; [on] by default), a row
- * for each sound line ([SoundRow]), and under it what writing them does ([ticked] pads): to the EP-133 and its project,
- * or kept in Arc until it connects.
+ * for each sound or synth line ([SoundRow]; a synth row IMPORT makes has a play key, [onPlaySynth]), and under it what
+ * writing them does ([ticked] pads): to the EP-133 and its project, or kept in Arc until it connects.
  */
 @Composable
 private fun SoundsBlock(
@@ -549,6 +555,7 @@ private fun SoundsBlock(
     ticked: Int,
     isTicked: (SoundRowUi) -> Boolean,
     onTick: (SoundRowUi) -> Unit,
+    onPlaySynth: (CardSynth) -> Unit = {},
 ) {
     val c = LocalArcColors.current
     val changes = sounds.changes.size
@@ -563,7 +570,7 @@ private fun SoundsBlock(
         }
         for (row in sounds.rows) {
             PlateLine()
-            SoundRow(row, isTicked(row), on) { onTick(row) }
+            SoundRow(row, isTicked(row), on, sounds.offline, onPlaySynth) { onTick(row) }
         }
     }
     if (sounds.noneFound) Text(ClaudeText.NONE_ON_DEVICE, style = ArcType.small, color = c.graphite)
@@ -810,10 +817,12 @@ private fun PadShapeRow(row: PadShapeRowUi, soundGoing: Boolean, ticked: Boolean
 /**
  * One sound line: a tick box (changes only), the pad, and what happens. A change shows the pad's old sound struck
  * through and the new one after an arrow; a pad that plays the sound already says so, with no box; a sound that isn't in
- * the user's list is amber, with the reason, and no box. [chipOn] is the chip: off, the rows are dimmed and can't be ticked.
+ * the user's list is amber, with the reason, and no box. A synth line IMPORT makes ([SoundRowUi.makes]) says "Make 808 kick"
+ * and where it goes ([offline]: kept in Arc), ticked like a change, with a small play key ([onPlaySynth]). [chipOn] is the
+ * chip: off, the rows are dimmed and can't be ticked.
  */
 @Composable
-private fun SoundRow(row: SoundRowUi, ticked: Boolean, chipOn: Boolean, onTick: () -> Unit) {
+private fun SoundRow(row: SoundRowUi, ticked: Boolean, chipOn: Boolean, offline: Boolean, onPlaySynth: (CardSynth) -> Unit, onTick: () -> Unit) {
     val c = LocalArcColors.current
     val pick = row.pick
     val wanted = pick.wanted
@@ -822,7 +831,9 @@ private fun SoundRow(row: SoundRowUi, ticked: Boolean, chipOn: Boolean, onTick: 
     val now = if (missing) null else if (pick.unverified && pick.name != null) pick.name else ClaudeText.soundName(pick.slot ?: wanted.slot, pick.name)
     val cardSays = row.cardSays
     val pack = row.fromPack
+    val synth = row.synth?.takeIf { row.makes }
     val description = when {
+        synth != null -> ClaudeText.soundRowMake(pick.pad, SynthVoice.shownName(synth), offline)
         missing && pack != null && row.uploadable -> ClaudeText.soundRowUpload(pick.pad, pack.slot, pack.name, pack.kit.model)
         missing -> ClaudeText.soundRowMissing(pick.pad, wanted.slot, wanted.name) + (pack?.let { ". " + ClaudeText.inPack(it.kit.model) } ?: "")
         pick.status == SoundStatus.SAME -> ClaudeText.soundRowSame(pick.pad, now.orEmpty())
@@ -850,6 +861,17 @@ private fun SoundRow(row: SoundRowUi, ticked: Boolean, chipOn: Boolean, onTick: 
         Text(ClaudeText.padLabel(pick.pad), style = ArcType.fieldLabel, color = c.ink, maxLines = 1, modifier = Modifier.width(28.dp))
         val dim = if (row.changes && !chipOn) 0.5f else 1f
         when {
+            // A synth line no slot holds: made as IMPORT goes, into a free slot or (offline) kept in Arc.
+            synth != null -> {
+                Column(Modifier.weight(1f).alpha(dim)) {
+                    Text(
+                        ClaudeText.make(SynthVoice.shownName(synth)),
+                        style = ArcType.small.copy(fontWeight = FontWeight.Bold), color = c.ink, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(if (offline) ClaudeText.MADE_OFFLINE else ClaudeText.MADE_INTO_SLOT, style = ArcType.tiny, color = c.graphite, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                PlayKey(playing = false, enabled = true, description = ClaudeText.PLAY_SYNTH, onClick = { onPlaySynth(synth) }, modifier = Modifier.size(32.dp))
+            }
             // Not on the EP-133, but in a pack Arc has: uploaded into a free slot as IMPORT goes.
             missing && pack != null -> Column(Modifier.weight(1f).alpha(dim)) {
                 Text(
