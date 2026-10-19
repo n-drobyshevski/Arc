@@ -29,6 +29,10 @@ test('the Device view draws the EP-133 and follows the device', async ({ page })
   await expect(pads).toHaveCount(12)
   await demo(page, (d) => d.noteOn(45, 127))
   await expect.poll(() => pads.evaluateAll((els) => els.filter((el) => Number((el as HTMLElement).style.getPropertyValue('--glow')) > 0.5).length)).toBe(1)
+  // Its group's LED lights at half while another group is shown.
+  await ep.getByRole('tab', { name: 'Group C' }).click()
+  const ledA = ep.locator('.ep-led--group[data-group="0"]')
+  await expect.poll(() => ledA.evaluate((el) => (el as HTMLElement).style.getPropertyValue('--glow'))).toBe('0.5')
   await demo(page, (d) => {
     d.noteOff(45)
     d.clock('stop')

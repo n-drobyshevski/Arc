@@ -526,6 +526,8 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
               {led(297, y, {
                 class: `ep-a ep-led ep-led--group${groupLed(r)}`,
                 'data-group': String(r),
+                // The glow pass lights a group not shown at half, as this render does.
+                'data-glow-scale': r === group ? '1' : '0.5',
                 style: { ...at(287, y - 10), '--glow': glowCss(r === group ? glows[r]! : glows[r]! * 0.5) },
               } as HTMLAttributes<HTMLSpanElement>)}
               {COLS.map((x, i) => (

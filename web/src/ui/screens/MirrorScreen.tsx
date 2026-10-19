@@ -335,36 +335,90 @@ const perfNow = (): number => (typeof performance !== 'undefined' ? performance.
 const NOTHING: ReadonlySignal<ReadonlySet<number>> = signal<ReadonlySet<number>>(new Set())
 const NOTHING_PLAYS: LivePlaying = { pads: NOTHING, notes: NOTHING }
 
-/** Sets [el]'s --glow to [value] unless it already has it (the frame loop runs 60 times a second). */
-function setGlow(el: HTMLElement, value: string): void {
-  if (el.style.getPropertyValue('--glow') !== value) el.style.setProperty('--glow', value)
-}
+/**
+ * The elements the glow pass writes, kept between frames (web only: the frame loop
+ * ran four querySelectorAlls and read each --glow back 60 times a second). A
+ * MutationObserver marks the lists stale when nodes or their data-* change under
+ * the root, and forgets what was written to an element whose style something else set.
+ */
+class GlowEls {
+  private pads: [HTMLElement, number][] = []
+  private groups: [HTMLElement, number, number][] = []
+  private keys: [HTMLElement, number][] = []
+  private notes: [HTMLElement, number][] = []
+  private stale = true
+  /** The --glow last written to each element, so a frame doesn't read it back. */
+  private written = new WeakMap<HTMLElement, string>()
+  private readonly observer: MutationObserver | null
 
-/** Writes every pad's, key's and group's glow at [now] straight into the DOM (the frame loop's step), only where it changed. */
-function applyGlow(
-  root: HTMLElement,
-  pads: ReadonlyMap<number, PadLight>,
-  notes: ReadonlyMap<number, PadLight>,
-  keyNotes: readonly number[] | null,
-  now: number,
-): void {
-  for (const el of root.querySelectorAll<HTMLElement>('[data-pad]')) {
-    const l = pads.get(Number(el.dataset.pad))
-    setGlow(el, glowCss(l ? glow(l, now) : 0))
+  constructor(readonly root: HTMLElement) {
+    this.observer =
+      typeof MutationObserver === 'undefined' ? null : new MutationObserver((records) => this.changed(records))
+    this.observer?.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['style', 'data-pad', 'data-group', 'data-glow-scale', 'data-key', 'data-note'],
+    })
   }
-  for (const el of root.querySelectorAll<HTMLElement>('[data-group]')) {
-    setGlow(el, glowCss(groupGlow(pads, Number(el.dataset.group), now)))
+
+  disconnect(): void {
+    this.observer?.disconnect()
   }
-  if (keyNotes) {
-    const lit = keysLit(notes, keyNotes, now)
-    for (const el of root.querySelectorAll<HTMLElement>('[data-key]')) {
-      setGlow(el, glowCss(lit.get(Number(el.dataset.key)) ?? 0))
+
+  private changed(records: MutationRecord[]): void {
+    for (const r of records) {
+      if (r.type === 'attributes' && r.attributeName === 'style') this.written.delete(r.target as HTMLElement)
+      else this.stale = true
     }
-    // The piano: each key by its own note.
-    for (const el of root.querySelectorAll<HTMLElement>('[data-note]')) {
-      const l = notes.get(Number(el.dataset.note))
-      setGlow(el, glowCss(l ? glow(l, now) : 0))
+  }
+
+  private rebuild(): void {
+    const all = <T,>(sel: string, f: (el: HTMLElement) => T): T[] =>
+      Array.from(this.root.querySelectorAll<HTMLElement>(sel), f)
+    this.pads = all('[data-pad]', (el) => [el, Number(el.dataset.pad)])
+    // The device's group LEDs light at half for a group not shown (data-glow-scale).
+    this.groups = all('[data-group]', (el) => [el, Number(el.dataset.group), Number(el.dataset.glowScale ?? 1)])
+    this.keys = all('[data-key]', (el) => [el, Number(el.dataset.key)])
+    this.notes = all('[data-note]', (el) => [el, Number(el.dataset.note)])
+    this.stale = false
+  }
+
+  /** Sets [el]'s --glow to [value] unless it already has it. */
+  private set(el: HTMLElement, value: string): void {
+    const was = this.written.get(el) ?? el.style.getPropertyValue('--glow')
+    if (was !== value) el.style.setProperty('--glow', value)
+    this.written.set(el, value)
+  }
+
+  /** Writes every pad's, key's and group's glow at [now] straight into the DOM (the frame loop's step), only where it changed. */
+  apply(
+    pads: ReadonlyMap<number, PadLight>,
+    notes: ReadonlyMap<number, PadLight>,
+    keyNotes: readonly number[] | null,
+    now: number,
+  ): void {
+    if (this.observer) this.changed(this.observer.takeRecords())
+    else this.stale = true
+    if (this.stale) this.rebuild()
+    for (const [el, pad] of this.pads) {
+      const l = pads.get(pad)
+      this.set(el, glowCss(l ? glow(l, now) : 0))
     }
+    for (const [el, group, scale] of this.groups) {
+      this.set(el, glowCss(groupGlow(pads, group, now) * scale))
+    }
+    if (keyNotes) {
+      const lit = keysLit(notes, keyNotes, now)
+      for (const [el, key] of this.keys) this.set(el, glowCss(lit.get(key) ?? 0))
+      // The piano: each key by its own note.
+      for (const [el, note] of this.notes) {
+        const l = notes.get(note)
+        this.set(el, glowCss(l ? glow(l, now) : 0))
+      }
+    }
+    // Our own writes aren't someone else's.
+    this.observer?.takeRecords()
   }
 }
 
@@ -547,8 +601,19 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     () => (keys.on ? Keys.notes(keys.root, keys.scale, keys.octave) : null),
     [keys.on, keys.root, keys.scale, keys.octave],
   )
+  const glowEls = useRef<GlowEls | null>(null)
+  const applyGlow = (now: number): void => {
+    const el = root.current
+    if (!el) return
+    if (glowEls.current?.root !== el) {
+      glowEls.current?.disconnect()
+      glowEls.current = new GlowEls(el)
+    }
+    glowEls.current.apply(pads, notes, keyNotes, now)
+  }
+  useEffect(() => () => glowEls.current?.disconnect(), [])
   useLayoutEffect(() => {
-    if (fixedNow === null && root.current) applyGlow(root.current, pads, notes, keyNotes, perfNow())
+    if (fixedNow === null) applyGlow(perfNow())
   })
   useEffect(() => {
     if (fixedNow !== null || typeof requestAnimationFrame === 'undefined') return
@@ -556,7 +621,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     let raf = 0
     const frame = (): void => {
       const t = perfNow()
-      if (root.current) applyGlow(root.current, pads, notes, keyNotes, t)
+      applyGlow(t)
       raf = running(t) ? requestAnimationFrame(frame) : 0
     }
     if (running(perfNow())) raf = requestAnimationFrame(frame)
