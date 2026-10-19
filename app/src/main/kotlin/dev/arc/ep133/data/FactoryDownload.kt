@@ -13,7 +13,8 @@ import java.net.URL
 
 /**
  * teenage engineering's site, for the factory sounds (FactorySounds): paths on
- * its origin read over HTTPS, nothing sent but the request. A cancel closes
+ * its origin read over HTTPS, nothing sent but the request. Also a REMAKE's
+ * LOOK UP ([page], [landing]): a music app's page for a song's title. A cancel closes
  * the connection at once (a stalled read or connect would otherwise wait out
  * its timeout), and the read that fails then throws [CancelledError].
  * Blocking: call it off the main thread.
@@ -24,8 +25,45 @@ object FactoryDownload {
     private const val TIMEOUT_MS = 20_000
     private const val CANCEL_POLL_MS = 100L
 
+    // LOOK UP waits on a tap: a short wait, and no more of a page than its head needs (a track page's meta, an oEmbed).
+    private const val PAGE_TIMEOUT_MS = 8_000
+    private const val PAGE_MAX = 2 * 1024 * 1024
+
+    // Spotify's track page names the song (its og: meta) to a phone's browser, not to a computer's: the request says it is a phone's.
+    private const val BROWSER = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36"
+
+    // A spotify.link sends a phone to the app (an intent:// no request follows) and a computer to the track page ([landing]).
+    private const val DESKTOP = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+
     fun text(path: String, signal: CancelSignal, origin: String = FactorySounds.ORIGIN): String = get(origin + path, signal) { c ->
         c.inputStream.use { it.readBytes() }.toString(Charsets.UTF_8)
+    }
+
+    /**
+     * A small text page at [url] (a REMAKE's LOOK UP: a music app's track page or oEmbed, TrackLookup), asked for as a
+     * phone's browser would, with short timeouts, its first [PAGE_MAX] bytes. Only on a tap; nothing sent but the request.
+     */
+    fun page(url: String, signal: CancelSignal = CancelSignal()): String = get(url, signal, PAGE_TIMEOUT_MS, BROWSER, ::head)
+
+    /**
+     * Where a short link at [url] leads (a spotify.link: its track page), as [page] but asked for as a computer's browser
+     * would: the address it ends at after its redirects, a line, then that page. The track's link is in the address,
+     * as the page itself may only hand it to the app.
+     */
+    fun landing(url: String, signal: CancelSignal = CancelSignal()): String = get(url, signal, PAGE_TIMEOUT_MS, DESKTOP) { c -> "${c.url}\n${head(c)}" }
+
+    // A page's first [PAGE_MAX] bytes, as text.
+    private fun head(c: HttpURLConnection): String {
+        val out = ByteArrayOutputStream()
+        val buf = ByteArray(16 * 1024)
+        c.inputStream.use { input ->
+            while (out.size() < PAGE_MAX) {
+                val n = input.read(buf)
+                if (n < 0) break
+                out.write(buf, 0, n)
+            }
+        }
+        return out.toByteArray().toString(Charsets.UTF_8)
     }
 
     /**
@@ -82,7 +120,7 @@ object FactoryDownload {
     fun notFactory(kit: FactoryKit): String =
         if (kit == FactoryKit.EP40) dev.arc.ep133.text.FeatureText.NOT_FACTORY_40 else dev.arc.ep133.text.FeatureText.NOT_FACTORY
 
-    private fun <T> get(url: String, signal: CancelSignal, read: (HttpURLConnection) -> T): T {
+    private fun <T> get(url: String, signal: CancelSignal, timeout: Int = TIMEOUT_MS, agent: String? = null, read: (HttpURLConnection) -> T): T {
         signal.check()
         val c = URL(url).openConnection() as HttpURLConnection
         // CancelSignal is a flag: a small watcher turns it into a closed connection.
@@ -95,8 +133,9 @@ object FactoryDownload {
             }
         }.apply { isDaemon = true; start() }
         try {
-            c.connectTimeout = TIMEOUT_MS
-            c.readTimeout = TIMEOUT_MS
+            c.connectTimeout = timeout
+            c.readTimeout = timeout
+            agent?.let { c.setRequestProperty("User-Agent", it) }
             c.useCaches = false
             c.instanceFollowRedirects = true
             if (c.responseCode !in 200..299) throw IOException("HTTP ${c.responseCode}")
