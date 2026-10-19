@@ -78,6 +78,19 @@ class BeatPlanTest {
     }
 
     @Test
+    fun `a prompt without a card is named by its task, a remake by its song`() {
+        val p = dev.arc.ep133.features.ClaudePrompt()
+        assertEquals("Arc \u00B7 New beat", promptShare(promptWhat(p.withTask(dev.arc.ep133.features.PromptTask.BEAT)), "Write.", null).subject)
+        assertEquals("Arc \u00B7 Track idea", promptShare(promptWhat(p.withTask(dev.arc.ep133.features.PromptTask.TRACK)), "Write.", null).subject)
+        assertEquals("Learn", promptWhat(p.withTask(dev.arc.ep133.features.PromptTask.LEARN)))
+        // The song's words, cut at a word; with none, the task alone. Words of one's own don't add the saved name's mark.
+        val remake = p.remake("One More Time \u00B7 Daft Punk")
+        assertEquals("Arc \u00B7 Remake \u00B7 One More Time\u2026", promptShare(promptWhat(remake), "Remake.", null).subject)
+        assertEquals("Remake \u00B7 One More Time\u2026", promptWhat(remake.copy(text = "Remake it.")))
+        assertEquals("Remake", promptWhat(p.remake("https://spotify.link/AbCdEf123")))
+    }
+
+    @Test
     fun `a share is the scene's patterns or a group's as a tidied card in a fenced block, or nothing without notes`() {
         assertNull(beatShare(ProjectSeq.DEFAULT, null, 120.0, 50, nameOf))
         assertNull(beatShare(ProjectSeq.DEFAULT, 0, 120.0, 50, nameOf))

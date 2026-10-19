@@ -100,6 +100,8 @@ object SettingsText {
     }
     /** Why a piano size is greyed out. */
     const val DOESNT_FIT = "Too wide for this window"
+    const val BACKGROUND_PLAY = "Play in the background"
+    const val BACKGROUND_PLAY_NOTE = "A beat playing in Live goes on when you leave arc or lock the phone. The notification, the lock screen and headphone buttons stop it."
     const val HAPTICS = "Haptics"
     const val HAPTICS_NOTE = "A light tick when a pad or key goes down."
     /** Making up for the delay of a Bluetooth or hearing-aid output (an addition). */
@@ -127,6 +129,12 @@ object SettingsText {
     /** "Pad sounds \u00B7 69 KB". */
     fun padSoundsShort(size: String) = "$PAD_SOUNDS_SHORT \u00B7 $size"
     const val PAD_SOUNDS_SHORT_NOTE = "Copies of your pad samples, to play without the EP-133."
+
+    const val HELP = "Help"
+    const val TRY_AGAIN = "Try arc again"
+    const val TRY_AGAIN_NOTE = "A few short steps on the real screen: connect, play a pad, back up."
+    const val SHOW = "Show"
+    const val SHOW_NOTE = "Names every control on the screen."
 
     const val ABOUT = "About"
     fun version(v: String) = "arc $v"

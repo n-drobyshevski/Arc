@@ -2,7 +2,7 @@
 // its own IndexedDB database, settings in memory, its own channel and device lock.
 import 'fake-indexeddb/auto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createBrowserDeps, DEMO_CHANNEL_NAME, DEMO_LOCK_NAME, pageStorage } from '../../src/boot/browserDeps'
+import { createBrowserDeps, DEMO_CHANNEL_NAME, DEMO_LOCK_NAME, DEMO_PRESS_MS, pageStorage } from '../../src/boot/browserDeps'
 import { createController } from '../../src/state/controller'
 import { physicalPad } from '../../src/core/features/padNotes'
 import { DB_NAME, DEMO_DB_NAME } from '../../src/platform/storage/db'
@@ -102,6 +102,31 @@ describe('?demo isolation', () => {
     vi.stubGlobal('localStorage', ls)
     pageStorage(true).setItem('x', '1')
     expect(ls.data.size).toBe(0)
+  })
+
+  it("Try arc's demo press: pad A with its pad push, let go 400 ms later; none on a real page", async () => {
+    const calls: string[] = []
+    vi.stubGlobal('window', {
+      ...globalThis,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      __arcDemo: {
+        noteOn: (n: number, v: number) => calls.push(`on ${n} ${v}`),
+        pushPadActive: (p: number, g: number, pad: number) => calls.push(`push ${p} ${g} ${pad}`),
+        noteOff: (n: number) => calls.push(`off ${n}`),
+      },
+    })
+    const deps = await createBrowserDeps({ demo: true })
+    made.push(deps)
+    expect(deps.demo).toBe(true)
+    deps.demoPress?.()
+    expect(calls).toEqual(['on 36 127', 'push 1 0 1'])
+    await new Promise((r) => setTimeout(r, DEMO_PRESS_MS + 50))
+    expect(calls).toEqual(['on 36 127', 'push 1 0 1', 'off 36'])
+    const real = await createBrowserDeps()
+    made.push(real)
+    expect(real.demo).toBe(false)
+    expect(real.demoPress).toBeUndefined()
   })
 
   it('holds its own device lock, so a real tab can still connect', async () => {

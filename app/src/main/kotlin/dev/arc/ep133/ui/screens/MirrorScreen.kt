@@ -404,6 +404,14 @@ fun MirrorScreen(
     initialToolsOpen: Boolean = false,
     /** For screenshots: start with that page of the tools open (null: the front page). */
     initialToolsPage: ToolsPage? = null,
+    /** The tools panel open, held by the caller (the tour reads it); null keeps it here. */
+    toolsOpen: Boolean? = null,
+    onToolsOpen: (Boolean) -> Unit = {},
+    /**
+     * Live tools asked to open on the CLAUDE page (a song shared to arc), at its top; the page itself starts on the
+     * request's word and says when it has opened ([ClaudeUi.open]).
+     */
+    openClaude: dev.arc.ep133.controller.ClaudeOpen? = null,
     /** For screenshots: start with the offline note unfolded. */
     initialNoteOpen: Boolean = false,
     /** Not connected: download the factory sounds (FactorySounds); null when they are in the library. */
@@ -846,20 +854,33 @@ fun MirrorScreen(
     }
     // Read where it is used: the piano reads it while drawing, so a fade only redraws the keys.
     val clock = { fixedNow ?: if (fading) frame else System.nanoTime() }
-    // The secondary controls live in a side panel, opened from the strip on the right.
-    var toolsOpen by rememberSaveable { mutableStateOf(initialToolsOpen) }
+    // The secondary controls live in a side panel, opened from the strip on the right
+    // (kept here unless the caller holds [toolsOpen]).
+    var ownToolsOpen by rememberSaveable { mutableStateOf(initialToolsOpen) }
+    val tools = toolsOpen ?: ownToolsOpen
+    fun setTools(open: Boolean) {
+        ownToolsOpen = open
+        onToolsOpen(open)
+    }
     // The page Live tools show (null: the front page), back on the front page once they have closed.
     var toolsPage by rememberSaveable { mutableStateOf(initialToolsPage) }
     val toolsScroll = rememberScrollState()
     val toolsHeader: (@Composable RowScope.() -> Unit)? = toolsPage?.let { p -> { ToolsBack(p) { toolsPage = null } } }
     val toolsActions: (@Composable RowScope.() -> Unit)? =
-        if (toolsPage == null && onSettings != null) ({ SettingsKey { toolsOpen = false; onSettings() } }) else null
+        if (toolsPage == null && onSettings != null) ({ SettingsKey { setTools(false); onSettings() } }) else null
+    // A song shared to arc: Live tools open on CLAUDE, at its top, where its REMAKE is.
+    LaunchedEffect(openClaude) {
+        if (openClaude == null) return@LaunchedEffect
+        setTools(true)
+        toolsPage = ToolsPage.CLAUDE
+        toolsScroll.scrollTo(0)
+    }
     // A practice starting (from Claude's page) closes Live tools: its pads are the point.
     LaunchedEffect(practice != null) {
-        if (practice != null) toolsOpen = false
+        if (practice != null && tools) setTools(false)
     }
-    LaunchedEffect(toolsOpen) {
-        if (!toolsOpen) {
+    LaunchedEffect(tools) {
+        if (!tools) {
             delay(TOOLS_CLOSE_MS)
             toolsPage = null
         }
@@ -999,9 +1020,9 @@ fun MirrorScreen(
         // words, whether to tick as their hold's choices light ([PickWord]'s quick).
         CompositionLocalProvider(LocalSamplePanel provides panel, LocalDownPressure provides downPressure, LocalLiveHaptics provides haptics) {
             SideZone(
-                open = toolsOpen,
-                onOpen = { toolsOpen = true },
-                onClose = { toolsOpen = false },
+                open = tools,
+                onOpen = { setTools(true) },
+                onClose = { setTools(false) },
                 title = MirrorText.TOOLS,
                 // On a page the back control takes the caption's place; Settings (the tools close behind it) is on the front page.
                 header = toolsHeader,

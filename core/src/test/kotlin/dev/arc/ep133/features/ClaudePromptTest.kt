@@ -24,8 +24,8 @@ class ClaudePromptTest {
             assertEquals(lo..hi, g.tempo, g.name)
             assertEquals(bpm, g.bpm, g.name)
         }
-        // Every recipe but the arrangement is offered, the EP-40's as the riddim family.
-        assertEquals(recipes.keys - "Breakcore arrangement", Genres.ALL.map { it.name }.toSet())
+        // Every recipe but the arrangements is offered, the EP-40's as the riddim family.
+        assertEquals(recipes.keys - setOf("Breakcore arrangement", "Schranz arrangement"), Genres.ALL.map { it.name }.toSet())
         assertEquals(setOf("One drop", "Rockers", "Steppers", "Dub", "Digital riddim", "Dancehall", "UK dub"), Genres.ALL.filter { it.ep40 }.map { it.name }.toSet())
         assertTrue(Regex("^## (.+) \\(EP-40\\)$", RegexOption.MULTILINE).findAll(text).all { m -> Genres.ALL.first { it.name == m.groupValues[1] }.ep40 })
         assertEquals(Genres.ALL.size, Genres.ALL.map { it.id }.toSet().size)
@@ -190,6 +190,90 @@ class ClaudePromptTest {
         assertEquals("toward one drop", PromptText.value(ClaudePrompt(genre = "one-drop"), PromptSlot.GENRE, FactoryKit.EP40))
         assertEquals("any tempo", PromptText.value(ClaudePrompt(PromptTask.TRACK), PromptSlot.TEMPO, FactoryKit.EP40))
         assertEquals("lesson 9: bass and melody in keys", PromptText.value(ClaudePrompt(lesson = 9), PromptSlot.LESSON, FactoryKit.EP40))
+    }
+
+    @Test
+    fun `a remake keeps its song and scope, and starts at the song's own tempo`() {
+        val p = ClaudePrompt(PromptTask.REMAKE, song = "One; \\ More\nTime https://open.spotify.com/track/0DiWol3AO6WpXZgp0goxAV", loop = true)
+        assertEquals(p, ClaudePrompt.decode(p.encode()))
+        assertFalse(p.encode().contains("\n"))
+        assertEquals(ClaudePrompt(), ClaudePrompt.decode("song=   ;loop=maybe"))
+        assertEquals(ClaudePrompt.MAX_SONG, ClaudePrompt.decode("song=" + "x".repeat(400)).song?.length)
+        // A space typed before the next word stays.
+        assertEquals("One ", ClaudePrompt.decode("song=One ").song)
+        assertFalse(p.withCard)
+        assertFalse(p.copy(fromPick = true).withCard)
+        assertEquals(listOf(PromptSlot.SONG, PromptSlot.SCOPE, PromptSlot.TEMPO, PromptSlot.KIT), p.slots)
+        // A genre's tempo doesn't come along; the song does, both ways.
+        val beat = ClaudePrompt(PromptTask.BEAT, song = "x").withGenre(Genres.of("dub-techno"))
+        assertNull(beat.withTask(PromptTask.REMAKE).tempo)
+        assertEquals("x", beat.withTask(PromptTask.REMAKE).song)
+        assertEquals("x", beat.withTask(PromptTask.REMAKE).withTask(PromptTask.BEAT).song)
+        val shared = beat.copy(text = "mine").remake("  Song A https://spotify.link/abc ")
+        assertEquals(ClaudePrompt(PromptTask.REMAKE, bars = 4, genre = "dub-techno", song = "Song A https://spotify.link/abc"), shared)
+        assertFalse(PromptText.prompt(shared, SharePick.SCENE, false).contains("- Tempo: 122"))
+        assertTrue(PromptText.prompt(shared, SharePick.SCENE, false).contains("\n- Tempo: the song's own\n"))
+    }
+
+    @Test
+    fun `a remake asks for the song pinned down by search, its facts sourced, its hook written fresh`() {
+        val p = ClaudePrompt().remake("One More Time · Daft Punk https://open.spotify.com/track/0DiWol3AO6WpXZgp0goxAV")
+        assertEquals(
+            "Use the arc-beats skill to remake a song for my EP-133 as closely as the EP-133 allows: a card of scenes with a chain line that I'll paste into Arc and play.\n" +
+                "- Song: One More Time · Daft Punk\n" +
+                "- Link: https://open.spotify.com/track/0DiWol3AO6WpXZgp0goxAV\n" +
+                "- Scope: the whole song, its sections in order as scenes (16 at most), the chain giving each section's bars\n" +
+                "- Tempo: the song's own\n" +
+                "- First: use web search (if it's off, say so and ask me to turn it on) to pin down the recording (title, artist, which version) and find its tempo, key, time signature, genre and structure with bar counts. " +
+                "If the link is a spotify.link page, follow the open.spotify.com/track link inside it. Check each fact against two sources or more; where they disagree (half or double time, a key a fifth off, relative major or minor), say which you chose and why. " +
+                "If you can't tell which song it is, ask me instead of guessing.\n" +
+                "- Copy: the tempo, swing, drum pattern, sounds, FX, chord progression and the sections with their bar counts, as closely as you can\n" +
+                "- Write: a hook of your own in the song's key, register and feel, and the bass from the chord roots in the song's rhythm (if the bass line is the song's main riff, write your own). No lyrics, and no melody copied note for note.\n" +
+                "Only name a page you opened or a search snippet you saw. Parts you can't find described (often the drums and sounds) are written in the song's genre and marked guess. " +
+                "Before the card, list each fact with its source and whether it is confirmed (sources agree), likely (one good source) or a guess, and put the same as # comments at the top of the card. " +
+                "Reply with the card in one code block, then a line for each scene saying which part of the song it is.",
+            PromptText.prompt(p, SharePick.SCENE, sounds = false),
+        )
+        assertTrue(PromptText.prompt(p, SharePick.CHAIN, sounds = true).endsWith("which part of the song it is.\nChoose the sounds from my sound list, which follows:"))
+        // The main loop: one card, worded as a new beat's.
+        val loop = PromptText.prompt(p.copy(loop = true), SharePick.SCENE, false)
+        assertTrue(loop.startsWith("Use the arc-beats skill to remake a song for my EP-133 as closely as the EP-133 allows. I'll paste your card into the Arc app and play it, so give one complete ARC BEAT card"))
+        assertTrue(loop.contains("\n- Scope: its main groove (the chorus or the drop) as one scene of 4-8 bars\n"))
+        assertTrue(loop.contains("\n- Copy: the tempo, swing, drum pattern, sounds, FX and chord progression, as closely as you can\n"))
+        assertTrue(loop.endsWith("Reply with the card in one code block, then 2-4 lines on the feel and one thing to try changing."))
+        // A tempo set is asked for, and not copied.
+        val set = PromptText.prompt(p.copy(tempo = 100), SharePick.SCENE, false)
+        assertTrue(set.contains("\n- Tempo: 100 BPM\n") && set.contains("\n- Copy: swing, drum pattern, "))
+        // Words alone, or a link alone: the line it hasn't goes.
+        val words = PromptText.prompt(p.copy(song = "Around the World by Daft Punk"), SharePick.SCENE, false)
+        assertTrue(words.contains("\n- Song: Around the World by Daft Punk\n- Scope: "))
+        assertFalse(words.contains("Link") || words.contains("spotify.link"))
+        val link = PromptText.prompt(p.copy(song = "https://spotify.link/AbC123"), SharePick.SCENE, false)
+        assertTrue(link.contains(".\n- Link: https://spotify.link/AbC123\n- Scope: "))
+        assertFalse(link.contains("- Song:"))
+        assertEquals("Mine", PromptText.prompt(p.copy(text = "Mine"), SharePick.SCENE, false))
+    }
+
+    @Test
+    fun `a remake's sentence, name and waiting title say the song short`() {
+        val p = ClaudePrompt(kit = FactoryKit.EP40).remake("One More Time · Daft Punk https://open.spotify.com/track/0DiWol3AO6WpXZgp0goxAV")
+        assertEquals("Remake One More Time… as the whole song at its own tempo for the EP-40 kit", PromptText.sentence(p, FactoryKit.EP40).joinToString(" ") { it.text })
+        assertEquals("its main loop", PromptText.value(p.copy(loop = true), PromptSlot.SCOPE, FactoryKit.EP40))
+        assertEquals("100 BPM", PromptText.value(p.copy(tempo = 100), PromptSlot.TEMPO, FactoryKit.EP40))
+        assertEquals("this Spotify link", PromptText.value(p.copy(song = "https://spotify.link/AbC123"), PromptSlot.SONG, FactoryKit.EP40))
+        assertEquals("this Apple Music link", PromptText.value(p.copy(song = "https://music.apple.com/us/song/one-more-time/697195462"), PromptSlot.SONG, FactoryKit.EP40))
+        assertEquals("a song", PromptText.value(p.copy(song = null), PromptSlot.SONG, FactoryKit.EP40))
+        assertEquals("Remake · One More Time…", PromptText.name(p))
+        assertEquals("Remake", PromptText.name(p.copy(song = null)))
+        assertEquals("One More…", PromptText.what(p))
+        assertEquals("Windowlicker", PromptText.what(p.copy(song = "Windowlicker by Aphex Twin")))
+        assertEquals("Stand by Me", PromptText.what(p.copy(song = "Stand by Me · Ben E. King https://open.spotify.com/track/3SdTKo2uVsxFblQjpScoHy")))
+        assertEquals("Remake · One More Time…", PromptText.name(p.copy(song = "One More Time by Daft Punk https://www.shazam.com/track/5933917/one-more-time")))
+        assertEquals("Rhythmicall…", PromptText.what(p.copy(song = "Rhythmicallyspeaking")))
+        assertEquals("Remake", PromptText.what(p.copy(song = "https://spotify.link/AbC123")))
+        assertEquals(listOf(PromptText.NEW_BEAT, PromptText.TRACK_IDEA, PromptText.NEW_BEAT), listOf(PromptTask.BEAT, PromptTask.TRACK, PromptTask.IMPROVE).map { PromptText.what(ClaudePrompt(it)) })
+        assertEquals(listOf("New", "Improve", "Track", "Remake", "Play", "Learn"), PromptTask.entries.map(PromptText::tab))
+        assertEquals(listOf("Song", "Scope"), listOf(PromptSlot.SONG, PromptSlot.SCOPE).map(PromptText::slot))
     }
 
     @Test

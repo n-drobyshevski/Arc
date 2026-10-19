@@ -624,6 +624,140 @@ describe('library', () => {
   })
 })
 
+describe('Try arc', () => {
+  /** Counts the library.json writes. */
+  function countSyncs(h: Harness): { n: number } {
+    const count = { n: 0 }
+    const real = h.library.syncIndex.bind(h.library)
+    h.library.syncIndex = async () => {
+      count.n++
+      return real()
+    }
+    return count
+  }
+
+  it('finishTour sets tourDone and guideSeen together; nothing reaches library.json without a library', async () => {
+    const h = await harness()
+    await h.c.start()
+    const syncs = countSyncs(h)
+    h.c.setTourSteps('connect,~pad')
+    h.c.finishTour()
+    expect(h.c.settings.value).toMatchObject({ tourSteps: 'connect,~pad', tourDone: true, guideSeen: true })
+    expect(h.c.coach.seen).toBe(true)
+    expect(JSON.parse(h.storage.getItem('arc.settings')!)).toEqual({ tourSteps: 'connect,~pad', tourDone: true, guideSeen: true })
+    expect(syncs.n).toBe(0)
+    // Nothing changed: nothing written.
+    h.c.finishTour()
+    h.c.setTourSteps('connect,~pad')
+    expect(syncs.n).toBe(0)
+  })
+
+  it('with a library the tour settings are copied into library.json', async () => {
+    const h = await harness()
+    await h.c.start()
+    await h.c.import('a.pak', 0, async () => samplePak())
+    await until(h, (st) => st.backups.length === 1)
+    const syncs = countSyncs(h)
+    h.c.setTourSteps('connect')
+    h.c.finishTour()
+    expect(syncs.n).toBe(2)
+    expect(h.library.settings()).toMatchObject({ 'app.tourSteps': 'connect', 'app.tourDone': 'true', 'app.guideSeen': 'true' })
+  })
+
+  it('restartTour forgets the steps and leaves tourDone alone', async () => {
+    const h = await harness({ storage: { 'arc.settings': JSON.stringify({ tourSteps: 'connect,pad', tourDone: true, guideSeen: true }) } })
+    await h.c.start()
+    h.c.restartTour()
+    expect(h.c.settings.value).toMatchObject({ tourSteps: '', tourDone: true, guideSeen: true })
+    expect(JSON.parse(h.storage.getItem('arc.settings')!)).toEqual({ tourDone: true, guideSeen: true })
+  })
+
+  it('connectIfNeeded connects, and a second tap never disconnects', async () => {
+    const h = await harness()
+    await h.c.start()
+    const first = h.c.connectIfNeeded()
+    const second = h.c.connectIfNeeded()
+    await Promise.all([first, second])
+    expect(h.c.state.value.device).not.toBeNull()
+    await h.c.connectIfNeeded()
+    expect(h.c.state.value.connected).toBe(true)
+    expect(h.ep.input.opens).toBe(1)
+  })
+
+  it('midiPermission and plugged: from the probe, then from asking; plugged follows the cable', async () => {
+    const h = await harness({ permission: 'prompt' })
+    expect(h.c.state.value).toMatchObject({ midiPermission: 'prompt', plugged: null })
+    await h.c.start()
+    expect(h.c.state.value).toMatchObject({ midiPermission: 'prompt', plugged: null })
+    await h.c.connect()
+    expect(h.c.state.value).toMatchObject({ midiPermission: 'granted', plugged: true })
+    h.ep.access.unplug(h.ep.input, h.ep.output)
+    await until(h, (st) => st.plugged === false)
+    h.ep.access.plug(h.ep.input, h.ep.output)
+    await until(h, (st) => st.plugged === true)
+    const granted = await harness({ permission: 'granted', storage: { 'arc.settings': JSON.stringify({ autoConnect: false }) } })
+    await granted.c.start()
+    expect(granted.c.state.value).toMatchObject({ midiPermission: 'granted', plugged: true, connected: false })
+    const none = await harness({ nav: {} })
+    await none.c.start()
+    expect(none.c.state.value.midiPermission).toBe('unsupported')
+  })
+
+  it('a refused prompt: the permission is probed again', async () => {
+    let state = 'prompt'
+    const nav = fakeNavigator({ deny: true, permission: 'prompt' })
+    nav.permissions = { query: () => Promise.resolve({ state }) }
+    const h = await harness({ nav })
+    await h.c.start()
+    state = 'denied'
+    await h.c.connect()
+    await until(h, (st) => st.midiPermission === 'denied')
+    expect(h.c.state.value.plugged).toBeNull()
+  })
+
+  it('connectNote says another tab holds the EP-133, and clears on the next try', async () => {
+    const h = await harness({ otherTab: true })
+    await h.c.start()
+    await h.c.connect()
+    expect(h.c.state.value.connectNote).toBe(WebText.OTHER_TAB)
+    h.lockHeld.value = false
+    const ok = await harness()
+    await ok.c.start()
+    await ok.c.connect()
+    expect(ok.c.state.value.connectNote).toBeNull()
+  })
+
+  it('libraryChecked and folderChecked are set once looked at, even when the library fails', async () => {
+    const h = await harness()
+    expect(h.c.state.value).toMatchObject({ libraryChecked: false, folderChecked: false })
+    await h.c.start()
+    expect(h.c.state.value).toMatchObject({ libraryChecked: true, folderChecked: true })
+    const c = createController({ ...h.deps, library: unavailableLibrary(new Error('blocked')) })
+    try {
+      await c.start()
+      expect(c.state.value.libraryLoaded).toBe(false)
+      expect(c.state.value.libraryChecked).toBe(true)
+    } finally {
+      c.dispose()
+    }
+  })
+
+  it('demoPress is the demo deps\' own; without it nothing happens', async () => {
+    const h = await harness()
+    expect(h.c.demo).toBe(false)
+    expect(() => h.c.demoPress()).not.toThrow()
+    let pressed = 0
+    const c = createController({ ...h.deps, demo: true, demoPress: () => pressed++ })
+    try {
+      expect(c.demo).toBe(true)
+      c.demoPress()
+      expect(pressed).toBe(1)
+    } finally {
+      c.dispose()
+    }
+  })
+})
+
 describe('failures', () => {
   it('savePak of a backup whose file is gone: FILE_MISSING, and no save picker opens', async () => {
     const h = await harness()

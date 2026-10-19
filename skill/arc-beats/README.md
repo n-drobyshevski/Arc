@@ -4,7 +4,8 @@ With this skill, Claude can:
 
 1. **Build beats** for the EP-133 K.O. II as ARC BEAT cards that you paste into Arc and play.
 2. **Analyse and improve** beats you copy out of Arc, and send back a better card.
-3. **Teach** the EP-133 and beat making, one step at a time, with the official key combos and Arc as a practice partner.
+3. **Remake a song** you share from Spotify or another music app: Claude looks up its tempo, key, chords and sections on the web and writes them as a card, with a hook of its own.
+4. **Teach** the EP-133 and beat making, one step at a time, with the official key combos and Arc as a practice partner.
 
 The card is plain text; see [references/beat-card.md](references/beat-card.md) for the format. Cards live in Arc only: pasting one never writes to the EP-133.
 
@@ -32,18 +33,19 @@ Claude Code picks it up the next time it starts, and uses it whenever you talk a
 1. In Arc's **Live** screen open **Live tools**, find **CLAUDE**, and use **SHARE SCENE** or **SHARE** (the group shown) to send a beat to the Claude app, so Claude sees your pad names. Tick **With my sound list** first and Claude also gets the sounds on your EP-133, and can choose them for the pads with `sound` lines. Or ask Claude to make something new.
 2. Claude replies with a card in a code block. Copy it and tap **PASTE BEAT** (or share the reply to Arc), then **IMPORT** on the sheet, and play. One undo removes it. If the card picks sounds, the sheet lists each as old to new with a tick box; the ticked ones can be put on your pads (this is the one thing a card can change on the EP-133). When nothing in your sounds fits, Claude can write a `synth` line instead: Arc makes that sound, uploads it into a free slot and puts it on the pad (offline, it keeps it in Arc until you connect).
 
-[references/arc-app.md](references/arc-app.md) has the details Claude uses. On Android the Claude page builds the prompt for you: tabs for a new beat, improving one, a track or a lesson, and a sentence on the glass whose orange words (genre, tempo, kit, parts) you tap to change; EDIT changes the words by hand and prompts can be saved. On the web **Learn with Claude** starts lesson 1.
+[references/arc-app.md](references/arc-app.md) has the details Claude uses. On Android the Claude page builds the prompt for you: tabs for a new beat, improving one, a track, remaking a song, playing a card or a lesson, and a sentence on the glass whose orange words (genre, tempo, kit, parts) you tap to change; EDIT changes the words by hand and prompts can be saved. On the web **Learn with Claude** starts lesson 1.
 
 ## What is in the folder
 
 | Path | What it is |
 |---|---|
-| `SKILL.md` | The skill: what Claude does for each of the three jobs |
+| `SKILL.md` | The skill: what Claude does for each of its jobs |
 | `references/beat-card.md` | The card format, the spec both Arc and the script follow |
 | `references/genres.md` | The assumed kit, the feel words and 56 genre recipes (a techno family among them, and seven for the EP-40 kit), each a valid card |
 | `references/factory-sounds.md` | The EP-133's and the EP-40 Riddim's factory sounds by slot, and a fresh EP-133 project's pads, for sound lines without a shared list |
 | `references/ep40-kit.md` | The EP-40 Riddim kit on an EP-133: its slots, loops and tempos, its pads, and the loop rules |
 | `references/synth-sounds.md` | Synth lines: sounds Claude describes and Arc makes, with the types, the settings and four recipe kits |
+| `references/remake.md` | Remaking a song: finding its facts, mapping them to the EP-133, what is copied and what is written fresh |
 | `references/lessons.md` | Twelve lessons from a first beat to sampling |
 | `references/analysis.md` | How to read the script's report, the checklist and the vocabulary |
 | `references/arc-app.md` | What each Arc screen does, for Claude to explain |

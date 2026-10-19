@@ -43,9 +43,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -176,9 +178,13 @@ fun ArcShell(
     initialMenuOpen: Boolean = false,
     /** For screenshots: the connection key's ring part-way, as while it is held. */
     holdProgress: Float = 0f,
+    /** Whether the section list is open, each time that changes (the tour steps aside while it is). */
+    onMenuOpen: (Boolean) -> Unit = {},
     content: @Composable () -> Unit,
 ) {
     var menuOpen by rememberSaveable { mutableStateOf(initialMenuOpen) }
+    val reportMenu by rememberUpdatedState(onMenuOpen)
+    LaunchedEffect(menuOpen) { reportMenu(menuOpen) }
     Box(Modifier.fillMaxSize()) {
         ArcFrame(
             top = {

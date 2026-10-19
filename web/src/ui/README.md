@@ -11,6 +11,7 @@ ui/
   nav.ts            the navigation stack (one history entry per layer)
   coachPlace.ts     pure coach-tag placement (tested)
   lazy.ts           a screen or sheet as a chunk of its own, preloaded when idle
+  tourPlace.ts      pure placement of Try arc's step card and the veil's hole (tested)
   theme/            tokens.css, cap.css, base.css, theme.ts (applyTheme), fonts.ts
   components/       primitives + the shell (one .tsx + .css each)
   screens/          one file per Kotlin screen (+ its .css)
@@ -97,7 +98,8 @@ The `?demo` render counter (`dev/perf.ts`, `window.__arcPerf`) and
 ## Navigation (`nav.ts`)
 
 The app is a stack of layers; Back (browser or Android-style) pops one in
-Android's order: dialog, side panel, menu, coach, sheet, full screen, tab.
+Android's order: dialog, side panel, menu, coach, tour, sheet, full screen, tab.
+`nav.back()` keeps to the back guard too (nothing closes under the progress sheet).
 Every open thing is a layer, so Back closes it and a reload restores it.
 
 ```ts
@@ -107,14 +109,14 @@ nav.selectTab('live')                          // section switch; closes everyth
 nav.openScreen({ kind: 'contents', id })       // full screens: settings | debug | search | guide | contents | compare
 nav.open(sheetLayer(`detail:${b.id}`))         // sheets
 nav.open(dialogLayer('delete'))                // confirm dialogs
-nav.open(overlayLayer('side'))                 // 'menu' | 'side' | 'coach'
+nav.open(overlayLayer('side'))                 // 'menu' | 'side' | 'coach' | 'tour'
 nav.close(sheetLayer(`detail:${b.id}`))        // remove that layer (only it) from the stack
 nav.replace(sheetLayer(`detail:${id}`), screenLayer({ kind: 'contents', id }))  // Detail → Contents in one move
 nav.back()                                     // a Done/close key: same as system Back
 ```
 
 `NavView`: `tab`, `debug`, `settings`, `search`, `guide`, `contentsId`,
-`compare`, `menu`, `side`, `coach`, `sheets: string[]`, `dialogs: string[]`.
+`compare`, `menu`, `side`, `coach`, `tour`, `sheets: string[]`, `dialogs: string[]`.
 Sheet/dialog ids in use: `detail:<id>`, `restore:<id>`, `comparePick:<id>`,
 `pads:backup:<id>:<n>`, `pads:device:<n>`, `upload`, `trim:<i>`, `licence`,
 `progress` (owned by app.tsx), `edit:<group>:<offset>` (Live's EDIT pad sheet; Live
@@ -173,6 +175,19 @@ Two attributes help it:
 <span class="word__row" data-coach-box="">…</span>                       // inside a marked word: what shows, not the touch area
 ```
 
+**Try arc** (the first-run tour) is the same overlay with a `mode` (`CoachMode`:
+`only`, `spotlight`, `passThrough`) and a `card`: no close hint, the veil does
+nothing when tapped, a ringed hole (`clip-path: path(evenodd …)`, `veilPath`)
+around the spotlit mark, and the step card (`components/Tour.tsx`, placed by
+`tourPlace.ts`). Only the veil and the card take pointer events; with
+`passThrough` (Hear) the pads take touches and the rest of the page is
+`inert` (a mark that is only a box over its controls, the desk's pads, names
+them with `data-coach-pass`). Back up shows on Backups (`backups.backup`: the
+caption row's block, or the big key before the first backup) and the run
+takes the user there and back to Live after it (`tourTab`). app.tsx holds the run (`useTourFirstRun`, `useTourRun`): the
+session, the snapshot it reads, and the ticks kept in `settings.tourSteps`.
+Escape goes through `nav.back()`.
+
 ## Component catalogue (`components/`)
 
 Common optional props on most: `class`, `id`, `ref`. Colours are CSS values
@@ -206,7 +221,8 @@ Common optional props on most: `class`, `id`, `ref`. Colours are CSS values
 | `KoPanel` | KoPanel | `keymap: GuideKeymap \| null` (the K.O. II as an SVG in 560-wide drawing units, the keymap's keys outlined with step badges, the rest dimmed; `KO_ASPECT`; the Guide's desk column) |
 | `Shell`, `TopBar`, `SectionTag`, `SectionMenu`, `GuideEdgeTab` | Chrome.kt | mounted by app.tsx; screens don't use them. The bar holds the tag, Live's amber Bluetooth key (`top.bluetooth`, `late`: shown while `liveLate` is set; a tap toasts `MirrorText.WIRELESS_DELAY` through `onNote`), the connection key (a tap toasts "Hold to disconnect"; held for a second it disconnects; a hidden Disconnect button and an `aria-describedby` hint are for screen readers) and ? (the desk adds the theme switch); `SectionMenu`'s `onSettings?` adds Settings after the sections, set apart (left out on the desk, whose rail has the key) |
 | `ThemeSwitch`, `themeKeys(theme)` | — (web only) | `theme`, `onTheme(t)` (the desk's top bar, after the ? key: System / Light / Dark icon keys as a radiogroup, the same setting as Settings → Theme; coach mark `top.theme`) |
-| `CoachHost`, `CoachOverlay`, `useCoachMark` | Coach.kt | see above |
+| `CoachHost`, `CoachOverlay`, `useCoachMark` | Coach.kt | see above (`mode`, `card` for Try arc) |
+| `TourCard`, `tourMode` | Tour.kt | one card per step (`step`, `session`, `progress`, `state`, `demo`, `actions`); mounted by app.tsx through `CoachHost` |
 
 The top bar's 8dp spacing is drawn by shrinkable gap spans (not `gap`), so
 it matches Android at 360px and gives way only on a narrower screen.

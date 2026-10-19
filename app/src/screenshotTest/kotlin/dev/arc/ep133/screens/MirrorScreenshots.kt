@@ -137,96 +137,9 @@ import dev.arc.ep133.ui.screens.projectKeyOf
 import dev.arc.ep133.ui.theme.ArcTheme
 
 /*
- * Screens drawn from fixed sample states (no device), for screenshots.
- * The sound names are made up for the picture.
+ * Screens drawn from fixed sample states (no device), for screenshots; the
+ * shared samples are in ScreenshotFixtures.kt.
  */
-
-private val names = mapOf(
-    PhysicalPad(0, 9) to "kick", PhysicalPad(0, 10) to "kick 2", PhysicalPad(0, 11) to "snare",
-    PhysicalPad(0, 6) to "hat closed", PhysicalPad(0, 7) to "hat open", PhysicalPad(0, 8) to "clap",
-    PhysicalPad(0, 3) to "rim", PhysicalPad(0, 4) to "tom low", PhysicalPad(0, 0) to "perc",
-    PhysicalPad(1, 9) to "bass c1", PhysicalPad(1, 10) to "bass d1", PhysicalPad(2, 4) to "vox chop",
-    PhysicalPad(3, 9) to "stab", PhysicalPad(3, 3) to "riser",
-)
-
-private const val NOW = 10_000_000_000L
-
-private val playing = MirrorState(
-    pads = mapOf(
-        PhysicalPad(0, 9) to PadLight(124, 1, NOW - 20_000_000),
-        PhysicalPad(0, 6) to PadLight(70, 1, NOW - 90_000_000, offAt = NOW - 120_000_000),
-        PhysicalPad(1, 9) to PadLight(100, 1, NOW - 10_000_000),
-        PhysicalPad(2, 4) to PadLight(90, 1, NOW - 200_000_000, offAt = NOW - 60_000_000),
-    ),
-    keysHeld = mapOf(74 to 1, 77 to 1),
-    lastKeysNote = 77,
-    lastHit = Hit(PhysicalPad(0, 9), 45, 1, 124, 1, "kick"),
-    playing = true,
-    bpm = 122.0,
-    activeProject = 3,
-    learned = (0..11).associateWith { it + 1 },
-    pushesSeen = true,
-    padOrder = PadOrder.FROM_TOP,
-)
-
-/**
- * A section as the app shows it: the top bar with its section tag, and the guide tab on the left edge.
- * On a phone on its side Live's display line ([pill]) rides in the top bar, as MainActivity puts it.
- */
-@Composable
-private fun Framed(
-    tab: Tab,
-    connected: Boolean = true,
-    dark: Boolean = false,
-    skin: SkinChoice = SkinChoice.EP133,
-    guide: Boolean = false,
-    menu: Boolean = false,
-    guideOpen: Boolean = false,
-    pill: (@Composable BoxScope.() -> Unit)? = null,
-    /** A toast showing, and (in a short window) where the bar's middle is: the bar reports it a frame late. */
-    toast: String? = null,
-    barMiddle: DpRect? = null,
-    /** The toast's action key ("UNDO"). */
-    toastAction: String? = null,
-    /** Live's mic key in the top bar, as MainActivity has it on Live (here unlit unless given). */
-    sample: SampleKey? = if (tab == Tab.LIVE) SampleKey(false) {} else null,
-    /** Live's Bluetooth key in the top bar, while the sound goes to Bluetooth. */
-    late: LateKey? = null,
-    /** The connection key's ring part-way, as while it is held. */
-    holdProgress: Float = 0f,
-    content: @Composable () -> Unit,
-) {
-    ArcTheme(dark = dark, skin = skin) {
-        val density = LocalDensity.current
-        val slot = LocalBarSlot.current
-        val placed = remember(barMiddle) {
-            barMiddle?.let { m -> BarSlot().apply { bounds = with(density) { Rect(m.left.toPx(), m.top.toPx(), m.right.toPx(), m.bottom.toPx()) } } }
-        }
-        CompositionLocalProvider(LocalBarSlot provides (placed ?: slot)) {
-            Box(Modifier.fillMaxSize()) {
-                CoachHost(visible = guide, onDismiss = {}) {
-                    ArcShell(
-                        tab = tab, onTab = {},
-                        connected = connected, canConnect = true,
-                        onConnect = {}, onDisconnect = {}, onHint = {}, haptics = false, onDebug = {}, onSettings = {}, onHelp = {},
-                        guideOpen = guideOpen, onGuide = {},
-                        guide = { GuideScreen(onBack = {}) },
-                        middle = pill.takeIf { tab == Tab.LIVE && liveInBar(LocalArcWindow.current) },
-                        initialMenuOpen = menu,
-                        sample = sample,
-                        late = late,
-                        holdProgress = holdProgress,
-                        content = content,
-                    )
-                }
-                ArcToast(
-                    id = toast?.let { 1L }, text = toast.orEmpty(), error = false, onTimeout = {}, modifier = Modifier.align(Alignment.BottomCenter),
-                    action = toastAction, onAction = toastAction?.let { { } },
-                )
-            }
-        }
-    }
-}
 
 @Composable
 private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, skin: SkinChoice = SkinChoice.EP133, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f, claude: ClaudeUi? = null, trimming: String? = null, toolsPage: ToolsPage? = null, factoryKit: dev.arc.ep133.features.FactoryKit? = null, factoryKits: List<dev.arc.ep133.features.FactoryKit> = listOf(dev.arc.ep133.features.FactoryKit.EP133, dev.arc.ep133.features.FactoryKit.EP1320), practice: dev.arc.ep133.ui.screens.LivePractice? = null) {
@@ -342,9 +255,6 @@ fun LiveAllGroupsPlayPagePreview() = Live(playing, tools = true, toolsPage = Too
 @Preview(name = "Live one group small", widthDp = 360, heightDp = 668, showBackground = true)
 @Composable
 fun LiveOneGroupSmallPreview() = Live(playing, oneGroup = true)
-
-// Not connected: the pads and names as arc last read them, nothing lit.
-private val lastRead = MirrorState(activeProject = 3, learned = (0..11).associateWith { it + 1 })
 
 @PreviewTest
 @Preview(name = "Live offline", widthDp = 412, heightDp = 843, showBackground = true)
@@ -2110,24 +2020,6 @@ fun LiveKeysGridFallbackPreview() = Live(sideways, keys = chord)
  */
 private val SmallBarMiddle = DpRect(97.dp, 6.dp, 451.dp, 50.dp)
 
-private val device = BackupDevice("EP-133", "TE032AS001", "", "2.5.1")
-
-private fun backup(id: String, title: String, at: Long, sounds: Int, projects: Int) = BackupRecord(
-    id, title, "", at, "device", null, device, sounds, projects, (1..projects).toList(), (1..sounds).toList(), emptyMap(), 48_000_000L,
-)
-
-private val connectedState = UiState(
-    connected = true,
-    device = DeviceSummary(DeviceInfo("EP-133", "TE032AS001", "2.5.1", "", ""), Storage(64e6, 21e6, 43e6), 212, 6),
-    backups = listOf(
-        backup("1", "Before the gig", 1_791_000_000_000L, 212, 6),
-        backup("2", "Backup Oct 2", 1_790_700_000_000L, 198, 5),
-        backup("3", "Jam with Ana", 1_790_100_000_000L, 187, 4),
-    ),
-    freshId = "1",
-    libraryLoaded = true,
-)
-
 @Composable
 private fun Main(state: UiState, dark: Boolean = false, skin: SkinChoice = SkinChoice.EP133, guide: Boolean = false) {
     Framed(Tab.BACKUPS, connected = state.connected, dark = dark, skin = skin, guide = guide) {
@@ -2310,13 +2202,14 @@ private fun Settings(dark: Boolean, state: UiState = connectedState, settings: A
     }
 }
 
+// The whole page, Help (Try arc again, What's what) and About at its end.
 @PreviewTest
-@Preview(name = "Settings", widthDp = 393, heightDp = 1500, showBackground = true)
+@Preview(name = "Settings", widthDp = 393, heightDp = 2300, showBackground = true)
 @Composable
 fun SettingsPreview() = Settings(dark = false)
 
 @PreviewTest
-@Preview(name = "Settings dark", widthDp = 393, heightDp = 1500, showBackground = true)
+@Preview(name = "Settings dark", widthDp = 393, heightDp = 2300, showBackground = true)
 @Composable
 fun SettingsDarkPreview() = Settings(dark = true)
 
@@ -2543,6 +2436,39 @@ fun LiveToolsClaudePlayPreview() = Live(
 fun LiveToolsClaudeLearnPreview() = Live(
     lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
     claude = ClaudeUi(sounds = 212, prompt = dev.arc.ep133.features.ClaudePrompt(dev.arc.ep133.features.PromptTask.LEARN, lesson = 5), picking = dev.arc.ep133.features.PromptSlot.LESSON),
+)
+
+// REMAKE: a song shared from Spotify, its title looked up, as the whole song at its own tempo; SHARE and COPY lit.
+private val remakeSong = dev.arc.ep133.features.ClaudePrompt().remake("One More Time \u00B7 Daft Punk https://open.spotify.com/track/0DiWol3AO6WpXZgp0goxAV")
+
+@PreviewTest
+@Preview(name = "Live tools claude remake", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeRemakePreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(sounds = 212, prompt = remakeSong, saved = savedPrompts),
+)
+
+// A short spotify.link shared, no words: the song field on the glass with its link, PASTE, LOOK UP (lit), CLEAR and DONE.
+@PreviewTest
+@Preview(name = "Live tools claude remake song", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeRemakeSongPreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(
+        sounds = 212,
+        prompt = dev.arc.ep133.features.ClaudePrompt().remake("https://spotify.link/AbCdEf123"),
+        picking = dev.arc.ep133.features.PromptSlot.SONG,
+    ),
+)
+
+// The remake shared: the glass waits for its card, named by the song's title.
+@PreviewTest
+@Preview(name = "Live tools claude remake waiting", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeRemakeWaitingPreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(sounds = 212, prompt = remakeSong, waiting = dev.arc.ep133.text.PromptText.what(remakeSong)),
 )
 
 // Live tools' front page after a share: the display waits for Claude's reply, with PASTE BEAT and a dismiss.

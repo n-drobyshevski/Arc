@@ -28,6 +28,7 @@ import { MAX_OCTAVE, MIN_OCTAVE, NoteNames, Scale, noteNamesOf, scaleOf } from '
 import { LearnedLinks } from '../../core/features/learnedLinks'
 import { physicalPad, type PhysicalPad } from '../../core/features/padNotes'
 import { PadOrder } from '../../core/features/padPush'
+import { Tour } from '../../core/features/tour'
 import { KeysView, choiceOf as pianoChoiceOf, keysViewOf } from '../../core/features/piano'
 import { ArpOrder, ArpSettings } from '../../core/features/arp'
 import { FactoryKit, type FactoryKitId } from '../../core/features/factorySounds'
@@ -102,6 +103,10 @@ export interface AppSettings {
   readonly samplePattern: boolean
   /** The factory kit Live plays offline (FactoryKit.id): the EP-133's, or the EP-40's or the EP-1320's once saved. */
   readonly factoryKit: FactoryKitId
+  /** "Try arc": the steps done and skipped (Tour.encode), so a tour left half way resumes. */
+  readonly tourSteps: string
+  /** "Try arc" was finished (Done or Not now): it never starts by itself again. */
+  readonly tourDone: boolean
 }
 
 /** SAMPLE's LEVEL for the mic until one is chosen, in dB. */
@@ -189,6 +194,8 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   sampleTrimSilence: false,
   samplePattern: false,
   factoryKit: FactoryKit.EP133.id,
+  tourSteps: '',
+  tourDone: false,
 })
 
 /** Every setting's key, in Android's order (SettingsStore.values()). */
@@ -228,6 +235,8 @@ export const SETTING_KEYS = Object.freeze([
   'sampleTrimSilence',
   'samplePattern',
   'factoryKit',
+  'tourSteps',
+  'tourDone',
 ] as const)
 export type SettingKey = (typeof SETTING_KEYS)[number]
 
@@ -377,6 +386,7 @@ export function readSettings(raw: string | null): AppSettings {
   const o = storedSettings(raw)
   const bool = (k: SettingKey, d: boolean): boolean => (typeof o[k] === 'boolean' ? (o[k] as boolean) : d)
   const int = (k: SettingKey, d: number): number => (isInt(o[k]) ? (o[k] as number) : d)
+  const str = (k: SettingKey, d: string): string => (typeof o[k] === 'string' ? (o[k] as string) : d)
   const keep = o.keepLast
   return {
     theme: themeOf(o.theme) ?? ThemeChoice.SYSTEM,
@@ -416,6 +426,8 @@ export function readSettings(raw: string | null): AppSettings {
     sampleTrimSilence: bool('sampleTrimSilence', false),
     samplePattern: bool('samplePattern', false),
     factoryKit: FactoryKit.ofId(typeof o.factoryKit === 'string' ? o.factoryKit : null)?.id ?? FactoryKit.EP133.id,
+    tourSteps: str('tourSteps', ''),
+    tourDone: bool('tourDone', false),
   }
 }
 
@@ -479,6 +491,8 @@ export function settingValues(s: AppSettings): Record<SettingKey, string> {
     sampleTrimSilence: String(s.sampleTrimSilence),
     samplePattern: String(s.samplePattern),
     factoryKit: s.factoryKit,
+    tourSteps: s.tourSteps,
+    tourDone: String(s.tourDone),
   }
 }
 
@@ -557,7 +571,15 @@ export function settingsFromIndex(map: Readonly<Record<string, string>>, cur: Ap
     sampleTrimSilence: b('app.sampleTrimSilence') ?? cur.sampleTrimSilence,
     samplePattern: b('app.samplePattern') ?? cur.samplePattern,
     factoryKit: FactoryKit.ofId(get(map, 'app.factoryKit'))?.id ?? cur.factoryKit,
+    // Taken as it is when it reads as the tour's progress (LibraryIndex.merge joined the folder's copies).
+    tourSteps: tourStepsOf(get(map, 'app.tourSteps')) ?? cur.tourSteps,
+    tourDone: b('app.tourDone') ?? cur.tourDone,
   }
+}
+
+/** [v] when it is the tour's progress as Tour.encode writes it, else null. */
+function tourStepsOf(v: string | undefined): string | null {
+  return v !== undefined && Tour.encode(Tour.decode(v)) === v ? v : null
 }
 
 /** The settings, kept in storage and copied into library.json. */
@@ -603,6 +625,27 @@ export class SettingsStore {
     }
     this.set(next)
     return next
+  }
+
+  /**
+   * Forgets [key]: it is no longer stored (nor copied to library.json) and
+   * reads as its default again (SharedPreferences remove). Returns whether
+   * anything changed.
+   */
+  clear(key: SettingKey): boolean {
+    const stored = storedSettings(this.safeGet(SETTINGS_KEY))
+    const had = this.chosen.has(key) || Object.hasOwn(stored, key)
+    const next: AppSettings = { ...this.current, [key]: DEFAULT_SETTINGS[key] }
+    if (!had && sameSettings(this.current, next)) return false
+    delete stored[key]
+    this.chosen.delete(key)
+    try {
+      this.storage.setItem(SETTINGS_KEY, JSON.stringify(stored))
+    } catch {
+      // Kept for this session only.
+    }
+    this.set(next)
+    return true
   }
 
   /** As stored in library.json: only the settings that were chosen. */

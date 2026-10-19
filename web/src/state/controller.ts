@@ -49,6 +49,11 @@
 //   [liveEngine] (the row in use) and [liveLatencyHint] / [setLiveLatencyHint],
 //   the web's stand-in for Android's audio engine choice (LatencyText). Play
 //   actions take the press's event timeStamp ([at]) for the latency note.
+// - Try arc (the first-run tour): its progress and flag are settings
+//   ([setTourSteps], [finishTour], [restartTour]), copied into library.json
+//   only once there is a library to keep them with (Tour.syncsIndex), so a
+//   fresh install that never backs up writes no library.json. ?demo has
+//   [Deps.demoPress] for the Pad step.
 
 import { computed, effect, signal, type ReadonlySignal, type Signal } from '@preact/signals'
 import { Keys, MAX_OCTAVE, MIN_OCTAVE, type NoteNames, type Scale } from '../core/features/keys'
@@ -69,6 +74,7 @@ import { backupDevice, restorePak } from '../core/backup/backup'
 import { describePak, openPak, type PakDescription, type PakSound } from '../core/backup/pak'
 import { project as exportProject, projectFileName, soundFileName, soundWav } from '../core/backup/pakExport'
 import { compare as compareWithDevice } from '../core/features/backupDiff'
+import { Tour } from '../core/features/tour'
 import { contents as deviceContents, projectLayout, soundDetails, type DeviceContents } from '../core/features/deviceBrowser'
 import { FactoryKit, FactorySounds, type FactoryKitId } from '../core/features/factorySounds'
 import { search as searchLibrary, type NameEntry } from '../core/features/librarySearch'
@@ -772,7 +778,13 @@ export class ArcController {
     } catch {
       // The folder stays unused this session.
     }
-    this.store.update((s) => ({ ...s, folderPicked: lib.folderPicked, folderStatus: status, folderName: lib.target?.name ?? null }))
+    this.store.update((s) => ({
+      ...s,
+      folderPicked: lib.folderPicked,
+      folderStatus: status,
+      folderName: lib.target?.name ?? null,
+      folderChecked: true,
+    }))
     void lib.persist().catch(() => false)
     // Backups saved before search existed get their sound names indexed once.
     this.store.update((s) => ({ ...s, search: { ...s.search, indexing: true } }))
@@ -817,7 +829,7 @@ export class ArcController {
       this.names = names
       this.live.libraryChanged(list)
       const first = !this.store.get().libraryLoaded
-      this.store.update((s) => ({ ...s, backups: list, libraryLoaded: true, spaceLeft }))
+      this.store.update((s) => ({ ...s, backups: list, libraryLoaded: true, libraryChecked: true, spaceLeft }))
       // Connected before the library was first read: the device's kit, now that its pack can be seen.
       const sku = this.store.get().device?.info.sku
       if (first && sku !== undefined) this.deviceKit(sku)
@@ -825,6 +837,8 @@ export class ArcController {
       void this.refreshKitNames()
       this.factoryChanged()
     } catch (e) {
+      // The first run decides without the library (no backups, nothing to restore).
+      if (gen === this.libraryGen && !this.disposed) this.store.update((s) => (s.libraryChecked ? s : { ...s, libraryChecked: true }))
       this.toast(Strings.libraryFailed(errorText(e)), true)
     }
   }
@@ -1008,8 +1022,24 @@ export class ArcController {
     return this.conn.connect()
   }
 
+  /** Try arc's Connect key: connects, never disconnects (a second tap while it connects does nothing). */
+  async connectIfNeeded(): Promise<void> {
+    if (this.conn.session !== null || this.store.get().busy) return
+    await this.conn.connect()
+  }
+
   refreshDevice(): Promise<void> {
     return this.conn.refreshDevice()
+  }
+
+  /** ?demo: whether the simulated EP-133 stands in for the device. */
+  get demo(): boolean {
+    return this.deps.demo === true
+  }
+
+  /** ?demo: the simulated EP-133 plays a pad (Try arc's Pad step); nothing elsewhere. */
+  demoPress(): void {
+    this.deps.demoPress?.()
   }
 
   /** dropSession's controller part (the session is already closed). */
@@ -2785,6 +2815,30 @@ export class ArcController {
   /** The guide overlay was shown (it opens by itself only once, also across reinstalls). */
   setGuideSeen(): void {
     this.changeSettings((s) => ({ ...s, guideSeen: true }))
+  }
+
+  /** Try arc's progress (Tour.encode), as it ticks. */
+  setTourSteps(steps: string): void {
+    const before = this.deps.settings.settings
+    this.changeTour(() => this.deps.settings.update((s) => ({ ...s, tourSteps: steps })) !== before)
+  }
+
+  /** Done, Not now or ×: the tour never starts by itself again, and neither does the guide overlay. */
+  finishTour(): void {
+    const before = this.deps.settings.settings
+    this.changeTour(() => this.deps.settings.update((s) => ({ ...s, tourDone: true, guideSeen: true })) !== before)
+  }
+
+  /** Try arc again: the steps start over; tourDone stays as it is (never written back to false). */
+  restartTour(): void {
+    this.changeTour(() => this.deps.settings.clear('tourSteps'))
+  }
+
+  /** The tour's settings reach library.json only once there is a library (Tour.syncsIndex). */
+  private changeTour(change: () => boolean): void {
+    if (!change()) return
+    const st = this.store.get()
+    if (Tour.syncsIndex(st.folderPicked, st.backups.length)) void this.syncIndex()
   }
 
   /** How many backups [setKeepLast] would delete now, for the confirmation. */

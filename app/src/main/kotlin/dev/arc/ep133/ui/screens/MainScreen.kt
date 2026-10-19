@@ -102,7 +102,9 @@ fun MainScreen(
                 ArcKey(
                     Strings.BACK_UP,
                     onBackup,
-                    modifier = Modifier.fillMaxWidth(),
+                    // The same mark as the orange block after it: the guide overlay names it, and the tour's
+                    // Back up step rings it before there is a backup.
+                    modifier = Modifier.fillMaxWidth().coachMark("backups.backup", CoachText.BACK_UP, c.signal, c.onSignal),
                     style = KeyStyle.Signal,
                     size = KeySize.Wide,
                     enabled = canBackup,

@@ -189,6 +189,16 @@ internal fun promptShare(what: String, prompt: String, kit: dev.arc.ep133.featur
     return BeatShare(dev.arc.ep133.text.PromptText.subject(what), if (list == null) text else text + "\n" + BeatCards.soundList(list.source, list.names))
 }
 
+/**
+ * What a prompt without a card is named by in its share's subject: a lesson by its task, a remake by its saved name
+ * ("Remake · One More Time": the song, not just its title), the rest as the waiting glass says it ([PromptText.what]).
+ */
+internal fun promptWhat(prompt: dev.arc.ep133.features.ClaudePrompt): String = when (prompt.task) {
+    dev.arc.ep133.features.PromptTask.LEARN -> dev.arc.ep133.text.PromptText.task(prompt.task)
+    dev.arc.ep133.features.PromptTask.REMAKE -> dev.arc.ep133.text.PromptText.name(prompt.copy(text = null))
+    else -> dev.arc.ep133.text.PromptText.what(prompt)
+}
+
 /** How strong a hit is drawn on the sheet's grid: the ghost, normal and accent tints (the card's x, o and X rounding, as TIDY has it). */
 enum class Weight {
     GHOST,

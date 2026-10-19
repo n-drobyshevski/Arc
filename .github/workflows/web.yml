@@ -5,6 +5,9 @@ on:
     paths:
       - 'web/**'
       - 'reference/**'
+      # The web tests compare its text and coach marks with the Kotlin sources.
+      - 'core/src/main/kotlin/dev/arc/ep133/text/**'
+      - 'app/src/main/kotlin/dev/arc/ep133/ui/**'
       - 'skill/**'
       - 'version.properties'
       - 'vercel.json'
@@ -14,6 +17,9 @@ on:
     paths:
       - 'web/**'
       - 'reference/**'
+      # The web tests compare its text and coach marks with the Kotlin sources.
+      - 'core/src/main/kotlin/dev/arc/ep133/text/**'
+      - 'app/src/main/kotlin/dev/arc/ep133/ui/**'
       - 'skill/**'
       - 'version.properties'
       - 'vercel.json'

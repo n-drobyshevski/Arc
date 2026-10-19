@@ -35,7 +35,20 @@
 // Web delta: outside a short window too, a placement that leaves a tag on a
 // control or an arrow across one gives way to the short window's rules when
 // they fit better (layoutTags): Device's keys under the top bar, upright.
-import { createContext, type ComponentChildren, type JSX } from 'preact'
+//
+// Try arc (the first-run tour) uses the same overlay with a [CoachMode]: no
+// close hint, and the veil does nothing when tapped. It shows the step card
+// ([CoachOverlayProps.card], placed by ui/tourPlace.ts) and, with a spotlight,
+// a hole in the veil (clip-path: path(evenodd …)) ringed in orange around the
+// control the step is about, tagged unless it is a tall area (the card's
+// heading names the pads) or on the screen's edge (a side tag would cover it). Only the veil and the card take pointer events;
+// the page under the hole stays inert except with passThrough (HEAR and the
+// offline steps), where the marked control (the pads, the more-tools strip,
+// the GUIDE tab, the section tag) takes touches and everything else on the
+// page is inert (a mark that is a box over its controls, the desk's pads,
+// names them with data-coach-pass). Without a mode the overlay is the "?"
+// guide, unchanged.
+import { createContext, type ComponentChildren, type JSX, type RefObject } from 'preact'
 import { signal, type Signal } from '@preact/signals'
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { CoachText } from '../../core/text/coachText'
@@ -44,7 +57,9 @@ import {
   COACH_METRICS,
   NO_INSETS,
   arrowHead,
+  edgeOf,
   hintTop,
+  isTall,
   layoutTags,
   sideHook,
   type Box,
@@ -53,6 +68,7 @@ import {
   type PlacedTag,
   type Size,
 } from '../coachPlace'
+import { holeOf, placeTourCard, tourCardWidth, veilPath, type TourPlacement } from '../tourPlace'
 import './Coach.css'
 
 /** The pocket operator app's yellow tip tags, for hints that aren't one key (Kotlin CoachYellow). */
@@ -211,6 +227,12 @@ interface Entry {
   readonly spec: CoachMarkSpec
 }
 
+/**
+ * The tour's card sits in the lower half of the screen (MainActivity's
+ * tourCardLow): the toast then shows at the top, else at the bottom.
+ */
+export const tourCardLow: Signal<boolean> = signal(false)
+
 /** The marks registered by useCoachMark under one CoachHost. */
 export class CoachRegistry {
   private readonly entries = new Map<string, Entry>()
@@ -233,6 +255,11 @@ export class CoachRegistry {
 
   list(): [string, Entry][] {
     return [...this.entries]
+  }
+
+  /** The control registered as [id], if any. */
+  get(id: string): Element | null {
+    return this.entries.get(id)?.el ?? null
   }
 }
 
@@ -263,7 +290,7 @@ export function useCoachMark(id: string, label: string, face: string, ink: strin
 // ---------- reading the page ----------
 
 /** The marks on screen now: data-coach elements under [root], then hook registrations. */
-function collectMarks(root: Element | null, reg: CoachRegistry, origin: DOMRect): CoachMarkInput[] {
+function collectMarks(root: Element | null, reg: CoachRegistry, origin: DOMRect, keep?: (id: string) => boolean): CoachMarkInput[] {
   // Layers over the page (an open side panel): a control whose middle they cover is out of view.
   const covers = root ? Array.from(root.querySelectorAll('[data-coach-cover]')) : []
   const covered = (el: Element, r: DOMRect): boolean => {
@@ -287,6 +314,7 @@ function collectMarks(root: Element | null, reg: CoachRegistry, origin: DOMRect)
   for (const [id, e] of reg.list()) byId.set(id, e)
   const out: CoachMarkInput[] = []
   for (const [id, { el, spec }] of byId) {
+    if (keep && !keep(id)) continue
     if (!el.isConnected) continue
     // A word's touch area reaches past its letters: its data-coach-box part is what shows.
     const part = el.querySelector('[data-coach-box]')
@@ -382,14 +410,63 @@ interface Layout {
   readonly vp: Size
   /** The close hint's top edge. */
   readonly hint: number
+  /** Tour mode: where the card goes (null before the card was measured), and the hole in the veil. */
+  readonly card: TourPlacement | null
+  readonly hole: Box | null
+  /** Tour mode: the spotlight's control is not on screen (yet). */
+  readonly missing: boolean
 }
+
+/**
+ * Try arc's overlay (Kotlin CoachMode). Any mode, even an empty one, turns
+ * the "?" guide into the tour's veil: no close hint, no close on tap.
+ */
+export interface CoachMode {
+  /** Tags only these marks (Done: "?", GUIDE and the more-tools strip). */
+  readonly only?: ReadonlySet<string> | undefined
+  /** The mark the step is about: a ringed hole in the veil (its tag too, unless it is a tall area). */
+  readonly spotlight?: string | undefined
+  /** Touches go through the hole to the page (HEAR: hold a pad). */
+  readonly passThrough?: boolean | undefined
+}
+
+/** What the step card is drawn for (CoachOverlayProps.card). */
+export interface TourCardSlot {
+  /** Only the heading fits (beside the pads on a short screen). */
+  readonly headingOnly: boolean
+  /** The unseen copy that is measured: no ids, no focus. */
+  readonly measuring: boolean
+  /** The card is placed and shown (it can take focus now). */
+  readonly ready: boolean
+}
+
+/** How long a spotlight waits for its control before the card shows without one. */
+export const SPOTLIGHT_WAIT_MS = 1000
 
 export interface CoachOverlayProps {
   registry: CoachRegistry
   /** The element whose data-coach descendants are marks. */
   root: { readonly current: Element | null }
   visible: boolean
+  /** "?": tap anywhere or Escape. Tour: Escape (the app sends it through nav.back()). */
   onDismiss: () => void
+  /** Try arc: the tour's veil instead of the guide (see [CoachMode]). */
+  mode?: CoachMode | undefined
+  /**
+   * Try arc: the step card; headingOnly when only its heading fits beside the
+   * pads. It is also drawn unseen to be measured (measuring: leave out ids and focus).
+   */
+  card?: ((place: TourCardSlot) => ComponentChildren) | undefined
+  /** Try arc: the dialog's name (TourText.TITLE) and the id of the step's heading. */
+  label?: string | undefined
+  describedBy?: string | undefined
+}
+
+/** Whether a mark gets a tag in [mode] (tall areas under a spotlight don't: the card names them). */
+function tagged(mode: CoachMode | undefined, id: string): boolean {
+  if (!mode) return true
+  if (mode.only) return mode.only.has(id)
+  return mode.spotlight === id
 }
 
 /** The faded page with the tags and arrows; mounted while visible or fading out. */
@@ -419,32 +496,101 @@ export function CoachOverlay(props: CoachOverlayProps): JSX.Element | null {
     return () => window.clearTimeout(t)
   }, [visible])
 
+  // While it fades out, the overlay keeps the look it had (a closing tour stays the tour).
+  const kept = useRef({ mode: props.mode, card: props.card })
+  if (visible) kept.current = { mode: props.mode, card: props.card }
+  const mode = kept.current.mode
+  const cardOf = kept.current.card
+  const tour = mode !== undefined
+  const modeRef = useRef(mode)
+  modeRef.current = mode
+  const modeKey = mode ? `${[...(mode.only ?? [])].join(',')}|${mode.spotlight ?? ''}|${mode.passThrough ? 1 : 0}` : ''
+  const measureRef = useRef<HTMLDivElement | null>(null)
+  // A spotlight whose control isn't on screen waits a moment for it.
+  const [waited, setWaited] = useState(false)
+  useEffect(() => {
+    setWaited(false)
+    if (!visible || !mode?.spotlight) return
+    const t = window.setTimeout(() => setWaited(true), SPOTLIGHT_WAIT_MS)
+    return () => window.clearTimeout(t)
+  }, [visible, modeKey])
+
   // What the last placement was made from: a pad's light changing its style every frame
   // moves nothing, and placing again (tens of ms on a phone) would only stall the page.
   const placedFrom = useRef('')
-  /** Places the tags again if anything they depend on moved; [force]: the font changed. */
+  /** Places the tags again if anything they depend on moved; [force]: the font or the tour's card changed. */
   const recompute = useCallback((force = false) => {
     const ov = overlay.current
     if (!ov) return
     const origin = ov.getBoundingClientRect()
     const vp = { width: origin.width, height: origin.height }
-    const marks = collectMarks(root.current, registry, origin)
+    const m = modeRef.current
+    const marks = collectMarks(root.current, registry, origin, (id) => tagged(m, id) || m?.spotlight === id)
     const clear = collectClear(root.current, origin)
     const safe = readInsets(insets.current)
-    const from = JSON.stringify([vp, safe, clear, marks])
+    const key = m ? `${[...(m.only ?? [])].join(',')}|${m.spotlight ?? ''}|${m.passThrough ? 1 : 0}` : ''
+    const from = JSON.stringify([vp, safe, clear, marks, key])
     if (!force && from === placedFrom.current) return
     placedFrom.current = from
-    const placed = layoutTags(marks, vp, (text, max) => measureWith(measurer.current, text, max), { clear, safe, spare: COACH_SPARE })
+    const target = m?.spotlight ? (marks.find((k) => k.id === m.spotlight) ?? null) : null
+    // Tall areas (the pads) get no tag under a spotlight: the card's heading names them. Nor
+    // does a control on the screen's edge (the GUIDE tab): its side tag would cover what is tapped.
+    const tagMarks = marks.filter((k) => tagged(m, k.id) && !(m?.spotlight === k.id && (isTall(k, vp) || edgeOf(k, vp, safe) !== 0)))
+    const placed = layoutTags(tagMarks, vp, (text, max) => measureWith(measurer.current, text, max), { clear, safe, spare: COACH_SPARE })
     const h = hint.current?.getBoundingClientRect()
     const hintSize = h && h.width > 0 ? { width: h.width, height: h.height } : undefined
-    setLayout({ placed, vp, hint: hintTop(vp, placed, hintSize, safe) })
+    let card: TourPlacement | null = null
+    let hole: Box | null = null
+    const el = measureRef.current
+    if (m && el) {
+      // The whole card's height at a width (an unseen copy), and its heading's, for the last resort.
+      const heightAt = (w: number): number => {
+        el.style.width = `${w}px`
+        return Math.ceil(el.getBoundingClientRect().height)
+      }
+      const headingAt = (w: number): number => {
+        el.style.width = `${w}px`
+        const head = el.querySelector<HTMLElement>('[data-tour-head]')
+        const inner = el.firstElementChild
+        if (!head || !inner) return heightAt(w)
+        const pad = parseFloat(getComputedStyle(inner).paddingBottom) || 0
+        return Math.ceil(head.getBoundingClientRect().bottom - el.getBoundingClientRect().top + pad)
+      }
+      // Done tags controls around the middle of the screen: its card docks below them.
+      const dockBottom = !m?.spotlight && (m?.only?.size ?? 0) > 0
+      card = placeTourCard(vp.width, vp.height, target?.bounds ?? null, heightAt, headingAt, 0, 0, dockBottom)
+      el.style.width = `${card.card.right - card.card.left}px`
+      hole = target ? holeOf(target.bounds, card.holeClip) : null
+      tourCardLow.value = (card.card.top + card.card.bottom) / 2 > vp.height / 2
+    }
+    setLayout({ placed, vp, hint: hintTop(vp, placed, hintSize, safe), card, hole, missing: !!m?.spotlight && target === null })
   }, [registry, root])
 
   // Place before the first paint, and again whenever something moves.
   const version = registry.version.value
   useLayoutEffect(() => {
     if (mounted && visible) recompute()
-  }, [mounted, visible, version, recompute])
+  }, [mounted, visible, version, recompute, modeKey])
+
+  // The card's own size (its step's text, fonts loading) moves it too.
+  useEffect(() => {
+    const el = measureRef.current
+    if (!mounted || !visible || !el || typeof ResizeObserver !== 'function') return
+    let raf = 0
+    let last = ''
+    const ro = new ResizeObserver(() => {
+      const size = `${el.offsetWidth}x${el.offsetHeight}`
+      if (size === last) return
+      last = size
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => recompute(true))
+    })
+    ro.observe(el)
+    return () => {
+      cancelAnimationFrame(raf)
+      ro.disconnect()
+    }
+  }, [mounted, visible, recompute, tour])
 
   useEffect(() => {
     if (!mounted || !visible) return
@@ -477,12 +623,13 @@ export function CoachOverlay(props: CoachOverlayProps): JSX.Element | null {
   }, [mounted, visible, recompute, root])
 
   // Focus: into the overlay while it shows, back where it was after; Escape closes.
+  // (The tour's card puts focus on its step's first key itself.)
   useEffect(() => {
     if (!visible || !mounted) return
     const before = document.activeElement as HTMLElement | null
     // Opened from the keyboard (or a key pressed since): show where focus is.
     setKeyed(keyboardLast)
-    closeKey.current?.focus({ preventScroll: true })
+    if (!tour) closeKey.current?.focus({ preventScroll: true })
     const onKey = (e: KeyboardEvent): void => {
       setKeyed(true)
       if (e.key === 'Escape') {
@@ -495,26 +642,46 @@ export function CoachOverlay(props: CoachOverlayProps): JSX.Element | null {
       document.removeEventListener('keydown', onKey)
       if (before && before.isConnected && overlay.current?.contains(document.activeElement)) before.focus({ preventScroll: true })
     }
-  }, [visible, mounted])
+  }, [visible, mounted, tour])
 
   if (!mounted) return null
   const vp = layout?.vp
+  const place = layout?.card ?? null
+  const hole = layout?.hole ?? null
+  // A spotlight still looking for its control keeps the card back (up to SPOTLIGHT_WAIT_MS).
+  const cardReady = place !== null && !(layout?.missing && !waited)
   return (
     <div
       ref={overlay}
-      class={`coach${shown && visible ? ' is-shown' : ''}${keyed ? ' is-keyed' : ''}`}
+      class={`coach${tour ? ' coach--tour' : ''}${shown && visible ? ' is-shown' : ''}${keyed ? ' is-keyed' : ''}`}
       role="dialog"
-      aria-modal="true"
-      aria-label={CoachText.HELP}
+      aria-modal={tour && mode?.passThrough ? undefined : 'true'}
+      aria-label={props.label ?? CoachText.HELP}
+      aria-describedby={props.describedBy}
       aria-hidden={visible ? undefined : 'true'}
     >
-      <button
-        ref={closeKey}
-        type="button"
-        class="coach__veil"
-        aria-label={CoachText.CLOSE_HINT}
-        onClick={() => props.onDismiss()}
-      />
+      {tour ? (
+        <div
+          class="coach__veil"
+          aria-hidden="true"
+          style={vp ? { clipPath: `path(evenodd, "${veilPath(vp, hole)}")` } : undefined}
+        />
+      ) : (
+        <button
+          ref={closeKey}
+          type="button"
+          class="coach__veil"
+          aria-label={CoachText.CLOSE_HINT}
+          onClick={() => props.onDismiss()}
+        />
+      )}
+      {tour && hole && (
+        <div
+          class="coach__hole"
+          aria-hidden="true"
+          style={{ left: `${hole.left}px`, top: `${hole.top}px`, width: `${hole.right - hole.left}px`, height: `${hole.bottom - hole.top}px` }}
+        />
+      )}
       {layout && vp && (
         <svg class="coach__arrows" width={vp.width} height={vp.height} viewBox={`0 0 ${vp.width} ${vp.height}`} aria-hidden="true">
           {layout.placed.map((p) => {
@@ -560,18 +727,108 @@ export function CoachOverlay(props: CoachOverlayProps): JSX.Element | null {
           ))}
         </ul>
       )}
-      <p ref={hint} class="coach__hint" style={layout ? { top: `${layout.hint}px` } : undefined} aria-hidden="true">
-        {CoachText.CLOSE_HINT}
-      </p>
+      {!tour && (
+        <p ref={hint} class="coach__hint" style={layout ? { top: `${layout.hint}px` } : undefined} aria-hidden="true">
+          {CoachText.CLOSE_HINT}
+        </p>
+      )}
+      {tour && cardOf && (
+        <div
+          class={`coach__card${cardReady ? ' is-placed' : ''}`}
+          style={
+            place
+              ? {
+                  left: `${place.card.left}px`,
+                  top: `${place.card.top}px`,
+                  width: `${place.card.right - place.card.left}px`,
+                  maxHeight: `${place.card.bottom - place.card.top}px`,
+                }
+              : { width: vp ? `${tourCardWidth(vp)}px` : undefined }
+          }
+        >
+          {cardOf({ headingOnly: place?.headingOnly ?? false, measuring: false, ready: cardReady })}
+        </div>
+      )}
+      {tour && cardOf && (
+        // The whole card, unseen, measured at the widths placeTourCard tries (no style prop: recompute sets its width).
+        <div ref={measureRef} class="coach__card coach__card--measure" aria-hidden="true" inert>
+          {cardOf({ headingOnly: false, measuring: true, ready: false })}
+        </div>
+      )}
       <span ref={measurer} class="coach__tag-text coach__measure" aria-hidden="true" />
       <span ref={insets} class="coach__insets" aria-hidden="true" />
     </div>
   )
 }
 
+/**
+ * HEAR and the offline steps: everything on the page but the marked control
+ * (the pads, the strip, the tab, the tag), its ancestors and what is inside
+ * it is inert, so touches through the hole reach that control only. Returns
+ * the undo.
+ */
+function inertAround(root: Element, target: Element): () => void {
+  const made: Element[] = []
+  let node: Element | null = target
+  while (node && node !== root) {
+    const parent: Element | null = node.parentElement
+    if (!parent) break
+    for (const sib of Array.from(parent.children)) {
+      if (sib === node || sib.hasAttribute('inert')) continue
+      sib.setAttribute('inert', '')
+      made.push(sib)
+    }
+    node = parent
+  }
+  return () => {
+    for (const el of made) el.removeAttribute('inert')
+  }
+}
+
+/** Keeps [inertAround] in place while [on], following the page as it re-renders. */
+function usePassThrough(
+  root: RefObject<HTMLDivElement | null>,
+  registry: CoachRegistry,
+  id: string | undefined,
+  on: boolean,
+  version: number,
+): void {
+  useLayoutEffect(() => {
+    const host = root.current
+    if (!on || !host || !id) return
+    let undo = (): void => {}
+    const apply = (): void => {
+      undo()
+      // A mark that is only a box over its controls (the desk's pads) names them with data-coach-pass;
+      // else a hook registration (the more-tools strip) wins, as in collectMarks.
+      const pass = host.querySelector(`[data-coach-pass="${CSS.escape(id)}"]`)
+      const registered = registry.get(id)
+      const target = pass ?? (registered && registered.isConnected && host.contains(registered)
+        ? registered
+        : host.querySelector(`[data-coach="${CSS.escape(id)}"]`))
+      undo = target ? inertAround(host, target) : () => {}
+    }
+    apply()
+    const mo = typeof MutationObserver === 'function' ? new MutationObserver((records) => {
+      // Only new or removed elements can need it again (not the inert attributes set here).
+      if (records.some((r) => r.type === 'childList')) apply()
+    }) : null
+    mo?.observe(host, { subtree: true, childList: true })
+    return () => {
+      mo?.disconnect()
+      undo()
+    }
+  }, [root, registry, id, on, version])
+}
+
 export interface CoachHostProps {
   visible: boolean
   onDismiss: () => void
+  /** Try arc: the tour's veil, card and spotlight (see [CoachMode]); none for the "?" guide. */
+  mode?: CoachMode | undefined
+  card?: CoachOverlayProps['card']
+  label?: string | undefined
+  describedBy?: string | undefined
   children?: ComponentChildren
 }
 
@@ -579,12 +836,23 @@ export interface CoachHostProps {
 export function CoachHost(props: CoachHostProps): JSX.Element {
   const [registry] = useState(() => new CoachRegistry())
   const root = useRef<HTMLDivElement | null>(null)
+  const passThrough = props.visible && props.mode?.passThrough === true && props.mode.spotlight !== undefined
+  usePassThrough(root, registry, props.mode?.spotlight, passThrough, registry.version.value)
   return (
     <CoachContext.Provider value={registry}>
-      <div ref={root} class="coach-host" inert={props.visible || undefined}>
+      <div ref={root} class="coach-host" inert={(props.visible && !passThrough) || undefined}>
         {props.children}
       </div>
-      <CoachOverlay registry={registry} root={root} visible={props.visible} onDismiss={props.onDismiss} />
+      <CoachOverlay
+        registry={registry}
+        root={root}
+        visible={props.visible}
+        onDismiss={props.onDismiss}
+        mode={props.mode}
+        card={props.card}
+        label={props.label}
+        describedBy={props.describedBy}
+      />
     </CoachContext.Provider>
   )
 }
@@ -596,18 +864,13 @@ export interface CoachSeenPrefs {
 }
 
 /**
- * Opens the overlay by itself once, on the first start (MainActivity's
- * coach_seen): calls [open] on mount while [prefs] is unseen, and marks it seen
- * when the overlay closes, so a reload before reading it shows it again.
+ * Marks the guide seen when the overlay closes (MainActivity's coach_seen,
+ * saved on close, so a reload before reading it shows it again). Whether it
+ * opens by itself on the first start is Try arc's first-run decision
+ * (Tour.firstRun, app.tsx's useTourFirstRun).
  */
-export function useCoachFirstRun(prefs: CoachSeenPrefs, visible: boolean, open: () => void): void {
+export function useCoachFirstRun(prefs: CoachSeenPrefs, visible: boolean): void {
   const wasVisible = useRef(false)
-  const openRef = useRef(open)
-  openRef.current = open
-  useEffect(() => {
-    if (!prefs.seen) openRef.current()
-    // Once per mount, as LaunchedEffect(Unit).
-  }, [])
   useEffect(() => {
     if (wasVisible.current && !visible && !prefs.seen) prefs.markSeen()
     wasVisible.current = visible

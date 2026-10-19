@@ -47,8 +47,8 @@ describe('ClaudePrompt', () => {
       expect(g.tempo, g.name).toEqual({ first: lo, last: hi })
       expect(g.bpm, g.name).toBe(bpm)
     }
-    // Every recipe but the arrangement is offered, the EP-40's as the riddim family.
-    expect(new Set(Genres.ALL.map((g) => g.name))).toEqual(new Set([...recipes.keys()].filter((k) => k !== 'Breakcore arrangement')))
+    // Every recipe but the arrangements is offered, the EP-40's as the riddim family.
+    expect(new Set(Genres.ALL.map((g) => g.name))).toEqual(new Set([...recipes.keys()].filter((k) => k !== 'Breakcore arrangement' && k !== 'Schranz arrangement')))
     expect(new Set(Genres.ALL.filter((g) => g.ep40).map((g) => g.name))).toEqual(
       new Set(['One drop', 'Rockers', 'Steppers', 'Dub', 'Digital riddim', 'Dancehall', 'UK dub']),
     )

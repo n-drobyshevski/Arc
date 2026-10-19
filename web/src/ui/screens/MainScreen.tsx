@@ -138,6 +138,7 @@ export function MainScreen(props: MainScreenProps): JSX.Element {
       <DevicePanel state={state} line={short} />
 
       {/* The big key stays until the first backup; after it, the orange block opens the caption row below. */}
+      {/* Marked as the block is (backups.backup), so Try arc's Back up step rings it before the first backup. */}
       {!hasBackups && (
         <Key
           text={Strings.BACK_UP}
@@ -146,6 +147,7 @@ export function MainScreen(props: MainScreenProps): JSX.Element {
           block
           disabled={!canBackup}
           onClick={props.onBackup}
+          data-coach="backups.backup"
         />
       )}
     </>

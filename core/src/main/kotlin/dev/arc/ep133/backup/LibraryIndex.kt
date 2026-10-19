@@ -1,6 +1,7 @@
 package dev.arc.ep133.backup
 
 import dev.arc.ep133.features.LearnedLinks
+import dev.arc.ep133.features.Tour
 import dev.arc.ep133.formats.JsJson
 import dev.arc.ep133.formats.isJsNumber
 import dev.arc.ep133.formats.jsStringOr
@@ -124,7 +125,8 @@ object LibraryIndex {
     /**
      * Several indexes (an old one the new install couldn't overwrite, and a new
      * one) merged by id; later ones win. Live's learned pad links are combined,
-     * so a few pads learned in a new install don't drop the rest.
+     * so a few pads learned in a new install don't drop the rest; so are the
+     * steps of the first-run tour.
      */
     fun merge(indexes: List<LibraryIndexData>): LibraryIndexData {
         val byId = LinkedHashMap<String, IndexEntry>()
@@ -132,14 +134,19 @@ object LibraryIndex {
         for (ix in indexes) {
             for (e in ix.entries) byId[e.id] = e
             val before = settings[LEARNED]
+            val tourBefore = settings[TOUR_STEPS]
             settings.putAll(ix.settings)
             val now = ix.settings[LEARNED]
             if (before != null && now != null) {
                 settings[LEARNED] = LearnedLinks.format(LearnedLinks.merge(LearnedLinks.parse(before), LearnedLinks.parse(now)))
             }
+            val toured = tourBefore
+            val tourNow = ix.settings[TOUR_STEPS]
+            if (toured != null && tourNow != null) settings[TOUR_STEPS] = Tour.merge(toured, tourNow)
         }
         return LibraryIndexData(byId.values.toList(), settings)
     }
 
     private const val LEARNED = "mirror.learned"
+    private const val TOUR_STEPS = "app.tourSteps"
 }

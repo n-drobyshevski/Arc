@@ -47,6 +47,8 @@ import { unavailableLibrary, type Deps, type LibraryApi } from '../state/deps'
 
 type Timer = ReturnType<typeof globalThis.setTimeout>
 
+/** How long ?demo's pad press (Deps.demoPress) holds the pad. */
+export const DEMO_PRESS_MS = 400
 /** Deps.requestFrame's timer where the display gives no frames (a hidden tab): about one frame. */
 const FRAME_MS = 16
 
@@ -222,6 +224,17 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
         }
       : undefined,
     userAgent: nav?.userAgent ?? '',
+    demo,
+    demoPress: demo
+      ? () => {
+          // dev/demo.ts's driver (installed before the deps): pad A "." with its pad push, as a person would play it.
+          const d = win?.__arcDemo
+          if (!d) return
+          d.noteOn(36, 127)
+          d.pushPadActive(1, 0, 1)
+          globalThis.setTimeout(() => d.noteOff(36), DEMO_PRESS_MS)
+        }
+      : undefined,
     onStorageChange(listener) {
       // ?demo's settings are in memory: another tab's change is not its own.
       if (!win || demo) return () => {}

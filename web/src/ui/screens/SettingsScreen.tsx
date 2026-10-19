@@ -2,7 +2,7 @@
 //
 // The settings (an addition to the web version): theme, connecting, the
 // screen in Live, how many backups to keep, Live's pad numbering, note names
-// on the keys, learned names and pad sound copies, and about arc.
+// on the keys, learned names and pad sound copies, help, and about arc.
 //
 // Web deltas:
 // - Texts that talk about the phone or Documents/arc use WebText: the storage
@@ -21,6 +21,8 @@
 // - "Pad sounds saved on the phone" counts arc's copies in this browser
 //   (IndexedDB store padSounds); the size is read when the screen opens and
 //   Clear sets it to nothing, as in Kotlin.
+// - Help (Try arc again, What's what) sits before About, as on Android:
+//   Try arc again is a link row, its note under the card.
 // - The pad order is not a signal (c.padOrder() is read when Root renders), so
 //   the screen keeps its own copy from here on, as the Kotlin does.
 // - The Step 1c rows: each setting is a SettingRow (its name and the control
@@ -50,6 +52,7 @@ import { FactoryKit } from '../../core/features/factorySounds'
 import { NOTE_NAMES, type NoteNames } from '../../core/features/keys'
 import type { PadOrder } from '../../core/features/padPush'
 import { choiceOf as pianoChoiceOf, fits as pianoFits, switchShown } from '../../core/features/piano'
+import { CoachText } from '../../core/text/coachText'
 import { FeatureText } from '../../core/text/featureText'
 import { Format } from '../../core/text/format'
 import { MirrorText } from '../../core/text/mirrorText'
@@ -123,6 +126,10 @@ export interface SettingsScreenProps {
   onSource: () => void
   onFontLicence: () => void
   onDebug: () => void
+  /** Help → Try arc again: the tour from the start, on Live. */
+  onTryAgain?: () => void
+  /** Help → What's what: the guide overlay, on Live. */
+  onShowGuide?: () => void
   onBack: () => void
 }
 
@@ -130,7 +137,7 @@ export interface SettingsScreenProps {
 const PAD_ORDERS: readonly PadOrder[] = ['FROM_TOP', 'FROM_BOTTOM']
 
 /** The page's sections, in order: the desktop nav's entries and the headings' ids. */
-export const SECTIONS = ['appearance', 'device', 'library', 'live', 'saved', 'about'] as const
+export const SECTIONS = ['appearance', 'device', 'library', 'live', 'saved', 'help', 'about'] as const
 export type SettingsSection = (typeof SECTIONS)[number]
 
 /** A section's heading. */
@@ -146,6 +153,8 @@ export function sectionTitle(s: SettingsSection): string {
       return SettingsText.LIVE
     case 'saved':
       return WebText.SAVED_HERE
+    case 'help':
+      return SettingsText.HELP
     case 'about':
       return SettingsText.ABOUT
   }
@@ -712,6 +721,25 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
                   )}
                 />
               </RowCard>
+            </Section>
+
+            <Section id="help">
+              <RowCard>
+                <LinkRow title={SettingsText.TRY_AGAIN} onClick={() => props.onTryAgain?.()} />
+                <SettingRow
+                  title={CoachText.HELP}
+                  note={SettingsText.SHOW_NOTE}
+                  control={(ids) => (
+                    <RowAction
+                      text={SettingsText.SHOW}
+                      label={`${CoachText.HELP}: ${SettingsText.SHOW}`}
+                      describedBy={ids.noteId}
+                      onClick={() => props.onShowGuide?.()}
+                    />
+                  )}
+                />
+              </RowCard>
+              <p class="t-small settings__storage">{SettingsText.TRY_AGAIN_NOTE}</p>
             </Section>
 
             <Section id="about">

@@ -13,7 +13,8 @@ object Strings {
     const val DISCONNECT = "Disconnect"
     const val NO_DEVICE = "No device"
     const val READING_DEVICE = "Reading device"
-    const val PLUG_IN_HINT = "Plug in the EP-133 with a USB-C cable and turn it on, then tap Connect."
+    // Android and web: Live has no key named Connect (the connection key is an icon), so this names it.
+    const val PLUG_IN_HINT = "Plug in the EP-133 with a USB-C cable and turn it on, then tap the connection key at the top."
     const val ONE_MOMENT = "One moment."
     const val BACK_UP = "Back up device"
     const val BACKUPS = "Backups"

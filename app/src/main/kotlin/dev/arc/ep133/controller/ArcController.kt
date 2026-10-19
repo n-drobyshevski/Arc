@@ -93,6 +93,12 @@ data class TaskUi(val title: String, val label: String, val fraction: Double, va
 /** A toast; [action] ("Undo") is a key at its end that runs [onAction]. */
 data class ToastMsg(val id: Long, val text: String, val error: Boolean, val action: String? = null, val onAction: (() -> Unit)? = null)
 
+/**
+ * Live tools' Claude page asked to open (a song shared to arc: [ArcController.remakeSong]), on the word whose answers
+ * show first ([slot]; null: the sentence's keys). Each request is its own, so the same song shared twice opens it twice.
+ */
+class ClaudeOpen(val slot: dev.arc.ep133.features.PromptSlot?)
+
 /** The device browser (an addition to the web version). */
 data class BrowserUi(
     val contents: DeviceContents? = null,
@@ -230,6 +236,10 @@ data class UiState(
     val keysPad: dev.arc.ep133.features.PhysicalPad? = null,
     /** Whether the library folder has been picked (after a reinstall); until then restoring is offered. */
     val folderPicked: Boolean = false,
+    /** The library has been read once, or failed to be: the first-run decision waits for this. */
+    val libraryChecked: Boolean = false,
+    /** An EP-133 is plugged in, connected or not (the tour's "plugged in" row). */
+    val plugged: Boolean = false,
     /** Live's pad changes made offline, in arc only ([OfflinePads]): how many, for Live tools' Reset row. */
     val offlinePads: Int = 0,
     /** The EP-133 connected with offline pad changes kept: how many, while it asks whether to write them. */
@@ -336,6 +346,9 @@ private const val PRACTICE_START_SPEED = 75
 /** WAIT's lane shows this many steps ahead. */
 private const val PRACTICE_WAIT_AHEAD = 6
 
+/** Stopped with arc off the screen, Live's output and mirror wait this long for PLAY on the notification. */
+private const val AWAY_IDLE_MS = 10 * 60 * 1000L
+
 /** A lesson's step opens the next after this many clean passes in a row. */
 internal const val LESSON_CLEAN_PASSES = 4
 
@@ -367,7 +380,7 @@ private fun pcmSoundOf(pcm: ShortArray, channels: Int, rate: Int) = PcmSound(pcm
 /** How often an idle mirror with a tempo showing looks whether it went stale. */
 private const val TEMPO_CHECK_MS = 250L
 
-/** How long the click's tempo rests before library.json gets it. */
+/** How long the click's tempo (or the Claude page's prompt) rests before library.json gets it. */
 private const val TEMPO_SYNC_MS = 1000L
 
 /** How long FX's knobs rest before fx.json gets them. */
@@ -860,7 +873,7 @@ class ArcController(
     private val scope: CoroutineScope,
     val player: dev.arc.ep133.audio.SoundPlayer = dev.arc.ep133.audio.SoundPlayer(context),
 ) {
-    private val _state = MutableStateFlow(UiState(midiSupported = midi.supported))
+    private val _state = MutableStateFlow(UiState(midiSupported = midi.supported, folderPicked = library.folderPicked))
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private val searchQuery = MutableStateFlow("")
@@ -1019,9 +1032,14 @@ class ArcController(
     init {
         scope.launch {
             library.backups
-                .catch { e -> toast(Strings.libraryFailed(e.message ?: e.toString()), error = true) }
+                .catch { e ->
+                    _state.update { it.copy(libraryChecked = true) }
+                    toast(Strings.libraryFailed(e.message ?: e.toString()), error = true)
+                }
                 .collect { list ->
-                    _state.update { it.copy(backups = list, libraryLoaded = true, spaceLeft = runCatching { library.spaceLeft() }.getOrNull()) }
+                    _state.update {
+                        it.copy(backups = list, libraryLoaded = true, libraryChecked = true, spaceLeft = runCatching { library.spaceLeft() }.getOrNull())
+                    }
                     refreshFactoryNames()
                     refreshOffline()
                 }
@@ -1040,7 +1058,7 @@ class ArcController(
         // The click follows the tempo, also one library.json gives back (nothing while it is off).
         scope.launch { settings.collect { liveAudio.setClickTempo(it.liveTempo) } }
         scope.launch { loadTakes() }
-        _state.update { it.copy(keysPad = savedKeysPad()) }
+        _state.update { it.copy(keysPad = savedKeysPad(), plugged = midi.epPlugged()) }
         scope.launch {
             library.names.catch { /* shown by the backups collector */ }.collect {
                 backupNames = it
@@ -1073,6 +1091,7 @@ class ArcController(
         }
         midi.watch(
             onAdded = { info ->
+                _state.update { it.copy(plugged = midi.epPlugged()) }
                 // Agreed addition: connect on its own when an EP-133 is plugged in.
                 if (midi.looksLikeEp(info) && settingsStore.settings.value.autoConnect) scope.launch {
                     delay(300)
@@ -1093,6 +1112,7 @@ class ArcController(
                 }
             },
             onRemoved = { info ->
+                _state.update { it.copy(plugged = midi.epPlugged()) }
                 scope.launch {
                     if (info.id == openDeviceId && session != null) {
                         trafficLog.note("device removed")
@@ -1151,6 +1171,12 @@ class ArcController(
         // A question about offline pad changes goes with the device; they are kept, and asked about at the next read.
         _state.update { it.copy(connected = false, device = null, browser = BrowserUi(), diff = null, offlinePrompt = null) }
         if (message != null) toast(message, error = true)
+    }
+
+    /** The tour's Connect key: connects unless a connection is there or on its way (a second tap never disconnects). */
+    fun connectIfNeeded() {
+        if (session != null || _state.value.busy) return
+        connect()
     }
 
     /** The Connect / Disconnect key. */
@@ -2111,6 +2137,11 @@ class ArcController(
      * which a take stopped by it says.
      */
     fun closeLiveAudio(background: Boolean = false) {
+        // Arc left the screen with the beat going on (background play): the output stays for it; SAMPLE still goes.
+        if (keepsAway(background)) {
+            exitSample(background)
+            return
+        }
         // The transport stops (recording ends, kept) before the output goes.
         patternStop()
         // SAMPLE goes with it: its RSP takes the output's mix, and its mic is never left open.
@@ -4340,6 +4371,10 @@ class ArcController(
         refreshPatternPlan()
         patternScheduler.play(a.countInBars, if (a.countInBars > 0) COUNT_IN_LEAD_NS else extraLeadNs, a.at)
         followPattern()
+        // With background play the beat may go on off the screen: its service starts now, while arc is in front.
+        awayRelease?.cancel()
+        awayRelease = null
+        if (settings.value.backgroundPlay && practiceRun == null) startPlaybackService()
     }
 
     /** The transport stopped: recording ([wasRecording]) ends where it is heard, the sequencer lets go, and the patterns are kept. */
@@ -4370,6 +4405,11 @@ class ArcController(
         _pattern.update { it.copy(countIn = null) }
         refreshPatternPlan()
         savePatterns()
+        // Stopped off the screen: Live's output and mirror wait a while for PLAY on the notification.
+        if (away && _awayKept.value) awayRelease = scope.launch {
+            delay(AWAY_IDLE_MS)
+            releaseAway()
+        }
     }
 
     /** Recording starts while running ([fromStop]: in the count-in, where AUTO length may open empty groups). */
@@ -5733,7 +5773,7 @@ class ArcController(
     /**
      * What the Claude page's SHARE sends for [prompt]: with a card, the [pick]'s ([beatShare] of [group]'s pattern or
      * the scene, [beatShareChain]) after the prompt's words ([PromptText.prompt]), else the words alone ([promptShare],
-     * named [PromptText.NEW_BEAT] or [PromptText.TRACK_IDEA]) with the sounds Arc knows when "With my sound list" is on
+     * named by [promptWhat]: a new beat, a track idea, a remake) with the sounds Arc knows when "With my sound list" is on
      * (a lesson goes without). The prompt's kit, else the one Live plays, follows the words. Null when the card has
      * nothing in it.
      */
@@ -5750,12 +5790,22 @@ class ArcController(
                 dev.arc.ep133.features.SharePick.CHAIN -> beatShareChain(words, kit)
             }
         }
-        val what = if (prompt.task == dev.arc.ep133.features.PromptTask.TRACK) PromptText.TRACK_IDEA else PromptText.NEW_BEAT
-        return promptShare(if (learn) PromptText.task(prompt.task) else what, words, if (learn) null else kit, list)
+        return promptShare(promptWhat(prompt), words, if (learn) null else kit, list)
     }
 
+    // A song typed on the Claude page changes the prompt at every key: library.json is written once it rests.
+    private var promptSync: Job? = null
+
     /** The Claude page's prompt as built ([AppSettings.claudePrompt]), and kept as it changes. */
-    fun setClaudePrompt(p: dev.arc.ep133.features.ClaudePrompt) = changeSettings { it.copy(claudePrompt = p.encode()) }
+    fun setClaudePrompt(p: dev.arc.ep133.features.ClaudePrompt) {
+        if (!settingsStore.update { it.copy(claudePrompt = p.encode()) }) return
+        // Not changeSettings: a REMAKE's song is typed key by key, and library.json is written once it rests.
+        promptSync?.cancel()
+        promptSync = scope.launch {
+            delay(TEMPO_SYNC_MS)
+            withContext(kotlinx.coroutines.NonCancellable) { library.syncIndex() }
+        }
+    }
 
     /** SAVE under SAVED: the prompt kept with a name of its own ([PromptText.withSaved]), and said. */
     fun saveClaudePrompt(p: dev.arc.ep133.features.ClaudePrompt) {
@@ -5792,18 +5842,85 @@ class ArcController(
         _claudeWaiting.value = null
     }
 
+    private val _claudePage = MutableStateFlow<ClaudeOpen?>(null)
+
+    /**
+     * Live tools' Claude page asked to open ([remakeSong]), until the page has opened ([claudePageShown]): kept till
+     * then, so a song shared to arc while it starts still opens it. In memory only.
+     */
+    val claudePage: StateFlow<ClaudeOpen?> = _claudePage
+
+    /** The Claude page opened as [claudePage] asked. */
+    fun claudePageShown() {
+        _claudePage.value = null
+    }
+
+    /**
+     * A song shared from a music app (or pasted under PASTE CARD): the Claude page's prompt becomes a REMAKE of it (its
+     * other choices kept) and the page opens on it, on the song itself when it is a link with no words (for LOOK UP).
+     * A card Claude was writing is no longer waited for, and the toast says so: PASTE CARD still takes it.
+     */
+    fun remakeSong(song: String) {
+        setClaudePrompt(dev.arc.ep133.features.ClaudePrompt.decode(settings.value.claudePrompt).remake(song))
+        val waited = _claudeWaiting.value != null
+        _claudeWaiting.value = null
+        _claudePage.value = ClaudeOpen(if (dev.arc.ep133.features.TrackLinks.words(song) == null) dev.arc.ep133.features.PromptSlot.SONG else null)
+        toast(if (waited) PromptText.REMAKE_READY_WAIT else PromptText.REMAKE_READY)
+    }
+
+    private val _lookingUp = MutableStateFlow(false)
+
+    /** LOOK UP is asking a music app for the song's title: its key waits. */
+    val lookingUp: StateFlow<Boolean> = _lookingUp
+
+    /**
+     * LOOK UP, only on a tap (arc's one use of the internet besides the factory sounds): the title and artist of the
+     * REMAKE's song link, from the music app's own page ([TrackLookup]); a short spotify.link leads to the track's,
+     * asked for next. Found, the song is "Title · Artist <link>" (the track's link for a short one); not, the link
+     * stays as it is and goes to Claude so, as the toast says. A tap while one is asked does nothing.
+     */
+    fun lookUpSong() {
+        if (_lookingUp.value) return
+        val link = dev.arc.ep133.features.TrackLinks.find(dev.arc.ep133.features.ClaudePrompt.decode(settings.value.claudePrompt).song) ?: return
+        val url = dev.arc.ep133.features.TrackLookup.requestUrl(link) ?: return
+        _lookingUp.value = true
+        scope.launch {
+            try {
+                val found = withContext(Dispatchers.IO) {
+                    runCatching {
+                        if (link.short && link.source == dev.arc.ep133.features.TrackSource.SPOTIFY) {
+                            // A short link names no title: the track page it leads to does.
+                            dev.arc.ep133.features.TrackLookup.trackPageIn(dev.arc.ep133.data.FactoryDownload.landing(url))?.let { track ->
+                                dev.arc.ep133.features.TrackLookup.parse(link.source, dev.arc.ep133.data.FactoryDownload.page(track))?.let { it to track }
+                            }
+                        } else {
+                            dev.arc.ep133.features.TrackLookup.parse(link.source, dev.arc.ep133.data.FactoryDownload.page(url))?.let { it to link.url }
+                        }
+                    }.getOrNull()
+                }
+                if (found == null) {
+                    toast(PromptText.LOOKUP_FAILED)
+                    return@launch
+                }
+                // The prompt as it is now: a song changed while the page came keeps the change.
+                val now = dev.arc.ep133.features.ClaudePrompt.decode(settings.value.claudePrompt)
+                if (dev.arc.ep133.features.TrackLinks.find(now.song) != link) return@launch
+                val (title, at) = found
+                // A link with no room left for the title stays alone.
+                val room = dev.arc.ep133.features.ClaudePrompt.MAX_SONG - at.length - 1
+                setClaudePrompt(now.copy(song = if (room > 0) title.take(room).trimEnd() + " " + at else at))
+            } finally {
+                _lookingUp.value = false
+            }
+        }
+    }
+
     /** "With my sound list" on or off (kept like the other Live preferences). */
     fun setShareSounds(on: Boolean) = changeSettings { it.copy(shareSounds = on) }
 
     /** The beat card sheet's REPLACE: a card's scenes take the place of the project's, or follow them; kept for the next card. */
     fun setReplaceScenes(on: Boolean) = changeSettings { it.copy(replaceScenes = on) }
 
-    /**
-     * A text from PASTE BEAT (the clipboard) or shared to arc: with an ARC BEAT line in it, the card is read and planned
-     * into the project's patterns as they stand ([BeatCards.plan]) and its sheet opens ([beatImport]); with none the
-     * toast says so. Nothing changes until [importBeat]. Works offline and while stopped or playing: the plan reads
-     * the patterns once they are loaded, so a card never lands on a project's notes before they are read.
-     */
     /**
      * A .txt or .md file with a beat card in it (shared to arc, opened with it, or picked with PASTE held): its text, as
      * [receiveBeat] takes it. A file that can't be read, or is longer than a card ([BeatCards.MAX_CARD_FILE]), has none.
@@ -5817,16 +5934,28 @@ class ArcController(
         receiveBeat(text)
     }
 
-    fun receiveBeat(text: String?) {
-        if (text == null || !dev.arc.ep133.features.BeatCards.hasCard(text)) {
-            toast(dev.arc.ep133.text.ClaudeText.NO_CARD)
-            return
-        }
-        // The reply is here.
-        _claudeWaiting.value = null
-        scope.launch {
-            loadPatterns()
-            showBeat(dev.arc.ep133.features.BeatCards.read(text))
+    /**
+     * A text from PASTE CARD (the clipboard) or shared to arc, with the share's [subject] (none from the clipboard), as
+     * [dev.arc.ep133.features.ShareRoute] reads it. With an ARC BEAT line in it, the card is read and planned into the
+     * project's patterns as they stand ([BeatCards.plan]) and its sheet opens ([beatImport]); nothing changes until
+     * [importBeat]. Works offline and while stopped or playing: the plan reads the patterns once they are loaded, so a
+     * card never lands on a project's notes before they are read. A song from a music app opens a REMAKE of it
+     * ([remakeSong]); an album or a playlist, or no card at all, the toast says so.
+     */
+    fun receiveBeat(text: String?, subject: String? = null) {
+        when (val route = dev.arc.ep133.features.ShareRoute.of(text, subject)) {
+            dev.arc.ep133.features.ShareRoute.Card -> {
+                val card = text ?: return
+                // The reply is here.
+                _claudeWaiting.value = null
+                scope.launch {
+                    loadPatterns()
+                    showBeat(dev.arc.ep133.features.BeatCards.read(card))
+                }
+            }
+            is dev.arc.ep133.features.ShareRoute.Song -> remakeSong(route.song)
+            dev.arc.ep133.features.ShareRoute.NotSong -> toast(PromptText.NOT_A_SONG)
+            dev.arc.ep133.features.ShareRoute.None -> toast(dev.arc.ep133.text.ClaudeText.NO_CARD)
         }
     }
 
@@ -7319,7 +7448,9 @@ class ArcController(
      * Stops listening while the app is in the background; the screen keeps
      * its last state, and a take kept meanwhile waits for Live to be back.
      */
-    fun pauseMirror() {
+    fun pauseMirror(background: Boolean = false) {
+        // The beat going on with arc off the screen plays the pads' sounds from the mirror: it stays.
+        if (keepsAway(background)) return
         liveOpens++
         livePaused.value = true
         stopMirror()
@@ -7439,6 +7570,95 @@ class ArcController(
         unmeasured.clear()
         liveAudio.stopAll()
         player.stop()
+    }
+
+    // ---------- BACKGROUND PLAY: the beat goes on with arc off the screen (an addition) ----------
+
+    /** Arc is off the screen (its activity stopped). */
+    private var away = false
+
+    /** Live's output and mirror were kept for the beat with arc off the screen; [releaseAway] lets them go. */
+    private val _awayKept = MutableStateFlow(false)
+    val awayKept: StateFlow<Boolean> = _awayKept
+
+    // Stopped off the screen: Live's output and mirror go after a while.
+    private var awayRelease: Job? = null
+
+    /** The beat goes on off the screen: the setting is on and the transport runs, not for a practice (its score follows the screen). */
+    private fun playsAway() = settings.value.backgroundPlay && patternRunning() && practiceRun == null
+
+    /**
+     * Arc is leaving the screen ([background]): Live's output and mirror stay while the beat plays off it, or
+     * stopped there and waits for PLAY on the notification ([awayKept]).
+     */
+    private fun keepsAway(background: Boolean): Boolean {
+        if (!background) return false
+        if (!_awayKept.value && playsAway()) _awayKept.value = true
+        return _awayKept.value
+    }
+
+    /**
+     * Arc left the screen. With background play and the transport running, the beat goes on: recording stops
+     * (kept) and RECORD is disarmed, SAMPLE and a practice end, the arp and the keys held let go. Else nothing keeps
+     * playing ([stopPlayback]).
+     */
+    fun leaveScreen() {
+        away = true
+        if (practiceRun != null) endPractice()
+        if (!keepsAway(background = true)) {
+            stopPlayback()
+            return
+        }
+        patternAct { transport.punchOut() }
+        exitSample(background = true)
+        // The hands left with the screen; the pattern's own notes ring on.
+        playToken++
+        arpClear()
+        held.clear()
+        cut.clear()
+        unsure.clear()
+        unmeasured.clear()
+        player.stop()
+    }
+
+    /** Arc is back on the screen: Live takes its output and mirror back as they are, and a stopped beat's notification goes. */
+    fun backOnScreen() {
+        away = false
+        awayRelease?.cancel()
+        awayRelease = null
+        _awayKept.value = false
+    }
+
+    /** PLAY from the notification, the lock screen or headphones: the transport starts if it is stopped (while Live's output and mirror are there for it). */
+    fun awayPlay() {
+        if (patternRunning()) return
+        if (away && !_awayKept.value) return
+        patternPlay()
+    }
+
+    /**
+     * Stopped off the screen, the notification swiped away or left a while: Live's output and mirror go as they
+     * would have when arc left the screen, and the notification with them.
+     */
+    fun releaseAway() {
+        awayRelease?.cancel()
+        awayRelease = null
+        if (!away || !_awayKept.value || patternRunning()) return
+        _awayKept.value = false
+        closeLiveAudio(background = true)
+        pauseMirror()
+    }
+
+    /** What plays, for the notification: "S02 · 122 BPM · chain". */
+    fun playbackLabel(): String = dev.arc.ep133.text.PlaybackText.now(
+        projectSeq.scene,
+        Math.round(patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)).toInt(),
+        projectSeq.chain.on,
+    )
+
+    // Not allowed from the background on newer Android: it is started while arc is in front, as the transport starts.
+    private fun startPlaybackService() {
+        runCatching { ContextCompat.startForegroundService(context, Intent(context, dev.arc.ep133.service.PlaybackService::class.java)) }
     }
 
     /** Plays PCM that is already in memory (the trim preview). */
@@ -7724,11 +7944,39 @@ class ArcController(
 
     fun setHaptics(on: Boolean) = changeSettings { it.copy(haptics = on) }
 
+    fun setBackgroundPlay(on: Boolean) = changeSettings { it.copy(backgroundPlay = on) }
+
     /** Make up for Bluetooth delay (kept): see [dev.arc.ep133.audio.OutputDelay] for what moves. */
     fun setMakeUpDelay(on: Boolean) = changeSettings { it.copy(makeUpDelay = on) }
 
     /** The guide overlay was shown (it opens by itself only once, also across reinstalls). */
     fun setGuideSeen() = changeSettings { it.copy(guideSeen = true) }
+
+    // ---------- "Try arc", the first-run tour (an addition) ----------
+
+    /** The tour's progress, as Tour.encode writes it. */
+    fun setTourSteps(text: String) = changeTour { settingsStore.update { it.copy(tourSteps = text) } }
+
+    /** Done or Not now: the tour no longer opens by itself, and neither does the guide overlay. */
+    fun finishTour() = changeTour { settingsStore.update { it.copy(tourDone = true, guideSeen = true) } }
+
+    /** Try arc again: its progress is forgotten (finished stays finished, so it never opens by itself again). */
+    fun restartTour() = changeTour {
+        val had = settingsStore.settings.value.tourSteps.isNotEmpty()
+        settingsStore.clear("tourSteps")
+        had
+    }
+
+    /**
+     * The tour's settings reach library.json only once there is a library to
+     * keep them with: a fresh install that tries the tour and stops writes
+     * nothing to Documents/arc (they go there with the first backup or restore).
+     */
+    private fun changeTour(change: () -> Boolean) {
+        if (!change()) return
+        val st = _state.value
+        if (dev.arc.ep133.features.Tour.syncsIndex(st.folderPicked, st.backups.size)) scope.launch { library.syncIndex() }
+    }
 
     /** How many backups [setKeepLast] would delete now, for the confirmation. */
     fun pruneCount(keep: Int?): Int = LibraryRules.toPrune(_state.value.backups, keep).size
@@ -7753,7 +8001,7 @@ class ArcController(
     }
 
     private fun changeSettings(change: (dev.arc.ep133.data.AppSettings) -> dev.arc.ep133.data.AppSettings) {
-        settingsStore.update(change)
+        if (!settingsStore.update(change)) return
         scope.launch { library.syncIndex() }
     }
 

@@ -114,6 +114,11 @@ export const SettingsText = {
     return `${SettingsText.PAD_SOUNDS}: ${size}`
   },
 
+  HELP: 'Help',
+  TRY_AGAIN: 'Try arc again',
+  TRY_AGAIN_NOTE: 'A few short steps on the real screen: connect, play a pad, back up.',
+  SHOW: 'Show',
+  SHOW_NOTE: 'Names every control on the screen.',
   // Live's choices as short rows, and what arc keeps on the phone in a group of its own.
   NOTE_NAMES_SHORT: 'DO is C (fixed-do), or letters.',
   SHOW_NAMES_SHORT: 'Off: rings and octave numbers only.',
