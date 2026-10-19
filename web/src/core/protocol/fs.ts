@@ -55,7 +55,10 @@ export const ACK_STALL_MS = 600
 /** Unacknowledged data chunks allowed in flight before waiting for acks. */
 export const UPLOAD_WINDOW = 16
 
-const utf8 = new TextEncoder()
+// Made on first use, not at load: Live's AudioWorklet imports this module (through
+// SAMPLE's source) and its scope has no TextEncoder.
+let encoder: TextEncoder | null = null
+const utf8 = (): TextEncoder => (encoder ??= new TextEncoder())
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
@@ -170,7 +173,7 @@ export async function setMetadata(
   opts: BarrierOptions = {},
 ): Promise<Frame> {
   const { timeout = 3000, progress = false } = opts
-  const json = utf8.encode(JSON.stringify(patch))
+  const json = utf8().encode(JSON.stringify(patch))
   if (json.length > MAX_METADATA_BYTES) {
     throw new DeviceError(`Metadata for node ${node} is too large (${json.length} bytes)`)
   }
@@ -291,8 +294,8 @@ export async function upload(session: Session, opts: UploadOptions): Promise<voi
     streamPauseEvery = 0,
     streamPauseMs = 0,
   } = opts
-  const nameBytes = utf8.encode(name)
-  const jsonBytes = meta ? utf8.encode(JSON.stringify(meta)) : new Uint8Array(0)
+  const nameBytes = utf8().encode(name)
+  const jsonBytes = meta ? utf8().encode(JSON.stringify(meta)) : new Uint8Array(0)
   if (jsonBytes.length > MAX_METADATA_BYTES) throw new DeviceError('Sound settings too large to upload')
   const chunks = Math.ceil(data.length / UPLOAD_CHUNK)
   if (chunks > 0xffff) throw new DeviceError('File too large to upload')
