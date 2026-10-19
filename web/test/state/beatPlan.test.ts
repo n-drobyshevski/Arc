@@ -171,6 +171,11 @@ describe('BeatPlanTest', () => {
     const three = beatImportUi(read(card([section(0, swung), section(1, b), section(3, b)], { tempo: 120.4, swing: 58 })), seq, 120.0, nameOf)
     expect(three.scene).toBe(1)
     expect(three.placed.length).toBe(3)
+    // REPLACE: the same card's one scene would be the project's only one, S01 (the project has 1 scene now).
+    expect(three.replace?.scene).toBe(0)
+    expect(three.projectScenes).toBe(1)
+    // A card of one group adds no scene: no REPLACE row.
+    expect(beatImportUi(read(card([section(0, a)])), seq, 120.0, nameOf).replace).toBeNull()
     expect(three.tempo).toBeNull()
     expect(three.swing).toBe(58)
     expect(three.title).toBe('Beat card')

@@ -1548,6 +1548,8 @@ function LiveBeatSheet(props: { view: NavView }): JSX.Element | null {
   const pasting = c.beatPasting.value
   // PICK SOUND's list waits while the device is busy (read alone: the sheet doesn't follow the mirror).
   const busy = useComputed(() => c.state.value.busy).value
+  // The Scenes row's REPLACE, a setting kept for the next card (read alone, as busy is).
+  const replaceScenes = useComputed(() => c.settings.value.replaceScenes).value
   const shown = beat !== null || pasting
   const has = props.view.sheets.includes(BEAT_SHEET)
   // A preview started by PICK SOUND stops with the sheet, as the pad sheet's does.
@@ -1599,8 +1601,10 @@ function LiveBeatSheet(props: { view: NavView }): JSX.Element | null {
       onCancel={closeBeat}
       onImport={(setTempo, soundPads, picked, applyFx, shapePads, setChain) => {
         stopPickPreview()
-        p.importBeat(setTempo, soundPads, picked, applyFx, shapePads, setChain)
+        p.importBeat(setTempo, soundPads, picked, applyFx, shapePads, setChain, replaceScenes && beat !== null && beat.replace !== null)
       }}
+      replaceScenes={replaceScenes}
+      onReplaceScenes={(on) => c.setReplaceScenes(on)}
       onCopyProblems={(problems) => void c.copyProblems(problems)}
       onPaste={(text) => void c.receiveBeat(text)}
       playing={c.playing}

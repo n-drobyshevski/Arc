@@ -3029,6 +3029,11 @@ export class ArcController {
     this.changeSettings((s) => ({ ...s, shareSounds: on }))
   }
 
+  /** The beat card sheet's REPLACE: a card's scenes take the place of the project's, or follow them; kept for the next card. */
+  setReplaceScenes(on: boolean): void {
+    this.changeSettings((s) => ({ ...s, replaceScenes: on }))
+  }
+
   /**
    * The kit the EP-133's own sounds are, and the names its unnamed ones
    * ("200.pcm") go by: Live playing a pack offline, that pack's; else the kit

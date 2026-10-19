@@ -3,7 +3,8 @@
 // none), PASTE BEAT reads the clipboard (or waits for a paste where the page can't read it),
 // a card opens its sheet, IMPORT places it as one UNDO step, and COPY PROBLEMS copies them.
 // A share carries the pads' sound lines and, with "With my sound list" on, the sounds Arc knows;
-// SHARE CHAIN shares the project's chain; a card of scenes imported sets its chain unless SET CHAIN is off. IMPORT puts the card's ticked sounds and the ones
+// SHARE CHAIN shares the project's chain; a card of scenes imported sets its chain unless SET CHAIN is off,
+// and with REPLACE takes the place of the project's scenes. IMPORT puts the card's ticked sounds and the ones
 // picked for silent pads on the pads (on the EP-133, or offline in arc), in the same UNDO step;
 // writes that throw stop it with its error toast. The card's FX replace the project's and its
 // pad lines shape the ticked pads (on the EP-133, or as offline pad settings), in that same step.
@@ -159,6 +160,28 @@ describe('BEAT CARDS', () => {
     p.importBeat(false, new Set(), new Map(), false, new Set(), false)
     const off = await until(h, (st) => st.toast?.text === 'Imported to scenes S02\u2013S03. UNDO takes it back.')
     expect(off.toast).not.toBeNull()
+    expect(p.scene.value.chain).toEqual([])
+  })
+
+  it("IMPORT with REPLACE: the card's scenes take the project's place from S01, the chain names them, and one UNDO puts the project's back; the choice is kept", async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    expect(h.c.settings.value.replaceScenes).toBe(false)
+    h.c.setReplaceScenes(true)
+    expect(h.c.settings.value.replaceScenes).toBe(true)
+    expect(JSON.parse(h.storage.getItem('arc.settings')!).replaceScenes).toBe(true)
+    await h.c.receiveBeat(SCENES)
+    const ui = p.beat.value!
+    expect(ui.projectScenes).toBe(1)
+    expect(ui.replace?.scenes.map((s) => [s.name, s.index])).toEqual([['One', 0], ['Two', 1]])
+    expect(ui.replace?.chain?.steps.map((s) => s.scene)).toEqual([0, 1])
+    p.importBeat(false, new Set(), new Map(), false, new Set(), true, true)
+    const done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    expect(done.toast?.text).toBe('Imported to scenes S01–S02. Chain set. UNDO takes it back.')
+    expect(p.scene.value.count).toBe(2)
+    expect(p.scene.value.chain.map((s) => s.scene)).toEqual([0, 1])
+    p.undo()
+    expect(p.scene.value.count).toBe(1)
     expect(p.scene.value.chain).toEqual([])
   })
 

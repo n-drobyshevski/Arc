@@ -675,7 +675,9 @@ export function isBefore(c: ProjectSeq, before: ProjectSeq): boolean {
  * for a card without `scene` lines, whose [grids] are all), its [chain] on the
  * new scenes (null when it has none or no scene can be added) and [noRoom]:
  * the project has too many scenes for the card's, which only place their
- * patterns.
+ * patterns. [projectScenes] is how many scenes the project has, for the
+ * REPLACE row ("Replace S01–S05"), and [replace] where the card goes with
+ * REPLACE on (its scenes from S01): null when the card adds no scene.
  */
 export interface BeatImportUi {
   readonly read: CardRead
@@ -695,6 +697,19 @@ export interface BeatImportUi {
   readonly scenes: readonly BeatSceneUi[]
   readonly chain: BeatChainUi | null
   readonly noRoom: boolean
+  readonly projectScenes: number
+  readonly replace: BeatReplaceUi | null
+}
+
+/**
+ * A card's scenes with REPLACE on: they become the project's from S01.
+ * [scene] is the one new scene of a card of several groups (0), [scenes] the
+ * rows of a card of scenes and [chain] its chain on them.
+ */
+export interface BeatReplaceUi {
+  readonly scene: number | null
+  readonly scenes: readonly BeatSceneUi[]
+  readonly chain: BeatChainUi | null
 }
 
 /**
@@ -740,7 +755,7 @@ export function beatImportUi(read: CardRead, seq: ProjectSeq, now: number, names
   const card = read.card
   const nowBpm = Tempo.round(now)
   if (card === null) {
-    return { read, title: ClaudeText.CARD, summary: null, grids: [], placed: [], scene: null, tempo: null, tempoNow: nowBpm, swing: null, blocked: ClaudeText.FIX_ERRORS, sounds: null, fx: null, shaping: null, silent: null, scenes: [], chain: null, noRoom: false }
+    return { read, title: ClaudeText.CARD, summary: null, grids: [], placed: [], scene: null, tempo: null, tempoNow: nowBpm, swing: null, blocked: ClaudeText.FIX_ERRORS, sounds: null, fx: null, shaping: null, silent: null, scenes: [], chain: null, noRoom: false, projectScenes: seq.scenes.length, replace: null }
   }
   const plan = BeatCards.plan(seq, card)
   // The plan places the sections in the card's order (scene by scene), or none when a group is full.
@@ -749,6 +764,9 @@ export function beatImportUi(read: CardRead, seq: ProjectSeq, now: number, names
   const bars = grids.reduce((m, g) => Math.max(m, g.bars), 0)
   const hits = grids.reduce((sum, g) => sum + g.rows.reduce((s, r) => s + r.hits, 0), 0)
   const tempo = card.tempo === null ? null : Tempo.round(card.tempo)
+  // The same card with REPLACE on: the patterns go where they go either way, the scenes from S01.
+  const r = BeatCards.plan(seq, card, true, true)
+  const replaced = r.newScene && r.fullGroup === null ? r : null
   return {
     read,
     title: card.name ?? ClaudeText.CARD,
@@ -767,6 +785,15 @@ export function beatImportUi(read: CardRead, seq: ProjectSeq, now: number, names
     scenes: isMultiScene(card) ? sceneRows(card, grids, plan) : [],
     chain: plan.chain !== null && plan.newScene ? { steps: plan.chain } : null,
     noRoom: isMultiScene(card) && plan.fullGroup === null && !plan.newScene,
+    projectScenes: seq.scenes.length,
+    replace:
+      replaced === null
+        ? null
+        : {
+            scene: isMultiScene(card) ? null : replaced.seq.scene,
+            scenes: isMultiScene(card) ? sceneRows(card, grids, replaced) : [],
+            chain: replaced.chain === null ? null : { steps: replaced.chain },
+          },
   }
 }
 
@@ -854,11 +881,13 @@ export interface BeatApplied {
  * A card of scenes adds one scene for each of its own after the project's,
  * the first selected, and with [setChain] on (and a chain in the card) the
  * project's chain becomes the card's on the new scenes, turned on: all in the
- * same one checkpoint. With no room for the scenes (the project has too many)
- * the patterns are placed, and the first scene's picked in the scene playing.
+ * same one checkpoint. With [replace] (the sheet's REPLACE) the new scenes
+ * take the place of the project's, from S01, the project's patterns kept in
+ * the banks; with no room for the scenes (the project has too many) the
+ * patterns are placed, and the first scene's picked in the scene playing.
  */
-export function applyBeat(seq: ProjectSeq, card: BeatCard, recorder: PatternRecorder, setChain = true): BeatApplied {
-  const plan = BeatCards.plan(seq, card, setChain)
+export function applyBeat(seq: ProjectSeq, card: BeatCard, recorder: PatternRecorder, setChain = true, replace = false): BeatApplied {
+  const plan = BeatCards.plan(seq, card, setChain, replace)
   if (plan.fullGroup !== null) return { seq, placed: [], scene: null, fullGroup: plan.fullGroup, scenes: 0, chainSet: false }
   let after = plan.seq
   if (!plan.newScene) {

@@ -3,7 +3,9 @@
 // sheet (the grid, where it goes, the tempo's SET key), IMPORT placing it with a toast, and
 // PASTE BEAT reading the clipboard. A card of scenes imported sets a chain: SHARE CHAIN
 // shares it, followed by the sound list while "With my sound list" is ticked; its sheet
-// shows each scene and the chain, and with SET CHAIN off IMPORT leaves the chain. A card's
+// shows each scene and the chain, and with SET CHAIN off IMPORT leaves the chain. REPLACE
+// on the Scenes row puts a card's scenes in the project's place from S01, and is kept for
+// the next card. A card's
 // SOUNDS and SILENT PADS: its sound ticked, a sound picked for a silent pad with PICK
 // SOUND, both put on the pads by IMPORT. A card's FX and PAD SHAPING: APPLY FX switched,
 // a pad line ticked, and IMPORT applying the FX.
@@ -142,6 +144,41 @@ test("SCENES and SET CHAIN: a card's scenes under their titles, a row for each, 
   const claude = page.getByRole('dialog', { name: 'Live tools' }).getByRole('region', { name: 'Claude' })
   await expect(claude).toBeVisible()
   await expect(claude.getByRole('button', { name: /^Share the chain with Claude/ })).toHaveCount(0)
+})
+
+test("REPLACE: a card's scenes take the project's place from S01, the choice kept for the next card", async ({ page }) => {
+  await page.goto('/?demo#/live')
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
+  const paste = (): Promise<void> =>
+    page.evaluate((text) => {
+      const data = new DataTransfer()
+      data.setData('text/plain', text)
+      document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }))
+    }, SCENES)
+  await paste()
+  const sheet = page.getByRole('dialog', { name: 'Two' })
+  await expect(sheet).toBeVisible()
+  // Off to begin with: the card's scenes follow the project's one.
+  await expect(sheet).toContainText('After S01')
+  const replace = sheet.getByRole('switch', { name: "Add the card's scenes after the project's 1 scene" })
+  await expect(replace).toHaveAttribute('aria-checked', 'false')
+  await replace.click()
+  // On: the rows, the chain and the line under the plate say where they go now.
+  await expect(sheet.getByRole('switch', { name: "Replace the project's 1 scene with the card's" })).toHaveAttribute('aria-checked', 'true')
+  await expect(sheet).toContainText('Replace S01')
+  await expect(sheet.getByRole('note', { name: /^Scene 1, One, becomes S01, patterns / })).toBeVisible()
+  await expect(sheet.getByRole('note', { name: /^Scene 2, Two, becomes S02, patterns / })).toBeVisible()
+  await expect(sheet).toContainText('S01\u00D72 \u2192 S02')
+  await expect(sheet).toContainText("The card's scenes take the place of this project's 1 scene, from S01.")
+
+  await sheet.getByRole('button', { name: 'Import' }).click()
+  await expect(sheet).toBeHidden()
+  await expect(page.getByRole('status').filter({ hasText: 'Imported to scenes S01\u2013S02. Chain set. UNDO takes it back.' })).toBeVisible()
+  // The next card's sheet opens with REPLACE still on, now over the project's two scenes.
+  await paste()
+  await expect(sheet).toBeVisible()
+  await expect(sheet.getByRole('switch', { name: "Replace the project's 2 scenes with the card's" })).toHaveAttribute('aria-checked', 'true')
+  await expect(sheet).toContainText('Replace S01\u2013S02')
 })
 
 test('SOUNDS and SILENT PADS: a card\'s sound and one picked for a silent pad go on the pads with IMPORT', async ({ page }) => {

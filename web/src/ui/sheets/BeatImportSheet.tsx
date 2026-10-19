@@ -22,7 +22,11 @@
 // has a row for each scene ("Scene 1 · Drop" over "new S03 · A 04 · B
 // (same)") and one for its chain on the new scenes, with SET CHAIN (on to
 // begin with; the note under the plate says what it does). With no room for
-// the scenes the sheet says so, and shows no chain.
+// the scenes the sheet says so, and shows no chain. A card that adds scenes
+// has a Scenes row first, with REPLACE ([replaceScenes], a setting kept for
+// the next card): off, "After S05", its scenes follow the project's; on,
+// "Replace S01–S05", they take their place from S01, and the scene rows, the
+// new scene and the chain say where they go then, with a line under the plate.
 // IMPORT puts it all in as one UNDO step; it is off, and says why, when the
 // card can't be read or a group is full. [onImport] gets whether the tempo
 // is to be set, the pads whose sounds are to be put on, the sounds picked
@@ -38,7 +42,7 @@
 //   pad is named by its label on a small cap, not the device view's PadCap.
 // - Opening the picker focuses its title and leaving it focuses the pad's
 //   PICK SOUND / CHANGE key again, as the upload sheet's trim view does.
-// - The sheet's switches (SET, PUT ON PADS, APPLY FX, SET CHAIN) are a
+// - The sheet's switches (SET, PUT ON PADS, APPLY FX, SET CHAIN, REPLACE) are a
 //   role="switch" button on theme/cap.css's cap, pressed by :active. The rows
 //   of a pack's sound to upload, the synth rows and the suggested sounds come
 //   with their ports.
@@ -102,6 +106,9 @@ export interface BeatImportSheetProps {
   onStop(): void
   /** The device is busy with something else: connected, a sound can't be picked. */
   busy: boolean
+  /** The Scenes row's REPLACE (a setting, kept for the next card): the card's scenes take the place of the project's. */
+  replaceScenes: boolean
+  onReplaceScenes(on: boolean): void
 }
 
 /**
@@ -219,22 +226,36 @@ function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; choices: Cho
   // Whether a new sound is going onto the pad (its row ticked): its settings start again, which the shaping rows start from.
   const going = new Set(ticked.map((r) => padKey(r.pad)))
   const soundGoing = (pad: PhysicalPad): boolean => going.has(padKey(pad))
-  const chain = ui.chain
+  // With REPLACE on, the scenes, the new scene and the chain are the ones that start at S01.
+  const { replaceScenes } = props
+  const replacing = replaceScenes ? ui.replace : null
+  const targets = replacing !== null && replacing.scenes.length > 0 ? replacing.scenes : ui.scenes
+  const newScene = replacing !== null ? replacing.scene : ui.scene
+  const chain = replacing !== null ? replacing.chain : ui.chain
   const rows: JSX.Element[] = []
+  if (ui.replace !== null) {
+    const name = ClaudeText.replaceScenesName(replaceScenes, ui.projectScenes)
+    rows.push(
+      // Where the card's scenes go: after the project's, or in their place (REPLACE).
+      <ValueRow key="replace" label={ClaudeText.SCENES} value={replaceScenes ? ClaudeText.scenesReplace(ui.projectScenes) : ClaudeText.scenesAfter(ui.projectScenes)}>
+        <SwitchChip text={ClaudeText.REPLACE} description={name} on={replaceScenes} onToggle={() => props.onReplaceScenes(!replaceScenes)} />
+      </ValueRow>,
+    )
+  }
   if (ui.scenes.length === 0) {
     for (const g of ui.grids) {
       if (g.goesTo !== null) rows.push(<ValueRow key={`g${g.group}`} label={ClaudeText.GOES_TO} value={ClaudeText.goesTo(g.group, g.goesTo)} />)
     }
-    if (ui.scene !== null) rows.push(<ValueRow key="scene" label={MirrorText.NEW_SCENE} value={MirrorText.sceneLabel(ui.scene)} />)
+    if (newScene !== null) rows.push(<ValueRow key="scene" label={MirrorText.NEW_SCENE} value={MirrorText.sceneLabel(newScene)} />)
   } else {
     // One row for each scene: "Scene 1 · Drop" and where it goes, "new S03 · A 04 · B (same)".
-    for (const sc of ui.scenes) {
+    for (const sc of targets) {
       if (sc.index === null) continue
       rows.push(
         <StackedRow
           key={`s${sc.number}`}
           label={ClaudeText.cardScene(sc.number, sc.name)}
-          value={ClaudeText.cardSceneTarget(sc.index, sc.parts)}
+          value={replacing !== null ? ClaudeText.cardSceneReplaced(sc.index, sc.parts) : ClaudeText.cardSceneTarget(sc.index, sc.parts)}
           description={sc.patterns === null ? null : ClaudeText.cardSceneName(sc.number, sc.name, sc.index, sc.patterns)}
         />,
       )
@@ -292,8 +313,9 @@ function CardView(props: BeatImportSheetProps & { ui: BeatImportUi; choices: Cho
           {rows.flatMap((r, i) => (i === 0 ? [r] : [<PlateLine key={`l${i}`} />, r]))}
         </GridPlate>
       )}
+      {replacing !== null && <p class="t-small beat-sheet__dim">{ClaudeText.replaceScenesNote(ui.projectScenes)}</p>}
       {chain !== null && setChain && <p class="t-small beat-sheet__dim">{ClaudeText.SET_CHAIN_NOTE}</p>}
-      {ui.noRoom && (
+      {ui.noRoom && replacing === null && (
         <div class="beat-problem" role="note">
           <span class="beat-problem__bar" aria-hidden="true" />
           <span class="t-small beat-problem__text">{ClaudeText.NO_ROOM_FOR_SCENES}</span>

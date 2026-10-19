@@ -69,6 +69,7 @@ describe('SettingsStore', () => {
       haptics: true,
       makeUpDelay: true,
       shareSounds: true,
+      replaceScenes: false,
       sampleSource: 'mic',
       sampleStereo: false,
       sampleGainMic: 12,
@@ -163,6 +164,7 @@ describe('SettingsStore', () => {
       'app.haptics',
       'app.makeUpDelay',
       'app.shareSounds',
+      'app.replaceScenes',
       'app.sampleSource',
       'app.sampleStereo',
       'app.sampleGainMic',
@@ -204,6 +206,10 @@ describe('SettingsStore', () => {
     expect(new SettingsStore(storage).settings.shareSounds).toBe(false)
     expect(settingsFromIndex({ 'app.shareSounds': 'false' }, DEFAULT_SETTINGS).shareSounds).toBe(false)
     expect(settingsFromIndex({ 'app.shareSounds': 'true' }, { ...DEFAULT_SETTINGS, shareSounds: false }).shareSounds).toBe(true)
+    // The beat card sheet's REPLACE: off at first (a card's scenes follow the project's), kept with the rest.
+    expect(s.settings.replaceScenes).toBe(false)
+    expect(settingValues({ ...DEFAULT_SETTINGS, replaceScenes: true }).replaceScenes).toBe('true')
+    expect(settingsFromIndex({ 'app.replaceScenes': 'true' }, DEFAULT_SETTINGS).replaceScenes).toBe(true)
     // Missing or unreadable: left as it is.
     expect(settingsFromIndex({}, { ...DEFAULT_SETTINGS, shareSounds: false }).shareSounds).toBe(false)
     expect(settingsFromIndex({ 'app.shareSounds': 'maybe' }, DEFAULT_SETTINGS).shareSounds).toBe(true)

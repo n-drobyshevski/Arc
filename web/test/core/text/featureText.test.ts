@@ -545,6 +545,17 @@ describe('FeatureTextTest', () => {
     expect([ClaudeText.GOES_TO, MirrorText.NEW_SCENE, ClaudeText.TEMPO]).toEqual(['Goes to', 'New scene', 'Tempo'])
     expect(ClaudeText.tempoChip(122).toUpperCase()).toBe('SET \u00B7 NOW 122')
     expect([ClaudeText.SET_TEMPO.toUpperCase(), ClaudeText.tempoChange(136, 85), ClaudeText.tempoKept(136, 85)]).toEqual(['SET', '136 \u2192 85', '136 \u00B7 card 85'])
+    expect([
+      ClaudeText.scenesAfter(5),
+      ClaudeText.scenesReplace(5),
+      ClaudeText.scenesReplace(1),
+      ClaudeText.cardSceneReplaced(2, [
+        [0, 4],
+        [1, null],
+      ]),
+      ClaudeText.replaceScenesName(false, 5),
+      ClaudeText.replaceScenesName(true, 1),
+    ]).toEqual(['After S05', 'Replace S01\u2013S05', 'Replace S01', 'S03 \u00B7 A 04 \u00B7 B (same)', "Add the card's scenes after the project's 5 scenes", "Replace the project's 1 scene with the card's"])
     expect([true, false].map((on) => ClaudeText.tempoChipName('92', 122, on))).toEqual(['Set the tempo to 92, now 122', 'Keep the tempo at 122, the card says 92'])
     expect(ClaudeText.swingLine(58)).toBe('Swing 58 \u00B7 placed in the notes')
     // Problems: listed, announced and copied for Claude.

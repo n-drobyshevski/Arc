@@ -1728,8 +1728,10 @@ export class PatternDesk {
    * A card of scenes adds a scene for each of its own, and with [setChain]
    * (the sheet's SET CHAIN) its chain replaces the project's, on the new
    * scenes, and is turned on: part of the same one UNDO step, the
-   * sequencer's. Web delta: [picked] comes before [applyFx] and [shapePads],
-   * where the Kotlin has it after them.
+   * sequencer's. With [replaceScenes] (the sheet's REPLACE) the card's scenes
+   * take the place of the project's, from S01, in that same step. Web delta:
+   * [picked] comes before [applyFx] and [shapePads], where the Kotlin has it
+   * after them.
    */
   importBeat(
     setTempo: boolean,
@@ -1738,6 +1740,7 @@ export class PatternDesk {
     applyFx = false,
     shapePads: ReadonlySet<number> = new Set(),
     setChain = true,
+    replaceScenes = false,
   ): void {
     const ui = this._beat.peek()
     const card = ui?.read.card ?? null
@@ -1746,7 +1749,7 @@ export class PatternDesk {
     // The sequencer as it was: UNDO is that one, once the sounds are back with it.
     const before = this.seq
     this.sceneEdit(() => {
-      const a = applyBeat(this.seq, card, this.recorder, setChain)
+      const a = applyBeat(this.seq, card, this.recorder, setChain, replaceScenes)
       applied = a
       if (a.seq !== this.seq) this.sceneDesk.cancel()
       return a.seq
