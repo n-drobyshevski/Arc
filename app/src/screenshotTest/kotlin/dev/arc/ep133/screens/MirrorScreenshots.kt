@@ -229,7 +229,7 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, skin: SkinChoice = SkinChoice.EP133, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f, claude: ClaudeUi? = null, trimming: String? = null, toolsPage: ToolsPage? = null, factoryKit: dev.arc.ep133.features.FactoryKit? = null, factoryKits: List<dev.arc.ep133.features.FactoryKit> = listOf(dev.arc.ep133.features.FactoryKit.EP133, dev.arc.ep133.features.FactoryKit.EP1320)) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, skin: SkinChoice = SkinChoice.EP133, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f, claude: ClaudeUi? = null, trimming: String? = null, toolsPage: ToolsPage? = null, factoryKit: dev.arc.ep133.features.FactoryKit? = null, factoryKits: List<dev.arc.ep133.features.FactoryKit> = listOf(dev.arc.ep133.features.FactoryKit.EP133, dev.arc.ep133.features.FactoryKit.EP1320), practice: dev.arc.ep133.ui.screens.LivePractice? = null) {
     // As the controller has it: the last read's day alone for a short line ("Seen Oct 5").
     val offlineShort = offline?.takeIf { it.startsWith("Last seen ") }?.let { MirrorText.seen(it.removePrefix("Last seen ").substringBefore(",")) }
     // [factoryKit]: [factoryKits] saved (two or more), that one shown (its switch on the factory line).
@@ -298,6 +298,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             scene = sceneUi,
             onSettings = {},
             claude = claude,
+            practice = practice,
         )
     }
 }
@@ -1380,6 +1381,82 @@ private val stepPanel = StepUi(
     interval = Timing.SIXTEENTH,
 )
 
+// PRACTICE on group A: the kick (7), snare (9) and hats (4) to play, lit ahead (the kick now, the hat in a beat, the
+// snare in two), the lane with their hits coming in to the orange line, and WAIT, 75%, the loop and BACKING under it.
+private val practiceTargets = listOf(
+    dev.arc.ep133.features.PracticeTarget(9, 0, 127), dev.arc.ep133.features.PracticeTarget(6, 48, 100), dev.arc.ep133.features.PracticeTarget(6, 96, 100),
+    dev.arc.ep133.features.PracticeTarget(11, 192, 127), dev.arc.ep133.features.PracticeTarget(6, 144, 100), dev.arc.ep133.features.PracticeTarget(9, 288, 100),
+    dev.arc.ep133.features.PracticeTarget(6, 240, 100), dev.arc.ep133.features.PracticeTarget(6, 336, 64),
+)
+private val practiceFrame = dev.arc.ep133.controller.PracticeFrame(0.0, practiceTargets.map { it to it.tick.toDouble() }.filter { it.second > 0 || it.first.offset == 9 }, dev.arc.ep133.features.PracticeCounts())
+private val practiceUi = dev.arc.ep133.controller.PracticeUi(
+    dev.arc.ep133.features.PracticeSpec(0, speed = 75), "A \u00B7 01", listOf(9, 11, 6), mapOf(9 to "kick", 11 to "snare", 6 to "hat"), 69, 1,
+)
+
+@PreviewTest
+@Preview(name = "Live practice", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePracticePreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(), practice = dev.arc.ep133.ui.screens.LivePractice(practiceUi, frame = { practiceFrame }),
+)
+
+// Stopped after four passes: how it went in place of the lane, the hat most often early; the dark theme.
+@PreviewTest
+@Preview(name = "Live practice result dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePracticeResultDarkPreview() = Live(
+    lastRead, dark = true, oneGroup = true, transport = patternUi(),
+    practice = dev.arc.ep133.ui.screens.LivePractice(
+        practiceUi.copy(counts = dev.arc.ep133.features.PracticeCounts(onTime = 26, early = 4, late = 1, missed = 1, passes = 4, cleanRun = 1), worst = 6 to dev.arc.ep133.features.HitMark.EARLY),
+    ),
+)
+
+// WAIT: the beat stands at the kick and the hat on 1, both lit; the header counts the steps.
+@PreviewTest
+@Preview(name = "Live practice wait", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePracticeWaitPreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(),
+    practice = dev.arc.ep133.ui.screens.LivePractice(
+        practiceUi.copy(spec = practiceUi.spec.copy(wait = true), waiting = setOf(9, 6), waitStep = 0, waitSteps = 7),
+        frame = { practiceFrame },
+    ),
+)
+
+// A card's lesson, step 2 of 4 at 360 dp, ready: the title and tip over the lane, the clean passes to go, ‹ and › for LOOP.
+@PreviewTest
+@Preview(name = "Live practice lesson", widthDp = 360, heightDp = 780, showBackground = true)
+@Composable
+fun LivePracticeLessonPreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(),
+    practice = dev.arc.ep133.ui.screens.LivePractice(
+        practiceUi.copy(
+            spec = practiceUi.spec.copy(pads = setOf(9, 11), speed = 50), pads = listOf(9, 11), bpm = 46,
+            lesson = dev.arc.ep133.controller.LessonPlace(2, 4, "Add the snare", "Snare on 2 and 4", 4, listOf(dev.arc.ep133.controller.LessonRecord(96, 5, true), null, null, null)),
+        ),
+        frame = { practiceFrame },
+    ),
+)
+
+// The lesson done, dark: how the last step went, each step's share in time, COPY for Claude.
+@PreviewTest
+@Preview(name = "Live practice lesson done dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePracticeLessonDoneDarkPreview() = Live(
+    lastRead, dark = true, oneGroup = true, transport = patternUi(),
+    practice = dev.arc.ep133.ui.screens.LivePractice(
+        practiceUi.copy(
+            counts = dev.arc.ep133.features.PracticeCounts(onTime = 40, early = 3, late = 1, passes = 6, cleanRun = 4),
+            worst = 6 to dev.arc.ep133.features.HitMark.EARLY,
+            lesson = dev.arc.ep133.controller.LessonPlace(
+                3, 3, "The whole groove", null, 0,
+                listOf(dev.arc.ep133.controller.LessonRecord(96, 5, true), dev.arc.ep133.controller.LessonRecord(88, 7, true), dev.arc.ep133.controller.LessonRecord(91, 6, true)),
+                done = true,
+            ),
+        ),
+    ),
+)
+
 @PreviewTest
 @Preview(name = "Live step panel", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
@@ -2336,8 +2413,8 @@ fun GuideFromEdgePreview() {
     }
 }
 
-// Beat cards. Live tools' CLAUDE section, after the view settings and before TAKES: SHARE SCENE, SHARE for the group shown
-// (A, pattern 1) and the orange PASTE BEAT, then the skill's link and Learn with Claude; its sample scene is S02.
+// Beat cards. Live tools' CLAUDE page, as it starts: IMPROVE, the scene S02 on the glass, SCENE, the pattern (A, 1) and
+// CHAIN to pick the card, the orange PASTE, SAVE and the skill's link.
 // "With my sound list" under the two SHARE keys, ticked, with the sounds Arc knows.
 // The scene's first bars as the glass shows them: A's kick, B's snare, D's hats (C blank).
 private val claudeLights = listOf("X.......x.o.....", "....X.......X..x", "................", "o.o.o.oxo.o.o.oo").map { row ->
@@ -2379,6 +2456,93 @@ fun LiveToolsClaudeEmptyPreview() = Live(lastRead, oneGroup = true, tools = true
 fun LiveToolsClaudeDarkPreview() = Live(
     lastRead, dark = true, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE, takes = someTakes, offline = "Last seen Oct 5, 2:02 PM",
     claude = ClaudeUi(scene = "S01", numbers = listOf(1, 1, 1, 1), sounds = 212, withSounds = false),
+)
+
+// The prompt builder: a new dub techno beat at 122 BPM on the EP-40 kit (Live's), with bass, chords and FX, the words
+// orange under the glass; two saved prompts under the keys, the first in use.
+private val dubBeat = dev.arc.ep133.features.ClaudePrompt(
+    dev.arc.ep133.features.PromptTask.BEAT, genre = "dub-techno", tempo = 122,
+    parts = setOf(dev.arc.ep133.features.PromptPart.BASS, dev.arc.ep133.features.PromptPart.CHORDS, dev.arc.ep133.features.PromptPart.FX),
+)
+private val savedPrompts = listOf(
+    dev.arc.ep133.features.SavedPrompt("Dub techno 122", dubBeat),
+    dev.arc.ep133.features.SavedPrompt("Steppers 78", dev.arc.ep133.features.ClaudePrompt(dev.arc.ep133.features.PromptTask.BEAT).withGenre(dev.arc.ep133.features.Genres.of("steppers"))),
+)
+private val claudeBeat = ClaudeUi(
+    scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, lights = claudeLights,
+    prompt = dubBeat, kit = dev.arc.ep133.features.FactoryKit.EP40, saved = savedPrompts,
+)
+
+@PreviewTest
+@Preview(name = "Live tools claude beat", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeBeatPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE, claude = claudeBeat)
+
+// The genre word tapped: lit orange on the glass, the techno family's recipes as keys with their tempos, ANY and DONE.
+@PreviewTest
+@Preview(name = "Live tools claude genre", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeGenrePreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(sounds = 212, prompt = dubBeat, saved = savedPrompts, picking = dev.arc.ep133.features.PromptSlot.GENRE),
+)
+
+// The feel word tapped: dreamy and dark lit, the twelve words as keys, what the last one does under the glass.
+@PreviewTest
+@Preview(name = "Live tools claude feel", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeFeelPreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(
+        sounds = 212,
+        prompt = dubBeat.copy(feels = listOf(dev.arc.ep133.features.Feel.DREAMY, dev.arc.ep133.features.Feel.DARK)),
+        picking = dev.arc.ep133.features.PromptSlot.FEEL,
+    ),
+)
+
+// IMPROVE, asking for more drive toward dub techno, the scene on the glass; the dark theme.
+@PreviewTest
+@Preview(name = "Live tools claude improve dark", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeImproveDarkPreview() = Live(
+    lastRead, dark = true, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(
+        scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, lights = claudeLights,
+        prompt = dev.arc.ep133.features.ClaudePrompt(goal = dev.arc.ep133.features.PromptGoal.DRIVE, genre = "dub-techno"), saved = savedPrompts,
+    ),
+)
+
+// A prompt edited by hand: its own words on the glass, PROMPT · EDITED at its foot.
+@PreviewTest
+@Preview(name = "Live tools claude edited", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeEditedPreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(
+        sounds = 212,
+        prompt = dubBeat.copy(text = "Use the arc-beats skill. Write a new 4-bar dub techno beat at 122 BPM with a slow chord echo on C7 and a sub bass that only plays on the one. Choose the sounds from my sound list:"),
+    ),
+)
+
+// PLAY: teach me to play scene S02 by finger drumming, the way word tapped (its four ways as keys), the scene on the glass.
+@PreviewTest
+@Preview(name = "Live tools claude play", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudePlayPreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(
+        scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, lights = claudeLights,
+        prompt = dev.arc.ep133.features.ClaudePrompt(dev.arc.ep133.features.PromptTask.PLAY), picking = dev.arc.ep133.features.PromptSlot.WAY,
+    ),
+)
+
+// LEARN: the lesson word tapped, the twelve lessons as keys.
+@PreviewTest
+@Preview(name = "Live tools claude learn", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeLearnPreview() = Live(
+    lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE,
+    claude = ClaudeUi(sounds = 212, prompt = dev.arc.ep133.features.ClaudePrompt(dev.arc.ep133.features.PromptTask.LEARN, lesson = 5), picking = dev.arc.ep133.features.PromptSlot.LESSON),
 )
 
 // Live tools' front page after a share: the display waits for Claude's reply, with PASTE BEAT and a dismiss.
@@ -2433,6 +2597,20 @@ A9 snare     | .... X... .... X..o | .... X... .... X..o |
 A4 hat       | x.x. x.x. x.x. x.xo | x.x. x.x. x.x. x.xo |
 wobble 3
 ```"""
+
+private const val BOOM_BAP_LESSON = """ARC BEAT 1
+name Lazy boom bap lesson
+tempo 92
+lesson Kick alone | A7 | 50 | Count 1 e and a out loud
+lesson Add the snare | A7 A9 | 50 | Snare on 2 and 4
+lesson Hats on top | A4 | 75
+lesson The whole groove | A
+
+[A] bars 2 step 1/16
+A7 kick      | X... ..x. X... .... | X... ..x. X.x. .... |
+A9 snare     | .... X... .... X..o | .... X... .... X..o |
+A4 hat       | x.x. x.x. x.x. x.xo | x.x. x.x. x.x. x.xo |
+"""
 
 private const val NIGHT_DRIVE = """ARC BEAT 1
 name Night drive
@@ -2502,6 +2680,7 @@ private fun BeatSheet(
     initialPicked: List<Pair<PhysicalPad, Int>> = emptyList(),
     initialPicking: PhysicalPad? = null,
     replaceScenes: Boolean = false,
+    practise: Boolean = false,
 ) {
     val ui = beatImportUi(BeatCards.read(text), seq, 122.0, { names[it] }, fx = fx, shaping = shaping, sounds = sounds, silent = silent)
     Framed(Tab.LIVE, dark = dark) {
@@ -2511,6 +2690,7 @@ private fun BeatSheet(
                 ui, onCancel = {}, onImport = { _, _, _, _, _, _ -> }, onCopyProblems = {},
                 initialSetTempo = initialSetTempo, initialPicked = initialPicked, initialPicking = initialPicking,
                 replaceScenes = replaceScenes,
+                onPractise = if (practise) ({}) else null,
             )
         }
     }
@@ -2522,11 +2702,12 @@ private fun BeatSheet(
 @Composable
 fun BeatSheetOneGroupPreview() = BeatSheet(BOOM_BAP)
 
-// Three groups: a new scene to play them, a long pattern's first two bars and "+2 bars", the swing said, the tempo chip chosen.
+// Three groups: a new scene to play them, a long pattern's first two bars and "+2 bars", the swing said, the tempo chip chosen,
+// IMPORT AND PRACTISE under IMPORT.
 @PreviewTest
 @Preview(name = "Beat sheet scene dark", widthDp = 393, heightDp = 1100, showBackground = true)
 @Composable
-fun BeatSheetSceneDarkPreview() = BeatSheet(NIGHT_DRIVE, dark = true, initialSetTempo = true)
+fun BeatSheetSceneDarkPreview() = BeatSheet(NIGHT_DRIVE, dark = true, initialSetTempo = true, practise = true)
 
 // Three scenes and a chain: each scene's grids under its title, a row for each scene ("Scene 1 · Intro" over where it goes: new S02 with
 // the patterns it takes, a group it leaves out "(same)"), and the CHAIN row with SET CHAIN on, on a small phone.
@@ -2542,6 +2723,12 @@ fun BeatSheetScenesChainPreview() = BeatSheet(TRACK)
 fun BeatSheetScenesReplacePreview() = BeatSheet(TRACK, seq = beatSeq.withScenes(List(3) { dev.arc.ep133.features.Scene() }, 0), replaceScenes = true)
 
 // A card that can't be read: its errors and warning by line, COPY PROBLEMS, and IMPORT off with the reason.
+// A card with lesson lines: the LESSON block lists the steps, IMPORT AND PRACTISE runs them.
+@PreviewTest
+@Preview(name = "Beat sheet lesson", widthDp = 360, heightDp = 1040, showBackground = true)
+@Composable
+fun BeatSheetLessonPreview() = BeatSheet(BOOM_BAP_LESSON, practise = true)
+
 @PreviewTest
 @Preview(name = "Beat sheet errors", widthDp = 360, heightDp = 760, showBackground = true)
 @Composable
@@ -2626,6 +2813,26 @@ A5 | .... .... ..o. .... |
 @Composable
 fun BeatSheetSoundsUnnamedPreview() =
     BeatSheet(UNNAMED_BEAT, sounds = { card -> soundsUi(card, unnamedList, { soundNow[it] }, { soundWas[it] }, offline = false, project = 3) })
+
+// A card written for the EP-40 Riddim's sounds, on an EP-133 with its own: A5's 301 RIM DUSTY is in the EP-40 pack Arc has,
+// so it is ticked to be uploaded into a free slot; offline (dark) it says to connect. A7's KICK DEEP stays on its unnamed slot.
+private val riddimPack = mapOf(dev.arc.ep133.features.FactoryKit.EP40 to mapOf(301 to "rim dusty", 53 to "mpc kick"))
+
+@PreviewTest
+@Preview(name = "Beat sheet sounds upload", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetSoundsUploadPreview() = BeatSheet(
+    UNNAMED_BEAT,
+    sounds = { card -> soundsUi(card, unnamedList, { soundNow[it] }, { soundWas[it] }, offline = false, project = 3, packs = riddimPack, deviceKit = dev.arc.ep133.features.FactoryKit.EP133) },
+)
+
+@PreviewTest
+@Preview(name = "Beat sheet sounds upload offline dark", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetSoundsUploadOfflineDarkPreview() = BeatSheet(
+    UNNAMED_BEAT, dark = true,
+    sounds = { card -> soundsUi(card, unnamedList, { soundNow[it] }, { soundWas[it] }, offline = true, project = 3, packs = riddimPack, deviceKit = dev.arc.ep133.features.FactoryKit.EP133) },
+)
 
 // A card with FX lines: the project has a reverb on group A, the card swaps it for a distortion, sends A and B to it, turns
 // the compressor on and makes A7 duck B and C. The FX block comes after the tempo row, before the pads (no sound lines here).

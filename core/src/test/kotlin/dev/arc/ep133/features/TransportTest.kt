@@ -25,6 +25,16 @@ class TransportTest {
     }
 
     @Test
+    fun `PRACTICE plays after a bar counted in, recording nothing, and leaves a running transport be`() {
+        val t = Transport()
+        assertEquals(Start(1, false), t.practise())
+        assertEquals(TransportState(COUNT_IN), t.state)
+        assertEquals(None, t.practise())
+        t.countedIn()
+        assertEquals(TransportState(PLAYING), t.state)
+    }
+
+    @Test
     fun `RECORD arms and disarms while stopped`() {
         val t = Transport()
         assertEquals(TransportState(), t.state)

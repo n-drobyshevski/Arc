@@ -354,6 +354,12 @@ class Errors(unittest.TestCase):
         "chain-too-long": "ARC BEAT 1\nchain " + "1 " * 65 + "\nscene\n" + kick(),
         "chain-unknown-scene": "ARC BEAT 1\nchain 1 2\nscene\n" + kick(),
         "chain-without-scenes": "ARC BEAT 1\nchain 1\n" + kick(),
+        "lesson-line": "ARC BEAT 1\nlesson Nothing\n" + kick(),
+        "lesson-too-long": "ARC BEAT 1\n" + "lesson Kick | A7\n" * 13 + kick(),
+        "lesson-pad": "ARC BEAT 1\nlesson Bad | Z7\n" + kick(),
+        "lesson-groups": "ARC BEAT 1\nlesson Two | A7 B7\n" + kick(),
+        "lesson-speed": "ARC BEAT 1\nlesson Fast | A7 | 120\n" + kick(),
+        "lesson-no-hits": "ARC BEAT 1\nlesson Clap | A6\n" + kick(),
     }
 
     def test_every_case_gives_its_error(self):
@@ -1361,6 +1367,7 @@ class Ep40Kit(unittest.TestCase):
         self.assertEqual(bc.detect_kit("824 jammy drms a 85\n830 jammy bass a 85\n833 jammy mel a 85\n"), "ep40")
         self.assertIsNone(bc.detect_kit("824 jammy drms a 85\n12 Kick 808\n"))  # one loop alone says nothing
         self.assertIsNone(bc.detect_kit("My EP-133's sounds (slot name), from the EP-133:\n12 Kick 808\n14 Snare\n"))
+        self.assertEqual(bc.detect_kit("Write a beat.\nMy EP-133 plays the EP-133's own factory sounds.\n"), "ep133")
         # The sentence isn't a sound line.
         self.assertEqual(bc.parse_sound_list("My EP-133 plays the EP-40 Riddim factory kit.\n12 Kick\n"), {12: "Kick"})
 
@@ -2067,6 +2074,76 @@ class SceneCli(unittest.TestCase):
         self.assertFalse(data["ok"])
         self.assertEqual([(p["line"], p["code"]) for p in data["problems"]], [(2, "chain-unknown-scene")])
         self.assertEqual(r.returncode, 1)
+
+
+LESSON = """ARC BEAT 1
+name L
+tempo 92
+lesson Kick alone | A7 | 50 | Count 1 e and a out loud
+lesson Add the snare | A9 A7 | 50%
+lesson The whole groove | A
+[A]
+A7 kick  | X... .... X... .... |
+A9 snare | .... X... .... X... |
+A4 hat   | x.x. x.x. x.x. x.x. |
+"""
+
+
+class Lesson(unittest.TestCase):
+    def test_lesson_lines_read_in_order_with_their_pads_speed_and_tip(self):
+        card = bc.parse_card(LESSON)
+        self.assertTrue(card.ok, card.problems)
+        self.assertEqual(card.problems, [])
+        self.assertEqual([s.title for s in card.lesson], ["Kick alone", "Add the snare", "The whole groove"])
+        self.assertEqual([s.pads_text() for s in card.lesson], ["A7", "A7 A9", "A"])
+        self.assertEqual([s.speed for s in card.lesson], [50, 50, 100])
+        self.assertEqual([s.tip for s in card.lesson], ["Count 1 e and a out loud", None, None])
+        self.assertIsNone(card.lesson[2].pads)
+
+    def test_a_lesson_line_may_come_after_the_sections(self):
+        card = bc.parse_card(LESSON + "lesson Hats | A4 | 25\n")
+        self.assertTrue(card.ok, card.problems)
+        self.assertEqual(card.lesson[-1].pads_text(), "A4")
+
+    def test_faults_name_the_line(self):
+        cases = [
+            ("lesson Clap | A6 | 50", "lesson-no-hits"),
+            ("lesson Two groups | A7 B7", "lesson-groups"),
+            ("lesson Fast | A7 | 120", "lesson-speed"),
+            ("lesson Slow | A7 | 10", "lesson-speed"),
+            ("lesson Odd | A7 | half", "lesson-speed"),
+            ("lesson Nothing", "lesson-line"),
+            ("lesson Bad | Z7", "lesson-pad"),
+            ("lesson Empty group | B", "lesson-no-hits"),
+        ]
+        for line, code in cases:
+            card = bc.parse_card("ARC BEAT 1\n" + line + "\n" + kick())
+            self.assertEqual([(p.line, p.code) for p in card.problems if p.level == "error"], [(2, code)], line)
+
+    def test_a_long_title_is_shortened(self):
+        card = bc.parse_card("ARC BEAT 1\nlesson " + "k" * 50 + " | A7\n" + kick())
+        self.assertTrue(card.ok, card.problems)
+        self.assertEqual(codes(card), ["lesson-title-long"])
+        self.assertEqual(len(card.lesson[0].title), bc.NAME_MAX)
+
+    def test_at_most_twelve_steps(self):
+        card = bc.parse_card("ARC BEAT 1\n" + "lesson Kick | A7\n" * 13 + kick())
+        self.assertEqual(len(card.lesson), 12)
+        self.assertEqual([(p.line, p.code) for p in card.problems], [(14, "lesson-too-long")])
+
+    def test_the_steps_apply_to_the_first_scene(self):
+        card = one("lesson Snare | A9\nscene\n" + kick() + "scene\n[A]\nA9 snare | .... X... .... X... |\n")
+        self.assertEqual(codes(card, "error"), ["lesson-no-hits"])
+
+    def test_grid_and_analyse_list_the_steps(self):
+        card = bc.parse_card(LESSON)
+        grid = bc.render_grid(card)
+        self.assertIn("lesson 1: Kick alone (A7, 50%) - Count 1 e and a out loud", grid)
+        self.assertIn("lesson 3: The whole groove (A, 100%)", grid)
+        report = bc.analyse_card(card)
+        self.assertEqual(report["lesson"][1], {"title": "Add the snare", "pads": "A7 A9", "speed": 50, "tip": None})
+        self.assertIn("lesson 2: Add the snare (A7 A9, 50%)", bc.render_analysis(report))
+        self.assertEqual(bc.analyse_card(bc.parse_card(spec_card()))["lesson"], [])
 
 
 

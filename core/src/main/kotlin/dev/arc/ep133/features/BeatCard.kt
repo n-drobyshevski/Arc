@@ -33,6 +33,8 @@ data class BeatCard(
     val fx: CardFx? = null,
     val chain: List<Pair<Int, Int>>? = null,
     val sceneLines: Boolean = false,
+    /** The card's lesson, its `lesson` lines in order ([LessonStep]): what PRACTICE runs a step at a time. */
+    val lesson: List<LessonStep> = emptyList(),
 ) {
     init {
         require(scenes.isNotEmpty()) { "A card has at least one scene." }
@@ -164,6 +166,19 @@ data class SoundPick(
     val status: SoundStatus,
     val unverified: Boolean = false,
 )
+
+/**
+ * A step of a card's lesson (`lesson Kick alone | A7 | 50 | Count out loud`): its [title], the [group] and [pads]
+ * (offsets; null: all the group's) the player plays, at [speed] percent of the tempo, and a [tip]. It is played on the
+ * first scene's pattern of that group.
+ */
+data class LessonStep(val title: String, val group: Int, val pads: Set<Int>?, val speed: Int = 100, val tip: String? = null) {
+    companion object {
+        const val MAX = 12
+        const val MIN_SPEED = 25
+        const val MAX_SPEED = 100
+    }
+}
 
 /** Something wrong with a card, at [line] (counted from 1 in the text read): an [error] stops the card being read, a warning doesn't. */
 data class CardProblem(val line: Int, val message: String, val error: Boolean)
@@ -351,12 +366,13 @@ object BeatCards {
             scenes += CardScene(if (sceneLines > 0) sceneName else null, sections.toList())
             if (sectionLines == 0) error(start + 1, "The card has no section, such as [A].")
             checkChain()
+            checkLesson()
             return result()
         }
 
         private fun result(): CardRead {
             val sorted = problems.sortedBy { it.line }
-            val card = if (sorted.any { it.error }) null else BeatCard(name, tempo, swing, scenes.toList(), cardFx(), chain, sceneLines > 0)
+            val card = if (sorted.any { it.error }) null else BeatCard(name, tempo, swing, scenes.toList(), cardFx(), chain, sceneLines > 0, lesson.map { it.second })
             return CardRead(card, sorted, names.toMap())
         }
 
@@ -401,6 +417,11 @@ object BeatCards {
 
         private fun lineAt(no: Int, line: String) {
             val first = tokens(line)[0].lowercase()
+            // A lesson line may come anywhere: it names no section's pads but its own.
+            if (first == "lesson") {
+                lessonLine(no, line)
+                return
+            }
             if (first == "scene") {
                 scene(no, line)
                 return
@@ -495,6 +516,68 @@ object BeatCards {
             if (chain != null) warn(no, "Two chain lines, kept the later.")
             chain = steps
             chainAt = no
+        }
+
+        // ---- lesson ----
+
+        private val lesson = ArrayList<Pair<Int, LessonStep>>()
+
+        // lesson <title> | <pads> | <speed> | <tip>: a step of the lesson. A line with a fault is left out.
+        private fun lessonLine(no: Int, line: String) {
+            val parts = line.substring(tokens(line)[0].length).split('|').map { trim(it) }
+            var title = parts.getOrNull(0).orEmpty()
+            val padsText = parts.getOrNull(1).orEmpty()
+            if (title.isEmpty() || padsText.isEmpty()) {
+                error(no, "A lesson line needs a title and the pads to play, as in lesson Kick alone | A7 | 50.")
+                return
+            }
+            if (lesson.size == LessonStep.MAX) {
+                error(no, "The lesson has more than ${LessonStep.MAX} steps, the most is ${LessonStep.MAX}.")
+                return
+            }
+            if (title.codePointCount(0, title.length) > MAX_NAME) {
+                warn(no, "Lesson step title is longer than $MAX_NAME characters, shortened.")
+                title = trim(cut(title, MAX_NAME))
+            }
+            var group: Int? = null
+            var pads: MutableSet<Int>? = HashSet()
+            for (tok in tokens(padsText)) {
+                val whole = tok.length == 1 && tok[0] in 'A'..'D'
+                val pad = if (whole) null else parsePad(tok)
+                val g = if (whole) tok[0] - 'A' else pad?.group
+                if (g == null) {
+                    error(no, "'$tok' isn't a pad or a group: write pads such as A7 A9, or A for the whole group.")
+                    return
+                }
+                if (group != null && g != group) {
+                    error(no, "A lesson step's pads are all in one group.")
+                    return
+                }
+                group = g
+                if (whole) pads = null else pads?.add(pad!!.offset)
+            }
+            val speedText = parts.getOrNull(2)?.removeSuffix("%")?.let { trim(it) }.orEmpty()
+            val speed = if (speedText.isEmpty()) LessonStep.MAX_SPEED else speedText.takeIf { it.length <= 3 && it.all { c -> c in '0'..'9' } }?.toInt()
+            if (speed == null || speed !in LessonStep.MIN_SPEED..LessonStep.MAX_SPEED) {
+                error(no, "A lesson step's speed is ${LessonStep.MIN_SPEED} to ${LessonStep.MAX_SPEED} percent of the tempo.")
+                return
+            }
+            val tip = parts.drop(3).joinToString(" | ").let { trim(it) }.takeIf { it.isNotEmpty() }
+            lesson += no to LessonStep(title, group!!, pads, speed, tip)
+        }
+
+        // Each step's pads have pad hits in the first scene's pattern of its group.
+        private fun checkLesson() {
+            val first = scenes.firstOrNull()?.sections.orEmpty()
+            for ((no, step) in lesson) {
+                val notes = first.firstOrNull { it.group == step.group }?.pattern?.playable().orEmpty().filter { it.semitones == null }
+                val played = notes.map { it.offset }.toSet()
+                val missing = step.pads?.filter { it !in played }.orEmpty()
+                when {
+                    notes.isEmpty() -> error(no, "Lesson step '${step.title}': the card's first scene has no pad hits in group ${'A' + step.group}.")
+                    missing.isNotEmpty() -> error(no, "Lesson step '${step.title}': ${missing.joinToString(" ") { padText(step.group, it) }} has no hits in the first scene's [${'A' + step.group}].")
+                }
+            }
         }
 
         // ---- header ----
@@ -1055,6 +1138,7 @@ object BeatCards {
         out += "swing $swing"
         card.fx?.let { writeFx(out, it) }
         if (card.multiScene) card.chain?.let { writeChain(out, it, card.scenes.size) }
+        for (step in card.lesson.take(LessonStep.MAX)) out += lessonText(step)
         if (silent.isNotEmpty()) out += ClaudeText.noSoundOn(silent)
         if (tidy) out += TIDY_COMMENT
         if (!card.multiScene) {
@@ -1080,6 +1164,17 @@ object BeatCards {
         }
         return out.joinToString("\n", postfix = "\n")
     }
+
+    /** A lesson step as its line: "lesson Kick alone | A7 | 50 | Count out loud" (the speed left out at 100, A for the whole group). */
+    fun lessonText(step: LessonStep): String {
+        val parts = listOf(cleanText(step.title, MAX_NAME), lessonPads(step)) +
+            listOfNotNull(if (step.speed != LessonStep.MAX_SPEED || step.tip != null) "${step.speed}" else null, step.tip?.let { cleanText(it, Int.MAX_VALUE) })
+        return "lesson " + parts.joinToString(" | ")
+    }
+
+    /** A lesson step's pads as a card writes them, in keypad order ("A7 A9"), or the group's letter for all its pads. */
+    fun lessonPads(step: LessonStep): String =
+        step.pads?.let { set -> PadNotes.ROWS.flatten().filter { it in set }.joinToString(" ") { padText(step.group, it) } } ?: "${'A' + step.group}"
 
     // The chain line: steps as 2 or 2x4; those naming a scene the card hasn't, or passes out of range, are left out, and so is a chain left with none.
     private fun writeChain(out: MutableList<String>, chain: List<Pair<Int, Int>>, sceneCount: Int) {
@@ -1570,9 +1665,15 @@ object BeatCards {
      * whose slot is already on the pad is [SoundStatus.SAME], found by name
      * or not. The sounds are the project's, not a scene's: the lines of all
      * the card's scenes are matched, and a pad given a line in more than one
-     * scene takes the last (one pick, in the place of its first).
+     * scene takes the last (one pick, in the place of its first). A line that is [foreign] (another kit's sound, by its
+     * slot and name) is never used by an unnamed slot: that slot holds another sound.
      */
-    fun resolveSounds(card: BeatCard, available: Map<Int, String>, current: (PhysicalPad) -> Int?): List<SoundPick> {
+    fun resolveSounds(
+        card: BeatCard,
+        available: Map<Int, String>,
+        foreign: (CardSound) -> Boolean = { false },
+        current: (PhysicalPad) -> Int?,
+    ): List<SoundPick> {
         val picks = LinkedHashMap<PhysicalPad, SoundPick>()
         for (s in card.allSections) {
             for (offset in KEYPAD) {
@@ -1583,7 +1684,7 @@ object BeatCards {
                 val name = wanted.name?.takeIf { it.isNotBlank() && !FactorySounds.unnamed(wanted.slot, it) }
                 val direct = wanted.slot.takeIf { it in available && (name == null || holds(available[it], name)) }
                 val byName = if (direct == null && name != null) lookUp(available, name, now) else null
-                val slot = direct ?: byName ?: wanted.slot.takeIf { unnamedIn(available, it) }
+                val slot = direct ?: byName ?: wanted.slot.takeIf { unnamedIn(available, it) && !foreign(wanted) }
                 val unverified = slot != null && unnamedIn(available, slot)
                 picks[pad] = when {
                     slot == null -> SoundPick(pad, wanted, null, null, now, SoundStatus.MISSING)

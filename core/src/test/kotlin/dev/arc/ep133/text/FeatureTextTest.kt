@@ -546,14 +546,14 @@ class FeatureTextTest {
             listOf(ClaudeText.shareSceneName("S02", false), ClaudeText.shareSceneName("S02", true), ClaudeText.sharePatternName(1, 12, false), ClaudeText.sharePatternName(1, 12, true)),
         )
         assertEquals("https://arc-ko.vercel.app/arc-beats-skill.zip", ClaudeText.SKILL_URL)
-        assertTrue(ClaudeText.LEARN_PROMPT.startsWith("Use the arc-beats skill."))
+        assertTrue(ClaudeText.LEARN_PROMPT.startsWith("Use the arc-beats skill to teach me"))
         assertEquals("Share a beat with Claude, paste one back", CoachText.CLAUDE)
         // What is shared: the card in a fenced block after the prompt, named by where it sits.
         assertEquals(listOf("P01 S02", "P99 S10", "S02"), listOf(ClaudeText.patternCardName(1, 1), ClaudeText.patternCardName(99, 9), ClaudeText.sceneCardName(1)))
         assertEquals("Arc beat P01 S02", ClaudeText.shareSubject("P01 S02"))
-        assertEquals("Analyse this beat:\n\n```\nARC BEAT 1\nswing 50\n```\n", ClaudeText.shareText("Analyse this beat:", "ARC BEAT 1\nswing 50\n"))
+        assertEquals("Analyse this beat:\n\nMy EP-133 plays the EP-133's own factory sounds.\n\n```\nARC BEAT 1\nswing 50\n```\n", ClaudeText.shareText("Analyse this beat:", "ARC BEAT 1\nswing 50\n"))
         // A kit other than the EP-133's is named between the prompt and the card; the EP-133's own kit adds nothing.
-        assertEquals(null, ClaudeText.kitLine(dev.arc.ep133.features.FactoryKit.EP133))
+        assertEquals("My EP-133 plays the EP-133's own factory sounds.", ClaudeText.kitLine(dev.arc.ep133.features.FactoryKit.EP133))
         assertEquals("My EP-133 plays the EP-40 Riddim factory kit.", ClaudeText.kitLine(dev.arc.ep133.features.FactoryKit.EP40))
         assertEquals("My EP-133 plays the EP-1320 Medieval factory kit.", ClaudeText.kitLine(dev.arc.ep133.features.FactoryKit.EP1320))
         assertEquals(

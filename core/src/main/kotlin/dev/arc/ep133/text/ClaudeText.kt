@@ -110,24 +110,28 @@ object ClaudeText {
 
     /** What Learn with Claude shares, to be sent to the Claude app as the first message. */
     const val LEARN_PROMPT =
-        "Use the arc-beats skill. Teach me the EP-133 K.O. II from lesson 1, one step at a time. I use the Arc app on Android."
+        "Use the arc-beats skill to teach me the EP-133 K.O. II, starting at lesson 1 (Meet the pads). I use the Arc app on Android. " +
+            "Go one step at a time: explain the step, give me something to try on the device, and wait for me before the next one."
     const val LEARN_TITLE = "Learn the EP-133 with Claude"
 
     /** Said when no app can take the link or the text. */
     const val NO_APP = "No app can open that."
 
     // ---------- Sharing ----------
-    /** The line before the card in the shared text. */
+    /** The words before the card in the shared text: the skill and the task, why, the steps as a list, then the card. */
     const val SHARE_PROMPT =
-        "Analyse this EP-133 beat from Arc with the arc-beats skill, then suggest 2-3 edits as a new card. " +
-            "Keep its sound, FX and pad lines, or choose sounds from my sound list if one follows the card:"
+        "Use the arc-beats skill to improve this EP-133 beat from Arc. I'll paste your new card back into Arc next to mine, so give it a short new name.\n" +
+            "- First: analyse it, its groove, its energy and what makes it work\n" +
+            "- Edits: 2-3, as one new card\n" +
+            "Keep its sound, FX and pad lines unless an edit needs to change them, or choose sounds from my sound list if one follows the card. The card:"
     const val SHARE_TITLE = "Share beat card"
 
     /** The line before a shared chain: an arrangement of several scenes (its `chain` line gives their order). */
     const val SHARE_CHAIN_PROMPT =
-        "Analyse this EP-133 arrangement from Arc with the arc-beats skill: comment on its energy curve, contrast, length and transitions, " +
-            "then suggest 2-3 edits as a new card of scenes with a chain line. " +
-            "Keep its sound, FX and pad lines, or choose sounds from my sound list if one follows the card:"
+        "Use the arc-beats skill to improve this EP-133 arrangement from Arc. I'll paste your new card back into Arc next to mine, so give it a short new name.\n" +
+            "- First: analyse it, its energy curve, contrast, length and transitions\n" +
+            "- Edits: 2-3, as one new card of scenes with a chain line\n" +
+            "Keep its sound, FX and pad lines unless an edit needs to change them, or choose sounds from my sound list if one follows the card. The card:"
     const val SHARE_CHAIN_TITLE = "Share chain as a beat card"
 
     /** "Chain": a chain's card, as the share's subject names it ("Arc beat Chain"). */
@@ -147,10 +151,13 @@ object ClaudeText {
      * reads its slots and pads by it). Null for the EP-133's own kit.
      */
     fun kitLine(kit: dev.arc.ep133.features.FactoryKit): String? = when (kit) {
-        dev.arc.ep133.features.FactoryKit.EP133 -> null
+        dev.arc.ep133.features.FactoryKit.EP133 -> EP133_LINE
         dev.arc.ep133.features.FactoryKit.EP40 -> "My EP-133 plays the ${FeatureText.FACTORY_40} factory kit."
         dev.arc.ep133.features.FactoryKit.EP1320 -> "My EP-133 plays the ${FeatureText.FACTORY_1320} factory kit."
     }
+
+    /** The EP-133's own kit, said too, so Claude never takes another kit's sounds for it. */
+    const val EP133_LINE = "My EP-133 plays the EP-133's own factory sounds."
 
     /**
      * The shared text: [prompt], a blank line and [card] (which ends in a newline) in a fenced block; with a [kit]
@@ -264,6 +271,14 @@ object ClaudeText {
 
     /** What a row says in place of a new sound: the pad plays it already. */
     const val ALREADY_THERE = "Already there"
+
+    /** A sound no slot holds that a saved factory pack has: IMPORT uploads it ("Upload 234 mpc hh", "From the EP-40 pack, into a free slot"). */
+    fun upload(slot: Int, name: String?) = "Upload ${soundName(slot, name)}"
+    fun fromPack(model: String) = "From the $model pack, into a free slot"
+    fun inPack(model: String) = "In the $model pack: connect the EP-133 to upload it"
+    fun soundRowUpload(pad: PhysicalPad, slot: Int, name: String?, model: String) = "${padLabel(pad)}: ${upload(slot, name)}, ${fromPack(model).lowercase()}"
+    /** An upload that stopped part way: the pads before it keep their sounds. */
+    const val UPLOAD_STOPPED = "The upload stopped"
 
     /** What a row says when the sound is nowhere in the user's list: "Not on your EP-133: 301 Rim dusty". */
     fun soundMissing(slot: Int, name: String?) = "Not on your EP-133: ${soundName(slot, name)}"

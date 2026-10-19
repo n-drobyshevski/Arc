@@ -70,7 +70,26 @@ export interface BeatCard {
   readonly fx: CardFx | null
   readonly chain: readonly (readonly [number, number])[] | null
   readonly sceneLines: boolean
+  /** The card's lesson, its `lesson` lines in order (LessonStep); none when left out. */
+  readonly lesson?: readonly LessonStep[]
 }
+
+/**
+ * A step of a card's lesson (`lesson Kick alone | A7 | 50 | Count out loud`): its [title], the [group] and [pads]
+ * (offsets; null: all the group's) the player plays, at [speed] percent of the tempo, and a [tip]. Arc on Android
+ * runs it in PRACTICE; the web reads and writes it.
+ */
+export interface LessonStep {
+  readonly title: string
+  readonly group: number
+  readonly pads: readonly number[] | null
+  readonly speed: number
+  readonly tip: string | null
+}
+
+export const LESSON_MAX = 12
+export const LESSON_MIN_SPEED = 25
+export const LESSON_MAX_SPEED = 100
 
 /** A single-scene card of [sections] (what `BeatCard(...)` is in Kotlin). */
 export function beatCard(
@@ -92,9 +111,10 @@ export function beatCardOfScenes(
   fx: CardFx | null = null,
   chain: readonly (readonly [number, number])[] | null = null,
   sceneLines = false,
+  lesson: readonly LessonStep[] = [],
 ): BeatCard {
   const all = scenes.length === 0 ? [cardScene(null, [])] : scenes
-  return { name, tempo, swing, scenes: all, sections: all[0]!.sections, fx, chain, sceneLines }
+  return { name, tempo, swing, scenes: all, sections: all[0]!.sections, fx, chain, sceneLines, ...(lesson.length > 0 ? { lesson } : {}) }
 }
 
 /** The same card with [sections] as its first scene's. */
@@ -529,8 +549,53 @@ function read(text: string): CardRead {
   const result = (): CardRead => {
     // Array.prototype.sort is stable, as Kotlin's sortedBy.
     const sorted = [...problems].sort((a, b) => a.line - b.line)
-    const card = sorted.some((p) => p.error) ? null : beatCardOfScenes(name, tempo, swing, [...scenes], readFx(), chain, sceneLines > 0)
+    const card = sorted.some((p) => p.error) ? null : beatCardOfScenes(name, tempo, swing, [...scenes], readFx(), chain, sceneLines > 0, lesson.map((l) => l[1]))
     return { card, problems: sorted, names }
+  }
+  // ---- lesson ----
+  const lesson: [number, LessonStep][] = []
+  // lesson <title> | <pads> | <speed> | <tip>: a step of the lesson. A line with a fault is left out.
+  const lessonLine = (no: number, line: string): void => {
+    const parts = line.slice(tokens(line)[0]!.length).split('|').map((p) => trim(p))
+    let title = parts[0] ?? ''
+    const padsText = parts[1] ?? ''
+    if (title === '' || padsText === '') return error(no, 'A lesson line needs a title and the pads to play, as in lesson Kick alone | A7 | 50.')
+    if (lesson.length === LESSON_MAX) return error(no, `The lesson has more than ${LESSON_MAX} steps, the most is ${LESSON_MAX}.`)
+    if (Array.from(title).length > MAX_NAME) {
+      warn(no, `Lesson step title is longer than ${MAX_NAME} characters, shortened.`)
+      title = trim(cut(title, MAX_NAME))
+    }
+    let group: number | null = null
+    let pads: Set<number> | null = new Set()
+    for (const tok of tokens(padsText)) {
+      const whole = tok.length === 1 && tok >= 'A' && tok <= 'D'
+      const pad = whole ? null : parsePad(tok)
+      const g = whole ? tok.charCodeAt(0) - 65 : (pad?.group ?? null)
+      if (g === null) return error(no, `'${tok}' isn't a pad or a group: write pads such as A7 A9, or A for the whole group.`)
+      if (group !== null && g !== group) return error(no, "A lesson step's pads are all in one group.")
+      group = g
+      if (whole) pads = null
+      else pads?.add(pad!.offset)
+    }
+    const speedText = trim((parts[2] ?? '').replace(/%$/, ''))
+    const speed = speedText === '' ? LESSON_MAX_SPEED : /^\d{1,3}$/.test(speedText) ? Number(speedText) : null
+    if (speed === null || speed < LESSON_MIN_SPEED || speed > LESSON_MAX_SPEED) {
+      return error(no, `A lesson step's speed is ${LESSON_MIN_SPEED} to ${LESSON_MAX_SPEED} percent of the tempo.`)
+    }
+    const tip = trim(parts.slice(3).join(' | '))
+    lesson.push([no, { title, group: group!, pads: pads === null ? null : [...pads].sort((a, b) => a - b), speed, tip: tip === '' ? null : tip }])
+  }
+  // Each step's pads have pad hits in the first scene's pattern of its group.
+  const checkLesson = (): void => {
+    const first = scenes[0]?.sections ?? []
+    for (const [no, step] of lesson) {
+      const section = first.find((s) => s.group === step.group)
+      const notes = section === undefined ? [] : Pattern.playable(section.pattern).filter((n) => n.semitones === null)
+      const played = new Set(notes.map((n) => n.offset))
+      const missing = (step.pads ?? []).filter((o) => !played.has(o))
+      if (notes.length === 0) error(no, `Lesson step '${step.title}': the card's first scene has no pad hits in group ${letter(step.group)}.`)
+      else if (missing.length > 0) error(no, `Lesson step '${step.title}': ${missing.map((o) => padText(step.group, o)).join(' ')} has no hits in the first scene's [${letter(step.group)}].`)
+    }
   }
   // The chain names scenes the card has, and the card has scenes at all.
   const checkChain = (): void => {
@@ -1096,6 +1161,11 @@ function read(text: string): CardRead {
 
   const lineAt = (no: number, line: string): void => {
     const first = tokens(line)[0]!.toLowerCase()
+    // A lesson line may come anywhere: it names no section's pads but its own.
+    if (first === 'lesson') {
+      lessonLine(no, line)
+      return
+    }
     if (first === 'scene') {
       sceneLine(no, line)
       return
@@ -1144,6 +1214,7 @@ function read(text: string): CardRead {
   scenes.push(cardScene(sceneLines > 0 ? sceneName : null, [...sections]))
   if (sectionLines === 0) error(start + 1, 'The card has no section, such as [A].')
   checkChain()
+  checkLesson()
   return result()
 }
 
@@ -1173,6 +1244,7 @@ function write(card: BeatCard, names: (pad: PhysicalPad) => string | null = () =
   out.push(`swing ${swing}`)
   if (card.fx !== null) writeFx(out, card.fx)
   if (isMultiScene(card) && card.chain !== null) writeChain(out, card.chain, card.scenes.length)
+  for (const step of (card.lesson ?? []).slice(0, LESSON_MAX)) out.push(lessonText(step))
   if (silent.length > 0) out.push(ClaudeText.noSoundOn(silent))
   if (tidy) out.push(TIDY_COMMENT)
   if (!isMultiScene(card)) {
@@ -1201,6 +1273,15 @@ function write(card: BeatCard, names: (pad: PhysicalPad) => string | null = () =
 }
 
 // The chain line: steps as 2 or 2x4; those naming a scene the card hasn't, or passes out of range, are left out, and so is a chain left with none.
+/** A lesson step as its line: "lesson Kick alone | A7 | 50 | Count out loud" (the speed left out at 100, A for the whole group). */
+export function lessonText(step: LessonStep): string {
+  const pads = step.pads === null ? letter(step.group) : ROWS.flat().filter((o) => step.pads!.includes(o)).map((o) => padText(step.group, o)).join(' ')
+  const parts = [cleanText(step.title, MAX_NAME), pads]
+  if (step.speed !== LESSON_MAX_SPEED || step.tip !== null) parts.push(`${step.speed}`)
+  if (step.tip !== null) parts.push(cleanText(step.tip, Number.MAX_SAFE_INTEGER))
+  return 'lesson ' + parts.join(' | ')
+}
+
 function writeChain(out: string[], chain: readonly (readonly [number, number])[], sceneCount: number): void {
   const steps = chain.filter(([sc, passes]) => sc >= 1 && sc <= sceneCount && passes >= Chain.MIN_PASSES && passes <= Chain.MAX_PASSES).slice(0, Chain.MAX_STEPS)
   if (steps.length === 0) return

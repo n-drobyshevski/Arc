@@ -45,6 +45,36 @@ internal class SoundSet(val source: String, val names: Map<Int, String>) {
     val size: Int get() = names.size
 }
 
+/** The kit a device's own sounds are ([kit]), and the names its unnamed ones ("200.pcm") go by ([names]; null: none known). */
+internal class DeviceKit(val kit: dev.arc.ep133.features.FactoryKit, val names: Map<Int, String>?)
+
+/**
+ * The kit the EP-133's sounds are, for a share and for reading a card's sound lines ([DeviceKit]). Live playing a pack
+ * offline ([OfflineSounds.base] FACTORY): the [active] kit and its pack's names. Otherwise the device's slots (connected,
+ * or as last read) told against the saved packs' ([dev.arc.ep133.features.FactorySounds.kitOf]), with that pack's names;
+ * failing that, the connected device's own kit ([sku]) with no names, or, with no list known, [active]. An EP-133 whose
+ * slots match no saved pack is the EP-133's kit, its unnamed sounds left unnamed: never another kit's names.
+ */
+internal fun deviceKitOf(
+    m: MirrorUi?,
+    backups: List<dev.arc.ep133.text.BackupRecord>,
+    kitNames: Map<dev.arc.ep133.features.FactoryKit, Map<Int, String>>,
+    sku: String?,
+    active: dev.arc.ep133.features.FactoryKit,
+): DeviceKit {
+    val list = when {
+        m == null -> null
+        m.offline == null -> m.sounds
+        m.offlineSounds?.base == SoundSource.FACTORY -> return DeviceKit(active, kitNames[active])
+        else -> m.offlineSounds?.device
+    }
+    if (list.isNullOrEmpty()) return DeviceKit(active, kitNames[active])
+    val packs = dev.arc.ep133.features.FactoryKit.SHOWN.mapNotNull { k -> dev.arc.ep133.features.FactorySounds.inLibrary(backups, k)?.let { k to it.slots.toSet() } }.toMap()
+    val matched = dev.arc.ep133.features.FactorySounds.kitOf(list.mapTo(HashSet()) { it.slot }, packs)
+    if (matched != null) return DeviceKit(matched, kitNames[matched])
+    return DeviceKit(dev.arc.ep133.features.FactoryKit.ofSku(sku) ?: dev.arc.ep133.features.FactoryKit.EP133, null)
+}
+
 /**
  * The sounds [m] (Live's mirror) can choose from: the EP-133's, read, while connected; offline the list the view shows,
  * the last read's or the factory pack's ([OfflineSounds.base]). Null when none is known (nothing read, or no pack). A
@@ -72,8 +102,9 @@ internal fun soundSetOf(m: MirrorUi?, factory: Map<Int, String>? = null): SoundS
  * With a [list], the sounds Arc knows follow the card's closing fence
  * ([BeatCards.soundList]), for Claude to choose from. When the pads are [padsKnown], the pads the notes use that have no
  * sound ([held] gives a pad's slot, null for none; [BeatCards.silentPads]) are named in a comment after the header
- * ([ClaudeText.noSoundOn]). A [kit] other than the EP-133's is named before the card ([ClaudeText.kitLine]). Null when
- * there is nothing to share: no notes in it.
+ * ([ClaudeText.noSoundOn]). A [kit] other than the EP-133's is named before the card ([ClaudeText.kitLine]); the
+ * [prompt] goes first (the Claude page's, [dev.arc.ep133.text.PromptText.prompt]). Null when there is nothing to share:
+ * no notes in it.
  */
 internal fun beatShare(
     seq: ProjectSeq,
@@ -88,6 +119,7 @@ internal fun beatShare(
     held: (PhysicalPad) -> Int? = { null },
     padsKnown: Boolean = false,
     kit: dev.arc.ep133.features.FactoryKit = dev.arc.ep133.features.FactoryKit.EP133,
+    prompt: String = ClaudeText.SHARE_PROMPT,
 ): BeatShare? {
     val groups = if (group == null) 0..3 else group..group
     val sections = groups.map { g -> CardSection(g, seq.selected(g), seq.pattern(g, seq.selected(g))) }
@@ -95,7 +127,7 @@ internal fun beatShare(
     val name = if (group == null) ClaudeText.sceneCardName(seq.scene) else ClaudeText.patternCardName(seq.selected(group), seq.scene)
     val card = BeatCards.fromPatterns(name, tempo, swing, sections, sounds, fx, pads)
     val silent = BeatCards.silentPads(card, held, padsKnown)
-    val text = ClaudeText.shareText(ClaudeText.SHARE_PROMPT, BeatCards.write(card, names, tidy = true, silent = silent), kit)
+    val text = ClaudeText.shareText(prompt, BeatCards.write(card, names, tidy = true, silent = silent), kit)
     // The list follows the closing fence after a blank line (the card's text ends in a newline); readers stop at the fence.
     return BeatShare(ClaudeText.shareSubject(name), if (list == null) text else text + "\n" + BeatCards.soundList(list.source, list.names))
 }
@@ -122,7 +154,7 @@ internal fun chainSceneCount(steps: List<ChainStep>): Int = chainForCard(steps).
  * The text the project's chain shares: as [beatShare], a card ([BeatCards.fromScenes]: the chain's scenes in the order they first play,
  * each with its patterns, and the `chain` line with the passes) with the prompt for an arrangement, at [tempo] and the TIMING
  * [swing], the pads' [names], the sounds, FX and pad settings the other shares carry, the sound list after it, and the pads with no sound
- * named in a comment. Null when the chain has no step (or none naming a scene of [seq]).
+ * named in a comment, after the [prompt]. Null when the chain has no step (or none naming a scene of [seq]).
  */
 internal fun beatShareChain(
     seq: ProjectSeq,
@@ -136,12 +168,23 @@ internal fun beatShareChain(
     held: (PhysicalPad) -> Int? = { null },
     padsKnown: Boolean = false,
     kit: dev.arc.ep133.features.FactoryKit = dev.arc.ep133.features.FactoryKit.EP133,
+    prompt: String = ClaudeText.SHARE_CHAIN_PROMPT,
 ): BeatShare? {
     val name = ClaudeText.CHAIN_CARD_NAME
     val card = BeatCards.fromScenes(name, tempo, swing, seq, chainForCard(seq.chain.steps), sounds, fx, pads) ?: return null
     val silent = BeatCards.silentPads(card, held, padsKnown)
-    val text = ClaudeText.shareText(ClaudeText.SHARE_CHAIN_PROMPT, BeatCards.write(card, names, tidy = true, silent = silent), kit)
+    val text = ClaudeText.shareText(prompt, BeatCards.write(card, names, tidy = true, silent = silent), kit)
     return BeatShare(ClaudeText.shareSubject(name), if (list == null) text else text + "\n" + BeatCards.soundList(list.source, list.names))
+}
+
+/**
+ * A prompt that goes without a card (a new beat, a track from scratch, a lesson), named [what] in the subject: the
+ * [prompt], the [kit] when it isn't the EP-133's ([ClaudeText.kitLine]) and, with a [list], the sounds Arc knows after a
+ * blank line.
+ */
+internal fun promptShare(what: String, prompt: String, kit: dev.arc.ep133.features.FactoryKit?, list: SoundSet? = null): BeatShare {
+    val text = prompt + (kit?.let(ClaudeText::kitLine)?.let { "\n\n$it" } ?: "") + "\n"
+    return BeatShare(dev.arc.ep133.text.PromptText.subject(what), if (list == null) text else text + "\n" + BeatCards.soundList(list.source, list.names))
 }
 
 /** How strong a hit is drawn on the sheet's grid: the ghost, normal and accent tints (the card's x, o and X rounding, as TIDY has it). */
@@ -183,11 +226,18 @@ class BeatChainUi(val steps: List<ChainStep>)
  * A card's sound line on the sheet: the [pick] ([BeatCards.resolveSounds]) and the name the pad plays now ([oldName], null when unknown).
  * A [picked] row is not the card's: the user chose its sound for a silent pad ([pickedRow]).
  */
-class SoundRowUi(val pick: SoundPick, val oldName: String?, val picked: Boolean = false) {
+class SoundRowUi(
+    val pick: SoundPick,
+    val oldName: String?,
+    val picked: Boolean = false,
+    /** A missing sound a saved factory pack has ([PackSound]): IMPORT can upload it into a free slot, while connected ([uploadable]). */
+    val fromPack: PackSound? = null,
+    val uploadable: Boolean = false,
+) {
     val pad: PhysicalPad get() = pick.pad
 
-    /** Whether the row can be ticked: the sound is somewhere in the list and not on the pad yet. */
-    val changes: Boolean get() = pick.status == SoundStatus.CHANGE || pick.status == SoundStatus.FOUND_BY_NAME
+    /** Whether the row can be ticked: the sound is somewhere in the list and not on the pad yet, or can be uploaded from a pack. */
+    val changes: Boolean get() = pick.status == SoundStatus.CHANGE || pick.status == SoundStatus.FOUND_BY_NAME || fromPack != null && uploadable
 
     /**
      * The name the card gave a sound used by its slot because the EP-133 lists it unnamed ("200.pcm"), for the line
@@ -221,10 +271,40 @@ internal fun soundsUi(
     names: (PhysicalPad) -> String?,
     offline: Boolean,
     project: Int?,
+    packs: Map<dev.arc.ep133.features.FactoryKit, Map<Int, String>> = emptyMap(),
+    deviceKit: dev.arc.ep133.features.FactoryKit? = null,
 ): SoundsUi? {
     if (card.allSections.all { it.sounds.isEmpty() }) return null
-    val rows = BeatCards.resolveSounds(card, set?.names.orEmpty(), current).map { SoundRowUi(it, names(it.pad)) }
+    val rows = BeatCards.resolveSounds(card, set?.names.orEmpty(), foreignTo(packs, deviceKit), current).map { p ->
+        val from = if (p.status == SoundStatus.MISSING) packSoundOf(p.wanted, packs) else null
+        SoundRowUi(p, names(p.pad), fromPack = from, uploadable = from != null && !offline)
+    }
     return SoundsUi(rows, offline, project)
+}
+
+/** A sound of a saved factory pack: its [kit], its [slot] there and its [name]. */
+class PackSound(val kit: dev.arc.ep133.features.FactoryKit, val slot: Int, val name: String)
+
+/**
+ * Where a card's sound line is in the saved [packs]: the pack whose slot holds a sound of its name, else the first that
+ * has a sound of that name anywhere; null for a line with no name, or none has it.
+ */
+internal fun packSoundOf(wanted: CardSound, packs: Map<dev.arc.ep133.features.FactoryKit, Map<Int, String>>): PackSound? {
+    val name = wanted.name?.takeIf { it.isNotBlank() && !FactorySounds.unnamed(wanted.slot, it) } ?: return null
+    for ((kit, names) in packs) {
+        if (names[wanted.slot]?.let { PadSoundCache.sameName(it, name) } == true) return PackSound(kit, wanted.slot, names.getValue(wanted.slot))
+    }
+    for ((kit, names) in packs) {
+        val slot = names.entries.filter { PadSoundCache.sameName(it.value, name) }.minOfOrNull { it.key } ?: continue
+        return PackSound(kit, slot, names.getValue(slot))
+    }
+    return null
+}
+
+/** A card line that is another kit's sound than the device's ([deviceKit]): that pack's sound of its name at its slot. */
+internal fun foreignTo(packs: Map<dev.arc.ep133.features.FactoryKit, Map<Int, String>>, deviceKit: dev.arc.ep133.features.FactoryKit?): (CardSound) -> Boolean = { w ->
+    val name = w.name
+    name != null && packs.any { (kit, names) -> kit != deviceKit && names[w.slot]?.let { PadSoundCache.sameName(it, name) } == true }
 }
 
 /**

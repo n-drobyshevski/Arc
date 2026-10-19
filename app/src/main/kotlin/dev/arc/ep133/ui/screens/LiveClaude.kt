@@ -116,14 +116,27 @@ class ClaudeUi(
     /** Each group's pattern, its first bar as step lights ([dev.arc.ep133.controller.stepLights]), for the glass. */
     val lights: List<List<dev.arc.ep133.controller.Weight?>> = List(4) { dev.arc.ep133.controller.NO_LIGHTS },
     val onWithSounds: (Boolean) -> Unit = {},
-    val onShareScene: () -> Unit = {},
-    val onShareChain: () -> Unit = {},
-    val onSharePattern: (group: Int) -> Unit = {},
+    /** The prompt on the glass ([dev.arc.ep133.text.PromptText]), and the kit Live plays (the prompt's own when it names none). */
+    val prompt: dev.arc.ep133.features.ClaudePrompt = dev.arc.ep133.features.ClaudePrompt(),
+    val kit: dev.arc.ep133.features.FactoryKit = dev.arc.ep133.features.FactoryKit.EP133,
+    /** The tempo Live plays at: the tempo's LIVE answer. */
+    val liveTempo: Int = dev.arc.ep133.features.Tempo.DEFAULT,
+    val saved: List<dev.arc.ep133.features.SavedPrompt> = emptyList(),
+    /** The word whose answers show as the page opens (the previews'); null: the sentence's keys. */
+    val picking: dev.arc.ep133.features.PromptSlot? = null,
+    val onPrompt: (dev.arc.ep133.features.ClaudePrompt) -> Unit = {},
+    /** SHARE: the prompt, with the card [pick] names ([group]'s pattern for PATTERN) when it goes with one. */
+    val onShare: (pick: dev.arc.ep133.features.SharePick, group: Int) -> Unit = { _, _ -> },
+    /** PRACTICE (the PLAY tab): play along with [pick] on Live's pads ([group]'s pattern for PATTERN). */
+    val onPractice: (pick: dev.arc.ep133.features.SharePick, group: Int) -> Unit = { _, _ -> },
+    /** COPY: as SHARE, onto the clipboard. */
+    val onCopy: (pick: dev.arc.ep133.features.SharePick, group: Int) -> Unit = { _, _ -> },
+    val onSavePrompt: (dev.arc.ep133.features.ClaudePrompt) -> Unit = {},
+    val onDeletePrompt: (index: Int) -> Unit = {},
     val onPaste: () -> Unit = {},
     /** PASTE held: a .txt or .md file with a beat card in it, from the system's file picker. */
     val onOpenFile: () -> Unit = {},
     val onGetSkill: () -> Unit = {},
-    val onLearn: () -> Unit = {},
     /** What was shared to Claude and not yet answered ("Scene S02", "A \u00B7 01", "Chain"); null when no reply is awaited. */
     val waiting: String? = null,
     /** The dismiss key on the display's waiting card: stop waiting. */
@@ -177,6 +190,8 @@ fun ColumnScope.BeatImportSheetContent(
     onCancel: () -> Unit,
     onImport: (setTempo: Boolean, soundPads: Set<PhysicalPad>, applyFx: Boolean, shapePads: Set<PhysicalPad>, picked: Map<PhysicalPad, Int>, setChain: Boolean) -> Unit,
     onCopyProblems: (List<CardProblem>) -> Unit,
+    /** IMPORT AND PRACTISE, after the import: practice on Live's pads (null hides it). */
+    onPractise: (() -> Unit)? = null,
     /** For screenshots: start with the tempo chip chosen. */
     initialSetTempo: Boolean = false,
     /** The preview of the sounds PICK SOUND lists: what plays, and the keys that play and stop it. */
@@ -342,6 +357,7 @@ fun ColumnScope.BeatImportSheetContent(
             onTick = { row -> shapeOff = if (padKey(row.pad) in shapeOff) shapeOff - padKey(row.pad) else shapeOff + padKey(row.pad) },
         )
     }
+    ui.card?.lesson?.takeIf { it.isNotEmpty() }?.let { LessonBlock(it, practising = onPractise != null) }
     ui.swing?.let { Text(ClaudeText.swingLine(it), style = ArcType.small, color = c.graphite) }
     if (ui.problems.isNotEmpty()) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -358,19 +374,26 @@ fun ColumnScope.BeatImportSheetContent(
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
     }
+    val import = {
+        val pads = if (putOnPads) sounds?.changes.orEmpty().filter { padKey(it.pad) !in unticked }.mapTo(HashSet()) { it.pad } else emptySet()
+        val shaped = ui.shaping?.rows.orEmpty().filter { it.changes(soundGoing(it.pad)) && padKey(it.pad) !in shapeOff }.mapTo(HashSet()) { it.pad }
+        // The picked sounds that are ticked: they are in [pads] too, being SOUNDS rows.
+        val chosen = pickedRows.filter { it.pad in pads }.associate { it.pad to it.pick.slot!! }
+        onImport(setTempo && tempo != null, pads, applyFx && ui.fx != null, shaped, chosen, setChain && chainUi != null)
+    }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         ArcKey(Strings.CANCEL, onCancel, Modifier.weight(1f))
+        ArcKey(ClaudeText.IMPORT, import, Modifier.weight(1f), style = KeyStyle.Signal, enabled = blocked == null)
+    }
+    // IMPORT, then play along with it on Live's pads.
+    onPractise?.let { practise ->
         ArcKey(
-            ClaudeText.IMPORT,
+            dev.arc.ep133.text.PracticeText.IMPORT_PRACTICE,
             {
-                val pads = if (putOnPads) sounds?.changes.orEmpty().filter { padKey(it.pad) !in unticked }.mapTo(HashSet()) { it.pad } else emptySet()
-                val shaped = ui.shaping?.rows.orEmpty().filter { it.changes(soundGoing(it.pad)) && padKey(it.pad) !in shapeOff }.mapTo(HashSet()) { it.pad }
-                // The picked sounds that are ticked: they are in [pads] too, being SOUNDS rows.
-                val chosen = pickedRows.filter { it.pad in pads }.associate { it.pad to it.pick.slot!! }
-                onImport(setTempo && tempo != null, pads, applyFx && ui.fx != null, shaped, chosen, setChain && chainUi != null)
+                import()
+                practise()
             },
-            Modifier.weight(1f),
-            style = KeyStyle.Signal,
+            Modifier.fillMaxWidth(),
             enabled = blocked == null,
         )
     }
@@ -628,6 +651,41 @@ private fun FxBlock(fx: BeatFxUi, on: Boolean, onToggle: () -> Unit) {
     if (on && fx.changes) Text(ClaudeText.FX_BLOCK_NOTE, style = ArcType.small, color = c.graphite)
 }
 
+/**
+ * The LESSON block: a row for each step of the card's lesson, its number, title and tip, and the pads and speed on the
+ * right; under it, that IMPORT AND PRACTISE runs them ([practising]: the key is there).
+ */
+@Composable
+private fun LessonBlock(steps: List<dev.arc.ep133.features.LessonStep>, practising: Boolean) {
+    val c = LocalArcColors.current
+    GridPlate {
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(dev.arc.ep133.text.PracticeText.LESSON.uppercase(), style = ArcType.caps, color = c.graphite, maxLines = 1)
+        }
+        for ((i, step) in steps.withIndex()) {
+            PlateLine()
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 8.dp).semantics(mergeDescendants = true) {},
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("${i + 1}", style = ArcType.caps, color = c.graphite, maxLines = 1, modifier = Modifier.width(18.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(step.title, style = ArcType.small, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    step.tip?.let { Text(it, style = ArcType.tiny, color = c.graphite, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                }
+                Text(
+                    dev.arc.ep133.text.PracticeText.lessonPads(dev.arc.ep133.features.BeatCards.lessonPads(step), step.speed),
+                    style = ArcType.small,
+                    color = c.ink,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+    if (practising) Text(dev.arc.ep133.text.PracticeText.LESSON_NOTE, style = ArcType.small, color = c.graphite)
+}
+
 /** The width of the label column of an FX row, and of a pad shaping row's pad. */
 private val FxLabelWidth = 62.dp
 
@@ -763,8 +821,10 @@ private fun SoundRow(row: SoundRowUi, ticked: Boolean, chipOn: Boolean, onTick: 
     // A sound listed unnamed is its file name ("012.pcm") already: the slot isn't said twice.
     val now = if (missing) null else if (pick.unverified && pick.name != null) pick.name else ClaudeText.soundName(pick.slot ?: wanted.slot, pick.name)
     val cardSays = row.cardSays
+    val pack = row.fromPack
     val description = when {
-        missing -> ClaudeText.soundRowMissing(pick.pad, wanted.slot, wanted.name)
+        missing && pack != null && row.uploadable -> ClaudeText.soundRowUpload(pick.pad, pack.slot, pack.name, pack.kit.model)
+        missing -> ClaudeText.soundRowMissing(pick.pad, wanted.slot, wanted.name) + (pack?.let { ". " + ClaudeText.inPack(it.kit.model) } ?: "")
         pick.status == SoundStatus.SAME -> ClaudeText.soundRowSame(pick.pad, now.orEmpty())
         else -> ClaudeText.soundRowName(pick.pad, row.oldName, now.orEmpty())
     } + (cardSays?.let { ". " + ClaudeText.cardSays(it) } ?: "")
@@ -790,6 +850,18 @@ private fun SoundRow(row: SoundRowUi, ticked: Boolean, chipOn: Boolean, onTick: 
         Text(ClaudeText.padLabel(pick.pad), style = ArcType.fieldLabel, color = c.ink, maxLines = 1, modifier = Modifier.width(28.dp))
         val dim = if (row.changes && !chipOn) 0.5f else 1f
         when {
+            // Not on the EP-133, but in a pack Arc has: uploaded into a free slot as IMPORT goes.
+            missing && pack != null -> Column(Modifier.weight(1f).alpha(dim)) {
+                Text(
+                    if (row.uploadable) ClaudeText.upload(pack.slot, pack.name) else ClaudeText.soundMissing(wanted.slot, wanted.name),
+                    style = if (row.uploadable) ArcType.small.copy(fontWeight = FontWeight.Bold) else ArcType.small,
+                    color = c.ink, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    if (row.uploadable) ClaudeText.fromPack(pack.kit.model) else ClaudeText.inPack(pack.kit.model),
+                    style = ArcType.tiny, color = c.graphite, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+            }
             missing -> Text(
                 ClaudeText.soundMissing(wanted.slot, wanted.name),
                 style = ArcType.small, color = c.ink, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),

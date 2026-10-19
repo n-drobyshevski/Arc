@@ -524,6 +524,11 @@ fun MirrorScreen(
      * shown ([stepGroupFor]: on KEYS the sound's), PASTE BEAT, and the links to the arc-beats skill and to learn with Claude.
      */
     claude: ClaudeUi? = null,
+    /**
+     * PRACTICE (an addition; null when none is on): the display line grows into its panel as into STEP's ([LivePractice]),
+     * on the group practised, one group's pads, which light ahead of each hit ([PadCue]).
+     */
+    practice: LivePractice? = null,
 ) {
     val sounding = voices?.collectAsStateWithLifecycle()?.value
     // The pads held for note repeat are ringed too, and those it sounds lit.
@@ -543,9 +548,11 @@ fun MirrorScreen(
     val sampling = panelOn && sample?.state?.on == true
     // STEP's panel open (the Live tab, with the pattern's transport): the pads and keys are its own. Where the layout has no
     // room for it (worked out with the room, below) it closes.
-    val stepping = step != null && onBack == null && transport != null && step.ui.open && !sampling
+    // PRACTICE on: its panel instead of STEP's or SCENE's.
+    val practicing = practice != null && onBack == null && transport != null && !sampling
+    val stepping = step != null && onBack == null && transport != null && step.ui.open && !sampling && !practicing
     // The SCENE panel open (the Live tab, with the pattern's transport): over the pads' place, they stay the player's.
-    val sceneOn = scene != null && onBack == null && transport != null && scene.ui.open && !sampling && !stepping
+    val sceneOn = scene != null && onBack == null && transport != null && scene.ui.open && !sampling && !stepping && !practicing
     // ERASE latched: a pad erases its notes (SAMPLE's pads record instead, STEP's place or sound).
     val erasing = transport?.erase == true && !sampling && !stepping
     // CORRECT on while the pattern plays: a pad corrects its notes instead of sounding, as ERASE's erases them.
@@ -780,8 +787,12 @@ fun MirrorScreen(
     if (sampling && sample != null) SampleHaptics(sample.state, haptics, held = { it in samplePressed }, bpm = mirror?.state?.bpm ?: functions.bpm.toDouble())
     // The SAMPLE panel (or STEP's), wherever the layout below puts the function keys.
     val panel = remember {
-        val unroll = sample?.unroll ?: step?.unroll ?: scene?.unroll
-        SamplePanel(unroll ?: if (sampling || stepping || sceneOn) 1f else 0f, fixed = unroll != null, kind = if (sceneOn) PanelKind.SCENE else if (stepping) PanelKind.STEP else PanelKind.SAMPLE)
+        val unroll = sample?.unroll ?: step?.unroll ?: scene?.unroll ?: practice?.unroll
+        SamplePanel(
+            unroll ?: if (sampling || stepping || sceneOn || practicing) 1f else 0f,
+            fixed = unroll != null,
+            kind = if (practicing) PanelKind.PRACTICE else if (sceneOn) PanelKind.SCENE else if (stepping) PanelKind.STEP else PanelKind.SAMPLE,
+        )
     }
     // CLR / DEL's hold, where the panel's header and its key read it.
     val sceneHold = remember { SceneHold(scene?.holding ?: 0f) }
@@ -805,6 +816,7 @@ fun MirrorScreen(
                 PanelKind.SCENE -> scene?.onClose()
                 PanelKind.STEP -> step?.onClose()
                 PanelKind.SAMPLE -> sample?.onClose()
+                PanelKind.PRACTICE -> practice?.onClose()
             }
         }
     }
@@ -826,7 +838,8 @@ fun MirrorScreen(
     if (onBack != null) BackHandler(onBack = onBack)
     val st = mirror?.state ?: MirrorState()
     // The fade runs on the frame clock while a released pad is fading, and stops after.
-    val fading = fixedNow == null && (st.pads.values.any { it.offAt != null } || keys.on && st.notes.values.any { it.offAt != null })
+    // So does practice while it plays: the pads light ahead of each hit.
+    val fading = fixedNow == null && (st.pads.values.any { it.offAt != null } || keys.on && st.notes.values.any { it.offAt != null } || practicing && practice?.running == true)
     var frame by remember { mutableLongStateOf(System.nanoTime()) }
     LaunchedEffect(fading) {
         while (fading) withFrameNanos { frame = System.nanoTime() }
@@ -841,6 +854,10 @@ fun MirrorScreen(
     val toolsHeader: (@Composable RowScope.() -> Unit)? = toolsPage?.let { p -> { ToolsBack(p) { toolsPage = null } } }
     val toolsActions: (@Composable RowScope.() -> Unit)? =
         if (toolsPage == null && onSettings != null) ({ SettingsKey { toolsOpen = false; onSettings() } }) else null
+    // A practice starting (from Claude's page) closes Live tools: its pads are the point.
+    LaunchedEffect(practice != null) {
+        if (practice != null) toolsOpen = false
+    }
     LaunchedEffect(toolsOpen) {
         if (!toolsOpen) {
             delay(TOOLS_CLOSE_MS)
@@ -916,12 +933,16 @@ fun MirrorScreen(
         // in KEYS, off the page), where STEP's and SCENE's close too. A swipe or Back has set it going already.
         val stepShown = stepping && stepHost
         val sceneShown = sceneOn && sceneHost
-        val kind = if (sceneShown) PanelKind.SCENE else if (stepShown) PanelKind.STEP else PanelKind.SAMPLE
-        val wanted = sceneShown || stepShown || sampling
+        // PRACTICE is on one group's pads, where STEP's panel would be.
+        val practiceHost = practice != null && onBack == null && transport != null && oneGroup && !keys.on
+        val practiceShown = practicing && practiceHost
+        val kind = if (practiceShown) PanelKind.PRACTICE else if (sceneShown) PanelKind.SCENE else if (stepShown) PanelKind.STEP else PanelKind.SAMPLE
+        val wanted = practiceShown || sceneShown || stepShown || sampling
         val hosted = when (panel.kind) {
             PanelKind.SCENE -> sceneHost
             PanelKind.STEP -> stepHost
             PanelKind.SAMPLE -> panelOn
+            PanelKind.PRACTICE -> practiceHost
         }
         LaunchedEffect(wanted, kind, hosted) {
             when {
@@ -961,6 +982,9 @@ fun MirrorScreen(
             }
         }
         val padStep = padStepFor(group)
+        // PRACTICE: each pad's next hit, from the frame the pads are drawn at.
+        val padCuesNow = if (practiceShown && practice != null) padCues(practice.frame(clock()), if (practice.ui.spec.wait) practice.ui.waiting else null) else emptyMap()
+        LaunchedEffect(practice?.ui?.spec?.group) { practice?.ui?.spec?.group?.let { group = it } }
         val keysStep = if (stepping && step != null) {
             PadStep(stepLitNotes(step.ui, keys.pad), stepPickedNote(step.ui, keys.pad), step.ui.recordHeld, onPick = step.onNotePick)
         } else {
@@ -968,7 +992,7 @@ fun MirrorScreen(
         }
         // Back rolls the SAMPLE panel (or STEP's or SCENE's) up (Live tools, open over it, close first: their Back comes later).
         // Not while a sheet is open over Live: its Back was there first, so this one would win.
-        BackHandler(enabled = (panelOn || stepHost || sceneHost) && sample?.sheetOpen != true && panel.open) { closePanel() }
+        BackHandler(enabled = (panelOn || stepHost || sceneHost || practiceHost) && sample?.sheetOpen != true && panel.open) { closePanel() }
         // The 1–99 grid, open over the pads, goes first.
         BackHandler(enabled = sceneOn && scene?.ui?.gridGroup != null) { scene?.onGrid(null) }
         // The pads hear of a finger the SAMPLE panel's swipe took ([holdToPlay]); KEYS' scale and octave
@@ -1027,6 +1051,7 @@ fun MirrorScreen(
                         PanelKind.SCENE -> sceneDeckHeight(sceneNow.ui, width - WaveSide * 2)
                         PanelKind.STEP -> stepDeckHeight(width - WaveSide * 2)
                         PanelKind.SAMPLE -> fit.wave
+                        PanelKind.PRACTICE -> practiceDeckHeight(width - WaveSide * 2)
                     }
                     SampleMorph(
                         panel, gap, corner, wave, m,
@@ -1037,6 +1062,7 @@ fun MirrorScreen(
                                 PanelKind.SCENE -> SceneHeader(sceneNow, sceneHold, haptics)
                                 PanelKind.STEP -> StepHeader(stepNow, haptics)
                                 PanelKind.SAMPLE -> SampleHeader(sampleNow, stillSample)
+                                PanelKind.PRACTICE -> practice?.let { PracticeHeader(it) }
                             }
                         },
                         strip = {
@@ -1044,6 +1070,7 @@ fun MirrorScreen(
                                 PanelKind.SCENE -> SceneDeck(sceneNow, panel, sceneHold, haptics)
                                 PanelKind.STEP -> StepDeck(stepNow, panel, haptics)
                                 PanelKind.SAMPLE -> SampleWaveStrip(sampleNow, panel, stillSample, fit.wave)
+                                PanelKind.PRACTICE -> practice?.let { PracticeDeck(it, panel) }
                             }
                         },
                         plate = { if (kind == PanelKind.SAMPLE) SamplePlate(sampleNow, panel, fit, haptics) },
@@ -1063,6 +1090,7 @@ fun MirrorScreen(
                                 PanelKind.SCENE -> SceneHeader(sceneNow, sceneHold, haptics)
                                 PanelKind.STEP -> StepHeader(stepNow, haptics)
                                 PanelKind.SAMPLE -> SampleHeader(sampleNow, stillSample)
+                                PanelKind.PRACTICE -> practice?.let { PracticeHeader(it) }
                             }
                         },
                         strip = {
@@ -1070,6 +1098,7 @@ fun MirrorScreen(
                                 PanelKind.SCENE -> SceneDeck(sceneNow, panel, sceneHold, haptics)
                                 PanelKind.STEP -> StepDeck(stepNow, panel, haptics)
                                 PanelKind.SAMPLE -> SampleWaveStrip(sampleNow, panel, stillSample, wave)
+                                PanelKind.PRACTICE -> practice?.let { PracticeDeck(it, panel) }
                             }
                         },
                         plate = { if (kind == PanelKind.SAMPLE) SamplePlate(sampleNow, panel, null, haptics) },
@@ -1088,6 +1117,7 @@ fun MirrorScreen(
                                 PanelKind.SCENE -> SceneBodyFace(sceneNow, panel, sceneHold, haptics)
                                 PanelKind.STEP -> StepBodyFace(stepNow, panel, haptics)
                                 PanelKind.SAMPLE -> SampleBodyFace(sampleNow, panel, fit, haptics, stillSample)
+                                PanelKind.PRACTICE -> practice?.let { PracticeBodyFace(it, panel) }
                             }
                         }
                     }
@@ -1191,6 +1221,7 @@ fun MirrorScreen(
                                 arpLit = arpLitPads,
                                 onPadPressure = padPressure,
                                 step = padStep,
+                                cues = padCuesNow,
                             )
                         }
                         val fnColumn: @Composable () -> Unit = { FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
@@ -1417,6 +1448,7 @@ fun MirrorScreen(
                                         arpLit = arpLitPads,
                                         onPadPressure = padPressure,
                                         step = padStep,
+                                        cues = padCuesNow,
                                         tall = true,
                                     )
                                 }
@@ -1991,6 +2023,8 @@ private fun Group(
     step: PadStep? = null,
     /** The group keys' pattern numbers ([GroupNumbers]), where there is something to say. */
     groupNumbers: GroupNumbers? = null,
+    /** PRACTICE: each pad's cue by its offset ([PadCue]). */
+    cues: Map<Int, PadCue> = emptyMap(),
     /** The big grid upright: its pads grow taller into height the body leaves ([padFit]). */
     tall: Boolean = false,
 ) {
@@ -2026,6 +2060,7 @@ private fun Group(
                     picked = step?.picked == pad.offset,
                     placing = step?.placing == true,
                     onPick = step?.let { s -> { s.onPick(pad.offset) } },
+                    cue = cues[pad.offset],
                 )
             }
         }
@@ -2481,12 +2516,14 @@ private fun Pad(
     picked: Boolean = false,
     placing: Boolean = false,
     onPick: (() -> Boolean)? = null,
+    /** PRACTICE: its next hit coming ([PadCue]): ringed with the beats to go, lit when it is time. */
+    cue: PadCue? = null,
 ) {
     val c = LocalArcColors.current
     val hw = LocalHwColors.current
     val density = LocalDensity.current
     val held = remember { mutableStateOf(false) }
-    val g = if (sampleLed == SampleLed.RECORDING || sampleLed == SampleLed.WAITING || arpLit || placing && held.value) 1f else light?.let { glow(it, now) } ?: 0f
+    val g = if (sampleLed == SampleLed.RECORDING || sampleLed == SampleLed.WAITING || arpLit || placing && held.value || cue?.now == true) 1f else light?.let { glow(it, now) } ?: 0f
     val ink = if (g > 0.3f) c.onSignal else if (stepLit) c.signal else hw.darkInk
     val wide = pad.label.length > 1
     val labelStyle = ArcType.semi.copy(
@@ -2524,6 +2561,18 @@ private fun Pad(
                 }
             }
         }
+        // PRACTICE: the beats to its next hit, in orange at the label's right.
+        val cueRow: @Composable (@Composable () -> Unit) -> Unit = { l ->
+            if (cue == null || cue.now) {
+                l()
+            } else {
+                Row(Modifier.fillMaxWidth()) {
+                    l()
+                    Spacer(Modifier.weight(1f))
+                    Text("${cue.beats}", style = labelStyle.copy(fontSize = labelStyle.fontSize * 0.7f), color = c.signal, maxLines = 1)
+                }
+            }
+        }
         if (ko != null) {
             // The K.O. II's pads keep their proportions, so even a small one is stacked: the
             // name in the lines left under the digit (at least one; the cap clips the rest).
@@ -2536,14 +2585,14 @@ private fun Pad(
             val fit = with(density) { (left / (nameStyle.fontSize.toDp() * 1.1f)).toInt() }
             val lines = if (ringed) fit.coerceAtMost(3) else fit.coerceIn(1, 3)
             Column(Modifier.fillMaxSize()) {
-                label()
+                cueRow(label)
                 Spacer(Modifier.weight(1f))
                 // Picked for − / +, NUDGE in the name's place ([NudgeTag]).
                 if (name != null && !picked && (room == null || lines >= 1)) Text(name, style = nameStyle, color = nameColor, maxLines = lines.coerceAtLeast(1), overflow = TextOverflow.Ellipsis)
             }
         } else {
             Column(Modifier.fillMaxSize()) {
-                label()
+                cueRow(label)
                 Spacer(Modifier.weight(1f))
                 if (name != null && !picked) {
                     Text(name, style = nameStyle, color = nameColor, maxLines = if (big) 3 else 2, overflow = TextOverflow.Ellipsis)
@@ -2562,7 +2611,7 @@ private fun Pad(
         // SAMPLE mode: the empty pads' ring blinks, the filled pads' stays (drawn, so a blink only redraws).
         .sampleRing(sampleLed, blink, c.signal, shape)
         // Playing on the phone, EDIT on, or on STEP's cursor step: a signal-orange ring inside the pad (thicker, picked).
-        .then(if (playing || onEdit != null || stepLit || picked) Modifier.border(if (picked) 3.dp else 2.dp, c.signal, shape) else Modifier)
+        .then(if (playing || onEdit != null || stepLit || picked || cue != null) Modifier.border(if (picked || cue != null) 3.dp else 2.dp, c.signal, shape) else Modifier)
         // ERASE: a dot on a pad with notes (pale on a lit pad), the rest dimmed.
         .eraseDot(noteDot, if (g > 0.3f) c.onSignal else c.signal)
         .then(
@@ -2607,6 +2656,11 @@ private fun Pad(
                     picked -> MirrorText.PICKED
                     stepLit -> MirrorText.ON_STEP
                     else -> ""
+                } +
+                when {
+                    cue == null -> ""
+                    cue.now -> dev.arc.ep133.text.PracticeText.PLAY_NEXT
+                    else -> dev.arc.ep133.text.PracticeText.inBeats(cue.beats)
                 }
         }
         .padding(

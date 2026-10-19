@@ -141,7 +141,7 @@ import kotlin.math.roundToInt
  */
 
 /** Which panel the display line grows into: SAMPLE's, STEP's or SCENE's ([SamplePanel.kind]). */
-internal enum class PanelKind { SAMPLE, STEP, SCENE }
+internal enum class PanelKind { SAMPLE, STEP, SCENE, PRACTICE }
 
 /**
  * Where Live's SAMPLE panel is: [progress] 0 with the function keys, 1 with

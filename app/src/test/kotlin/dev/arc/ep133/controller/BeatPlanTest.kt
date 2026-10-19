@@ -58,6 +58,21 @@ class BeatPlanTest {
     // ---- sharing ----
 
     @Test
+    fun `the Claude page's prompt goes before the card, or alone with the kit and the sound list after it`() {
+        val seq = with(ProjectSeq.DEFAULT, 0, 1, pattern(hit(0)))
+        val prompt = dev.arc.ep133.text.PromptText.prompt(dev.arc.ep133.features.ClaudePrompt(goal = dev.arc.ep133.features.PromptGoal.BUSIER), dev.arc.ep133.features.SharePick.SCENE, false)
+        val share = beatShare(seq, null, 92.0, 50, nameOf, kit = dev.arc.ep133.features.FactoryKit.EP40, prompt = prompt)!!
+        assertTrue(share.text.startsWith(prompt + "\n\nMy EP-133 plays the EP-40 Riddim factory kit.\n\n```\nARC BEAT 1\n"))
+        // Without a card: the words, the kit, then the list after a blank line.
+        val list = SoundSet(ClaudeText.SOUNDS_FROM_FACTORY, mapOf(1 to "ep 40 kick"))
+        val beat = promptShare(dev.arc.ep133.text.PromptText.NEW_BEAT, "Write a beat.", dev.arc.ep133.features.FactoryKit.EP40, list)
+        assertEquals("Arc \u00B7 New beat", beat.subject)
+        assertEquals("Write a beat.\n\nMy EP-133 plays the EP-40 Riddim factory kit.\n\n" + ClaudeText.soundListHeader(ClaudeText.SOUNDS_FROM_FACTORY) + "\n1 ep 40 kick\n", beat.text)
+        assertEquals("Teach me.\n", promptShare("Learn", "Teach me.", null).text)
+        assertEquals("Write.\n\nMy EP-133 plays the EP-133's own factory sounds.\n", promptShare("New beat", "Write.", dev.arc.ep133.features.FactoryKit.EP133).text)
+    }
+
+    @Test
     fun `a share is the scene's patterns or a group's as a tidied card in a fenced block, or nothing without notes`() {
         assertNull(beatShare(ProjectSeq.DEFAULT, null, 120.0, 50, nameOf))
         assertNull(beatShare(ProjectSeq.DEFAULT, 0, 120.0, 50, nameOf))
@@ -65,7 +80,7 @@ class BeatPlanTest {
         seq = with(seq, 2, 1, pattern(hit(0, 11), hit(96, 11), bars = 2))
         val scene = beatShare(seq, null, 92.0, 50, nameOf)!!
         assertEquals("Arc beat S01", scene.subject)
-        assertTrue(scene.text.startsWith(ClaudeText.SHARE_PROMPT + "\n\n```\nARC BEAT 1\nname S01\ntempo 92\nswing 50\n# tidied"))
+        assertTrue(scene.text.startsWith(ClaudeText.SHARE_PROMPT + "\n\n" + ClaudeText.EP133_LINE + "\n\n```\nARC BEAT 1\nname S01\ntempo 92\nswing 50\n# tidied"))
         assertTrue(scene.text.endsWith("\n```\n"))
         // The EP-40 kit is named before the card; the EP-133's adds nothing.
         val riddim = beatShare(seq, null, 92.0, 50, nameOf, kit = dev.arc.ep133.features.FactoryKit.EP40)!!
@@ -374,7 +389,7 @@ B8 bass | X... .... .... .... | .... .... .... .... |
         seq = seq.withChain(Chain(listOf(ChainStep(1, 2), ChainStep(0), ChainStep(1, 2)), on = true))
         val share = beatShareChain(seq, 120.0, 50, nameOf)!!
         assertEquals("Arc beat Chain", share.subject)
-        assertTrue(share.text.startsWith(ClaudeText.SHARE_CHAIN_PROMPT + "\n\n```\nARC BEAT 1\nname Chain\ntempo 120"))
+        assertTrue(share.text.startsWith(ClaudeText.SHARE_CHAIN_PROMPT + "\n\n" + ClaudeText.EP133_LINE + "\n\n```\nARC BEAT 1\nname Chain\ntempo 120"))
         val card = BeatCards.read(share.text).card!!
         assertEquals(2, card.scenes.size)
         // Scene 2 (S02) plays first, so it is the card's scene 1.
