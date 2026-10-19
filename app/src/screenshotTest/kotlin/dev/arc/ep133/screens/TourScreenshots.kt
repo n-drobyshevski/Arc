@@ -5,6 +5,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import com.android.tools.screenshot.PreviewTest
 import dev.arc.ep133.controller.MirrorUi
 import dev.arc.ep133.features.MirrorState
+import dev.arc.ep133.features.Tour
 import dev.arc.ep133.features.TourStep
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.ui.components.ArcShell
@@ -112,6 +113,43 @@ fun TourDonePreview() = TourOnLive(TourUi(TourStep.DONE, laterNote = true))
 @Preview(name = "Tour needs MIDI", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
 fun TourNeedsMidiPreview() = TourOnLive(TourUi(TourStep.MIDI, midi = false), connected = false)
+
+// Without the EP-133: Live tools, the shortcut guide and Backups, each opened through its cut-out.
+
+/** A card of the run without the EP-133 ([deviceHere]: connected after all). */
+private fun offline(step: TourStep, deviceHere: Boolean = false) =
+    TourUi(step, steps = Tour.OFFLINE_STEPS, offline = true, connected = deviceHere, deviceHere = deviceHere)
+
+@PreviewTest
+@Preview(name = "Tour tools", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun TourToolsPreview() = TourOnLive(offline(TourStep.TOOLS), connected = false)
+
+@PreviewTest
+@Preview(name = "Tour guide", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun TourGuidePreview() = TourOnLive(offline(TourStep.GUIDE), connected = false)
+
+@PreviewTest
+@Preview(name = "Tour sections", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun TourSectionsPreview() = TourOnLive(offline(TourStep.SECTIONS), connected = false)
+
+@PreviewTest
+@Preview(name = "Tour offline done", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun TourOfflineDonePreview() = TourOnLive(offline(TourStep.DONE), connected = false)
+
+// The EP-133 connected on the way: Try the pads goes to the device's steps.
+@PreviewTest
+@Preview(name = "Tour offline done device here", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun TourOfflineDoneDeviceHerePreview() = TourOnLive(offline(TourStep.DONE, deviceHere = true))
+
+@PreviewTest
+@Preview(name = "Tour tools device here", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun TourToolsDeviceHerePreview() = TourOnLive(offline(TourStep.TOOLS, deviceHere = true))
 
 // A small phone, landscape, and large text: the card moves, shortens or scrolls.
 

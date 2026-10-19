@@ -173,8 +173,9 @@ fun CoachOverlay(
                     drawPath(veil, c.shell.copy(alpha = 0.86f))
                     if (h != null) drawRoundRect(color = c.signal, topLeft = h.topLeft, size = h.size, cornerRadius = radius, style = Stroke(3.dp.toPx()))
                     val tall = { m: Mark -> m.bounds.height > size.height * 0.25f }
+                    // A spotlit edge control (the GUIDE tab) gets no tag either: its side tag would cover it.
                     val shown = marks.marks.filter { (id, m) ->
-                        mode.only?.contains(id) != false && (mode.spotlight == null || id == mode.spotlight && !tall(m))
+                        mode.only?.contains(id) != false && (mode.spotlight == null || id == mode.spotlight && !tall(m) && edgeSide(m) == 0)
                     }
                     drawTags(shown.values.toList(), measurer, tagStyle)
                 }
@@ -216,6 +217,17 @@ private fun TouchBlocker(hole: () -> Rect?) {
     }
 }
 
+/** -1 or 1 for a narrow control on the screen's left or right edge (it gets a side tag), else 0. */
+private fun DrawScope.edgeSide(m: Mark): Int {
+    val slack = 2.dp.toPx()
+    return when {
+        m.bounds.width > 48.dp.toPx() || m.bounds.height < m.bounds.width * 2 -> 0
+        m.bounds.left <= slack -> -1
+        m.bounds.right >= size.width - slack -> 1
+        else -> 0
+    }
+}
+
 /**
  * Draws the tags for [shown]: each next to its control, pushed further out
  * until it clears the tags already placed; then arrows, then tags on top.
@@ -241,18 +253,11 @@ private fun DrawScope.drawTags(shown: List<Mark>, measurer: TextMeasurer, tagSty
     val clearance = 6.dp.toPx()
     // A narrow control on the screen's edge (the GUIDE tab, the more-tools strip)
     // gets the PO tutorial's side tag: a vertical tab on that edge, its word
-    // turned, with a hooked arrow above pointing at the edge.
-    val edgeSlack = 2.dp.toPx()
-    fun edge(m: Mark): Int = when {
-        m.bounds.width > 48.dp.toPx() || m.bounds.height < m.bounds.width * 2 -> 0
-        m.bounds.left <= edgeSlack -> -1
-        m.bounds.right >= size.width - edgeSlack -> 1
-        else -> 0
-    }
+    // turned, with a hooked arrow above pointing at the edge ([edgeSide]).
     class Side(val m: Mark, val text: androidx.compose.ui.text.TextLayoutResult, val rect: Rect, val side: Int)
     val sides = ArrayList<Side>()
     for (m in list) {
-        val side = edge(m)
+        val side = edgeSide(m)
         if (side == 0) continue
         val text = measurer.measure(m.label.uppercase(), tagStyle.copy(color = m.ink))
         val w = text.size.height + 2 * padY
@@ -265,7 +270,7 @@ private fun DrawScope.drawTags(shown: List<Mark>, measurer: TextMeasurer, tagSty
         placed += Placed(m, text, Rect(rect.left, rect.top - 30.dp.toPx(), rect.right, rect.bottom), null, null)
     }
     for (m in list) {
-        if (edge(m) != 0) continue
+        if (edgeSide(m) != 0) continue
         val text = tag(m)
         val w = text.size.width + 2 * padX
         val h = text.size.height + 2 * padY

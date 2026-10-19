@@ -364,6 +364,9 @@ class MainActivity : ComponentActivity() {
         var notesField by rememberSaveable { mutableStateOf("") }
         // The EP-133 shortcut guide, slid in from the left-edge tab.
         var guideOpen by rememberSaveable { mutableStateOf(false) }
+        // Live tools (the strip's panel) and the section list: the tour steps aside while one is open.
+        var toolsOpen by rememberSaveable { mutableStateOf(false) }
+        var menuOpen by remember { mutableStateOf(false) }
         // The mirror listens only while its tab is in front (not under the debug, settings or guide screen).
         val live = tab == Tab.LIVE && !debug && !settingsOpen && !guideOpen
         val appSettings by controller.settings.collectAsStateWithLifecycle()
@@ -376,6 +379,7 @@ class MainActivity : ComponentActivity() {
                     controller.closeMirror()
                     controller.stopPlayback()
                     forceOneGroup = false
+                    toolsOpen = false
                 }
                 Tab.DEVICE -> {
                     padsFor = null
@@ -481,6 +485,9 @@ class MainActivity : ComponentActivity() {
             hitAt = lastHit?.pad?.let { mirrorState?.pads?.get(it)?.onAt },
             hitNamed = lastHit?.name != null,
             heard = playingKeys.isNotEmpty(),
+            toolsOpen = toolsOpen,
+            guideOpen = guideOpen,
+            onBackups = tab == Tab.BACKUPS,
         )
         LaunchedEffect(tourSession, tourSnap, appSettings.tourSteps, appSettings.guideSeen, appSettings.tourDone) {
             val s = tourSession ?: return@LaunchedEffect
@@ -511,6 +518,9 @@ class MainActivity : ComponentActivity() {
                 canBackup = state.device != null && !state.busy,
                 canPlay = lastHit?.pad != null && tourSnap.hitNamed,
                 laterNote = Tour.laterNote(tourProgress, state.midiSupported),
+                steps = Tour.stepsFor(s, state.midiSupported),
+                offline = s.offline,
+                deviceHere = s.offline && tourSnap.connected,
             )
         }
         fun closeTour() {
@@ -518,6 +528,7 @@ class MainActivity : ComponentActivity() {
         }
         val tourActions = TourActions(
             onStart = { tourSession = tourSession?.let(Tour::welcome) },
+            onOffline = { tourSession = tourSession?.let(Tour::goOffline) },
             onNotNow = {
                 controller.finishTour()
                 closeTour()
@@ -543,6 +554,23 @@ class MainActivity : ComponentActivity() {
             onDone = {
                 controller.finishTour()
                 closeTour()
+            },
+            onOpen = {
+                when (tourUi?.step) {
+                    TourStep.TOOLS -> {
+                        selectTab(Tab.LIVE)
+                        toolsOpen = true
+                    }
+                    TourStep.GUIDE -> guideOpen = true
+                    TourStep.SECTIONS -> selectTab(Tab.BACKUPS)
+                    else -> {}
+                }
+            },
+            onTryPads = {
+                tourSession = tourSession?.let(Tour::goDevice)
+                // The pads are on Live, one group at a time as when the tour opened.
+                selectTab(Tab.LIVE)
+                forceOneGroup = true
             },
         )
         val compareA = compareIds?.substringBefore('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
@@ -664,10 +692,13 @@ class MainActivity : ComponentActivity() {
                 onBack = { if (tourUi?.step == TourStep.WELCOME) tourActions.onNotNow() else closeTour() },
                 coach = coach,
                 onCardLow = { tourCardLow = it },
+                // In what an offline step pointed at: its next card shows once that closes.
+                away = menuOpen || guideOpen || toolsOpen,
                 onCoachDismiss = {
                     coach = false
-                    // Seen once it has been closed (also kept in Documents/arc).
-                    if (!controller.settings.value.guideSeen) controller.setGuideSeen()
+                    // Seen once it has been closed (also kept in Documents/arc). Opened while the
+                    // tour stepped aside, the tour's end says so: seen now, it would close the tour.
+                    if (!controller.settings.value.guideSeen && tourSession == null) controller.setGuideSeen()
                 },
             ) {
                 ArcShell(
@@ -684,6 +715,7 @@ class MainActivity : ComponentActivity() {
                     guideOpen = guideOpen,
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
+                    onMenuOpen = { menuOpen = it },
                 ) {
                     // Back from another section returns to Live, the home section, first.
                     BackHandler(enabled = tab != Tab.LIVE) { selectTab(Tab.LIVE) }
@@ -729,6 +761,8 @@ class MainActivity : ComponentActivity() {
                             },
                             oneGroup = appSettings.liveOneGroup || forceOneGroup,
                             onOneGroup = controller::setLiveOneGroup,
+                            toolsOpen = toolsOpen,
+                            onToolsOpen = { toolsOpen = it },
                             follow = appSettings.liveFollow,
                             onFollow = controller::setLiveFollow,
                             rec = dev.arc.ep133.ui.screens.RecUi(rec, controller::toggleRec),

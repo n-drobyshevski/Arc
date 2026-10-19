@@ -186,6 +186,9 @@ fun MirrorScreen(
     initialGroup: Int = 0,
     /** For screenshots: start with the tools panel open. */
     initialToolsOpen: Boolean = false,
+    /** The tools panel open, held by the caller (the tour reads it); null keeps it here. */
+    toolsOpen: Boolean? = null,
+    onToolsOpen: (Boolean) -> Unit = {},
     /** For screenshots: start with the offline note unfolded. */
     initialNoteOpen: Boolean = false,
     /**
@@ -214,8 +217,14 @@ fun MirrorScreen(
         while (fading) withFrameNanos { frame = System.nanoTime() }
     }
     val now = fixedNow ?: if (fading) frame else System.nanoTime()
-    // The secondary controls live in a side panel, opened from the strip on the right.
-    var toolsOpen by rememberSaveable { mutableStateOf(initialToolsOpen) }
+    // The secondary controls live in a side panel, opened from the strip on the right
+    // (kept here unless the caller holds [toolsOpen]).
+    var ownToolsOpen by rememberSaveable { mutableStateOf(initialToolsOpen) }
+    val tools = toolsOpen ?: ownToolsOpen
+    fun setTools(open: Boolean) {
+        ownToolsOpen = open
+        onToolsOpen(open)
+    }
     // The group shown in the one-group view; Follow switches it to the group just played.
     var group by rememberSaveable { mutableIntStateOf(initialGroup) }
     val hitGroup = st.lastHit?.pad?.group
@@ -228,9 +237,9 @@ fun MirrorScreen(
     }
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
         SideZone(
-            open = toolsOpen,
-            onOpen = { toolsOpen = true },
-            onClose = { toolsOpen = false },
+            open = tools,
+            onOpen = { setTools(true) },
+            onClose = { setTools(false) },
             title = MirrorText.TOOLS,
             panel = {
                 if (keys.on) {

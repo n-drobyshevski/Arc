@@ -80,12 +80,20 @@ data class TourUi(
     val canPlay: Boolean = false,
     /** DONE: a step was left that Try arc again can bring back. */
     val laterNote: Boolean = false,
+    /** How many steps this run counts (Tour.stepsFor): four, or three without the EP-133. */
+    val steps: Int = Tour.STEPS,
+    /** The run without the EP-133: its Done offers the device's steps. */
+    val offline: Boolean = false,
+    /** That run, with the EP-133 connected after all: every card offers Try the pads. */
+    val deviceHere: Boolean = false,
 )
 
 /** What the card's keys do; every one runs the app's real action. */
 class TourActions(
     /** Start, or Continue on Welcome back. */
     val onStart: () -> Unit = {},
+    /** Without the EP-133, on the welcome card: the offline steps. */
+    val onOffline: () -> Unit = {},
     /** Not now and the ×: the tour no longer opens by itself. */
     val onNotNow: () -> Unit = {},
     /** Skip, Later, First time here, and Needs MIDI's Next. */
@@ -99,6 +107,10 @@ class TourActions(
     /** Plays the pad that lit, for those who can't hold it (screen readers). */
     val onPlay: () -> Unit = {},
     val onDone: () -> Unit = {},
+    /** Open it on an offline step: opens what the step points at (Live tools, the guide, Backups). */
+    val onOpen: () -> Unit = {},
+    /** Try the pads: from the offline steps to the device's. */
+    val onTryPads: () -> Unit = {},
 )
 
 /** The PAD and HEAR cards are short, so the pads they point at stay in view. */
@@ -107,7 +119,8 @@ fun TourUi.compact(): Boolean = (step == TourStep.PAD || step == TourStep.HEAR) 
 /**
  * The overlay for a step: a card on the veil alone (WELCOME, RESTORE, MIDI),
  * the veil cut away around the control the step is about, or Done's three tags.
- * Only HEAR lets touches through, to the pads.
+ * HEAR lets touches through to the pads, and the offline steps to the strip,
+ * the GUIDE tab and the section tag.
  */
 fun tourMode(ui: TourUi): CoachMode {
     // Without the EP-133 the card asks to connect: point at the connection key.
@@ -122,6 +135,9 @@ fun tourMode(ui: TourUi): CoachMode {
  * tour's step (null: none), [coach] the guide overlay (the ? key). Back
  * pauses the tour ([onBack]) or closes the overlay. [onCardLow] says whether
  * the card sits in the lower half, so a message can show at the other edge.
+ * While [away] (the user is in what an offline step pointed at: Live tools,
+ * the guide, the section list) the tour steps aside, and its next card shows
+ * once that closes.
  */
 @Composable
 fun TourHost(
@@ -131,19 +147,22 @@ fun TourHost(
     coach: Boolean,
     onCoachDismiss: () -> Unit,
     onCardLow: (Boolean) -> Unit = {},
+    away: Boolean = false,
     content: @Composable () -> Unit,
 ) {
+    // Stepped aside, the tour is as if closed: the guide overlay can show meanwhile.
+    val onScreen = tour?.takeIf { !away }
     // The last step stays on the veil while it fades out.
-    val shown = remember { mutableStateOf<TourUi?>(null) }.apply { if (tour != null) value = tour }.value
-    val ui = if (tour == null && coach) null else tour ?: shown
+    val shown = remember { mutableStateOf<TourUi?>(null) }.apply { if (onScreen != null) value = onScreen }.value
+    val ui = if (onScreen == null && coach) null else onScreen ?: shown
     val card: (@Composable (target: () -> Rect?, clipHole: (Rect?) -> Unit) -> Unit)? = if (ui != null) {
         { target, clipHole -> TourCardLayout(target, clipHole, dockBottom = ui.step == TourStep.DONE, onCardLow = onCardLow) { headingOnly -> TourCard(ui, actions, headingOnly = headingOnly) } }
     } else {
         null
     }
     CoachHost(
-        visible = tour != null || coach,
-        onDismiss = if (tour != null) onBack else onCoachDismiss,
+        visible = onScreen != null || coach,
+        onDismiss = if (onScreen != null) onBack else onCoachDismiss,
         mode = if (ui != null) tourMode(ui) else CoachMode(),
         card = card,
         content = content,
@@ -181,8 +200,8 @@ fun TourCard(ui: TourUi, actions: TourActions, modifier: Modifier = Modifier, he
         } else {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (number != null) {
-                    Text(TourText.stepOf(number, Tour.STEPS).uppercase(), style = ArcType.caps, color = c.graphite, maxLines = 1)
-                    StepDots(number)
+                    Text(TourText.stepOf(number, ui.steps).uppercase(), style = ArcType.caps, color = c.graphite, maxLines = 1)
+                    StepDots(number, ui.steps)
                 }
                 Box(Modifier.weight(1f))
                 CloseKey(actions.onNotNow, TourText.NOT_NOW)
@@ -226,11 +245,39 @@ fun TourCard(ui: TourUi, actions: TourActions, modifier: Modifier = Modifier, he
                             Note(Strings.KEEP_SCREEN_ON)
                             Keys(Strings.BACK_UP, actions.onBackup, enabled = ui.canBackup, second = TourText.LATER, onSecond = actions.onSkip)
                         }
+                        TourStep.TOOLS, TourStep.GUIDE, TourStep.SECTIONS -> {
+                            Heading(headingOf(ui))
+                            Body(hintOf(ui.step))
+                            Keys(TourText.OPEN_IT, actions.onOpen, second = TourText.SKIP, onSecond = actions.onSkip)
+                            if (ui.deviceHere) DeviceHere(actions.onTryPads)
+                        }
                         TourStep.DONE -> {
                             Heading(headingOf(ui))
                             Body(TourText.DONE_HINT)
-                            if (ui.laterNote) Note(TourText.LATER_NOTE)
-                            Keys(Strings.DONE, actions.onDone)
+                            when {
+                                !ui.offline -> {
+                                    if (ui.laterNote) Note(TourText.LATER_NOTE)
+                                    Keys(Strings.DONE, actions.onDone)
+                                }
+                                // Short enough to stay clear of the tags above it: the keys share a row.
+                                ui.deviceHere -> {
+                                    Body(TourText.DEVICE_HERE)
+                                    Keys(TourText.TRY_PADS, actions.onTryPads, second = Strings.DONE, onSecond = actions.onDone)
+                                }
+                                else -> {
+                                    Note(TourText.OFFLINE_NOTE)
+                                    if (ui.midi) {
+                                        // To the device's steps, and connect right away (Connect's card shows how it goes).
+                                        val connect = {
+                                            actions.onTryPads()
+                                            actions.onConnect()
+                                        }
+                                        Keys(TourText.CONNECT_NOW, connect, enabled = !ui.busy, second = Strings.DONE, onSecond = actions.onDone)
+                                    } else {
+                                        Keys(Strings.DONE, actions.onDone)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -248,7 +295,17 @@ private fun headingOf(ui: TourUi): String = when (ui.step) {
     TourStep.PAD -> TourText.PAD_HEAD
     TourStep.HEAR -> TourText.HEAR_HEAD
     TourStep.BACKUP -> TourText.BACKUP_HEAD
+    TourStep.TOOLS -> TourText.TOOLS_HEAD
+    TourStep.GUIDE -> TourText.GUIDE_HEAD
+    TourStep.SECTIONS -> TourText.SECTIONS_HEAD
     TourStep.DONE -> TourText.DONE_HEAD
+}
+
+/** What an offline step's card asks for. */
+private fun hintOf(step: TourStep): String = when (step) {
+    TourStep.TOOLS -> TourText.TOOLS_HINT
+    TourStep.GUIDE -> TourText.GUIDE_HINT
+    else -> TourText.SECTIONS_HINT
 }
 
 @Composable
@@ -258,6 +315,7 @@ private fun Welcome(ui: TourUi, actions: TourActions) {
         Heading(TourText.RESUME_HEAD)
         Body(TourText.resumeHint(ui.resumeAt, Tour.STEPS))
         Keys(TourText.CONTINUE, actions.onStart, second = TourText.NOT_NOW, onSecond = actions.onNotNow)
+        ArcKey(TourText.OFFLINE, actions.onOffline, Modifier.fillMaxWidth())
         return
     }
     DisplayPanel {
@@ -280,6 +338,7 @@ private fun Welcome(ui: TourUi, actions: TourActions) {
     Body(TourText.WELCOME_HINT)
     Body(TourText.WELCOME_STEPS)
     Keys(TourText.START, actions.onStart, second = TourText.NOT_NOW, onSecond = actions.onNotNow)
+    ArcKey(TourText.OFFLINE, actions.onOffline, Modifier.fillMaxWidth())
 }
 
 @Composable
@@ -310,6 +369,13 @@ private fun NeedsConnect(ui: TourUi, actions: TourActions) {
         Strings.CONNECT, actions.onConnect, enabled = ui.midi && !ui.busy,
         second = if (ui.step == TourStep.BACKUP) TourText.LATER else TourText.SKIP, onSecond = actions.onSkip,
     )
+}
+
+/** Offline, with the EP-133 connected after all: Try the pads goes to the device's steps. */
+@Composable
+private fun DeviceHere(onTryPads: () -> Unit) {
+    Body(TourText.DEVICE_HERE)
+    ArcKey(TourText.TRY_PADS, onTryPads, Modifier.fillMaxWidth())
 }
 
 @Composable
@@ -376,12 +442,12 @@ private fun CheckRow(label: String, done: Boolean) {
     }
 }
 
-/** ●●○○: the steps reached, up to [n] of four. */
+/** ●●○○: the steps reached, up to [n] of [of]. */
 @Composable
-private fun StepDots(n: Int) {
+private fun StepDots(n: Int, of: Int) {
     val c = LocalArcColors.current
     Row(Modifier.clearAndSetSemantics {}, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-        for (i in 1..Tour.STEPS) {
+        for (i in 1..of) {
             Box(Modifier.size(8.dp).clip(CircleShape).background(if (i <= n) c.signal else c.keyEdge))
         }
     }
@@ -538,7 +604,7 @@ fun TourCardLayout(
 val TourSessionSaver: Saver<TourSession?, String> = Saver(
     save = { s ->
         s?.run {
-            listOf(seenAtOpen, tourDoneAtOpen, openBackups, resumed, welcomed, step?.id.orEmpty(), stepAt, stepBackups, heardSince, connectTickedNow, connectAcked, reachedDone)
+            listOf(seenAtOpen, tourDoneAtOpen, openBackups, resumed, welcomed, step?.id.orEmpty(), stepAt, stepBackups, heardSince, connectTickedNow, connectAcked, reachedDone, offline)
                 .joinToString(",")
         }
     },
@@ -558,6 +624,7 @@ val TourSessionSaver: Saver<TourSession?, String> = Saver(
                 connectTickedNow = f[9].toBooleanStrict(),
                 connectAcked = f[10].toBooleanStrict(),
                 reachedDone = f[11].toBooleanStrict(),
+                offline = f[12].toBooleanStrict(),
             )
         }.getOrNull()
     },
