@@ -1,6 +1,7 @@
 // Web addition: what Live's memoized caps share (MirrorScreen's pads and KEYS
-// keys, the piano's keys): a component that renders again only when its props
-// changed, a set member read on its own, and a set kept while its notes are.
+// keys, the piano's keys, the drawn device's parts): a component that renders
+// again only when its props changed, a set member read on its own, and a set
+// kept while its notes are.
 
 import { h, type Component, type FunctionComponent, type JSX } from 'preact'
 import { useMemo } from 'preact/hooks'
@@ -24,6 +25,12 @@ export function memo<P extends object>(render: FunctionComponent<P>, same: (a: P
     return h(render, props)
   }
   return Memoed as FunctionComponent<P>
+}
+
+/** Whether every prop of [a] and [b] is the same value (props all values, or kept by the parent). */
+export function sameProps<P extends object>(a: P, b: P): boolean {
+  for (const k in b) if (a[k] !== b[k]) return false
+  return true
 }
 
 /** Whether [a] and [b] hold the same notes in the same order (first pressed first). */
