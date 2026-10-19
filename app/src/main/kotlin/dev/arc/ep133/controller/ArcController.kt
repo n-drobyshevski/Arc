@@ -157,6 +157,10 @@ data class UiState(
     val keysPad: dev.arc.ep133.features.PhysicalPad? = null,
     /** Whether the library folder has been picked (after a reinstall); until then restoring is offered. */
     val folderPicked: Boolean = false,
+    /** The library has been read once, or failed to be: the first-run decision waits for this. */
+    val libraryChecked: Boolean = false,
+    /** An EP-133 is plugged in, connected or not (the tour's "plugged in" row). */
+    val plugged: Boolean = false,
 )
 
 /**
@@ -175,7 +179,7 @@ class ArcController(
     private val scope: CoroutineScope,
     val player: dev.arc.ep133.audio.SoundPlayer = dev.arc.ep133.audio.SoundPlayer(context),
 ) {
-    private val _state = MutableStateFlow(UiState(midiSupported = midi.supported))
+    private val _state = MutableStateFlow(UiState(midiSupported = midi.supported, folderPicked = library.folderPicked))
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private val searchQuery = MutableStateFlow("")
@@ -241,8 +245,15 @@ class ArcController(
     init {
         scope.launch {
             library.backups
-                .catch { e -> toast(Strings.libraryFailed(e.message ?: e.toString()), error = true) }
-                .collect { list -> _state.update { it.copy(backups = list, libraryLoaded = true, spaceLeft = runCatching { library.spaceLeft() }.getOrNull()) } }
+                .catch { e ->
+                    _state.update { it.copy(libraryChecked = true) }
+                    toast(Strings.libraryFailed(e.message ?: e.toString()), error = true)
+                }
+                .collect { list ->
+                    _state.update {
+                        it.copy(backups = list, libraryLoaded = true, libraryChecked = true, spaceLeft = runCatching { library.spaceLeft() }.getOrNull())
+                    }
+                }
         }
         library.settings = {
             buildMap {
@@ -253,7 +264,7 @@ class ArcController(
         }
         library.onExternalError = { msg -> scope.launch { toast(FeatureText.copyFailed(msg), error = true) } }
         scope.launch { loadTakes() }
-        _state.update { it.copy(keysPad = savedKeysPad()) }
+        _state.update { it.copy(keysPad = savedKeysPad(), plugged = midi.epPlugged()) }
         scope.launch {
             library.names.catch { /* shown by the backups collector */ }.collect { backupNames = it; openPak = null }
         }
@@ -277,6 +288,7 @@ class ArcController(
         }
         midi.watch(
             onAdded = { info ->
+                _state.update { it.copy(plugged = midi.epPlugged()) }
                 // Agreed addition: connect on its own when an EP-133 is plugged in.
                 if (midi.looksLikeEp(info) && settingsStore.settings.value.autoConnect) scope.launch {
                     delay(300)
@@ -285,6 +297,7 @@ class ArcController(
                 }
             },
             onRemoved = { info ->
+                _state.update { it.copy(plugged = midi.epPlugged()) }
                 scope.launch {
                     if (info.id == openDeviceId && session != null) {
                         trafficLog.note("device removed")
@@ -329,6 +342,12 @@ class ArcController(
         if (player.playing.value?.startsWith("device:") == true) player.stop()
         _state.update { it.copy(connected = false, device = null, browser = BrowserUi(), diff = null) }
         if (message != null) toast(message, error = true)
+    }
+
+    /** The tour's Connect key: connects unless a connection is there or on its way (a second tap never disconnects). */
+    fun connectIfNeeded() {
+        if (session != null || _state.value.busy) return
+        connect()
     }
 
     /** The Connect / Disconnect key. */
@@ -1460,6 +1479,32 @@ class ArcController(
     /** The guide overlay was shown (it opens by itself only once, also across reinstalls). */
     fun setGuideSeen() = changeSettings { it.copy(guideSeen = true) }
 
+    // ---------- "Try arc", the first-run tour (an addition) ----------
+
+    /** The tour's progress, as Tour.encode writes it. */
+    fun setTourSteps(text: String) = changeTour { settingsStore.update { it.copy(tourSteps = text) } }
+
+    /** Done or Not now: the tour no longer opens by itself, and neither does the guide overlay. */
+    fun finishTour() = changeTour { settingsStore.update { it.copy(tourDone = true, guideSeen = true) } }
+
+    /** Try arc again: its progress is forgotten (finished stays finished, so it never opens by itself again). */
+    fun restartTour() = changeTour {
+        val had = settingsStore.settings.value.tourSteps.isNotEmpty()
+        settingsStore.clear("tourSteps")
+        had
+    }
+
+    /**
+     * The tour's settings reach library.json only once there is a library to
+     * keep them with: a fresh install that tries the tour and stops writes
+     * nothing to Documents/arc (they go there with the first backup or restore).
+     */
+    private fun changeTour(change: () -> Boolean) {
+        if (!change()) return
+        val st = _state.value
+        if (dev.arc.ep133.features.Tour.syncsIndex(st.folderPicked, st.backups.size)) scope.launch { library.syncIndex() }
+    }
+
     /** How many backups [setKeepLast] would delete now, for the confirmation. */
     fun pruneCount(keep: Int?): Int = LibraryRules.toPrune(_state.value.backups, keep).size
 
@@ -1483,7 +1528,7 @@ class ArcController(
     }
 
     private fun changeSettings(change: (dev.arc.ep133.data.AppSettings) -> dev.arc.ep133.data.AppSettings) {
-        settingsStore.update(change)
+        if (!settingsStore.update(change)) return
         scope.launch { library.syncIndex() }
     }
 

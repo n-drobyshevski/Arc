@@ -63,6 +63,9 @@ class MidiConnector(context: Context) {
     fun looksLikeEp(info: MidiDeviceInfo): Boolean =
         info.inputPortCount > 0 && info.outputPortCount > 0 && PortMatch.matches(nameOf(info))
 
+    /** Whether an EP-133 is plugged in now (by name), connected or not: the tour's "plugged in" row. */
+    fun epPlugged(): Boolean = candidates().any { looksLikeEp(it) }
+
     suspend fun open(): OpenMidi {
         val m = manager ?: throw MidiError("This phone can't connect to your EP-133. Your saved backups still work here.")
         val info = find() ?: throw MidiError("No EP-133 found. Plug it in with a USB-C cable, turn it on, then connect again.")

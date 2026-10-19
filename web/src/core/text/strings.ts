@@ -16,7 +16,8 @@ export const Strings = {
   DISCONNECT: 'Disconnect',
   NO_DEVICE: 'No device',
   READING_DEVICE: 'Reading device',
-  PLUG_IN_HINT: 'Plug in the EP-133 with a USB-C cable and turn it on, then tap Connect.',
+  // Android and web: Live has no key named Connect (the connection key is an icon), so this names it.
+  PLUG_IN_HINT: 'Plug in the EP-133 with a USB-C cable and turn it on, then tap the connection key at the top.',
   ONE_MOMENT: 'One moment.',
   BACK_UP: 'Back up device',
   BACKUPS: 'Backups',

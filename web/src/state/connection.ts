@@ -22,6 +22,12 @@
 // - connect() holds the 'arc-device' Web Lock while its session lives, so
 //   two tabs never talk to the device at once (WebText.OTHER_TAB otherwise).
 // - Device identity is the pair of port ids (OpenMidi.owns), not MidiDeviceInfo.id.
+// - For Try arc's Connect card the state also says what the browser allows
+//   (UiState.midiPermission: the boot probe, then every request for access,
+//   probed again after a MidiError), whether an EP-133 is plugged in
+//   (UiState.plugged, MidiConnector.epPlugged: null until access was given,
+//   then recomputed on every attach and detach) and why a Connect did nothing
+//   (UiState.connectNote: another tab holds the device).
 
 import { getStorage, listProjects, listSounds } from '../core/protocol/device'
 import { LoggingTransport } from '../core/protocol/loggingTransport'
@@ -30,7 +36,14 @@ import { Session } from '../core/protocol/session'
 import { Strings } from '../core/text/strings'
 import { WebText } from '../core/text/webText'
 import type { ReleaseLock } from '../platform/midi/owner'
-import { pickPair, portLooksLikeEp, type MidiAccessLike, type MidiDeviceEvent, type OpenMidi } from '../platform/midi/webmidi'
+import {
+  MidiError,
+  pickPair,
+  portLooksLikeEp,
+  type MidiAccessLike,
+  type MidiDeviceEvent,
+  type OpenMidi,
+} from '../platform/midi/webmidi'
 import type { Deps } from './deps'
 import type { Store } from './store'
 import { errorText, type Tasks } from './tasks'
@@ -46,6 +59,12 @@ export function connectionPhase(s: UiState): ConnectionPhase {
   if (!s.connected) return s.busy ? 'opening' : 'disconnected'
   if (!s.device) return 'handshaking'
   return s.busy ? 'reading' : 'ready'
+}
+
+/** MidiConnector.epPlugged: the ports [pickPair] would open both look like an EP-133. */
+export function epPlugged(access: MidiAccessLike): boolean {
+  const pair = pickPair(access)
+  return pair !== null && portLooksLikeEp(pair.input) && portLooksLikeEp(pair.output)
 }
 
 /** A subscription to the device's notes, clock and transport (MidiTransport.events). */
@@ -90,7 +109,7 @@ export class Connection {
   async boot(): Promise<void> {
     const { deps, store } = this.host
     if (!deps.midi.supported()) {
-      store.update((s) => ({ ...s, midiSupported: false }))
+      store.update((s) => ({ ...s, midiSupported: false, midiPermission: 'unsupported' }))
       return
     }
     let permission
@@ -99,7 +118,10 @@ export class Connection {
     } catch {
       return
     }
-    if (permission !== 'granted' || this.disposed) return
+    if (this.disposed) return
+    // Access may have been given meanwhile (a tap on Connect): that answer is newer.
+    if (this.access === null) store.update((s) => ({ ...s, midiPermission: permission }))
+    if (permission !== 'granted') return
     let access: MidiAccessLike
     try {
       access = await this.ensureAccess()
@@ -107,8 +129,7 @@ export class Connection {
       return
     }
     if (!deps.settings.settings.autoConnect || this.session !== null || store.get().busy) return
-    const pair = pickPair(access)
-    if (pair && portLooksLikeEp(pair.input) && portLooksLikeEp(pair.output)) await this.connect()
+    if (epPlugged(access)) await this.connect()
   }
 
   /** MIDI access (prompting the first time), watched for attach/detach from then on. */
@@ -118,6 +139,7 @@ export class Connection {
     const access = await this.host.deps.midi.requestAccess()
     if (this.access) return this.access
     this.access = access
+    this.host.store.update((s) => ({ ...s, midiPermission: 'granted', plugged: epPlugged(access) }))
     if (!this.disposed) {
       this.unwatch = this.host.deps.midi.watch(
         access,
@@ -128,14 +150,36 @@ export class Connection {
     return access
   }
 
+  /** The EP-133 came or went: UiState.plugged follows (midi.watch in ArcController's init). */
+  private syncPlugged(): void {
+    const access = this.access
+    if (access === null || this.disposed) return
+    const plugged = epPlugged(access)
+    if (this.host.store.get().plugged !== plugged) this.host.store.update((s) => ({ ...s, plugged }))
+  }
+
+  /** After a MidiError: what the browser says about MIDI now (the prompt may have been refused). */
+  private async reprobe(): Promise<void> {
+    let permission
+    try {
+      permission = await this.host.deps.midi.probe()
+    } catch {
+      return
+    }
+    if (this.disposed || this.access !== null) return
+    this.host.store.update((s) => ({ ...s, midiPermission: permission }))
+  }
+
   /** Agreed addition: connect on its own when an EP-133 is plugged in. */
   private onAdded(ev: MidiDeviceEvent): void {
+    this.syncPlugged()
     if (!ev.looksLikeEp || !this.host.deps.settings.settings.autoConnect) return
     // watchMidi already waited its 300 ms (ArcController's delay(300)).
     if (this.session === null && !this.host.store.get().busy) void this.connect()
   }
 
   private onRemoved(ev: MidiDeviceEvent): void {
+    this.syncPlugged()
     const open = this.openMidi
     if (open && open.owns(ev) && this.session !== null) {
       this.host.deps.trafficLog.note('device removed')
@@ -153,10 +197,11 @@ export class Connection {
       return
     }
     if (store.get().busy) return
-    store.update((s) => ({ ...s, busy: true }))
+    store.update((s) => ({ ...s, busy: true, connectNote: null }))
     try {
       const release = await deps.lock.acquire()
       if (!release) {
+        store.update((s) => ({ ...s, connectNote: WebText.OTHER_TAB }))
         this.host.toast(WebText.OTHER_TAB, true)
         return
       }
@@ -178,6 +223,7 @@ export class Connection {
       await this.refreshDevice()
     } catch (e) {
       this.dropSession(errorText(e))
+      if (e instanceof MidiError) void this.reprobe()
     } finally {
       store.update((s) => ({ ...s, busy: false }))
     }

@@ -15,6 +15,8 @@
 // Android's LiveAudio (one low-latency output mixing the pads and keys),
 // [Deps.padSounds] the folder PadSoundCache keeps its copies in, and
 // [Deps.lastRead] Live's last read of the device (files/live-last.json).
+//
+// ?demo (no Android counterpart): [Deps.demo] and [Deps.demoPress], for Try arc.
 
 import type { ReadonlySignal } from '@preact/signals'
 import { signal } from '@preact/signals'
@@ -226,6 +228,10 @@ export interface Deps {
   userAgent: string
   /** Settings changed in another tab (the window "storage" event). */
   onStorageChange?: ((listener: () => void) => () => void) | undefined
+  /** ?demo: the simulated EP-133 stands in for the device (Try arc then always starts, and presses a pad itself). */
+  demo?: boolean | undefined
+  /** ?demo: the simulated EP-133 plays pad A "." (a note-on with its pad push, the note-off 400 ms later). */
+  demoPress?: (() => void) | undefined
 }
 
 /**

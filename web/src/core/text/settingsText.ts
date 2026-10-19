@@ -79,6 +79,12 @@ export const SettingsText = {
     return `${SettingsText.PAD_SOUNDS}: ${size}`
   },
 
+  HELP: 'Help',
+  TRY_AGAIN: 'Try arc again',
+  TRY_AGAIN_NOTE: 'A few short steps on the real screen: connect, play a pad, back up.',
+  SHOW: 'Show',
+  SHOW_NOTE: 'Names every control on the screen.',
+
   ABOUT: 'About',
   version(v: string): string {
     return `arc ${v}`

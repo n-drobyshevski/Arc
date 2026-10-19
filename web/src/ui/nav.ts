@@ -15,9 +15,9 @@
 //   layers with their own hash route; the render priority stays Root's
 //   if-chain (see [viewOf] and app.tsx), whatever order they were opened in.
 // - Overlays (sheets, dialogs, the section menu, the Live side panel, the
-//   guide overlay) are layers that keep the hash of the layer below.
+//   guide overlay, Try arc) are layers that keep the hash of the layer below.
 // - Back (popstate) removes one layer, chosen in Android's order ([backStack]):
-//   dialog, side panel, menu, guide overlay, sheet, full screen, tab.
+//   dialog, side panel, menu, guide overlay, Try arc, sheet, full screen, tab.
 //
 // The pure functions are tested in test/ui/nav.test.ts; [Nav] binds them to
 // window.history (an injected [NavEnv], so it is tested with a fake too).
@@ -42,7 +42,7 @@ export type Screen =
  * 'pads:backup:<id>:<n>', 'pads:device:<n>', 'upload', 'trim:<i>', 'licence', 'progress' (app.tsx keeps it in step with state.task);
  * dialogs: 'delete', 'prune:<keep>', 'forget', 'pick:scale' / 'pick:octave' (Live's KEYS lists).
  */
-export type OverlayKind = 'dialog' | 'side' | 'menu' | 'coach' | 'sheet'
+export type OverlayKind = 'dialog' | 'side' | 'menu' | 'coach' | 'tour' | 'sheet'
 
 export type Layer =
   | { readonly kind: 'tab'; readonly tab: Tab }
@@ -193,7 +193,7 @@ function validLayer(raw: unknown): Layer | null {
     }
   }
   if (r.kind === 'overlay') {
-    const kinds: readonly OverlayKind[] = ['dialog', 'side', 'menu', 'coach', 'sheet']
+    const kinds: readonly OverlayKind[] = ['dialog', 'side', 'menu', 'coach', 'tour', 'sheet']
     if (!kinds.includes(r.overlay as OverlayKind)) return null
     if (r.id !== undefined && typeof r.id !== 'string') return null
     return overlayLayer(r.overlay as OverlayKind, r.id as string | undefined)
@@ -224,6 +224,8 @@ export interface NavView {
   readonly menu: boolean
   readonly side: boolean
   readonly coach: boolean
+  /** "Try arc", the first-run tour over the shell. */
+  readonly tour: boolean
   /** Open sheet ids, bottom first. */
   readonly sheets: readonly string[]
   /** Open dialog ids, bottom first. */
@@ -241,6 +243,7 @@ export function viewOf(stack: Stack): NavView {
   let menu = false
   let side = false
   let coach = false
+  let tour = false
   const sheets: string[] = []
   const dialogs: string[] = []
   for (const l of stack) {
@@ -256,10 +259,11 @@ export function viewOf(stack: Stack): NavView {
     } else if (l.overlay === 'menu') menu = true
     else if (l.overlay === 'side') side = true
     else if (l.overlay === 'coach') coach = true
+    else if (l.overlay === 'tour') tour = true
     else if (l.overlay === 'sheet') sheets.push(l.id ?? '')
     else dialogs.push(l.id ?? '')
   }
-  return { tab, debug, settings, search, guide, contentsId, compare, menu, side, coach, sheets, dialogs }
+  return { tab, debug, settings, search, guide, contentsId, compare, menu, side, coach, tour, sheets, dialogs }
 }
 
 /** Root's `live`: the Live tab is in front (not under the debug, settings or guide screen). */
@@ -311,12 +315,14 @@ export function close(stack: Stack, layer: Layer): Stack {
   return remove(stack, (l) => layerKey(l) === key)
 }
 
-/** The order Back closes things in (Android: dialog window, side panel, menu, overlay, sheet, screen, tab). */
+/** The order Back closes things in (Android: dialog window, side panel, menu, overlay, tour, sheet, screen, tab). */
 const BACK_ORDER: readonly ((l: Layer) => boolean)[] = [
   (l) => l.kind === 'overlay' && l.overlay === 'dialog',
   (l) => l.kind === 'overlay' && l.overlay === 'side',
   (l) => l.kind === 'overlay' && l.overlay === 'menu',
   (l) => l.kind === 'overlay' && l.overlay === 'coach',
+  // Back pauses the tour (nothing is written); Live's side panel and the menu go first.
+  (l) => l.kind === 'overlay' && l.overlay === 'tour',
   (l) => l.kind === 'overlay' && l.overlay === 'sheet',
   (l) => l.kind === 'screen',
   (l) => l.kind === 'tab',
@@ -442,8 +448,12 @@ export class Nav {
     this.go(push(close(this.stackSignal.peek(), from), to))
   }
 
-  /** The app's own Back (a Done or close key): closes what the system Back would. */
+  /**
+   * The app's own Back (a Done or close key, Escape on the tour): closes what
+   * the system Back would, and like it does nothing while the back guard holds.
+   */
   back(): void {
+    if (this.backGuard()) return
     const next = backStack(this.stackSignal.peek())
     if (next) this.go(next)
   }

@@ -7,6 +7,7 @@
 
 import { APP_NAME } from '../../version'
 import { LearnedLinks } from '../features/learnedLinks'
+import { Tour } from '../features/tour'
 import { isJsonObject } from '../protocol/fs'
 import type { BackupDevice } from '../text/libraryRules'
 
@@ -159,11 +160,13 @@ export function parse(text: string): LibraryIndexData | null {
 }
 
 const LEARNED = 'mirror.learned'
+const TOUR_STEPS = 'app.tourSteps'
 
 /**
  * Several indexes (an old one the new install couldn't overwrite, and a new
  * one) merged by id; later ones win. Live's learned pad links are combined,
- * so a few pads learned in a new install don't drop the rest.
+ * so a few pads learned in a new install don't drop the rest; so are the
+ * steps of the first-run tour.
  */
 export function merge(indexes: readonly LibraryIndexData[]): LibraryIndexData {
   // Map.set: a later entry replaces the value but keeps the first position.
@@ -172,6 +175,7 @@ export function merge(indexes: readonly LibraryIndexData[]): LibraryIndexData {
   for (const ix of indexes) {
     for (const e of ix.entries) byId.set(e.id, e)
     const before = Object.hasOwn(settings, LEARNED) ? settings[LEARNED]! : null
+    const tourBefore = Object.hasOwn(settings, TOUR_STEPS) ? settings[TOUR_STEPS]! : null
     for (const [k, v] of Object.entries(ix.settings)) {
       Object.defineProperty(settings, k, { value: v, writable: true, enumerable: true, configurable: true })
     }
@@ -179,6 +183,8 @@ export function merge(indexes: readonly LibraryIndexData[]): LibraryIndexData {
     if (before !== null && now !== null) {
       settings[LEARNED] = LearnedLinks.format(LearnedLinks.merge(LearnedLinks.parse(before), LearnedLinks.parse(now)))
     }
+    const tourNow = Object.hasOwn(ix.settings, TOUR_STEPS) ? ix.settings[TOUR_STEPS]! : null
+    if (tourBefore !== null && tourNow !== null) settings[TOUR_STEPS] = Tour.mergeText(tourBefore, tourNow)
   }
   return { entries: [...byId.values()], settings }
 }

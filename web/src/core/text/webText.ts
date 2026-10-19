@@ -93,6 +93,16 @@ export const WebText = {
   // ---------- coach (CoachText.PLAY "Play on the phone") ----------
   COACH_PLAY: 'Play it here',
 
+  // ---------- Try arc (TourText; no Android counterpart for these) ----------
+  /** Opens ?demo in a new tab, on the Welcome and Needs MIDI cards. */
+  TOUR_TRY_DEMO: 'Try the demo',
+  /** Under the Connect card's rows while the MIDI permission hasn't been asked yet. */
+  TOUR_MIDI_ASK: 'Your browser then asks to allow MIDI. arc needs it to talk to the EP-133.',
+  /** Replaces TourText.BACKUP_HINT "… on the EP-133 to the phone. …". */
+  TOUR_BACKUP_HINT: 'arc saves every sound and project on the EP-133 in this browser. Nothing on it is changed.',
+  /** The Pad card in ?demo, which presses a pad by itself. */
+  TOUR_DEMO_PAD: 'This is the demo: arc presses a pad for you.',
+
   // ---------- Live (MirrorText / SettingsText sentences about "the phone") ----------
   /** Replaces MirrorText.TAP_NOTE "Hold a pad to hear its sample on the phone …". */
   LIVE_TAP_NOTE:

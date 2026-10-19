@@ -40,6 +40,9 @@ import { unavailableLibrary, type Deps, type LibraryApi } from '../state/deps'
 
 type Timer = ReturnType<typeof globalThis.setTimeout>
 
+/** How long ?demo's pad press (Deps.demoPress) holds the pad. */
+export const DEMO_PRESS_MS = 400
+
 /** ?demo's library channel (BroadcastChannel) and device lock, apart from the real ones. */
 export const DEMO_CHANNEL_NAME = `${CHANNEL_NAME}-demo`
 export const DEMO_LOCK_NAME = `${DEVICE_LOCK_NAME}-demo`
@@ -176,6 +179,17 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
     launchFiles: (onFiles) => onLaunchFiles(onFiles),
     clipboard: nav?.clipboard ? { writeText: (t) => nav.clipboard.writeText(t) } : undefined,
     userAgent: nav?.userAgent ?? '',
+    demo,
+    demoPress: demo
+      ? () => {
+          // dev/demo.ts's driver (installed before the deps): pad A "." with its pad push, as a person would play it.
+          const d = win?.__arcDemo
+          if (!d) return
+          d.noteOn(36, 127)
+          d.pushPadActive(1, 0, 1)
+          globalThis.setTimeout(() => d.noteOff(36), DEMO_PRESS_MS)
+        }
+      : undefined,
     onStorageChange(listener) {
       // ?demo's settings are in memory: another tab's change is not its own.
       if (!win || demo) return () => {}

@@ -59,7 +59,7 @@ import dev.arc.ep133.ui.theme.LocalArcColors
 /**
  * The settings (an addition to the web version): theme, connecting, the
  * screen in Live, how many backups to keep, Live's pad numbering and learned
- * names, and about arc.
+ * names, help (the tour and the guide overlay), and about arc.
  */
 @Composable
 fun SettingsScreen(
@@ -80,6 +80,10 @@ fun SettingsScreen(
     padSoundsSize: suspend () -> Long = { 0L },
     onClearPadSounds: () -> Unit = {},
     onNoteNames: (dev.arc.ep133.features.NoteNames) -> Unit = {},
+    /** Try arc again: the tour from the start, on Live. */
+    onTryAgain: () -> Unit = {},
+    /** What's what: the guide overlay. */
+    onShowGuide: () -> Unit = {},
     onSource: () -> Unit,
     onFontLicence: () -> Unit,
     onDebug: () -> Unit,
@@ -180,6 +184,15 @@ fun SettingsScreen(
                 )
             }
             Text(SettingsText.PAD_SOUNDS_NOTE, style = ArcType.small, color = c.graphite)
+
+            Section(SettingsText.HELP)
+            ArcKey(SettingsText.TRY_AGAIN, onTryAgain, Modifier.fillMaxWidth(), size = KeySize.Small)
+            Text(SettingsText.TRY_AGAIN_NOTE, style = ArcType.small, color = c.graphite)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(dev.arc.ep133.text.CoachText.HELP, style = ArcType.body15, color = c.ink, modifier = Modifier.weight(1f))
+                ArcKey(SettingsText.SHOW, onShowGuide, size = KeySize.Small)
+            }
+            Text(SettingsText.SHOW_NOTE, style = ArcType.small, color = c.graphite)
 
             Section(SettingsText.ABOUT)
             Text(SettingsText.version(version), style = ArcType.bold, color = c.ink)

@@ -34,6 +34,11 @@
 //   Live's output (LiveAudioDeps) is open on the same terms. Pads and keys
 //   play through live.ts. The first-run guide's flag is AppSettings.guideSeen
 //   ([coach] keeps the old seen/markSeen shape for the UI).
+// - Try arc (the first-run tour): its progress and flag are settings
+//   ([setTourSteps], [finishTour], [restartTour]), copied into library.json
+//   only once there is a library to keep them with (Tour.syncsIndex), so a
+//   fresh install that never backs up writes no library.json. ?demo has
+//   [Deps.demoPress] for the Pad step.
 
 import { computed, signal, type ReadonlySignal, type Signal } from '@preact/signals'
 import { MAX_OCTAVE, MIN_OCTAVE, type NoteNames, type Scale } from '../core/features/keys'
@@ -42,6 +47,7 @@ import { backupDevice, restorePak } from '../core/backup/backup'
 import { describePak, openPak, type PakDescription, type PakSound } from '../core/backup/pak'
 import { project as exportProject, projectFileName, soundFileName, soundWav } from '../core/backup/pakExport'
 import { compare as compareWithDevice } from '../core/features/backupDiff'
+import { Tour } from '../core/features/tour'
 import { contents as deviceContents, projectLayout, soundDetails, type DeviceContents } from '../core/features/deviceBrowser'
 import { search as searchLibrary, type NameEntry } from '../core/features/librarySearch'
 import type { PadOrder } from '../core/features/padPush'
@@ -301,7 +307,13 @@ export class ArcController {
     } catch {
       // The folder stays unused this session.
     }
-    this.store.update((s) => ({ ...s, folderPicked: lib.folderPicked, folderStatus: status, folderName: lib.target?.name ?? null }))
+    this.store.update((s) => ({
+      ...s,
+      folderPicked: lib.folderPicked,
+      folderStatus: status,
+      folderName: lib.target?.name ?? null,
+      folderChecked: true,
+    }))
     void lib.persist().catch(() => false)
     // Backups saved before search existed get their sound names indexed once.
     this.store.update((s) => ({ ...s, search: { ...s.search, indexing: true } }))
@@ -328,9 +340,11 @@ export class ArcController {
       if (gen !== this.libraryGen || this.disposed) return
       this.names = names
       this.live.libraryChanged()
-      this.store.update((s) => ({ ...s, backups: list, libraryLoaded: true, spaceLeft }))
+      this.store.update((s) => ({ ...s, backups: list, libraryLoaded: true, libraryChecked: true, spaceLeft }))
       void this.runSearch()
     } catch (e) {
+      // The first run decides without the library (no backups, nothing to restore).
+      if (gen === this.libraryGen && !this.disposed) this.store.update((s) => (s.libraryChecked ? s : { ...s, libraryChecked: true }))
       this.toast(Strings.libraryFailed(errorText(e)), true)
     }
   }
@@ -450,8 +464,24 @@ export class ArcController {
     return this.conn.connect()
   }
 
+  /** Try arc's Connect key: connects, never disconnects (a second tap while it connects does nothing). */
+  async connectIfNeeded(): Promise<void> {
+    if (this.conn.session !== null || this.store.get().busy) return
+    await this.conn.connect()
+  }
+
   refreshDevice(): Promise<void> {
     return this.conn.refreshDevice()
+  }
+
+  /** ?demo: whether the simulated EP-133 stands in for the device. */
+  get demo(): boolean {
+    return this.deps.demo === true
+  }
+
+  /** ?demo: the simulated EP-133 plays a pad (Try arc's Pad step); nothing elsewhere. */
+  demoPress(): void {
+    this.deps.demoPress?.()
   }
 
   /** dropSession's controller part (the session is already closed). */
@@ -1117,6 +1147,30 @@ export class ArcController {
   /** The guide overlay was shown (it opens by itself only once, also across reinstalls). */
   setGuideSeen(): void {
     this.changeSettings((s) => ({ ...s, guideSeen: true }))
+  }
+
+  /** Try arc's progress (Tour.encode), as it ticks. */
+  setTourSteps(steps: string): void {
+    const before = this.deps.settings.settings
+    this.changeTour(() => this.deps.settings.update((s) => ({ ...s, tourSteps: steps })) !== before)
+  }
+
+  /** Done, Not now or ×: the tour never starts by itself again, and neither does the guide overlay. */
+  finishTour(): void {
+    const before = this.deps.settings.settings
+    this.changeTour(() => this.deps.settings.update((s) => ({ ...s, tourDone: true, guideSeen: true })) !== before)
+  }
+
+  /** Try arc again: the steps start over; tourDone stays as it is (never written back to false). */
+  restartTour(): void {
+    this.changeTour(() => this.deps.settings.clear('tourSteps'))
+  }
+
+  /** The tour's settings reach library.json only once there is a library (Tour.syncsIndex). */
+  private changeTour(change: () => boolean): void {
+    if (!change()) return
+    const st = this.store.get()
+    if (Tour.syncsIndex(st.folderPicked, st.backups.length)) void this.syncIndex()
   }
 
   /** How many backups [setKeepLast] would delete now, for the confirmation. */

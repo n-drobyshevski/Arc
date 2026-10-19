@@ -2,7 +2,7 @@
 //
 // The settings (an addition to the web version): theme, connecting, the
 // screen in Live, how many backups to keep, Live's pad numbering, note names
-// on the keys, learned names and pad sound copies, and about arc.
+// on the keys, learned names and pad sound copies, help, and about arc.
 //
 // Web deltas:
 // - Texts that talk about the phone or Documents/arc use WebText: the storage
@@ -19,12 +19,14 @@
 // - "Pad sounds saved on the phone" counts arc's copies in this browser
 //   (IndexedDB store padSounds); the size is read when the screen opens and
 //   Clear sets it to nothing, as in Kotlin.
+// - Help (Try arc again, What's what) sits before About, as on Android.
 // - The pad order is not a signal (c.padOrder() is read when Root renders), so
 //   the screen keeps its own copy from here on, as the Kotlin does.
 import type { JSX } from 'preact'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { NOTE_NAMES, type NoteNames } from '../../core/features/keys'
 import type { PadOrder } from '../../core/features/padPush'
+import { CoachText } from '../../core/text/coachText'
 import { Format } from '../../core/text/format'
 import { MirrorText } from '../../core/text/mirrorText'
 import { SettingsText, THEME_CHOICES, type ThemeChoice } from '../../core/text/settingsText'
@@ -68,6 +70,10 @@ export interface SettingsScreenProps {
   onSource: () => void
   onFontLicence: () => void
   onDebug: () => void
+  /** Help → Try arc again: the tour from the start, on Live. */
+  onTryAgain?: () => void
+  /** Help → What's what: the guide overlay, on Live. */
+  onShowGuide?: () => void
   onBack: () => void
 }
 
@@ -280,6 +286,15 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
           />
         </div>
         <p class="t-small settings__note">{SettingsText.PAD_SOUNDS_NOTE}</p>
+
+        <Section text={SettingsText.HELP} />
+        <Key text={SettingsText.TRY_AGAIN} size="small" block onClick={() => props.onTryAgain?.()} />
+        <p class="t-small settings__note">{SettingsText.TRY_AGAIN_NOTE}</p>
+        <div class="settings__sounds">
+          <p class="t-body15 settings__sounds-size">{CoachText.HELP}</p>
+          <Key text={SettingsText.SHOW} size="small" aria-label={`${CoachText.HELP}: ${SettingsText.SHOW}`} onClick={() => props.onShowGuide?.()} />
+        </div>
+        <p class="t-small settings__note">{SettingsText.SHOW_NOTE}</p>
 
         <Section text={SettingsText.ABOUT} />
         <p class="t-bold settings__version">{SettingsText.version(props.version)}</p>

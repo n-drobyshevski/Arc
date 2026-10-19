@@ -36,6 +36,11 @@ import androidx.lifecycle.repeatOnLifecycle
 import dev.arc.ep133.backup.PakExport
 import dev.arc.ep133.backup.PakSound
 import dev.arc.ep133.controller.ArcController
+import dev.arc.ep133.features.FirstRun
+import dev.arc.ep133.features.Tour
+import dev.arc.ep133.features.TourSession
+import dev.arc.ep133.features.TourSnapshot
+import dev.arc.ep133.features.TourStep
 import dev.arc.ep133.files.Files
 import dev.arc.ep133.text.BackupRecord
 import dev.arc.ep133.text.FeatureText
@@ -43,7 +48,10 @@ import dev.arc.ep133.text.LibraryRules
 import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcSheet
 import dev.arc.ep133.ui.components.ArcFrame
-import dev.arc.ep133.ui.components.CoachHost
+import dev.arc.ep133.ui.components.TourActions
+import dev.arc.ep133.ui.components.TourHost
+import dev.arc.ep133.ui.components.TourSessionSaver
+import dev.arc.ep133.ui.components.TourUi
 import dev.arc.ep133.ui.components.ArcToast
 import dev.arc.ep133.ui.components.Tab
 import dev.arc.ep133.ui.components.ArcShell
@@ -327,15 +335,14 @@ class MainActivity : ComponentActivity() {
         var debug by rememberSaveable { mutableStateOf(false) }
         var settingsOpen by rememberSaveable { mutableStateOf(false) }
         var fontLicence by rememberSaveable { mutableStateOf(false) }
-        // The guide overlay: from the ? key, and once by itself on the first start.
+        // The guide overlay: from the ? key, and once by itself on the first start (when the tour doesn't).
         var coach by rememberSaveable { mutableStateOf(false) }
-        LaunchedEffect(Unit) {
-            // Kept with the settings (and so in Documents/arc); "coach_seen" is where it was before.
-            if (!controller.settings.value.guideSeen) {
-                if (!getPreferences(MODE_PRIVATE).getBoolean("coach_seen", false)) coach = true
-                controller.setGuideSeen()
-            }
-        }
+        // "Try arc": the run on screen, null while it isn't (its progress is kept in the settings).
+        var tourSession by rememberSaveable(stateSaver = TourSessionSaver) { mutableStateOf<TourSession?>(null) }
+        // While the tour shows, Live shows one group (until Live is left; never saved).
+        var forceOneGroup by rememberSaveable { mutableStateOf(false) }
+        // What opens by itself is decided once, when the library has been read.
+        var firstRunChecked by rememberSaveable { mutableStateOf(false) }
         // The section under the top bar; the other screens stack over it without the bars.
         // Live is the home section: the app opens on it.
         var tab by rememberSaveable { mutableStateOf(Tab.LIVE) }
@@ -366,6 +373,7 @@ class MainActivity : ComponentActivity() {
                 Tab.LIVE -> {
                     controller.closeMirror()
                     controller.stopPlayback()
+                    forceOneGroup = false
                 }
                 Tab.DEVICE -> {
                     padsFor = null
@@ -375,6 +383,28 @@ class MainActivity : ComponentActivity() {
             }
             tab = t
             if (t == Tab.DEVICE) controller.refreshBrowser()
+        }
+
+        /** Opens the tour on Live, from the progress kept so far. */
+        fun openTour() {
+            val st = controller.settings.value
+            selectTab(Tab.LIVE)
+            forceOneGroup = true
+            coach = false
+            tourSession = Tour.open(Tour.decode(st.tourSteps), st.guideSeen, st.tourDone, controller.state.value.backups.size)
+        }
+
+        LaunchedEffect(state.libraryChecked) {
+            if (!state.libraryChecked || firstRunChecked) return@LaunchedEffect
+            firstRunChecked = true
+            // Kept with the settings (and so in Documents/arc); "coach_seen" is where it was before.
+            if (getPreferences(MODE_PRIVATE).getBoolean("coach_seen", false) && !controller.settings.value.guideSeen) controller.setGuideSeen()
+            val st = controller.settings.value
+            when (Tour.firstRun(st.guideSeen, st.tourDone, st.tourSteps, controller.state.value.backups.size, demo = false)) {
+                FirstRun.TOUR -> openTour()
+                FirstRun.COACH -> coach = true
+                FirstRun.NONE -> {}
+            }
         }
 
         // Keep the screen on while the progress sheet or the live mirror is open.
@@ -436,6 +466,83 @@ class MainActivity : ComponentActivity() {
         val playingKeys by controller.liveKeys.collectAsStateWithLifecycle()
         val rec by controller.rec.collectAsStateWithLifecycle()
         val takes by controller.takes.collectAsStateWithLifecycle()
+
+        // The tour reads the app as it is now; each change may tick its step.
+        val mirrorState = state.mirror?.state
+        val lastHit = mirrorState?.lastHit
+        val tourSnap = TourSnapshot(
+            backups = state.backups.size,
+            canRestore = state.libraryLoaded && !state.folderPicked && state.backups.isEmpty(),
+            midi = state.midiSupported,
+            connected = state.connected && state.device != null,
+            busy = state.busy,
+            hitAt = lastHit?.pad?.let { mirrorState?.pads?.get(it)?.onAt },
+            hitNamed = lastHit?.name != null,
+            heard = playingKeys.isNotEmpty(),
+        )
+        LaunchedEffect(tourSession, tourSnap, appSettings.tourSteps, appSettings.guideSeen, appSettings.tourDone) {
+            val s = tourSession ?: return@LaunchedEffect
+            val st = controller.settings.value
+            // Finished since it opened (a restore brought back a finished tour): it closes quietly.
+            if (Tour.closes(s, st.guideSeen, st.tourDone)) {
+                tourSession = null
+                return@LaunchedEffect
+            }
+            // The same clock as the pads' lights (PadLight.onAt).
+            val (p, next) = Tour.advance(Tour.decode(st.tourSteps), s, tourSnap, System.nanoTime())
+            val text = Tour.encode(p)
+            if (text != st.tourSteps) controller.setTourSteps(text)
+            if (next != s) tourSession = next
+        }
+        val tourProgress = Tour.decode(appSettings.tourSteps)
+        val tourUi = tourSession?.let { s ->
+            val step = Tour.current(tourProgress, s, tourSnap)
+            TourUi(
+                step = step,
+                resumed = s.resumed,
+                resumeAt = Tour.resumeAt(tourProgress),
+                midi = state.midiSupported,
+                plugged = state.plugged,
+                connected = tourSnap.connected,
+                busy = state.busy,
+                needsConnect = Tour.needsDevice(step) && state.device == null,
+                canBackup = state.device != null && !state.busy,
+                canPlay = lastHit?.pad != null && tourSnap.hitNamed,
+                laterNote = Tour.laterNote(tourProgress, state.midiSupported),
+            )
+        }
+        fun closeTour() {
+            tourSession = null
+        }
+        val tourActions = TourActions(
+            onStart = { tourSession = tourSession?.let(Tour::welcome) },
+            onNotNow = {
+                controller.finishTour()
+                closeTour()
+            },
+            onSkip = {
+                val s = tourSession
+                val step = tourUi?.step
+                if (s != null && step != null) {
+                    val p = Tour.decode(controller.settings.value.tourSteps)
+                    // A Connect ticked during this run is passed with Next, not skipped.
+                    if (step == TourStep.CONNECT && TourStep.CONNECT in p.done) {
+                        tourSession = Tour.ackConnect(s)
+                    } else {
+                        controller.setTourSteps(Tour.encode(Tour.skip(p, step)))
+                    }
+                }
+            },
+            onNext = { tourSession = tourSession?.let(Tour::ackConnect) },
+            onConnect = controller::connectIfNeeded,
+            onRestore = { folderLauncher.launch(dev.arc.ep133.data.ExternalLibrary.INITIAL_FOLDER) },
+            onBackup = { withNotifications { controller.backup() } },
+            onPlay = { lastHit?.pad?.let { controller.playPad(it, hold = false) } },
+            onDone = {
+                controller.finishTour()
+                closeTour()
+            },
+        )
         val compareA = compareIds?.substringBefore('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         val compareB = compareIds?.substringAfter('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         // Also runs again after a recreation, when the result is gone.
@@ -464,6 +571,15 @@ class MainActivity : ComponentActivity() {
                     padSoundsSize = controller::padSoundsSize,
                     onClearPadSounds = { controller.clearPadSounds() },
                     onNoteNames = controller::setKeysNames,
+                    onTryAgain = {
+                        controller.restartTour()
+                        settingsOpen = false
+                        openTour()
+                    },
+                    onShowGuide = {
+                        settingsOpen = false
+                        coach = true
+                    },
                     onRestoreFolder = { folderLauncher.launch(dev.arc.ep133.data.ExternalLibrary.INITIAL_FOLDER) },
                     // No browser installed: nothing to open.
                     onSource = { runCatching { uri.openUri(dev.arc.ep133.text.SettingsText.SOURCE_URL) } },
@@ -539,7 +655,18 @@ class MainActivity : ComponentActivity() {
                     onOpen = { b -> contentsId = b.id },
                     onBack = { search = false },
                 )
-            } else CoachHost(visible = coach, onDismiss = { coach = false }) {
+            } else TourHost(
+                tour = tourUi,
+                actions = tourActions,
+                // Back pauses the tour (it comes back as Welcome back); on the first card it means Not now.
+                onBack = { if (tourUi?.step == TourStep.WELCOME) tourActions.onNotNow() else closeTour() },
+                coach = coach,
+                onCoachDismiss = {
+                    coach = false
+                    // Seen once it has been closed (also kept in Documents/arc).
+                    if (!controller.settings.value.guideSeen) controller.setGuideSeen()
+                },
+            ) {
                 ArcShell(
                     tab = tab,
                     onTab = { selectTab(it) },
@@ -569,7 +696,8 @@ class MainActivity : ComponentActivity() {
                             onPad = { pad, hold -> controller.playPad(pad, hold) },
                             onPadUp = controller::releasePad,
                             keys = dev.arc.ep133.ui.screens.KeysUi(
-                                on = appSettings.liveKeys,
+                                // The tour points at the pads: KEYS waits until it is over.
+                                on = appSettings.liveKeys && tourSession == null,
                                 root = appSettings.keysRoot,
                                 scale = appSettings.keysScale,
                                 octave = appSettings.keysOctave,
@@ -596,7 +724,7 @@ class MainActivity : ComponentActivity() {
                                     if (g != null && o != null) dev.arc.ep133.features.PhysicalPad(g, o) else null
                                 }
                             },
-                            oneGroup = appSettings.liveOneGroup,
+                            oneGroup = appSettings.liveOneGroup || forceOneGroup,
                             onOneGroup = controller::setLiveOneGroup,
                             follow = appSettings.liveFollow,
                             onFollow = controller::setLiveFollow,
@@ -814,7 +942,8 @@ class MainActivity : ComponentActivity() {
                 text = toast?.text.orEmpty(),
                 error = toast?.error ?: false,
                 onTimeout = controller::dismissToast,
-                modifier = Modifier.align(Alignment.BottomCenter),
+                // At the top while the tour shows, clear of its card.
+                modifier = Modifier.align(if (tourSession != null) Alignment.TopCenter else Alignment.BottomCenter),
             )
         }
     }

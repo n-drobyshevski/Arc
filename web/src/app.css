@@ -27,6 +27,16 @@
   pointer-events: none;
 }
 
+/* While Try arc shows, the toast sits at the top, clear of the step card and the pads
+ * (MainActivity: the toast's alignment while the tour is open). */
+.toast-layer--top { inset: 0 0 auto 0; }
+.toast-layer--top .toast-host {
+  top: 0;
+  bottom: auto;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: 0;
+}
+
 /* ---------- the progress sheet (ProgressSheetContent) ---------- */
 
 .progress-sheet__label {

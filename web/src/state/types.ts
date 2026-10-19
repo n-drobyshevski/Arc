@@ -12,6 +12,9 @@
 //   (a remembered folder may need a tap to be used again) and
 //   [canPickFolder] (File System Access is Chromium only).
 // - UiState.keysPad is a PhysicalPad (compare with padKey(), not ===).
+// - Try arc: [UiState.plugged] is null until MIDI access was given, and the
+//   web adds [UiState.folderChecked], [UiState.midiPermission] and
+//   [UiState.connectNote] for the tour's Restore and Connect cards.
 
 import type { Pak } from '../core/backup/pak'
 import type { DiffResult } from '../core/features/backupDiff'
@@ -26,9 +29,10 @@ import type { TrimRange } from '../core/features/sampleTrim'
 import type { Storage } from '../core/protocol/device'
 import type { DeviceInfo } from '../core/protocol/session'
 import type { BackupRecord, RestoreSelection } from '../core/text/libraryRules'
+import type { MidiPermission } from '../platform/midi/webmidi'
 import type { FolderStatus } from '../platform/storage/library'
 
-export type { FolderStatus }
+export type { FolderStatus, MidiPermission }
 
 /** What the device panel shows (app.js state.device). The two counts are numbers, not lists. */
 export interface DeviceSummary {
@@ -159,6 +163,19 @@ export interface UiState {
   readonly canPickFolder: boolean
   /** Web: the library folder's name while it is in use (folderStatus 'granted'), for WebText.folderNote. */
   readonly folderName: string | null
+  /** The library has been read once, or failed to (the first-run decision waits for it). */
+  readonly libraryChecked: boolean
+  /** Web: the library folder has been looked at once at startup (Try arc's Restore step waits for it). */
+  readonly folderChecked: boolean
+  /**
+   * An EP-133 is plugged in (MidiConnector.epPlugged). Web: null until MIDI
+   * access was given (the browser lists no ports before), so the row hides.
+   */
+  readonly plugged: boolean | null
+  /** Web: the MIDI permission, from the silent probe, then from asking ('unsupported' without WebMIDI). */
+  readonly midiPermission: MidiPermission
+  /** Web: why the last Connect didn't connect when it wasn't an error toast (WebText.OTHER_TAB), for the tour's card. */
+  readonly connectNote: string | null
 }
 
 /** The three tabs under the top bar (ui/components Tab). */
@@ -221,5 +238,10 @@ export function initialState(midiSupported = true, canPickFolder = false): UiSta
     folderStatus: 'none',
     canPickFolder,
     folderName: null,
+    libraryChecked: false,
+    folderChecked: false,
+    plugged: null,
+    midiPermission: midiSupported ? 'prompt' : 'unsupported',
+    connectNote: null,
   }
 }
