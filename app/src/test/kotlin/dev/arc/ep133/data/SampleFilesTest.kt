@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -60,5 +61,61 @@ class SampleFilesTest {
         files.write(0L, ByteArray(1)).apply { setLastModified(5_000L) }
         File(dir, "samples/notes.txt").writeText("x")
         assertEquals(listOf(left.name), files.strays(setOf(kept.name), before = 2_000L))
+    }
+
+    @Test
+    fun `a synth file is told by its name, never a recording's`() {
+        assertTrue(SampleFiles.isSynth("syn-0a1b2c3d-1-0-9.wav"))
+        assertTrue(SampleFiles.isSynth("../x/syn-0a1b2c3d-1-0-9.wav"))
+        assertFalse(SampleFiles.isSynth("smp-20261007-142301.wav"))
+        assertFalse(SampleFiles.isSynth("syn/smp-1.wav"))
+    }
+
+    @Test
+    fun `a synth sound is written once under its name, and a name that isn't a synth's is refused`() {
+        val files = SampleFiles(File(dir, "samples"))
+        val name = "syn-0a1b2c3d-1-0-9.wav"
+        val a = files.writeSynth(name, byteArrayOf(1, 2, 3))
+        assertEquals(name, a.name)
+        assertArrayEquals(byteArrayOf(1, 2, 3), a.readBytes())
+        // The same name and size: the file there is used as it is.
+        a.setLastModified(1_000L)
+        assertEquals(a, files.writeSynth(name, byteArrayOf(9, 9, 9)))
+        assertArrayEquals(byteArrayOf(1, 2, 3), a.readBytes())
+        assertEquals(1_000L, a.lastModified())
+        // Another size: written again, with no .tmp left behind.
+        files.writeSynth(name, byteArrayOf(4, 5))
+        assertArrayEquals(byteArrayOf(4, 5), a.readBytes())
+        assertEquals(listOf(name), File(dir, "samples").list()!!.toList())
+        assertThrows(IllegalArgumentException::class.java) { files.writeSynth("smp-1.wav", byteArrayOf(1)) }
+        assertThrows(IllegalArgumentException::class.java) { files.writeSynth("syn-1.txt", byteArrayOf(1)) }
+    }
+
+    @Test
+    fun `synth files no pad change names are synth strays, and never recording strays`() {
+        val files = SampleFiles(File(dir, "samples"))
+        val kept = files.writeSynth("syn-00000001-1-0-9.wav", ByteArray(1)).apply { setLastModified(1_000L) }
+        val left = files.writeSynth("syn-00000002-1-0-9.wav", ByteArray(1)).apply { setLastModified(1_000L) }
+        val recording = files.write(0L, ByteArray(1)).apply { setLastModified(1_000L) }
+        assertEquals(listOf(left.name), files.synthStrays(setOf(kept.name), before = 2_000L))
+        assertEquals(listOf(kept.name, left.name), files.synthStrays(emptySet(), before = Long.MAX_VALUE))
+        assertEquals(emptyList<String>(), files.synthStrays(emptySet(), before = 500L))
+        // A recording is never a synth stray, and a synth file never a recording's.
+        assertEquals(listOf(recording.name), files.strays(emptySet(), before = 2_000L))
+    }
+
+    @Test
+    fun `a synth write cut short leaves a tmp file the sweep at start finds`() {
+        val files = SampleFiles(File(dir, "samples"))
+        val whole = files.writeSynth("syn-00000001-1-0-9.wav", ByteArray(1)).apply { setLastModified(1_000L) }
+        // Arc closed between writing the .tmp and renaming it.
+        val half = File(dir, "samples/syn-00000002-1-0-9.wav.tmp").apply { writeBytes(ByteArray(1)); setLastModified(1_000L) }
+        val other = File(dir, "samples/notes.tmp").apply { writeBytes(ByteArray(1)); setLastModified(1_000L) }
+        assertEquals(listOf(half.name), files.synthLeftovers(before = 2_000L))
+        assertEquals(emptyList<String>(), files.synthLeftovers(before = 500L))
+        // Neither sweep of whole files lists it, and the leftover sweep lists no whole file.
+        assertEquals(listOf(whole.name), files.synthStrays(emptySet(), before = 2_000L))
+        assertEquals(emptyList<String>(), files.strays(emptySet(), before = 2_000L))
+        assertTrue(other.isFile)
     }
 }

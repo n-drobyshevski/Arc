@@ -2834,6 +2834,33 @@ fun BeatSheetSoundsUploadOfflineDarkPreview() = BeatSheet(
     sounds = { card -> soundsUi(card, unnamedList, { soundNow[it] }, { soundWas[it] }, offline = true, project = 3, packs = riddimPack, deviceKit = dev.arc.ep133.features.FactoryKit.EP133) },
 )
 
+// A card with synth lines: A7's sound line changes its pad as any, A9's snare is on no slot, so IMPORT makes it ("Make snare",
+// ticked, with its play key), and A4's closed hat was made by an earlier import: found on the EP-133 by its device name.
+private const val SYNTH_BEAT = """ARC BEAT 1
+name Made kit
+tempo 96
+
+[A] bars 1 step 1/16
+sound A7 12 MICRO KICK
+synth A9 snare note G3 decay 30 tone 70 click 20 noise 70 name snare
+synth A4 hat decay 10 tone 75 name closed_hat
+A7 | X... ..x. X... .... |
+A9 | .... X... .... X... |
+A4 | x.x. x.x. x.x. x.x. |
+"""
+
+private val madeHat = dev.arc.ep133.features.SynthVoice.deviceName(
+    dev.arc.ep133.features.CardSynth(dev.arc.ep133.features.SynthType.HAT, decay = 10, tone = 75, name = "closed_hat"),
+)
+
+@PreviewTest
+@Preview(name = "Beat sheet synth", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetSynthPreview() = BeatSheet(
+    SYNTH_BEAT,
+    sounds = { card -> soundsUi(card, SoundSet(soundList.source, soundList.names + (300 to madeHat)), { soundNow[it] }, { soundWas[it] }, offline = false, project = 3) },
+)
+
 // A card with FX lines: the project has a reverb on group A, the card swaps it for a distortion, sends A and B to it, turns
 // the compressor on and makes A7 duck B and C. The FX block comes after the tempo row, before the pads (no sound lines here).
 private val projectFx = FxSettings(FxType.REVERB, 0.5f, 0.5f, listOf(0.5f, 0f, 0f, 0f))

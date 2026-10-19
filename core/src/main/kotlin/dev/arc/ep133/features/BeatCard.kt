@@ -116,8 +116,9 @@ data class CardPad(
 /**
  * One group's pattern on a card: [group] 0..3 (A..D), the pattern [number]
  * 1..99 it was written as (a hint, null when the card gave none), the
- * [pattern] itself, the [sounds] its pads should play and the [pads]' shaping
- * (a `pad` line each), both by pad offset.
+ * [pattern] itself, the [sounds] its pads should play, the [pads]' shaping
+ * (a `pad` line each) and the [synths] Arc makes for them (a `synth` line
+ * each), all by pad offset.
  */
 data class CardSection(
     val group: Int,
@@ -125,6 +126,7 @@ data class CardSection(
     val pattern: Pattern,
     val sounds: Map<Int, CardSound> = emptyMap(),
     val pads: Map<Int, CardPad> = emptyMap(),
+    val synths: Map<Int, CardSynth> = emptyMap(),
 )
 
 /**
@@ -133,6 +135,60 @@ data class CardSection(
  * which lets Arc check that the slot still holds that sound.
  */
 data class CardSound(val slot: Int, val name: String? = null)
+
+/** The sound types of a synth line, in the order of their ordinal (which seeds the noise, [SynthVoice]). */
+enum class SynthType(val id: String) {
+    KICK("kick"), SNARE("snare"), CLAP("clap"), HAT("hat"), OPENHAT("openhat"), TOM("tom"), RIM("rim"), COWBELL("cowbell"), SUB("sub"),
+    BASS("bass"), PLUCK("pluck"), STAB("stab"), BELL("bell"), ZAP("zap"), LEAD("lead"), PAD("pad"), RISER("riser"),
+}
+
+/** A synth line's oscillator: `metal` is six square partials (an 808 hat), `none` is noise only. */
+enum class SynthWave(val id: String) { SINE("sine"), TRI("tri"), SAW("saw"), SQUARE("square"), METAL("metal"), NONE("none") }
+
+/** A synth line's chord: the notes stacked on the root, in semitones. */
+enum class SynthChord(val id: String, val intervals: List<Int>) {
+    ONE("one", listOf(0)),
+    MIN("min", listOf(0, 3, 7)),
+    MAJ("maj", listOf(0, 4, 7)),
+    MIN7("min7", listOf(0, 3, 7, 10)),
+    MAJ7("maj7", listOf(0, 4, 7, 11)),
+    DOM7("dom7", listOf(0, 4, 7, 10)),
+    SUS2("sus2", listOf(0, 2, 7)),
+    SUS4("sus4", listOf(0, 5, 7)),
+    FIFTH("fifth", listOf(0, 7)),
+    OCT("oct", listOf(0, 12)),
+}
+
+/**
+ * A synth line: only what the line gave (null: not written; the renderer fills in its type's default). length is in
+ * hundredths of a second. [note] is MIDI (C4 = 60), the knobs 0..100, [level] 1..100, [seed] 0..999 and [name] one
+ * word of at most [NAME_MAX] characters. [SynthVoice] makes the sound.
+ */
+data class CardSynth(
+    val type: SynthType,
+    val note: Int? = null,
+    val wave: SynthWave? = null,
+    val chord: SynthChord? = null,
+    val attack: Int? = null,
+    val decay: Int? = null,
+    val length: Int? = null,
+    val tone: Int? = null,
+    val reso: Int? = null,
+    val sweep: Int? = null,
+    val bend: Int? = null,
+    val click: Int? = null,
+    val noise: Int? = null,
+    val snap: Int? = null,
+    val drive: Int? = null,
+    val detune: Int? = null,
+    val level: Int? = null,
+    val seed: Int? = null,
+    val name: String? = null,
+) {
+    companion object {
+        const val NAME_MAX = 13
+    }
+}
 
 /** What [BeatCards.resolveSounds] makes of a sound line. */
 enum class SoundStatus {
@@ -156,6 +212,8 @@ enum class SoundStatus {
  * when not known) and the [status]. [unverified] is set when the slot is a
  * factory sound the EP-133 lists without a name ("200.pcm", see
  * [FactorySounds.unnamed]): it is used by its slot, as its name can't be checked.
+ * [synth] is set when the pick is the pad's synth line: [wanted] then names
+ * its device name ([SynthVoice.deviceName]), and MISSING means Arc makes it.
  */
 data class SoundPick(
     val pad: PhysicalPad,
@@ -165,6 +223,7 @@ data class SoundPick(
     val currentSlot: Int?,
     val status: SoundStatus,
     val unverified: Boolean = false,
+    val synth: CardSynth? = null,
 )
 
 /**
@@ -256,6 +315,17 @@ object BeatCards {
     /** The effect lines: header only. */
     private val FX_KEYS = setOf("fx", "send", "comp", "sidechain")
     private val PAD_KEYS = setOf("pitch", "level", "pan", "attack", "release", "mode")
+
+    /** A synth line's settings, in the order a card writes them. No key is a type, wave, chord or line word. */
+    private val SYNTH_KEYS = listOf(
+        "note", "wave", "chord", "attack", "decay", "length", "tone", "reso", "sweep", "bend", "click", "noise", "snap", "drive", "detune", "level", "seed", "name",
+    )
+
+    /** A synth line's values: ASCII digits only, never \d. */
+    private val SYNTH_INT = Regex("^[0-9]{1,3}$")
+    private val SYNTH_NOTE = Regex("^[A-G]#?[0-9]$")
+    private val SYNTH_LENGTH = Regex("^([0-9])(?:\\.([0-9]{1,2}))?$")
+    private val SYNTH_NAME = Regex("^[A-Za-z0-9][A-Za-z0-9_-]*$")
     private const val FX_WORDS = "none, delay, reverb, distortion, chorus, filter or compressor"
 
     /** A knob value as a card writes it: 0 to 100, whole or with one decimal. */
@@ -317,6 +387,9 @@ object BeatCards {
 
         /** The pad lines read (merged when a pad has more than one), by pad offset. */
         val pads = LinkedHashMap<Int, CardPad>()
+
+        /** The synth lines read (the later wins, in the place of the first), by pad offset. */
+        val synths = LinkedHashMap<Int, CardSynth>()
         var inNotes = false
     }
 
@@ -444,6 +517,7 @@ object BeatCards {
                 line.equals("notes", ignoreCase = true) -> d.inNotes = true
                 tokens(line)[0].equals("sound", ignoreCase = true) -> sound(d, no, line)
                 tokens(line)[0].equals("pad", ignoreCase = true) -> padLine(d, no, line)
+                tokens(line)[0].equals("synth", ignoreCase = true) -> synthLine(d, no, line)
                 tokens(line)[0].lowercase() in FX_KEYS -> error(no, "'${tokens(line)[0]}' belongs before the first section.")
                 d.inNotes -> note(d, no, line)
                 '|' in line -> row(d, no, line)
@@ -589,7 +663,7 @@ object BeatCards {
             when {
                 sceneLines > 0 && key in HEADER_KEYS -> warn(no, "'$word' belongs before the first scene, ignored.")
                 sceneLines > 0 && key in FX_KEYS -> error(no, "'$word' belongs before the first scene.")
-                '|' in line || firstIsPad(line) || key == "notes" || key == "sound" || key == "pad" -> error(no, "'$word' needs a section first, such as [A].")
+                '|' in line || firstIsPad(line) || key == "notes" || key == "sound" || key == "pad" || key == "synth" -> error(no, "'$word' needs a section first, such as [A].")
                 key in FX_KEYS -> fxLine(no, word, key, tokens(rest))
                 key == "name" -> when {
                     rest.isEmpty() -> warn(no, "Name is empty, ignored.")
@@ -699,7 +773,7 @@ object BeatCards {
                 }
             }
             if (kept.size > Seq.MAX_NOTES) error(d.line, "Group ${'A' + d.group} has ${kept.size} notes, the most is ${Seq.MAX_NOTES}.")
-            if (!d.dropped) sections += CardSection(d.group, d.number, Pattern(d.bars, kept.sortedWith(NOTE_ORDER)), d.sounds, d.pads)
+            if (!d.dropped) sections += CardSection(d.group, d.number, Pattern(d.bars, kept.sortedWith(NOTE_ORDER)), d.sounds, d.pads, d.synths)
         }
 
         // ---- grid rows ----
@@ -786,6 +860,108 @@ object BeatCards {
             val name = cleanText(rest.substring(slotToken.length), Int.MAX_VALUE).ifEmpty { null }
             if (pad.offset in d.sounds) warn(no, "$label has two sound lines, kept the later.")
             d.sounds[pad.offset] = CardSound(slot, name)
+        }
+
+        // ---- synth lines ----
+
+        // synth <pad> <type> [<key> <value>]...: a sound Arc makes. A line with an error is left out, and an earlier line for the pad stays.
+        private fun synthLine(d: Draft, no: Int, line: String) {
+            if (d.inNotes) warn(no, "Put synth lines before notes, so older Arc can read the card.")
+            if ('|' in line) {
+                error(no, "A synth line can't hold a |.")
+                return
+            }
+            val t = tokens(line)
+            if (t.size < 3) {
+                error(no, "A synth line needs a pad and a sound type, as in synth A7 kick.")
+                return
+            }
+            val pad = parsePad(t[1])
+            if (pad == null) {
+                error(no, "'${t[1]}' isn't a pad. Use A to D, then . 0 E or 1 to 9.")
+                return
+            }
+            val label = padText(pad.group, pad.offset)
+            if (pad.group != d.group) {
+                error(no, "$label is in group ${'A' + pad.group}, but the section is [${'A' + d.group}].")
+                return
+            }
+            val type = SynthType.entries.firstOrNull { it.id == t[2].lowercase() }
+            if (type == null) {
+                warn(no, "Unknown sound type '${t[2]}' on $label synth, line ignored.")
+                return
+            }
+            var s = CardSynth(type)
+            var i = 3
+            while (i < t.size) {
+                val key = t[i].lowercase()
+                val v = t.getOrNull(i + 1)
+                if (key !in SYNTH_KEYS) {
+                    warn(no, "Unknown setting '${t[i]}' on $label synth, ignored.")
+                    i += if (v != null && v.lowercase() !in SYNTH_KEYS) 2 else 1
+                    continue
+                }
+                if (v == null) {
+                    error(no, "$label synth: $key needs a value.")
+                    return
+                }
+                s = when (key) {
+                    "note" -> {
+                        val n = (if (SYNTH_NOTE.matches(v)) NOTE_NUMBERS[v] else null)?.takeIf { it in SYNTH_NOTE_MIN..SYNTH_NOTE_MAX }
+                            ?: return error(no, "$label synth: note must be C0 to C7, such as C2 or F#1.")
+                        s.copy(note = n)
+                    }
+                    "length" -> {
+                        val m = SYNTH_LENGTH.matchEntire(v)
+                        val cs = m?.let {
+                            val frac = it.groupValues[2]
+                            it.groupValues[1].toInt() * 100 + if (frac.isEmpty()) 0 else if (frac.length == 1) frac.toInt() * 10 else frac.toInt()
+                        }?.takeIf { it in SYNTH_LENGTH_MIN..SYNTH_LENGTH_MAX }
+                            ?: return error(no, "$label synth: length must be 0.05 to 4 seconds, with up to two decimals.")
+                        s.copy(length = cs)
+                    }
+                    "wave" -> SynthWave.entries.firstOrNull { it.id == v.lowercase() }?.let { s.copy(wave = it) } ?: run {
+                        warn(no, "$label synth: unknown wave '$v', ignored.")
+                        s
+                    }
+                    "chord" -> SynthChord.entries.firstOrNull { it.id == v.lowercase() }?.let { s.copy(chord = it) } ?: run {
+                        warn(no, "$label synth: unknown chord '$v', ignored.")
+                        s
+                    }
+                    "name" -> {
+                        if (!SYNTH_NAME.matches(v)) return error(no, "$label synth: name must be one word of letters, digits, _ or -, starting with a letter or digit.")
+                        if (v.length > CardSynth.NAME_MAX) warn(no, "$label synth: name cut to ${CardSynth.NAME_MAX} characters.")
+                        s.copy(name = v.take(CardSynth.NAME_MAX))
+                    }
+                    else -> {
+                        val (lo, hi) = when (key) {
+                            "level" -> 1 to 100
+                            "seed" -> 0 to 999
+                            else -> 0 to 100
+                        }
+                        val n = v.takeIf { SYNTH_INT.matches(it) }?.toInt()?.takeIf { it in lo..hi }
+                            ?: return error(no, "$label synth: $key must be a whole number from $lo to $hi.")
+                        when (key) {
+                            "attack" -> s.copy(attack = n)
+                            "decay" -> s.copy(decay = n)
+                            "tone" -> s.copy(tone = n)
+                            "reso" -> s.copy(reso = n)
+                            "sweep" -> s.copy(sweep = n)
+                            "bend" -> s.copy(bend = n)
+                            "click" -> s.copy(click = n)
+                            "noise" -> s.copy(noise = n)
+                            "snap" -> s.copy(snap = n)
+                            "drive" -> s.copy(drive = n)
+                            "detune" -> s.copy(detune = n)
+                            "level" -> s.copy(level = n)
+                            else -> s.copy(seed = n)
+                        }
+                    }
+                }
+                i += 2
+            }
+            if (pad.offset in d.synths) warn(no, "$label has two synth lines, kept the later.")
+            d.synths[pad.offset] = s
         }
 
         // ---- effect lines (header only) ----
@@ -1046,6 +1222,12 @@ object BeatCards {
     }
 
     private val INT = Regex("^\\d{1,9}$")
+
+    /** A synth line's note (C0..C7, MIDI) and length (hundredths of a second, 0.05..4 s). */
+    private const val SYNTH_NOTE_MIN = 12
+    private const val SYNTH_NOTE_MAX = 96
+    private const val SYNTH_LENGTH_MIN = 5
+    private const val SYNTH_LENGTH_MAX = 400
     private val SIGNED = Regex("^[+-]?\\d{1,9}$")
     private val NOTE_ORDER = compareBy<PatternNote>({ it.tick }, { it.offset }, { it.semitones ?: Int.MIN_VALUE })
 
@@ -1116,7 +1298,9 @@ object BeatCards {
      * [card] as text, as the spec's writing rules have it. [names] gives the
      * sound name a row shows after its pad (null for none). A section's
      * sound lines come right after its line, in keypad order, each with its
-     * name when it has one. With [tidy],
+     * name when it has one; then its synth lines ([synthText]), in keypad
+     * order, before its pad lines, rows and notes list, so older Arc reads
+     * the card. With [tidy],
      * velocities are rounded to 127, 100 or 64 (ties up) and gates under a
      * step become a step, for every note, and the card says so in a comment.
      * The [silent] pads ([silentPads]) are listed in a comment of their own
@@ -1126,7 +1310,7 @@ object BeatCards {
      * that name no scene are left out), then each scene as a `scene` line
      * with its name if it has one, followed by its sections in group order. A
      * section that only repeats the previous scene's pattern for its group
-     * (the same pattern, sounds and pad shaping) is left out. The text ends in
+     * (the same pattern, sounds, pad shaping and synth lines) is left out. The text ends in
      * a newline.
      */
     fun write(card: BeatCard, names: (PhysicalPad) -> String? = { null }, tidy: Boolean = false, silent: List<PhysicalPad> = emptyList()): String {
@@ -1183,9 +1367,9 @@ object BeatCards {
         out += "chain " + steps.joinToString(" ") { (scene, passes) -> if (passes == 1) "$scene" else "${scene}x$passes" }
     }
 
-    // Whether section [s] only repeats [prev], the previous scene's for its group: the same pattern as written (not the notes' ids), sounds and pad shaping.
+    // Whether section [s] only repeats [prev], the previous scene's for its group: the same pattern as written (not the notes' ids), sounds, pad shaping and synth lines.
     private fun repeats(prev: CardSection, s: CardSection): Boolean =
-        s.sounds == prev.sounds && s.pads == prev.pads && samePattern(prev.pattern, s.pattern)
+        s.sounds == prev.sounds && s.pads == prev.pads && s.synths == prev.synths && samePattern(prev.pattern, s.pattern)
 
     // Whether two patterns are written the same: the bars and the notes that play, in order, whatever their ids.
     private fun samePattern(a: Pattern, b: Pattern): Boolean = a.bars == b.bars && keyed(a) == keyed(b)
@@ -1232,6 +1416,41 @@ object BeatCards {
         return sb.toString()
     }
 
+    /**
+     * A synth line as a card writes it: `synth`, the pad and the type, then the settings the line gave, in the order of
+     * [SYNTH_KEYS] ("synth B9 bass note C2 wave square decay 25 name acid"). The note is a name (C2, F#1) and the length
+     * in seconds, as few decimals as needed (4, 0.5, 1.25).
+     */
+    fun synthText(group: Int, offset: Int, s: CardSynth): String {
+        val sb = StringBuilder("synth ${padText(group, offset)} ${s.type.id}")
+        fun put(key: String, value: Any?) {
+            if (value != null) sb.append(' ').append(key).append(' ').append(value)
+        }
+        put("note", s.note?.let { PadNotes.noteName(it) })
+        put("wave", s.wave?.id)
+        put("chord", s.chord?.id)
+        put("attack", s.attack)
+        put("decay", s.decay)
+        put("length", s.length?.let { lengthText(it) })
+        put("tone", s.tone)
+        put("reso", s.reso)
+        put("sweep", s.sweep)
+        put("bend", s.bend)
+        put("click", s.click)
+        put("noise", s.noise)
+        put("snap", s.snap)
+        put("drive", s.drive)
+        put("detune", s.detune)
+        put("level", s.level)
+        put("seed", s.seed)
+        put("name", s.name)
+        return sb.toString()
+    }
+
+    // Hundredths of a second as seconds, as few decimals as needed: 400 is 4, 50 is 0.5, 5 is 0.05, 125 is 1.25.
+    private fun lengthText(cs: Int): String =
+        "${cs / 100}" + (if (cs % 100 == 0) "" else "." + (cs % 100).toString().padStart(2, '0').trimEnd('0'))
+
     // Semitones to two decimals, as few as needed: 7, -7.5, 0.25.
     private fun pitchText(v: Double): String {
         val h = Math.round(v.coerceIn(-PadSettings.PITCH_MAX, PadSettings.PITCH_MAX) * 100).toInt()
@@ -1255,6 +1474,7 @@ object BeatCards {
             val name = sound.name?.let { cleanText(it, Int.MAX_VALUE) }.orEmpty()
             out += "sound ${padText(g, offset)} ${sound.slot}" + if (name.isEmpty()) "" else " $name"
         }
+        for (offset in KEYPAD) s.synths[offset]?.let { out += synthText(g, offset, it) }
         for (offset in KEYPAD) {
             val pad = s.pads[offset]?.takeUnless { it.isEmpty } ?: continue
             out += padLineText(g, offset, pad)
@@ -1606,15 +1826,17 @@ object BeatCards {
 
     /**
      * The pads [card]'s notes use (pad hits and KEYS notes alike; a note past its pattern's end doesn't play) that would
-     * be silent: [slotOf] gives no sound for them now (null) and no sound line of the card (in any scene) puts one on them.
+     * be silent: [slotOf] gives no sound for them now (null) and no sound or synth line of the card (in any scene) puts one on them.
      * In keypad order for each group, scene by scene. Empty when the pads are not [known] (nothing read yet): then a pad with no slot is not
      * known to be empty.
      */
     fun silentPads(card: BeatCard, slotOf: (PhysicalPad) -> Int?, known: Boolean): List<PhysicalPad> {
         if (!known) return emptyList()
         val out = ArrayList<PhysicalPad>()
-        // A sound line in any scene puts a sound on its pad: the sounds are the project's.
-        val given = card.allSections.flatMap { s -> s.sounds.filterValues { it.slot in SLOT_MIN..SLOT_MAX }.keys.map { PhysicalPad(s.group, it) } }.toSet()
+        // A sound or synth line in any scene puts a sound on its pad: the sounds are the project's.
+        val given = card.allSections.flatMap { s ->
+            (s.sounds.filterValues { it.slot in SLOT_MIN..SLOT_MAX }.keys + s.synths.keys).map { PhysicalPad(s.group, it) }
+        }.toSet()
         for (scene in card.scenes) {
             for (s in scene.sections.sortedBy { it.group }) {
                 val used = usedOffsets(s)
@@ -1695,6 +1917,21 @@ object BeatCards {
         }
         return picks.values.toList()
     }
+
+    /**
+     * The card's synth lines by pad, in the card's order (sections as given, pads in keypad order). The sounds are the
+     * project's: a pad given a synth line in more than one scene takes the last, in the place of its first.
+     */
+    fun synthsByPad(card: BeatCard): Map<PhysicalPad, CardSynth> {
+        val out = LinkedHashMap<PhysicalPad, CardSynth>()
+        for (s in card.allSections) {
+            for (offset in KEYPAD) s.synths[offset]?.let { out[PhysicalPad(s.group, offset)] = it }
+        }
+        return out
+    }
+
+    /** The slot of [available] (slot to name) that holds a sound called [name], as [resolveSounds] looks one up: the pad's own ([now]) when it does, else the lowest; null when none. */
+    fun slotNamed(available: Map<Int, String>, name: String, now: Int?): Int? = lookUp(available, name, now)
 
     // Whether [slot] is in [available] under the name the EP-133 gives a sound nobody named ("200.pcm").
     private fun unnamedIn(available: Map<Int, String>, slot: Int): Boolean = available[slot]?.let { FactorySounds.unnamed(slot, it) } == true

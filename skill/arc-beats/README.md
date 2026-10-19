@@ -30,7 +30,7 @@ Claude Code picks it up the next time it starts, and uses it whenever you talk a
 ## Using it with Arc
 
 1. In Arc's **Live** screen open **Live tools**, find **CLAUDE**, and use **SHARE SCENE** or **SHARE** (the group shown) to send a beat to the Claude app, so Claude sees your pad names. Tick **With my sound list** first and Claude also gets the sounds on your EP-133, and can choose them for the pads with `sound` lines. Or ask Claude to make something new.
-2. Claude replies with a card in a code block. Copy it and tap **PASTE BEAT** (or share the reply to Arc), then **IMPORT** on the sheet, and play. One undo removes it. If the card picks sounds, the sheet lists each as old to new with a tick box; the ticked ones can be put on your pads (this is the one thing a card can change on the EP-133).
+2. Claude replies with a card in a code block. Copy it and tap **PASTE BEAT** (or share the reply to Arc), then **IMPORT** on the sheet, and play. One undo removes it. If the card picks sounds, the sheet lists each as old to new with a tick box; the ticked ones can be put on your pads (this is the one thing a card can change on the EP-133). When nothing in your sounds fits, Claude can write a `synth` line instead: Arc makes that sound, uploads it into a free slot and puts it on the pad (offline, it keeps it in Arc until you connect).
 
 [references/arc-app.md](references/arc-app.md) has the details Claude uses. On Android the Claude page builds the prompt for you: tabs for a new beat, improving one, a track or a lesson, and a sentence on the glass whose orange words (genre, tempo, kit, parts) you tap to change; EDIT changes the words by hand and prompts can be saved. On the web **Learn with Claude** starts lesson 1.
 
@@ -43,11 +43,12 @@ Claude Code picks it up the next time it starts, and uses it whenever you talk a
 | `references/genres.md` | The assumed kit, the feel words and 56 genre recipes (a techno family among them, and seven for the EP-40 kit), each a valid card |
 | `references/factory-sounds.md` | The EP-133's and the EP-40 Riddim's factory sounds by slot, and a fresh EP-133 project's pads, for sound lines without a shared list |
 | `references/ep40-kit.md` | The EP-40 Riddim kit on an EP-133: its slots, loops and tempos, its pads, and the loop rules |
+| `references/synth-sounds.md` | Synth lines: sounds Claude describes and Arc makes, with the types, the settings and four recipe kits |
 | `references/lessons.md` | Twelve lessons from a first beat to sampling |
 | `references/analysis.md` | How to read the script's report, the checklist and the vocabulary |
 | `references/arc-app.md` | What each Arc screen does, for Claude to explain |
 | `references/ep133-guide.md` | The 100 official OS 2.5 key combinations. **Generated, do not edit** |
-| `scripts/beatcard.py` | `check` (also `--sounds` to check sound lines against your sound list, and `--kit ep40` for the EP-40 kit; `--sounds factory` or `factory-ep40` checks against a factory pack), `analyse`, `grid` and `midi`; Python 3.9+, standard library only |
+| `scripts/beatcard.py` | `check` (also `--sounds` to check sound lines against your sound list, and `--kit ep40` for the EP-40 kit; `--sounds factory` or `factory-ep40` checks against a factory pack), `analyse`, `grid`, `midi` and `synth` (lists a card's synth lines and with `-o` writes them as WAV files, the same bytes Arc makes); Python 3.9+, standard library only |
 | `scripts/test_beatcard.py` | Tests; also checks every card in the references |
 
 ## Working on the skill

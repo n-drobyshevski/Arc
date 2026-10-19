@@ -17,7 +17,7 @@ A fresh EP-133 (and Arc's Live with the EP-133 kit and no read) has these sounds
 | C | 545 pling chord · 550 look organ · 555 nt chordy | 530 cello 360 · 535 horn 360 english · 540 sky lead | 515 epiano 360 · 520 epiano 360 bass · 525 synth micro funk | 500 blue · 505 ultra · 510 skyline string |
 | D | empty | empty | empty | empty |
 
-- **Group D is empty**: a lead, an effect or a second keys part on D needs a `sound` line (or the user picks one on Arc's import sheet, SILENT PADS).
+- **Group D is empty**: a lead, an effect or a second keys part on D needs a `sound` line (or the user picks one on Arc's import sheet, SILENT PADS), or a `synth` line, which has Arc make the sound and put it on the pad ([synth-sounds.md](synth-sounds.md)).
 - The pad numbering of a project's file isn't certain (community notes differ), so treat this table as a guide to which **kinds** of sound a group holds: drums on A, bass on B, keys on C. When the card's row and the pad's factory sound are different kinds (the assumed kit's A3 shaker, A7 kick), a sound line makes them match.
 
 The EP-40 Riddim's projects are in [ep40-kit.md](ep40-kit.md).
