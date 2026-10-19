@@ -91,6 +91,19 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `a REMAKE prompt round-trips through library json, its song's separators and all`() {
+        val remake = dev.arc.ep133.features.ClaudePrompt().remake("One More Time; Daft Punk\\ https://open.spotify.com/track/0DiWol3AO6WpXZgp0goxAV").copy(loop = true, tempo = 123)
+        val chosen = AppSettings(
+            claudePrompt = remake.encode(),
+            claudePrompts = dev.arc.ep133.features.SavedPrompt.encodeAll(listOf(dev.arc.ep133.features.SavedPrompt("Remake \u00B7 One More Time", remake))),
+        )
+        val back = AppSettings().withIndex(chosen.values().mapKeys { "app." + it.key })
+        assertEquals(chosen, back)
+        assertEquals(remake, dev.arc.ep133.features.ClaudePrompt.decode(back.claudePrompt))
+        assertEquals(remake, dev.arc.ep133.features.SavedPrompt.decodeAll(back.claudePrompts).single().prompt)
+    }
+
+    @Test
     fun `SAMPLE's choices round-trip through library json, no threshold and Free bars too`() {
         val chosen = AppSettings(
             sampleSource = dev.arc.ep133.features.SampleSource.USB,

@@ -18,10 +18,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -31,13 +35,18 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -58,6 +67,8 @@ import dev.arc.ep133.features.PromptSlot
 import dev.arc.ep133.features.PromptTask
 import dev.arc.ep133.features.SavedPrompt
 import dev.arc.ep133.features.SharePick
+import dev.arc.ep133.features.TrackLinks
+import dev.arc.ep133.features.TrackLookup
 import dev.arc.ep133.text.ClaudeText
 import dev.arc.ep133.text.PromptText
 import dev.arc.ep133.ui.components.GridPlate
@@ -67,13 +78,15 @@ import dev.arc.ep133.ui.theme.LocalArcColors
 
 /**
  * Live tools' Claude page as the device's display (an addition): a prompt builder. The glass's tabs pick what to ask
- * (NEW BEAT, IMPROVE, TRACK, PLAY: teach me to play the card, LEARN) and it says the prompt as a sentence whose orange words are its choices (genre,
- * tempo, kit...): a tap on one turns the keys under the glass into its answers ([Answers]). EDIT opens the prompt's
- * own text to change by hand, and SAVED keeps prompts to come back to. A prompt that goes with a card (an IMPROVE, a
- * TRACK from this beat) shows it on the glass as before: SCENE, the pattern (A · 01) and CHAIN pick it (lit navy; one
- * with nothing to share is faded). SOUNDS switches the sound list on (its light orange), SHARE sends the prompt and
- * COPY puts it on the clipboard; under them the wide PASTE CARD brings Claude's card in (held, it opens a .txt or .md
- * card file). While a reply is awaited the glass says so instead.
+ * (NEW BEAT, IMPROVE, TRACK, REMAKE: copy a song, PLAY: teach me to play the card, LEARN) and it says the prompt as a
+ * sentence whose orange words are its choices (genre, tempo, kit...): a tap on one turns the keys under the glass into
+ * its answers ([Answers]). A REMAKE's song is typed on the glass instead, with PASTE, LOOK UP (its title from the link,
+ * only on a tap) and CLEAR under it; a song shared to arc opens the page on it ([ClaudeUi.open]). EDIT opens the
+ * prompt's own text to change by hand, and SAVED keeps prompts to come back to. A prompt that goes with a card (an
+ * IMPROVE, a TRACK from this beat) shows it on the glass as before: SCENE, the pattern (A · 01) and CHAIN pick it (lit
+ * navy; one with nothing to share is faded). SOUNDS switches the sound list on (its light orange), SHARE sends the
+ * prompt and COPY puts it on the clipboard (both off for a REMAKE with no song); under them the wide PASTE CARD brings
+ * Claude's card in (held, it opens a .txt or .md card file). While a reply is awaited the glass says so instead.
  */
 @Composable
 internal fun ClaudeDeck(claude: ClaudeUi, group: Int) {
@@ -88,7 +101,8 @@ internal fun ClaudeDeck(claude: ClaudeUi, group: Int) {
     // A pick with nothing to share gives way to one that has something (the chain first), else stays.
     val has = mapOf(SharePick.SCENE to !sceneEmpty, SharePick.PATTERN to !patternEmpty, SharePick.CHAIN to claude.hasChain)
     val pick = if (has.getValue(picked)) picked else listOf(SharePick.CHAIN, SharePick.SCENE, SharePick.PATTERN).firstOrNull { has.getValue(it) } ?: picked
-    val empty = prompt.withCard && !has.getValue(pick)
+    // Nothing to send: a card with no notes, or a REMAKE of no song.
+    val empty = prompt.withCard && !has.getValue(pick) || prompt.task == PromptTask.REMAKE && prompt.song == null && prompt.text == null
 
     var picking by rememberSaveable { mutableStateOf(claude.picking) }
     var editing by rememberSaveable { mutableStateOf(false) }
@@ -98,6 +112,13 @@ internal fun ClaudeDeck(claude: ClaudeUi, group: Int) {
     val sounds = claude.withSounds && claude.sounds > 0 && prompt.task != PromptTask.LEARN
     val built = PromptText.prompt(prompt.copy(text = null), pick, sounds)
     val set = claude.onPrompt
+    // A song shared to arc: the page starts on the request's word (the song, for a link alone), and says it has.
+    LaunchedEffect(claude.open) {
+        val asked = claude.open ?: return@LaunchedEffect
+        picking = asked.slot
+        editing = false
+        claude.onOpened()
+    }
 
     // EDIT while a reply is awaited still opens the prompt's text.
     if (claude.waiting != null && !editing) {
@@ -121,6 +142,7 @@ internal fun ClaudeDeck(claude: ClaudeUi, group: Int) {
     }
     val hint = when {
         editing -> PromptText.HINT_EDITING
+        slot == PromptSlot.SONG && claude.lookingUp -> PromptText.LOOKING_UP
         slot != null -> slotHint(slot, prompt)
         prompt.text != null -> PromptText.HINT_EDITED
         prompt.withCard -> PromptText.HINT_CARD
@@ -154,6 +176,7 @@ internal fun ClaudeDeck(claude: ClaudeUi, group: Int) {
                 },
             ),
         )
+        slot == PromptSlot.SONG -> SongKeys(prompt, claude, onDone = { picking = null })
         slot != null -> Answers(slot, prompt, kit, claude, onDone = { picking = null }, onNext = {
             picking = prompt.slots.getOrNull(prompt.slots.indexOf(slot) + 1)
         })
@@ -247,10 +270,13 @@ internal fun ClaudeDeck(claude: ClaudeUi, group: Int) {
 private fun slotHint(slot: PromptSlot, p: ClaudePrompt): String = when (slot) {
     PromptSlot.GENRE -> PromptText.hintGenre(Genres.of(p.genre))
     PromptSlot.FEEL -> p.feels.lastOrNull()?.let(PromptText::feelHint) ?: PromptText.HINT_FEEL
-    PromptSlot.TEMPO -> PromptText.hintTempo(Genres.of(p.genre))
+    // A REMAKE's tempo is the song's own, whatever genre the prompt had.
+    PromptSlot.TEMPO -> if (p.task == PromptTask.REMAKE) PromptText.HINT_TEMPO_REMAKE else PromptText.hintTempo(Genres.of(p.genre))
     PromptSlot.PARTS -> PromptText.HINT_PARTS
     PromptSlot.KIT -> PromptText.HINT_KIT
     PromptSlot.START -> PromptText.HINT_START
+    PromptSlot.SONG -> PromptText.HINT_SONG
+    PromptSlot.SCOPE -> PromptText.HINT_SCOPE
     else -> PromptText.HINT_PICK
 }
 
@@ -278,14 +304,16 @@ private fun Answers(slot: PromptSlot, p: ClaudePrompt, kit: FactoryKit, claude: 
             extras += { WordKey(PromptText.KEY_ANY, PromptText.ANY_GENRE_NAME, { set(p.withGenre(null)) }, selected = p.genre == null) }
         }
         PromptSlot.TEMPO -> {
-            val from = p.tempo ?: genre?.bpm ?: claude.liveTempo
+            // A REMAKE steps from Live's tempo: the genre's is no guide to the song's.
+            val from = p.tempo ?: genre?.bpm?.takeIf { p.task != PromptTask.REMAKE } ?: claude.liveTempo
             KeyGrid(
                 listOf(-5, -1, 1, 5).map { by ->
                     { WordKey(PromptText.stepTempo(by), PromptText.stepTempoName(by), { set(p.copy(tempo = (from + by).coerceIn(ClaudePrompt.TEMPOS))) }) }
                 },
             )
             extras += { WordKey(PromptText.KEY_LIVE, PromptText.liveTempoName(claude.liveTempo), { set(p.copy(tempo = claude.liveTempo)) }, sub = "${claude.liveTempo}", selected = p.tempo == claude.liveTempo) }
-            extras += { WordKey(PromptText.KEY_ANY, PromptText.ANY_TEMPO_NAME, { set(p.copy(tempo = null)) }, selected = p.tempo == null) }
+            val any = if (p.task == PromptTask.REMAKE) PromptText.OWN_TEMPO_NAME else PromptText.ANY_TEMPO_NAME
+            extras += { WordKey(PromptText.KEY_ANY, any, { set(p.copy(tempo = null)) }, selected = p.tempo == null) }
         }
         // Up to two feel words, in the order tapped; ANY takes them all off.
         PromptSlot.FEEL -> {
@@ -316,6 +344,19 @@ private fun Answers(slot: PromptSlot, p: ClaudePrompt, kit: FactoryKit, claude: 
             },
             columns = 2,
         )
+        PromptSlot.SCOPE -> KeyGrid(
+            listOf(false to PromptText.KEY_WHOLE_SONG, true to PromptText.KEY_MAIN_LOOP).map { (loop, word) ->
+                {
+                    WordKey(
+                        word, if (loop) PromptText.MAIN_LOOP else PromptText.WHOLE_SONG, { set(p.copy(loop = loop)) },
+                        sub = if (loop) PromptText.KEY_MAIN_LOOP_SUB else PromptText.KEY_WHOLE_SONG_SUB, selected = p.loop == loop,
+                    )
+                }
+            },
+            columns = 2,
+        )
+        // Typed on the glass, with its own keys ([SongKeys]).
+        PromptSlot.SONG -> {}
         PromptSlot.WAY -> KeyGrid(
             PlayWay.entries.map { w -> { WordKey(PromptText.wayKey(w), PromptText.way(w), { set(p.copy(way = w)) }, sub = PromptText.waySub(w), selected = p.way == w) } },
             columns = 2,
@@ -338,6 +379,34 @@ private fun Answers(slot: PromptSlot, p: ClaudePrompt, kit: FactoryKit, claude: 
     DeckStrip(
         extras + listOfNotNull<@Composable RowScope.() -> Unit>(
             if (last) null else { { DeckKey(DeckGlyph.NEXT, PromptText.KEY_NEXT, PromptText.NEXT_NAME, onNext) } },
+            { DeckKey(DeckGlyph.DONE, PromptText.KEY_DONE, PromptText.KEY_DONE, onDone, style = DeckStyle.SIGNAL) },
+        ),
+    )
+}
+
+/**
+ * The song's keys, under the glass where it is typed: PASTE takes the clipboard's song (its link cleaned and its
+ * words, [TrackLinks.song]; else the text as it is), LOOK UP asks the link's music app for its title (on while there is
+ * a link it can ask about, and not asking yet), CLEAR empties it, DONE goes back to the sentence's keys.
+ */
+@Composable
+private fun SongKeys(p: ClaudePrompt, claude: ClaudeUi, onDone: () -> Unit) {
+    val set = claude.onPrompt
+    val canLookUp = TrackLinks.find(p.song)?.let(TrackLookup::requestUrl) != null
+    DeckStrip(
+        listOf<@Composable RowScope.() -> Unit>(
+            {
+                DeckKey(
+                    DeckGlyph.PASTE, PromptText.KEY_PASTE, PromptText.PASTE_NAME,
+                    {
+                        val clip = claude.clipboard()
+                        val song = clip?.let { TrackLinks.song(it) ?: it.replace(Regex("\\s+"), " ").trim().take(ClaudePrompt.MAX_SONG) }
+                        if (!song.isNullOrEmpty()) set(p.copy(song = song))
+                    },
+                )
+            },
+            { DeckKey(DeckGlyph.SEND, PromptText.KEY_LOOKUP, PromptText.LOOKUP_NAME, claude.onLookUp, enabled = canLookUp && !claude.lookingUp) },
+            { DeckKey(DeckGlyph.DELETE, PromptText.KEY_CLEAR, PromptText.CLEAR_NAME, { set(p.copy(song = null)) }, enabled = p.song != null) },
             { DeckKey(DeckGlyph.DONE, PromptText.KEY_DONE, PromptText.KEY_DONE, onDone, style = DeckStyle.SIGNAL) },
         ),
     )
@@ -397,8 +466,8 @@ private fun SavedPrompts(saved: List<SavedPrompt>, prompt: ClaudePrompt, onLoad:
 
 /**
  * The glass while the prompt is built: the tabs, the card a prompt goes with (its name and step lights), then the
- * sentence with its orange words ([slot] lit while its answers show), the prompt's own words once edited, or the text
- * field while EDIT is open. Its foot says when the sound list follows.
+ * sentence with its orange words ([slot] lit while its answers show), the prompt's own words once edited, the text
+ * field while EDIT is open, or a REMAKE's song field while its SONG is picked. Its foot says when the sound list follows.
  */
 @Composable
 private fun PromptGlass(
@@ -456,6 +525,7 @@ private fun PromptGlass(
                     .border(1.dp, c.displayDim, RoundedCornerShape(8.dp))
                     .padding(10.dp),
             )
+            slot == PromptSlot.SONG -> SongField(prompt, claude.onPrompt)
             prompt.text != null -> Text(
                 prompt.text.orEmpty(),
                 style = Own,
@@ -479,7 +549,7 @@ private fun PromptGlass(
     }
 }
 
-/** The glass's tabs: the task, picked one lit with an orange dot. */
+/** The glass's tabs: the task, the picked one lit; each as wide as its word needs, so six fit. */
 @Composable
 private fun Tabs(task: PromptTask, onTask: (PromptTask) -> Unit) {
     val c = LocalArcColors.current
@@ -491,9 +561,10 @@ private fun Tabs(task: PromptTask, onTask: (PromptTask) -> Unit) {
     ) {
         for (t in PromptTask.entries) {
             val on = t == task
+            val label = PromptText.tab(t).uppercase()
             Box(
                 Modifier
-                    .weight(1f)
+                    .weight(label.length + 2f)
                     .heightIn(min = 36.dp)
                     .background(if (on) c.segmentOff else Color.Transparent)
                     .clickable(role = Role.Tab) { onTask(t) }
@@ -505,14 +576,68 @@ private fun Tabs(task: PromptTask, onTask: (PromptTask) -> Unit) {
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    (if (on) "● " else "") + PromptText.tab(t).uppercase(),
+                    label,
                     style = GlassHead.copy(fontSize = 10.5.sp, letterSpacing = 0.04.em),
                     color = if (on) c.displayInk else c.displayDim,
                     maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
     }
+}
+
+/**
+ * A REMAKE's song, typed on the glass: each change is the prompt's at once (no draft to keep or lose), on one line
+ * however it is pasted. The field keeps its own text and cursor, as the prompt comes back a frame later: a song
+ * changed elsewhere (PASTE, CLEAR, LOOK UP, a share) replaces it, its own changes coming back don't.
+ */
+@Composable
+private fun SongField(prompt: ClaudePrompt, onPrompt: (ClaudePrompt) -> Unit) {
+    val c = LocalArcColors.current
+    val focus = LocalFocusManager.current
+    var typed by remember { mutableStateOf(TextFieldValue(prompt.song.orEmpty(), TextRange(prompt.song.orEmpty().length))) }
+    // The songs sent and not back yet, oldest first: one may come back for several, the later ones.
+    val sent = remember { ArrayDeque<String?>() }
+    LaunchedEffect(prompt.song) {
+        val back = sent.indexOf(prompt.song)
+        if (back >= 0) {
+            repeat(back + 1) { sent.removeFirst() }
+        } else {
+            sent.clear()
+            val song = prompt.song.orEmpty()
+            if (song != typed.text) typed = TextFieldValue(song, TextRange(song.length))
+        }
+    }
+    BasicTextField(
+        typed,
+        { v ->
+            val text = v.text.replace('\n', ' ').take(ClaudePrompt.MAX_SONG)
+            typed = if (text == v.text) v else v.copy(text = text, selection = TextRange(v.selection.end.coerceAtMost(text.length)))
+            val song = text.takeIf { it.isNotBlank() }
+            if (song != (if (sent.isEmpty()) prompt.song else sent.last())) {
+                sent.addLast(song)
+                onPrompt(prompt.copy(song = song))
+            }
+        },
+        textStyle = Words.copy(color = c.displayInk),
+        cursorBrush = SolidColor(c.signal),
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
+        maxLines = 4,
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = PromptText.slot(PromptSlot.SONG) }
+            .border(1.dp, c.displayDim, RoundedCornerShape(8.dp))
+            .padding(10.dp),
+        decorationBox = { inner ->
+            Box {
+                if (typed.text.isEmpty()) Text(PromptText.SONG_PLACEHOLDER.uppercase(), style = Words, color = c.displayDim)
+                inner()
+            }
+        },
+    )
 }
 
 /** The prompt as a sentence: dim words, and orange-underlined ones a tap changes (the [lit] one filled orange). */

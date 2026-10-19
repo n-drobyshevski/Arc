@@ -250,8 +250,8 @@ class MainActivity : ComponentActivity() {
 
     /**
      * A .pak opened from Files (or another app) lands here, and so does text shared to arc (Claude's reply, a beat
-     * card: its sheet opens over Live, or the toast says there is none in it), and a .txt or .md card file shared to
-     * arc or opened with it.
+     * card: its sheet opens over Live; a song from a music app, with the share's subject: a REMAKE of it opens on the
+     * Claude page; else the toast says there is no card in it), and a .txt or .md card file shared to arc or opened with it.
      */
     private fun handleIntent(intent: Intent?) {
         val view = intent?.action == Intent.ACTION_VIEW
@@ -265,8 +265,9 @@ class MainActivity : ComponentActivity() {
             } else {
                 // Text, or a .txt or .md file shared as such.
                 val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+                val subject = intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT)?.toString()
                 val file = androidx.core.content.IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, android.net.Uri::class.java)
-                if (text == null && file != null) controller.receiveBeatFile(file) else controller.receiveBeat(text)
+                if (text == null && file != null) controller.receiveBeatFile(file) else controller.receiveBeat(text, subject)
             }
         }
         setIntent(Intent(this, MainActivity::class.java))
@@ -282,7 +283,7 @@ class MainActivity : ComponentActivity() {
     /**
      * The Claude page's SHARE through the system chooser, as plain text: [prompt] with the card [pick] names when it goes
      * with one ([group]'s pattern, the scene [sceneLabel] or the chain), else alone. Then the display waits for the reply
-     * ("Scene S02", "A \u00B7 01", "Chain", "New beat"); not for a lesson.
+     * ("Scene S02", "A \u00B7 01", "Chain", "New beat", a remake's song); not for a lesson.
      */
     private fun sharePrompt(prompt: dev.arc.ep133.features.ClaudePrompt, pick: dev.arc.ep133.features.SharePick, group: Int, sceneLabel: String, number: Int, copy: Boolean = false) {
         val share = controller.promptShare(prompt, pick, group) ?: return
@@ -297,7 +298,7 @@ class MainActivity : ComponentActivity() {
         if (!sent || learn) return
         controller.waitForClaude(
             when {
-                !prompt.withCard -> if (prompt.task == dev.arc.ep133.features.PromptTask.TRACK) dev.arc.ep133.text.PromptText.TRACK_IDEA else dev.arc.ep133.text.PromptText.NEW_BEAT
+                !prompt.withCard -> dev.arc.ep133.text.PromptText.what(prompt)
                 pick == dev.arc.ep133.features.SharePick.SCENE -> dev.arc.ep133.text.ClaudeText.sharedScene(sceneLabel)
                 pick == dev.arc.ep133.features.SharePick.PATTERN -> dev.arc.ep133.text.ClaudeText.sharedPattern(group, number)
                 else -> dev.arc.ep133.text.ClaudeText.CHAIN_CARD_NAME
@@ -864,9 +865,8 @@ class MainActivity : ComponentActivity() {
         val beatImport by controller.beatImport.collectAsStateWithLifecycle()
         // A card shared to Claude, its reply awaited: Live tools' display asks for it.
         val claudeWaiting by controller.claudeWaiting.collectAsStateWithLifecycle()
-        LaunchedEffect(beatImport != null) {
-            if (beatImport == null) return@LaunchedEffect
-            // Shared to arc from another app, or pasted: its sheet opens over Live, whatever was on.
+        // Shared to arc from another app, or pasted: Live comes to the front, whatever was on.
+        fun showLive() {
             debug = false
             settingsOpen = false
             guideOpen = false
@@ -878,6 +878,20 @@ class MainActivity : ComponentActivity() {
             detailId = null
             restoreId = null
             if (tab != Tab.LIVE) selectTab(Tab.LIVE)
+        }
+        LaunchedEffect(beatImport != null) {
+            if (beatImport == null) return@LaunchedEffect
+            // A card: its sheet opens over Live.
+            showLive()
+        }
+        // A song shared to arc: Live tools open on the Claude page, on its REMAKE (MirrorScreen turns the page; the page
+        // says when it has opened).
+        val claudePage by controller.claudePage.collectAsStateWithLifecycle()
+        val lookingUp by controller.lookingUp.collectAsStateWithLifecycle()
+        LaunchedEffect(claudePage) {
+            if (claudePage == null) return@LaunchedEffect
+            showLive()
+            toolsOpen = true
         }
         val liveTransport = remember(pattern, scene.switchTime) {
             dev.arc.ep133.ui.screens.TransportUi(
@@ -1493,6 +1507,7 @@ class MainActivity : ComponentActivity() {
                             onOneGroup = controller::setLiveOneGroup,
                             toolsOpen = toolsOpen,
                             onToolsOpen = { toolsOpen = it },
+                            openClaude = claudePage,
                             follow = appSettings.liveFollow,
                             onFollow = controller::setLiveFollow,
                             onPianoRange = { pianoRange = it },
@@ -1576,6 +1591,11 @@ class MainActivity : ComponentActivity() {
                                 onSavePrompt = controller::saveClaudePrompt,
                                 onDeletePrompt = controller::deleteClaudePrompt,
                                 onPaste = { controller.receiveBeat(clipboardText()) },
+                                clipboard = ::clipboardText,
+                                onLookUp = controller::lookUpSong,
+                                lookingUp = lookingUp,
+                                open = claudePage,
+                                onOpened = controller::claudePageShown,
                                 onOpenFile = { cardFileLauncher.launch(arrayOf("text/plain", "text/markdown", "text/x-markdown", "application/octet-stream")) },
                                 waiting = claudeWaiting,
                                 onDismissWaiting = controller::stopWaitingForClaude,

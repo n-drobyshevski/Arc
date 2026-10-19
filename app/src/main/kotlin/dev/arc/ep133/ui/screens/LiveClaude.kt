@@ -106,7 +106,9 @@ import dev.arc.ep133.ui.theme.LocalArcColors
  * its tick box); the project's chain ([chainSteps] steps over [chainScenes] scenes; none
  * hides SHARE CHAIN); and what its keys and links do. SHARE A · 01 is the group
  * shown, as [MirrorScreen] has it. [waiting] is what a share sent and Claude has not answered yet: the now display of
- * Live tools asks for the reply ([onPaste]) until it is pasted or [onDismissWaiting].
+ * Live tools asks for the reply ([onPaste]) until it is pasted or [onDismissWaiting]. A REMAKE's song takes the
+ * [clipboard] on its PASTE and its title from the link on LOOK UP ([onLookUp]; [lookingUp] while it asks), and a song
+ * shared to arc opens the page on its REMAKE ([open]).
  */
 class ClaudeUi(
     val scene: String = MirrorText.sceneLabel(0),
@@ -127,6 +129,9 @@ class ClaudeUi(
     val saved: List<dev.arc.ep133.features.SavedPrompt> = emptyList(),
     /** The word whose answers show as the page opens (the previews'); null: the sentence's keys. */
     val picking: dev.arc.ep133.features.PromptSlot? = null,
+    /** The page asked to open (a song shared to arc): it starts on the request's word, then says so with [onOpened]. */
+    val open: dev.arc.ep133.controller.ClaudeOpen? = null,
+    val onOpened: () -> Unit = {},
     val onPrompt: (dev.arc.ep133.features.ClaudePrompt) -> Unit = {},
     /** SHARE: the prompt, with the card [pick] names ([group]'s pattern for PATTERN) when it goes with one. */
     val onShare: (pick: dev.arc.ep133.features.SharePick, group: Int) -> Unit = { _, _ -> },
@@ -137,6 +142,11 @@ class ClaudeUi(
     val onSavePrompt: (dev.arc.ep133.features.ClaudePrompt) -> Unit = {},
     val onDeletePrompt: (index: Int) -> Unit = {},
     val onPaste: () -> Unit = {},
+    /** The clipboard's text (null when it holds none): the song's PASTE. */
+    val clipboard: () -> String? = { null },
+    /** LOOK UP: the song's title and artist from its link (only on a tap); [lookingUp] while it asks. */
+    val onLookUp: () -> Unit = {},
+    val lookingUp: Boolean = false,
     /** PASTE held: a .txt or .md file with a beat card in it, from the system's file picker. */
     val onOpenFile: () -> Unit = {},
     val onGetSkill: () -> Unit = {},

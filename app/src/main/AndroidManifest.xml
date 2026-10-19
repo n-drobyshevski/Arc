@@ -12,7 +12,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <!-- Only to download the EP-133's factory sounds from teenage engineering, when asked (FactoryDownload). -->
+    <!-- Only when asked (FactoryDownload): to download the EP-133's factory sounds from teenage engineering, and the Claude page's LOOK UP, on a tap, to read a shared song's title from its music app. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Only while SAMPLE mode is open with the mic or USB as its source (InputCapture); asked for then. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -76,7 +76,7 @@
                 <data android:pathPattern=".*\\..*\\..*\\.pak" />
             </intent-filter>
 
-            <!-- Claude's reply shared to arc: a beat card in text, or a .txt or .md file holding one (MainActivity.handleIntent reads it, and says so when there is none). -->
+            <!-- Claude's reply shared to arc: a beat card in text, or a .txt or .md file holding one; or a song shared from a music app, which opens a REMAKE of it on the Claude page (MainActivity.handleIntent reads it, and says so when there is no card). -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />

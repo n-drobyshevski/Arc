@@ -1,6 +1,6 @@
 ---
 name: arc-beats
-description: Build, analyse and teach beats for the teenage engineering EP-133 K.O. II (KO2) together with the Arc companion app. Writes drum patterns, grooves and basslines as ARC BEAT text cards the user pastes into Arc, designs sounds, reads and improves cards copied out of Arc, and teaches the EP-133, beat making and how to play a card by hand (finger drumming, step entry, a live set) step by step with the official key combos. Use whenever the user mentions the EP-133, K.O. II, KO2, Arc, a beat card or ARC BEAT, a drum pattern, groove, swing, hi-hats, scenes, a chain or an arrangement (a whole track idea) or patterns for the EP-133, FX, sidechain or punch-in effects, tempo or genre recipes (house, deep and tech house, amapiano, boom bap, trap, drill, phonk, dnb, breakcore, garage, dubstep, grime, trip-hop, synthwave, dembow, reggae, dub, dancehall and more), the EP-40 Riddim's factory kit on an EP-133, or wants to learn the EP-133, beat making or to play a beat themselves.
+description: Build, analyse and teach beats for the teenage engineering EP-133 K.O. II (KO2) together with the Arc companion app. Writes drum patterns, grooves and basslines as ARC BEAT text cards the user pastes into Arc, designs sounds, reads and improves cards copied out of Arc, and teaches the EP-133, beat making and how to play a card by hand (finger drumming, step entry, a live set) step by step with the official key combos. Use whenever the user mentions the EP-133, K.O. II, KO2, Arc, a beat card or ARC BEAT, a drum pattern, groove, swing, hi-hats, scenes, a chain or an arrangement (a whole track idea) or patterns for the EP-133, FX, sidechain or punch-in effects, tempo or genre recipes (house, deep and tech house, amapiano, boom bap, trap, drill, phonk, dnb, breakcore, garage, dubstep, grime, trip-hop, synthwave, dembow, reggae, dub, dancehall and more), the EP-40 Riddim's factory kit on an EP-133, or wants to learn the EP-133 or beat making, to play a beat themselves or to remake a song (a Spotify link).
 ---
 
 # Arc beats
@@ -9,7 +9,7 @@ You help someone make music on the teenage engineering **EP-133 K.O. II** (also 
 
 You cannot hear anything and you cannot see the device. Say so when it matters ("this should feel like ...") and let the user's ears decide.
 
-## Four jobs
+## Five jobs
 
 | The user wants to | Do this | Read |
 |---|---|---|
@@ -17,6 +17,7 @@ You cannot hear anything and you cannot see the device. Say so when it matters (
 | Improve or understand a beat they copied out of Arc | **ANALYSE** below | [analysis.md](references/analysis.md), [beat-card.md](references/beat-card.md) |
 | Learn the EP-133 or beat making | **LEARN** below | [lessons.md](references/lessons.md), [ep133-guide.md](references/ep133-guide.md) |
 | Play a card themselves (finger drumming, step entry, a live set, KEYS) | **PLAY** below | [play.md](references/play.md), [ep133-guide.md](references/ep133-guide.md) |
+| Remake a song they heard (a Spotify or other music app link) | **REMAKE** below | [remake.md](references/remake.md), [genres.md](references/genres.md) |
 
 If a request mixes them (build a beat and explain how to enter it on the device), do the job first, then the teaching, in that order.
 
@@ -164,6 +165,10 @@ Follow [lessons.md](references/lessons.md): twelve lessons from a first beat to 
 
 When the user wants to play a card on the device rather than import it (Arc's PLAY tab sends *teach me to play this ... myself* with `- Way:`, `- Me:` and `- Start:` lines), follow [play.md](references/play.md): read the card, set the starting tempo, then one part per message in counts ("kick on 1 and 3"), with a hand for each pad, and wait between steps. Only the guide's combos, by id. With `- Arc:` asking for lesson lines, also give the card with a `lesson` line per step ("Lesson" in beat-card.md) so Arc's PRACTICE runs them.
 
+## REMAKE: copy a song as a card
+
+When Arc's REMAKE tab sends *Use the arc-beats skill to remake a song for my EP-133 ...* (`- Song:` and `- Link:` name it, `- Scope:` asks for the whole song as scenes with a chain or its main loop as one scene, `- Tempo:` the song's own or a set BPM, `- First:` the research, `- Copy:` and `- Write:` what to copy and what to write fresh), or the user asks for a beat like a song, follow [remake.md](references/remake.md). Web search pins the recording and finds its tempo, key, sections and bar counts from two sources or more (if it is off, say so and ask for it). Copy the groove, chords, sounds, FX and structure; write your own hook and no lyrics. Before the card, list each fact with its source and confirmed, likely or guess, and repeat them as `#` comments under `ARC BEAT 1`. Reply with the card, then a line for each scene saying which part of the song it is.
+
 ## PUNCH-IN TIPS: performance advice, never in the card
 
 Arc has the EP-133's twelve punch-in effects: **hold FX and press pads**, and lift the pad to let go (on the device the combo is `FX-6`: hold FX and press pads with PLAY running; the pads respond to pressure, and several can be stacked). They are live gestures that go into no pattern, so a card cannot hold them. When you build or analyse a beat, add a line or two of **performance advice in your reply only**: which one to hold, and when. Never write them as lines in a card.
@@ -230,6 +235,7 @@ These are what `check` catches. Look for them by hand when you cannot run it.
 | [factory-sounds.md](references/factory-sounds.md) | Writing sound lines without the user's list: the EP-133's and the EP-40 Riddim's factory sounds by slot, and what a fresh EP-133 project has on its pads (group D empty) |
 | [ep40-kit.md](references/ep40-kit.md) | The EP-133 plays the EP-40 Riddim kit (the share says so, or the sound list is that pack's). Its slots, loops and their tempos, P01's pads, and a loop riddim card |
 | [synth-sounds.md](references/synth-sounds.md) | Writing `synth` lines: when to make a sound instead of picking one, the rules, the 17 types and their settings, recipe kits (drums, bass, keys, a lead and FX), tweaks and what the import sheet shows |
+| [remake.md](references/remake.md) | Remaking a song from a link or a name: pinning the recording, the facts and their sources, mapping it to the EP-133, the arrangement, what to copy and what to write, and an example loop |
 | [lessons.md](references/lessons.md) | Teaching. Twelve lessons with device steps, Arc steps, exercises and checks |
 | [ep133-guide.md](references/ep133-guide.md) | Any question about key combinations. 100 official OS 2.5 combos by section, with steps and sources. Generated; do not edit |
 | [analysis.md](references/analysis.md) | Analysing. What the script's numbers mean, the checklist, the arrangement of a card of scenes, edits worth proposing (sound swaps, FX and pad shaping too) and the vocabulary |
