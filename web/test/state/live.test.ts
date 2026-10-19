@@ -222,6 +222,15 @@ describe('Live: copies of the pad sounds', () => {
     expect(await h.padSounds.has('s6.wav')).toBe(false)
   })
 
+  it("Live's own read of the sounds is one sorted list, the same array until the next read (the Sounds tab keeps its rows)", async () => {
+    const h = await liveOn()
+    expect(h.c.state.value.browser.contents).toBeNull()
+    const list = h.c.liveSounds()
+    expect(list.length).toBeGreaterThan(0)
+    expect(list.map((snd) => snd.slot)).toEqual([...list.map((snd) => snd.slot)].sort((a, b) => a - b))
+    expect(h.c.liveSounds()).toBe(list)
+  })
+
   it('a sound played from the device list is kept for Live', async () => {
     const h = await liveHarness()
     await h.c.connect()

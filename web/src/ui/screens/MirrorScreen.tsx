@@ -159,7 +159,7 @@ import { holdCap, releaseCap, useLiveKeys } from '../live/useLiveKeys'
 import { computerKeys } from '../keyPrefs'
 import { DEFAULT_KEYS_SHOWN, keysLit, keysNoteText, octaves, upperOctave, type KeysPicker, type KeysShown } from '../live/keys'
 import { PianoKeyboard } from '../live/PianoKeyboard'
-import { memo, sameNotes, useHas } from '../live/memo'
+import { memo, sameNotes, sameProps, useHas } from '../live/memo'
 import { PressTracker, rawMovesSupported, ticking, type PressTarget } from '../live/press'
 import { SLOT_MIME, SOURCE_MIME, SoundPicker } from '../live/SoundPicker'
 import { dragMayHaveAudio, isAudioFile } from '../../platform/files/pick'
@@ -682,6 +682,20 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // A device sound being dragged from the Sounds tab, and the pad it is over (padKey).
   const [dragged, setDragged] = useState<SoundEntry | null>(null)
   const [dropAt, setDropAt] = useState<number | null>(null)
+  // The Sounds tab's keys, kept so its list renders only when what it shows changes (not on every
+  // publish); each calls the latest edit.
+  const soundsActs: SoundsActs = useMemo(
+    () => ({
+      onPlay: (slot, source) => latest.current.edit?.onPlay(slot, source),
+      onStop: () => latest.current.edit?.onStop(),
+      onUpload: (files) => latest.current.edit?.onUpload(files),
+      onDrag: (snd) => {
+        setDragged(snd)
+        if (snd === null) setDropAt(null)
+      },
+    }),
+    [],
+  )
   const dropOn = edit !== null && desk && !keys.on
   const draggedName = dragged?.name ?? null
   // Kept while nothing about it changes, so the memoized pads don't all re-render (the edit
@@ -805,10 +819,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     toolsTab === 'tools' ? (
       tools
     ) : (
-      <SoundsPanel edit={edit} onDrag={(snd) => {
-        setDragged(snd)
-        if (snd === null) setDropAt(null)
-      }} />
+      <SoundsPanel connected={edit.connected} offline={edit.offline} sounds={edit.sounds} playing={edit.playing} acts={soundsActs} />
     )
   ) : (
     tools
@@ -1581,18 +1592,39 @@ function ToolsTabs(props: { tab: 'tools' | 'sounds'; onTab: (tab: 'tools' | 'sou
   )
 }
 
+/** The Sounds tab's callbacks (MirrorScreen keeps them, calling the latest edit). */
+interface SoundsActs {
+  onPlay: (slot: number, source: SoundSource) => void
+  onStop: () => void
+  onUpload: (files: File[]) => void
+  onDrag: (snd: SoundEntry | null) => void
+}
+
+interface SoundsPanelProps {
+  connected: boolean
+  offline: OfflineSounds | null
+  sounds: readonly SoundEntry[]
+  playing: string | null
+  acts: SoundsActs
+}
+
 /**
  * The desk's Sounds tab: the device's sounds to drag onto a pad, the hint,
  * and a drop zone for WAV files (uploaded to free slots). Offline, the last
  * read's sounds and the factory pack's, to change the pads in arc only (no
  * uploads without the EP-133).
+ *
+ * Web addition: memoized, its props values and kept callbacks, so a mirror
+ * publish doesn't re-diff the list.
  */
-function SoundsPanel(props: { edit: EditUi; onDrag: (snd: SoundEntry | null) => void }): JSX.Element {
-  const { edit } = props
+const SoundsPanel = memo(SoundsPanelView, sameProps)
+
+function SoundsPanelView(props: SoundsPanelProps): JSX.Element {
+  const { acts } = props
   const [over, setOver] = useState(false)
   const files = (e: TargetedDragEvent<HTMLElement>): boolean => dragMayHaveAudio(e.dataTransfer)
-  const off = edit.connected ? null : edit.offline
-  if (!edit.connected && off === null) return <p class="t-small live-sounds__hint">{MirrorText.EDIT_OFFLINE}</p>
+  const off = props.connected ? null : props.offline
+  if (!props.connected && off === null) return <p class="t-small live-sounds__hint">{MirrorText.EDIT_OFFLINE}</p>
   if (off !== null) {
     return (
       <div class="live-sounds">
@@ -1602,10 +1634,10 @@ function SoundsPanel(props: { edit: EditUi; onDrag: (snd: SoundEntry | null) => 
           unavailable={off.unavailable}
           padSource={off.base}
           offline
-          playing={edit.playing}
-          onPlay={edit.onPlay}
-          onStop={edit.onStop}
-          onDrag={props.onDrag}
+          playing={props.playing}
+          onPlay={acts.onPlay}
+          onStop={acts.onStop}
+          onDrag={acts.onDrag}
           findLabel={FeatureText.FIND_HINT}
           scroll
         />
@@ -1616,11 +1648,11 @@ function SoundsPanel(props: { edit: EditUi; onDrag: (snd: SoundEntry | null) => 
   return (
     <div class="live-sounds">
       <SoundPicker
-        sounds={edit.sounds}
-        playing={edit.playing}
-        onPlay={(slot) => edit.onPlay(slot, SoundSource.DEVICE)}
-        onStop={edit.onStop}
-        onDrag={props.onDrag}
+        sounds={props.sounds}
+        playing={props.playing}
+        onPlay={(slot) => acts.onPlay(slot, SoundSource.DEVICE)}
+        onStop={acts.onStop}
+        onDrag={acts.onDrag}
         findLabel={FeatureText.FIND_HINT}
         scroll
       />
@@ -1647,7 +1679,7 @@ function SoundsPanel(props: { edit: EditUi; onDrag: (snd: SoundEntry | null) => 
           e.preventDefault()
           // Not the page's own drop (a .pak import).
           e.stopPropagation()
-          edit.onUpload(audio)
+          acts.onUpload(audio)
         }}
       >
         {WebText.DROP_SAMPLE}

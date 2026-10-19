@@ -215,6 +215,8 @@ export class LiveSounds {
   readonly cache: PadSoundCache
   /** The device's sound list from Live's read (names and sizes), to tell which copies are current. */
   private deviceSounds = new Map<number, SoundEntry>()
+  /** The same list by slot, sorted once per read so it is the same array until the next (an addition). */
+  private deviceSoundsSorted: readonly SoundEntry[] = []
   /**
    * The last backup a pad played from, opened (or opening: the taps meanwhile
    * wait for that one open), so the next taps are quick; by its record's size
@@ -451,6 +453,7 @@ export class LiveSounds {
   /** The device's sound list as Live read it. */
   setDeviceSounds(sounds: readonly SoundEntry[]): void {
     this.deviceSounds = new Map(sounds.map((s) => [s.slot, s]))
+    this.deviceSoundsSorted = [...this.deviceSounds.values()].sort((a, b) => a.slot - b.slot)
   }
 
   deviceSound(slot: number): SoundEntry | undefined {
@@ -458,8 +461,8 @@ export class LiveSounds {
   }
 
   /** The device's sound list from Live's read, by slot (empty before it). */
-  deviceSoundList(): SoundEntry[] {
-    return [...this.deviceSounds.values()].sort((a, b) => a.slot - b.slot)
+  deviceSoundList(): readonly SoundEntry[] {
+    return this.deviceSoundsSorted
   }
 
   /** Ends the copying loop (the mirror stopped). */
