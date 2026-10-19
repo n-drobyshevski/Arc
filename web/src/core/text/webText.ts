@@ -316,6 +316,13 @@ export const WebText = {
   LEARN_PROMPT:
     'Use the arc-beats skill to teach me the EP-133 K.O. II, starting at lesson 1 (Meet the pads). I use the Arc web app. ' +
     'Go one step at a time: explain the step, give me something to try on the device, and wait for me before the next one.',
+  /** Replaces PromptText.learn, which says Android: lesson [n] ([title]) as LEARN_PROMPT has lesson 1. */
+  learn(n: number, title: string): string {
+    return (
+      `Use the arc-beats skill to teach me the EP-133 K.O. II, starting at lesson ${n} (${title}). I use the Arc web app. ` +
+      'Go one step at a time: explain the step, give me something to try on the device, and wait for me before the next one.'
+    )
+  },
   /** After a pad's or KEYS key's name for screen readers while it is held for the arp or note repeat (Android outlines it only). */
   ARP_HELD: ', held for the arp',
   /** The plate's line while TAKE waits. */
