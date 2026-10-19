@@ -1719,11 +1719,18 @@ export class PatternDesk {
   /**
    * IMPORT's second half, once the sounds went on ([put]): the toast says what
    * was done, or what stopped it. UNDO during the writes ([BeatUndo.undone])
-   * stops them, and what they did is put back.
+   * stops them, and what they did is put back. Web addition: writes that
+   * throw stop like a failure reported, with the pads done so far.
    */
   private async putTail(applied: BeatApplied, entry: BeatUndo, put: Promise<SoundsPut>): Promise<void> {
-    const s = await put
-    entry.writing = false
+    let s: SoundsPut
+    try {
+      s = await put
+    } catch (e) {
+      s = { done: entry.pads, skipped: 0, moved: 0, failure: e instanceof Error ? e.message || String(e) : String(e) }
+    } finally {
+      entry.writing = false
+    }
     if (entry.undone) {
       // The patterns are back already: the pads done follow them, with no import toast.
       if (entry.pads.length > 0) await this.host.putBackBeatSounds?.(entry)

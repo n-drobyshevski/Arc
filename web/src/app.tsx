@@ -1550,14 +1550,23 @@ function LiveBeatSheet(props: { view: NavView }): JSX.Element | null {
   const busy = useComputed(() => c.state.value.busy).value
   const shown = beat !== null || pasting
   const has = props.view.sheets.includes(BEAT_SHEET)
+  // A preview started by PICK SOUND stops with the sheet, as the pad sheet's does.
+  const stopPickPreview = (): void => {
+    const k = c.playing.peek()
+    if (k?.startsWith('device:') === true || k?.startsWith('factory:') === true) c.stopPlayback()
+  }
+  const closeBeat = (): void => {
+    stopPickPreview()
+    p.dismissBeat()
+    c.cancelBeatPaste()
+  }
   // The layer opens with the card; the layer closed (Back) while the card waits is a CANCEL.
   const opened = useRef(false)
   useEffect(() => {
     if (shown && !has) {
       if (opened.current) {
         opened.current = false
-        p.dismissBeat()
-        c.cancelBeatPaste()
+        closeBeat()
       } else {
         nav.open(sheetLayer(BEAT_SHEET))
       }
@@ -1587,11 +1596,11 @@ function LiveBeatSheet(props: { view: NavView }): JSX.Element | null {
       open={shown && has}
       ui={beat}
       pasting={pasting}
-      onCancel={() => {
-        p.dismissBeat()
-        c.cancelBeatPaste()
+      onCancel={closeBeat}
+      onImport={(setTempo, soundPads, picked) => {
+        stopPickPreview()
+        p.importBeat(setTempo, soundPads, picked)
       }}
-      onImport={(setTempo, soundPads, picked) => p.importBeat(setTempo, soundPads, picked)}
       onCopyProblems={(problems) => void c.copyProblems(problems)}
       onPaste={(text) => void c.receiveBeat(text)}
       playing={c.playing}

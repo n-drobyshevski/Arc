@@ -25,11 +25,13 @@
 //   box a paste goes into instead (WebText.PASTE_HERE), before any card.
 // - A sound row is a checkbox button (Kotlin's toggleable row); the picker's
 //   pad is named by its label on a small cap, not the device view's PadCap.
+// - Opening the picker focuses its title and leaving it focuses the pad's
+//   PICK SOUND / CHANGE key again, as the upload sheet's trim view does.
 // - PUT ON PADS is a pill like the tempo chip, until the sheet's switches
 //   become LED keys. The rows of a pack's sound to upload, the synth rows,
 //   the suggested sounds, FX and PAD SHAPING come with their ports.
 import type { JSX } from 'preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import type { ReadonlySignal } from '@preact/signals'
 import { SoundStatus, type CardProblem } from '../../core/features/beatCard'
 import { SoundSource } from '../../core/features/offlinePads'
@@ -87,6 +89,21 @@ export function BeatImportSheet(props: BeatImportSheetProps): JSX.Element {
   }, [props.open])
   const silent = ui?.silent ?? null
   const pickRow = choices.picking === null ? undefined : silent?.rows.find((r) => padKey(r.pad) === choices.picking)
+  // The pad's silent row gone (the card planned again): the picker closes, and stays closed if the row comes back.
+  useEffect(() => {
+    if (choices.picking !== null && pickRow === undefined) setChoices((now) => ({ ...now, picking: null }))
+  }, [choices.picking, pickRow === undefined])
+  // The picker replaces the card, so the key that opened it (or the picker itself) is gone: focus
+  // moves to the picker's title, and back to the pad's PICK SOUND / CHANGE key, instead of <body>.
+  const shownPick = pickRow === undefined ? null : choices.picking
+  const lastPick = useRef(shownPick)
+  useEffect(() => {
+    const prev = lastPick.current
+    lastPick.current = shownPick
+    if (prev === shownPick) return
+    const target = shownPick !== null ? document.getElementById('beat-sheet-title') : prev !== null ? document.getElementById(pickKeyId(prev)) : null
+    target?.focus({ preventScroll: shownPick === null })
+  }, [shownPick])
   return (
     <Sheet open={props.open} onDismiss={props.onCancel} labelledBy="beat-sheet-title" class="beat-sheet">
       {ui === null ? (
@@ -289,6 +306,7 @@ function SilentRow(props: { row: SilentRowUi; sound: string | null; canPick: boo
       </div>
       {props.canPick && (
         <Key
+          id={pickKeyId(padKey(row.pad))}
           text={sound === null ? ClaudeText.PICK_SOUND : ClaudeText.CHANGE_PICK}
           size="small"
           aria-label={sound === null ? ClaudeText.pickSoundName(row.pad) : ClaudeText.changePickName(row.pad, sound)}
@@ -298,6 +316,9 @@ function SilentRow(props: { row: SilentRowUi; sound: string | null; canPick: boo
     </div>
   )
 }
+
+/** Id of a silent pad's PICK SOUND / CHANGE key (focus returns to it from the picker). */
+const pickKeyId = (key: number): string => `beat-pick-${key}`
 
 /**
  * PICK SOUND's picker, in place of the sheet: the pad's cap and what it
@@ -319,7 +340,7 @@ function PickView(props: BeatImportSheetProps & { row: SilentRowUi; silent: Sile
       <div class="beat-pick__head">
         <span class="beat-pick__cap cap-3d" aria-hidden="true">{ClaudeText.padLabel(row.pad)}</span>
         <div class="beat-sheet__head">
-          <h2 id="beat-sheet-title" class="t-heading beat-sheet__title">{ClaudeText.pickTitle(row.pad)}</h2>
+          <h2 id="beat-sheet-title" tabIndex={-1} class="t-heading beat-sheet__title">{ClaudeText.pickTitle(row.pad)}</h2>
           <p class="t-small beat-sheet__dim">{ClaudeText.pickLine(row.notes)}</p>
         </div>
       </div>

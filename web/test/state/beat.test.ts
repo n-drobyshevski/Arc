@@ -4,7 +4,8 @@
 // a card opens its sheet, IMPORT places it as one UNDO step, and COPY PROBLEMS copies them.
 // A share carries the pads' sound lines and, with "With my sound list" on, the sounds Arc knows;
 // SHARE CHAIN shares the project's chain. IMPORT puts the card's ticked sounds and the ones
-// picked for silent pads on the pads (on the EP-133, or offline in arc), in the same UNDO step.
+// picked for silent pads on the pads (on the EP-133, or offline in arc), in the same UNDO step;
+// writes that throw stop it with its error toast.
 import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BeatCards, SoundStatus } from '../../src/core/features/beatCard'
@@ -244,6 +245,18 @@ describe('BEAT CARDS', () => {
     const done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
     expect(done.toast?.text).toBe(ClaudeText.imported([[0, 2], [3, 1]], 'S02'))
     expect(await onDevice(h, 'a', 5)).toBe(5)
+  })
+
+  it('writes that throw stop IMPORT with its error toast, and UNDO still takes the import back', async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    await h.c.receiveBeat(SOUNDS)
+    vi.spyOn(h.c as unknown as { putSounds(): Promise<unknown> }, 'putSounds').mockRejectedValue(new Error('gone'))
+    p.importBeat(false, new Set([padKey(A2)]))
+    const done = await until(h, (st) => st.toast?.text === ClaudeText.soundsFailed('gone', 0))
+    expect(done.toast?.error).toBe(true)
+    h.c.runToastAction(done.toast!.id)
+    await vi.waitFor(() => expect(p.ui.value.hasNotes.some(Boolean)).toBe(false))
   })
 
   it('offline, IMPORT keeps the sounds as offline pad changes, and UNDO takes them back', async () => {

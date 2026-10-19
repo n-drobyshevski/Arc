@@ -129,10 +129,12 @@ test('SOUNDS and SILENT PADS: a card\'s sound and one picked for a silent pad go
   await silent.getByRole('button', { name: 'Pick a sound for D9' }).click()
   const picker = page.getByRole('dialog', { name: 'Sound for D9' })
   await expect(picker).toBeVisible()
+  // The key that opened it is gone: focus is on the picker's title, and back on the pad's key after.
+  await expect(picker.getByRole('heading', { name: 'Sound for D9' })).toBeFocused()
   await picker.getByRole('button', { name: /^003/ }).click()
   await expect(sheet).toBeVisible()
   await expect(silent.getByRole('note', { name: /^D9: will get 003 / })).toBeVisible()
-  await expect(silent.getByRole('button', { name: /^Pick another sound for D9, now 003 / })).toBeVisible()
+  await expect(silent.getByRole('button', { name: /^Pick another sound for D9, now 003 / })).toBeFocused()
   await expect(sounds.getByRole('checkbox', { name: /^D9: No sound becomes 003 / })).toHaveAttribute('aria-checked', 'true')
   await expect(sheet).toContainText(/Writes 2 pads in project \d+ on the EP-133/)
 
