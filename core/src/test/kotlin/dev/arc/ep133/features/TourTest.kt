@@ -95,6 +95,7 @@ class TourTest {
         assertEquals(MIDI, r.step())
         r.skip()
         assertEquals(TOOLS, r.step())
+        assertEquals(3, Tour.stepsFor(r.s, midi = false))
         r.skip(); r.skip(); r.skip()
         assertEquals(DONE, r.step())
         assertEquals("~midi,~tools,~guide,~sections", Tour.encode(r.p))

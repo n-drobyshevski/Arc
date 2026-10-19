@@ -290,9 +290,15 @@ export function rootView(v: NavView, hasBackup: (id: string) => boolean): RootVi
 
 // ---------- transitions (pure) ----------
 
-/** selectTab: the section switch from the menu; closes everything above the shell. */
-export function selectTab(_stack: Stack, t: Tab): Stack {
-  return t === HOME_TAB ? [BASE] : [BASE, tabLayer(t)]
+/**
+ * selectTab: the section switch from the menu; closes everything above the
+ * shell but Try arc, which isn't a layer on Android and stays open (its
+ * offline step has the user pick Backups).
+ */
+export function selectTab(stack: Stack, t: Tab): Stack {
+  const base = t === HOME_TAB ? [BASE] : [BASE, tabLayer(t)]
+  const tour = stack.find((l) => l.kind === 'overlay' && l.overlay === 'tour')
+  return tour ? [...base, tour] : base
 }
 
 export function push(stack: Stack, layer: Layer): Stack {

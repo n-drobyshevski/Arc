@@ -127,6 +127,9 @@
 .coach--tour { pointer-events: none; }
 .coach--tour .coach__veil,
 .coach--tour .coach__card { pointer-events: auto; }
+/* Fading out (the tour steps aside while what its step pointed at is open): taps reach the page at once. */
+.coach--tour[aria-hidden='true'] .coach__veil,
+.coach--tour[aria-hidden='true'] .coach__card { pointer-events: none; }
 /* The tour's veil is not a key: tapping it does nothing. */
 .coach--tour .coach__veil { cursor: default; }
 /* The card's keys show their focus ring only once a key was pressed (the tour opens by itself). */

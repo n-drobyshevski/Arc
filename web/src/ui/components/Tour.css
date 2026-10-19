@@ -92,6 +92,9 @@
 }
 .tour-card__demo { align-self: flex-start; }
 
+/* Without the EP-133: the offline Done's keys, and Try the pads under its line, one above the other. */
+.tour-card__stack { display: flex; flex-direction: column; gap: 10px; }
+
 /* Pad and Hear: one row (heading, keys, ×), then one short line. */
 .tour-card--compact { gap: 6px; padding: 10px 12px 12px 16px; }
 .tour-card__row { display: flex; align-items: center; gap: 6px; }

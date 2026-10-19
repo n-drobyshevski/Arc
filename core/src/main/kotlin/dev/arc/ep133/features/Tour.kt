@@ -229,8 +229,8 @@ object Tour {
     /** "Try the pads": from the offline path to the device's steps. */
     fun goDevice(s: TourSession) = s.copy(welcomed = true, offline = false, reachedDone = false, step = null)
 
-    /** How many steps this run counts. */
-    fun stepsFor(s: TourSession) = if (s.offline) OFFLINE_STEPS else STEPS
+    /** How many steps this run counts: the offline three without the EP-133 or without MIDI. */
+    fun stepsFor(s: TourSession, midi: Boolean = true) = if (s.offline || !midi) OFFLINE_STEPS else STEPS
 
     /** "Step n of 4" (or of 3, offline), or null for the cards that aren't counted. */
     fun number(step: TourStep): Int? = when (step) {

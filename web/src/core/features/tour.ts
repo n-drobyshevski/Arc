@@ -4,7 +4,9 @@
 // place of the first-run guide overlay (an addition to the web version).
 //
 // Every step waits until the thing was done: the EP-133 connected, a pad
-// pressed on it lit here, a pad held here sounded, a backup saved. This is the
+// pressed on it lit here, a pad held here sounded, a backup saved. Without
+// the EP-133 (chosen on the welcome card, or where MIDI is missing) it shows
+// what works offline instead: Live tools, the shortcut guide, Backups. This is the
 // tour's logic only, pure so both ports share it: which step shows, when one
 // counts as done, and what is kept. The overlay and the cards are the UI's.
 //
@@ -33,6 +35,10 @@ export const TourStep = {
   PAD: 'pad',
   HEAR: 'hear',
   BACKUP: 'backup',
+  /** The offline path: Live tools, the EP-133 shortcut guide, Backups. */
+  TOOLS: 'tools',
+  GUIDE: 'guide',
+  SECTIONS: 'sections',
   DONE: 'done',
 } as const
 export type TourStep = (typeof TourStep)[keyof typeof TourStep]
@@ -46,6 +52,9 @@ export const TOUR_STEPS: readonly TourStep[] = Object.freeze([
   TourStep.PAD,
   TourStep.HEAR,
   TourStep.BACKUP,
+  TourStep.TOOLS,
+  TourStep.GUIDE,
+  TourStep.SECTIONS,
   TourStep.DONE,
 ])
 
@@ -95,6 +104,10 @@ export interface TourSnapshot {
   readonly heard?: boolean
   /** The web demo's simulated EP-133. */
   readonly demo?: boolean
+  /** Live tools, the shortcut guide, Backups: open on screen now. */
+  readonly toolsOpen?: boolean
+  readonly guideOpen?: boolean
+  readonly onBackups?: boolean
 }
 
 /** One run of the tour on screen: never stored. */
@@ -118,6 +131,8 @@ export interface TourSession {
   readonly connectAcked: boolean
   /** Done was reached: it stays for the rest of the run. */
   readonly reachedDone: boolean
+  /** The run without the EP-133: the offline steps instead of the device's. */
+  readonly offline: boolean
 }
 
 /** TourSession(...) with Kotlin's defaults. */
@@ -134,6 +149,7 @@ export function TourSession(
     connectTickedNow: false,
     connectAcked: false,
     reachedDone: false,
+    offline: false,
     ...init,
   }
 }
@@ -151,6 +167,7 @@ const SESSION_KEYS: readonly (keyof TourSession)[] = [
   'connectTickedNow',
   'connectAcked',
   'reachedDone',
+  'offline',
 ]
 
 /** Data class equality of two sessions. */
@@ -162,7 +179,20 @@ export const FirstRun = { TOUR: 'TOUR', COACH: 'COACH', NONE: 'NONE' } as const
 export type FirstRun = (typeof FirstRun)[keyof typeof FirstRun]
 
 /** The steps that are kept (WELCOME and DONE never are). */
-const KEPT: readonly TourStep[] = [TourStep.RESTORE, TourStep.CONNECT, TourStep.MIDI, TourStep.PAD, TourStep.HEAR, TourStep.BACKUP]
+const KEPT: readonly TourStep[] = [
+  TourStep.RESTORE,
+  TourStep.CONNECT,
+  TourStep.MIDI,
+  TourStep.PAD,
+  TourStep.HEAR,
+  TourStep.BACKUP,
+  TourStep.TOOLS,
+  TourStep.GUIDE,
+  TourStep.SECTIONS,
+]
+const OFFLINE: readonly TourStep[] = [TourStep.TOOLS, TourStep.GUIDE, TourStep.SECTIONS]
+
+const offlineStep = (p: TourProgress): TourStep => OFFLINE.find((s) => !handled(p, s)) ?? TourStep.DONE
 
 const tick = (p: TourProgress, step: TourStep): TourProgress =>
   TourProgress([...p.done, step], [...p.skipped].filter((s) => s !== step))
@@ -170,8 +200,9 @@ const tick = (p: TourProgress, step: TourStep): TourProgress =>
 const minus = (a: Iterable<TourStep>, b: ReadonlySet<TourStep>): TourStep[] => [...a].filter((s) => !b.has(s))
 
 export const Tour = {
-  /** The numbered steps, "Step n of 4". */
+  /** The numbered steps, "Step n of 4" (of 3 without the EP-133). */
   STEPS: 4,
+  OFFLINE_STEPS: 3,
 
   /** The coach marks Done tags: "?", the GUIDE tab and the more-tools strip. */
   DONE_TAGS: Object.freeze(new Set(['top.help', 'edge.guide', 'side.more'])) as ReadonlySet<string>,
@@ -237,7 +268,8 @@ export const Tour = {
     if (!s.welcomed) return TourStep.WELCOME
     if (s.reachedDone) return TourStep.DONE
     if (!handled(p, TourStep.RESTORE) && s.openBackups === 0 && snap.canRestore && !(snap.demo ?? false)) return TourStep.RESTORE
-    if (!snap.midi) return handled(p, TourStep.MIDI) ? TourStep.DONE : TourStep.MIDI
+    if (s.offline) return offlineStep(p)
+    if (!snap.midi) return handled(p, TourStep.MIDI) ? offlineStep(p) : TourStep.MIDI
     const connectDone = p.done.has(TourStep.CONNECT)
     if (!handled(p, TourStep.CONNECT) || (s.connectTickedNow && !s.connectAcked)) return TourStep.CONNECT
     if (!connectDone) return TourStep.DONE
@@ -282,6 +314,15 @@ export const Tour = {
         case TourStep.BACKUP:
           ticks = snap.backups > sess.stepBackups
           break
+        case TourStep.TOOLS:
+          ticks = snap.toolsOpen ?? false
+          break
+        case TourStep.GUIDE:
+          ticks = snap.guideOpen ?? false
+          break
+        case TourStep.SECTIONS:
+          ticks = snap.onBackups ?? false
+          break
         default:
           ticks = false
       }
@@ -306,14 +347,32 @@ export const Tour = {
     return { ...s, connectAcked: true }
   },
 
-  /** "Step n of 4", or null for the cards that aren't counted. */
+  /** "Without the EP-133" on the welcome card. */
+  goOffline(s: TourSession): TourSession {
+    return { ...Tour.welcome(s), offline: true }
+  },
+
+  /** "Try the pads": from the offline path to the device's steps. */
+  goDevice(s: TourSession): TourSession {
+    return { ...s, welcomed: true, offline: false, reachedDone: false, step: null }
+  },
+
+  /** How many steps this run counts: the offline three without the EP-133 or without MIDI. */
+  stepsFor(s: TourSession, midi = true): number {
+    return s.offline || !midi ? Tour.OFFLINE_STEPS : Tour.STEPS
+  },
+
+  /** "Step n of 4" (or of 3, offline), or null for the cards that aren't counted. */
   number(step: TourStep): number | null {
     switch (step) {
       case TourStep.CONNECT:
+      case TourStep.TOOLS:
         return 1
       case TourStep.PAD:
+      case TourStep.GUIDE:
         return 2
       case TourStep.HEAR:
+      case TourStep.SECTIONS:
         return 3
       case TourStep.BACKUP:
         return 4
@@ -343,14 +402,20 @@ export const Tour = {
         return 'live.pads'
       case TourStep.BACKUP:
         return 'top.backup'
+      case TourStep.TOOLS:
+        return 'side.more'
+      case TourStep.GUIDE:
+        return 'edge.guide'
+      case TourStep.SECTIONS:
+        return 'top.sections'
       default:
         return null
     }
   },
 
-  /** Only HEAR lets touches through to the page (the pads). */
+  /** The steps done on the page itself: touches go through to it (the pads, the strip, the tab, the tag). */
   passThrough(step: TourStep): boolean {
-    return step === TourStep.HEAR
+    return step === TourStep.HEAR || OFFLINE.includes(step)
   },
 
   /** Done mentions Try arc again when a step that could be done was left. */

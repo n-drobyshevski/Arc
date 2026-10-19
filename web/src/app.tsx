@@ -18,7 +18,9 @@
 // of the app it reads, the ticks it keeps in settings) and its overlay, the
 // guide overlay in tour mode with the step card (ui/components/Tour.tsx).
 // While the tour shows, Live is on one group with the pads (not the keys) and
-// the toast sits at the top.
+// the toast sits at the top. While what an offline step points at is open
+// (Live tools, the section list, the guide) the tour steps aside, and its next
+// card shows when that closes.
 import { Component, type ComponentChildren, type JSX } from 'preact'
 import { useEffect, useId, useRef, useState } from 'preact/hooks'
 import { FirstRun, Tour, TourStep, type TourProgress, type TourSession, type TourSnapshot } from './core/features/tour'
@@ -130,6 +132,8 @@ function Root(): JSX.Element {
   useCoachFirstRun(c.coach, v.coach)
   useTourFirstRun(state.libraryChecked)
   const tour = useTourRun()
+  // The tour steps aside while Live tools, the section list or the guide is open.
+  const tourShown = tour.shown && !tourAway(v)
 
   const backup = (id: string | null) => (id === null ? null : state.backups.find((b) => b.id === id) ?? null)
   const view = rootView(v, (id) => backup(id) !== null)
@@ -241,7 +245,7 @@ function Root(): JSX.Element {
   } else {
     page = (
       <CoachHost
-        visible={v.coach || tour.shown}
+        visible={v.coach || tourShown}
         onDismiss={() => (v.coach ? nav.close(overlayLayer('coach')) : nav.back())}
         mode={!v.coach && tour.step !== null ? tourMode(tour.step) : undefined}
         card={!v.coach && tour.step !== null ? tour.card : undefined}
@@ -289,7 +293,7 @@ function Root(): JSX.Element {
           restore 'restore:<id>', the delete dialog 'delete'. */}
       {tabs && v.tab === 'backups' && <BackupsSheets view={v} />}
       <ProgressSlot task={progressShown ? state.task : null} onCancel={() => c.cancelTask()} />
-      <ToastLayer raise={state.toast?.id ?? null} top={tour.shown && tourCardLow.value}>
+      <ToastLayer raise={state.toast?.id ?? null} top={tourShown && tourCardLow.value}>
         <ControllerToast controller={c} />
         <UpdatePrompt />
       </ToastLayer>
@@ -339,8 +343,19 @@ function useTourFirstRun(libraryChecked: boolean): void {
   }, [libraryChecked, visible])
 }
 
-/** What the tour reads of the app now (MainActivity's snapshot). */
-export function tourSnapshot(state: UiState, heard: boolean, demo: boolean, nameOf: (pad: { group: number; offset: number }) => string | null): TourSnapshot {
+/** Live tools, the section list or the guide is open: the tour steps aside (TourHost's `away`). */
+export function tourAway(v: NavView): boolean {
+  return v.side || v.menu || v.guide
+}
+
+/** What the tour reads of the app now (MainActivity's snapshot); [v] gives what is open. */
+export function tourSnapshot(
+  state: UiState,
+  heard: boolean,
+  demo: boolean,
+  nameOf: (pad: { group: number; offset: number }) => string | null,
+  v: Pick<NavView, 'side' | 'guide' | 'tab'>,
+): TourSnapshot {
   const m = state.mirror?.state ?? null
   const hit = m?.lastHit ?? null
   const pad = hit?.pad ?? null
@@ -355,6 +370,9 @@ export function tourSnapshot(state: UiState, heard: boolean, demo: boolean, name
     hitNamed: pad !== null && nameOf(pad) !== null,
     heard,
     demo,
+    toolsOpen: v.side,
+    guideOpen: v.guide,
+    onBackups: v.tab === 'backups',
   }
 }
 
@@ -404,7 +422,7 @@ function useTourRun(): TourRun {
     setSession(null)
   }, [open, runs])
 
-  const snap = tourSnapshot(state, heard, c.demo, (pad) => c.mirrorName(pad))
+  const snap = tourSnapshot(state, heard, c.demo, (pad) => c.mirrorName(pad), v)
   const progress: TourProgress = Tour.decode(settings.tourSteps)
   const step = open && session !== null ? Tour.current(progress, session, snap) : null
   const snapKey = JSON.stringify(snap)
@@ -453,6 +471,25 @@ function useTourRun(): TourRun {
       if (pad !== null) void c.playPad(pad, false)
     },
     backup: () => void c.backup(),
+    offline: () => setSession((s) => (s ? Tour.goOffline(s) : s)),
+    open: () => {
+      // What the step points at, opened the way its own control does (Open it).
+      if (step === TourStep.TOOLS) {
+        if (nav.current.tab !== 'live') nav.selectTab('live')
+        nav.open(overlayLayer('side'))
+      } else if (step === TourStep.GUIDE) nav.openScreen({ kind: 'guide' })
+      else if (step === TourStep.SECTIONS) nav.selectTab('backups')
+    },
+    tryPads: () => tryPads(),
+    connectNow: () => {
+      tryPads()
+      void c.connectIfNeeded()
+    },
+  }
+  /** On to the device's steps, on Live where the pads are. */
+  function tryPads(): void {
+    if (nav.current.tab !== 'live') nav.selectTab('live')
+    setSession((s) => (s ? Tour.goDevice(s) : s))
   }
 
   return {

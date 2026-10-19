@@ -6,6 +6,12 @@
 // has. Every card has × (Not now). The Pad and Hear cards are compact (a
 // heading row with their keys and one short line) so the pads stay in view.
 //
+// Without the EP-133 (Welcome's second key, or Needs MIDI's Next) the cards
+// are More tools, EP-133 shortcuts and Backups, "Step n of 3", each with
+// Open it and Skip; the overlay steps aside while what they point at is open
+// (app.tsx). While the EP-133 is connected they offer Try the pads, and the
+// offline Done offers Connect and try the pads where there is MIDI.
+//
 // Web deltas:
 // - The Welcome and Needs MIDI cards add "Try the demo" (WebText.TOUR_TRY_DEMO,
 //   a new tab with ?demo), except in the demo itself.
@@ -57,6 +63,14 @@ export interface TourActions {
   tryDemo(): void
   playIt(): void
   backup(): void
+  /** "Without the EP-133" on the welcome card (Tour.goOffline). */
+  offline(): void
+  /** Open it on an offline card: Live tools, the guide, Backups. */
+  open(): void
+  /** "Try the pads": on to the device's steps (Tour.goDevice). */
+  tryPads(): void
+  /** "Connect and try the pads" on the offline Done: goDevice, then connect. */
+  connectNow(): void
 }
 
 export interface TourCardProps extends TourCardSlot {
@@ -74,11 +88,21 @@ export interface TourCardProps extends TourCardSlot {
 /** Connected, and the device has been read (TourSnapshot.connected). */
 const ready = (s: TourCardState): boolean => s.connected && s.device !== null
 
+/** The offline path's cards, with their heading and hint. */
+const OFFLINE_CARDS: Partial<Record<TourStep, { head: string; hint: string }>> = {
+  [TourStep.TOOLS]: { head: TourText.TOOLS_HEAD, hint: TourText.TOOLS_HINT },
+  [TourStep.GUIDE]: { head: TourText.GUIDE_HEAD, hint: TourText.GUIDE_HINT },
+  [TourStep.SECTIONS]: { head: TourText.SECTIONS_HEAD, hint: TourText.SECTIONS_HINT },
+}
+
 export function TourCard(props: TourCardProps): JSX.Element {
   const { step, state, actions, measuring } = props
   const root = useRef<HTMLDivElement | null>(null)
   const needsDevice = Tour.needsDevice(step) && !ready(state)
-  const variant = `${step}${needsDevice ? ':device' : ''}${step === TourStep.CONNECT && ready(state) ? ':ticked' : ''}`
+  const offlineCard = OFFLINE_CARDS[step]
+  /** The run without the EP-133, with it connected after all: its cards offer Try the pads. */
+  const deviceHere = props.session.offline && ready(state)
+  const variant = `${step}${needsDevice ? ':device' : ''}${step === TourStep.CONNECT && ready(state) ? ':ticked' : ''}${deviceHere ? ':here' : ''}`
 
   // Focus on the step's first key each time a new card shows (and once it is placed).
   useEffect(() => {
@@ -113,10 +137,11 @@ export function TourCard(props: TourCardProps): JSX.Element {
   }
 
   const n = Tour.number(step)
+  const of = Tour.stepsFor(props.session, state.midiSupported)
   const head = (title: string): JSX.Element => (
     <div class="tour-card__head" data-tour-head>
       <div class="tour-card__heading">
-        {n !== null && <StepOf n={n} />}
+        {n !== null && <StepOf n={n} of={of} />}
         <h2 id={id} class="tour-card__title t-caps-key">{title}</h2>
       </div>
       {close}
@@ -144,17 +169,32 @@ export function TourCard(props: TourCardProps): JSX.Element {
     )
   }
 
+  if (offlineCard !== undefined) {
+    return card(
+      offlineCard.head,
+      <>
+        <p class="tour-card__body t-body15">{offlineCard.hint}</p>
+        <Keys>
+          <Key text={TourText.OPEN_IT} variant="signal" data-tour-primary onClick={actions.open} />
+          <Key text={TourText.SKIP} variant="quiet" onClick={actions.skip} />
+        </Keys>
+        {deviceHere && <DeviceHere onClick={actions.tryPads} />}
+      </>,
+    )
+  }
+
   switch (step) {
     case TourStep.WELCOME: {
       if (props.session.resumed) {
         return card(
           TourText.RESUME_HEAD,
           <>
-            <p class="tour-card__body t-body15">{TourText.resumeHint(Tour.resumeAt(props.progress), Tour.STEPS)}</p>
+            <p class="tour-card__body t-body15">{TourText.resumeHint(Tour.resumeAt(props.progress), Tour.stepsFor(props.session, state.midiSupported))}</p>
             <Keys>
               <Key text={TourText.CONTINUE} variant="signal" data-tour-primary onClick={actions.start} />
               <Key text={TourText.NOT_NOW} variant="quiet" onClick={actions.finish} />
             </Keys>
+            <Offline onClick={actions.offline} />
           </>,
         )
       }
@@ -175,6 +215,7 @@ export function TourCard(props: TourCardProps): JSX.Element {
                 <Key text={TourText.START} variant="signal" data-tour-primary onClick={actions.start} />
                 <Key text={TourText.NOT_NOW} variant="quiet" onClick={actions.finish} />
               </Keys>
+              <Offline onClick={actions.offline} />
               {!props.demo && <TryDemo onClick={actions.tryDemo} />}
             </>
           )}
@@ -249,29 +290,53 @@ export function TourCard(props: TourCardProps): JSX.Element {
         </>,
       )
     default: {
-      // DONE (PAD and HEAR are the compact cards above).
-      const later = Tour.laterNote(props.progress, props.state.midiSupported)
+      // DONE (PAD and HEAR are the compact cards above). Without the EP-133 it offers the
+      // device's steps: Try the pads once it is connected, else its own line and, where
+      // there is MIDI, Connect and try the pads.
+      const done = <Key text={Strings.DONE} variant="signal" data-tour-primary onClick={actions.finish} />
+      let rest: JSX.Element
+      if (!props.session.offline) {
+        rest = (
+          <>
+            {Tour.laterNote(props.progress, state.midiSupported) && <p class="tour-card__note t-small">{TourText.LATER_NOTE}</p>}
+            <Keys>{done}</Keys>
+          </>
+        )
+      } else if (deviceHere) {
+        rest = <DeviceHere onClick={actions.tryPads} main done={actions.finish} />
+      } else {
+        rest = (
+          <>
+            <p class="tour-card__note t-small">{TourText.OFFLINE_NOTE}</p>
+            {state.midiSupported ? (
+              <div class="tour-card__stack">
+                <Key text={TourText.CONNECT_NOW} variant="signal" block data-tour-primary disabled={state.busy} onClick={actions.connectNow} />
+                <Key text={Strings.DONE} block onClick={actions.finish} />
+              </div>
+            ) : (
+              <Keys>{done}</Keys>
+            )}
+          </>
+        )
+      }
       return card(
         TourText.DONE_HEAD,
         <>
           <p class="tour-card__body t-body15">{TourText.DONE_HINT}</p>
-          {later && <p class="tour-card__note t-small">{TourText.LATER_NOTE}</p>}
-          <Keys>
-            <Key text={Strings.DONE} variant="signal" data-tour-primary onClick={actions.finish} />
-          </Keys>
+          {rest}
         </>,
       )
     }
   }
 }
 
-/** "STEP 2 OF 4" and four dots, the steps up to n filled. */
-function StepOf(props: { n: number }): JSX.Element {
+/** "STEP 2 OF 4" and a dot per step (four, or three offline), the steps up to n filled. */
+function StepOf(props: { n: number; of: number }): JSX.Element {
   return (
     <p class="tour-card__step t-caps">
-      <span>{TourText.stepOf(props.n, Tour.STEPS)}</span>
+      <span>{TourText.stepOf(props.n, props.of)}</span>
       <span class="tour-card__dots" aria-hidden="true">
-        {Array.from({ length: Tour.STEPS }, (_, i) => (
+        {Array.from({ length: props.of }, (_, i) => (
           <span key={i} class={`tour-card__dot${i < props.n ? ' is-on' : ''}`} />
         ))}
       </span>
@@ -306,6 +371,31 @@ function Checks(props: { rows: readonly CheckRow[] }): JSX.Element {
 
 function Keys(props: { children: JSX.Element | JSX.Element[] | (JSX.Element | false)[] }): JSX.Element {
   return <div class="tour-card__keys">{props.children}</div>
+}
+
+/** "Without the EP-133": the welcome's second key, the card's width. */
+function Offline(props: { onClick: () => void }): JSX.Element {
+  return <Key text={TourText.OFFLINE} variant="normal" block onClick={props.onClick} />
+}
+
+/**
+ * Offline, with the EP-133 connected after all: say so, and Try the pads (the
+ * main key on Done, above its Done key).
+ */
+function DeviceHere(props: { onClick: () => void; main?: boolean; done?: () => void }): JSX.Element {
+  return (
+    <div class="tour-card__stack">
+      <p class="tour-card__body t-body15">{TourText.DEVICE_HERE}</p>
+      <Key
+        text={TourText.TRY_PADS}
+        variant={props.main ? 'signal' : 'normal'}
+        block
+        data-tour-primary={props.main || undefined}
+        onClick={props.onClick}
+      />
+      {props.done && <Key text={Strings.DONE} block onClick={props.done} />}
+    </div>
+  )
 }
 
 function TryDemo(props: { onClick: () => void }): JSX.Element {

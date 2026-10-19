@@ -154,6 +154,12 @@ describe('transitions', () => {
     expect(keys(selectTab(s, 'live'))).toEqual(['tab:live'])
   })
 
+  it('selectTab keeps Try arc open (its offline step picks Backups from the menu)', () => {
+    const s: Stack = [BASE, overlayLayer('tour'), overlayLayer('side'), overlayLayer('menu')]
+    expect(keys(selectTab(s, 'backups'))).toEqual(['tab:live', 'tab:backups', 'overlay:tour'])
+    expect(keys(selectTab(s, 'live'))).toEqual(['tab:live', 'overlay:tour'])
+  })
+
   it('push ignores a repeat of the top layer', () => {
     const s: Stack = [BASE, overlayLayer('menu')]
     expect(push(s, overlayLayer('menu'))).toBe(s)

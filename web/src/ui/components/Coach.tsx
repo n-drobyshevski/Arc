@@ -27,10 +27,11 @@
 // ([CoachOverlayProps.card], placed by ui/tourPlace.ts) and, with a spotlight,
 // a hole in the veil (clip-path: path(evenodd …)) ringed in orange around the
 // control the step is about, tagged unless it is a tall area (the card's
-// heading names the pads). Only the veil and the card take pointer events;
-// the page under the hole stays inert except with passThrough (HEAR), where
-// the pads take touches and everything else on the page is inert. Without a
-// mode the overlay is the "?" guide, unchanged.
+// heading names the pads) or on the screen's edge (a side tag would cover it). Only the veil and the card take pointer events;
+// the page under the hole stays inert except with passThrough (HEAR and the
+// offline steps), where the marked control (the pads, the more-tools strip,
+// the GUIDE tab, the section tag) takes touches and everything else on the
+// page is inert. Without a mode the overlay is the "?" guide, unchanged.
 import { createContext, type ComponentChildren, type JSX, type RefObject } from 'preact'
 import { signal, type Signal } from '@preact/signals'
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
@@ -39,6 +40,7 @@ import { WebText } from '../../core/text/webText'
 import {
   COACH_METRICS,
   arrowHead,
+  edgeOf,
   hintTop,
   isTall,
   placeTags,
@@ -177,6 +179,11 @@ export class CoachRegistry {
 
   list(): [string, Entry][] {
     return [...this.entries]
+  }
+
+  /** The control registered as [id], if any. */
+  get(id: string): Element | null {
+    return this.entries.get(id)?.el ?? null
   }
 }
 
@@ -380,8 +387,9 @@ export function CoachOverlay(props: CoachOverlayProps): JSX.Element | null {
     const m = modeRef.current
     const marks = collectMarks(root.current, registry, origin, (id) => tagged(m, id) || m?.spotlight === id)
     const target = m?.spotlight ? (marks.find((k) => k.id === m.spotlight) ?? null) : null
-    // Tall areas (the pads) get no tag under a spotlight: the card's heading names them.
-    const tagMarks = marks.filter((k) => tagged(m, k.id) && !(m?.spotlight === k.id && isTall(k, vp)))
+    // Tall areas (the pads) get no tag under a spotlight: the card's heading names them. Nor
+    // does a control on the screen's edge (the GUIDE tab): its side tag would cover what is tapped.
+    const tagMarks = marks.filter((k) => tagged(m, k.id) && !(m?.spotlight === k.id && (isTall(k, vp) || edgeOf(k, vp) !== 0)))
     const placed = placeTags(tagMarks, vp, (text, max) => measureWith(measurer.current, text, max))
     let card: TourPlacement | null = null
     let hole: Box | null = null
@@ -605,9 +613,10 @@ export function CoachOverlay(props: CoachOverlayProps): JSX.Element | null {
 }
 
 /**
- * HEAR: everything on the page but the pads (the marked control, its
- * ancestors and what is inside it) is inert, so touches through the hole
- * reach the pads only. Returns the undo.
+ * HEAR and the offline steps: everything on the page but the marked control
+ * (the pads, the strip, the tab, the tag), its ancestors and what is inside
+ * it is inert, so touches through the hole reach that control only. Returns
+ * the undo.
  */
 function inertAround(root: Element, target: Element): () => void {
   const made: Element[] = []
@@ -628,14 +637,24 @@ function inertAround(root: Element, target: Element): () => void {
 }
 
 /** Keeps [inertAround] in place while [on], following the page as it re-renders. */
-function usePassThrough(root: RefObject<HTMLDivElement | null>, id: string | undefined, on: boolean, version: number): void {
+function usePassThrough(
+  root: RefObject<HTMLDivElement | null>,
+  registry: CoachRegistry,
+  id: string | undefined,
+  on: boolean,
+  version: number,
+): void {
   useLayoutEffect(() => {
     const host = root.current
     if (!on || !host || !id) return
     let undo = (): void => {}
     const apply = (): void => {
       undo()
-      const target = host.querySelector(`[data-coach="${CSS.escape(id)}"]`)
+      // A hook registration (the more-tools strip) wins, as in collectMarks.
+      const registered = registry.get(id)
+      const target = registered && registered.isConnected && host.contains(registered)
+        ? registered
+        : host.querySelector(`[data-coach="${CSS.escape(id)}"]`)
       undo = target ? inertAround(host, target) : () => {}
     }
     apply()
@@ -648,7 +667,7 @@ function usePassThrough(root: RefObject<HTMLDivElement | null>, id: string | und
       mo?.disconnect()
       undo()
     }
-  }, [root, id, on, version])
+  }, [root, registry, id, on, version])
 }
 
 export interface CoachHostProps {
@@ -667,7 +686,7 @@ export function CoachHost(props: CoachHostProps): JSX.Element {
   const [registry] = useState(() => new CoachRegistry())
   const root = useRef<HTMLDivElement | null>(null)
   const passThrough = props.visible && props.mode?.passThrough === true && props.mode.spotlight !== undefined
-  usePassThrough(root, props.mode?.spotlight, passThrough, registry.version.value)
+  usePassThrough(root, registry, props.mode?.spotlight, passThrough, registry.version.value)
   return (
     <CoachContext.Provider value={registry}>
       <div ref={root} class="coach-host" inert={(props.visible && !passThrough) || undefined}>

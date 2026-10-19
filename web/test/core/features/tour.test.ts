@@ -19,7 +19,7 @@ import {
 } from '../../../src/core/features/tour'
 import { COACH_IDS } from '../../../src/ui/components/Coach'
 
-const { WELCOME, RESTORE, CONNECT, MIDI, PAD, HEAR, BACKUP, DONE } = TourStep
+const { WELCOME, RESTORE, CONNECT, MIDI, PAD, HEAR, BACKUP, TOOLS, GUIDE, SECTIONS, DONE } = TourStep
 
 const fresh: TourSnapshot = { backups: 0, canRestore: false, midi: true, connected: false }
 
@@ -59,6 +59,7 @@ describe('TourTest', () => {
     expect(Tour.encode(p)).toBe('connect,pad,~backup')
     expect(Tour.decode('connect,pad,~backup')).toEqual(p)
     expect(Tour.decode(' ~backup ,pad,welcome,nonsense,,connect,done')).toEqual(p)
+    expect(Tour.encode(Tour.decode('sections,~tools,connect'))).toBe('connect,~tools,sections')
     expect(Tour.encode(TourProgress())).toBe('')
     expect(Tour.decode('')).toEqual(TourProgress())
     // Done wins over skipped.
@@ -93,23 +94,69 @@ describe('TourTest', () => {
   })
 
   it('done stays for the rest of the run', () => {
-    const r = run({ ...fresh, midi: false })
+    const r = run(fresh)
     r.start()
-    expect(r.step()).toBe(MIDI)
     r.skip()
     expect(r.step()).toBe(DONE)
-    // MIDI showing up later doesn't bring the steps back in this run.
-    expect(r.update((it) => ({ ...it, midi: true }))).toBe(DONE)
+    // The EP-133 showing up later doesn't bring the steps back in this run.
+    expect(r.update((it) => ({ ...it, connected: true }))).toBe(DONE)
   })
 
-  it('without MIDI only the Needs MIDI card shows', () => {
+  it('without MIDI the Needs MIDI card leads to the offline steps', () => {
     const r = run({ ...fresh, midi: false })
     r.start()
     expect(r.step()).toBe(MIDI)
     r.skip()
+    expect(r.step()).toBe(TOOLS)
+    expect(Tour.stepsFor(r.s, false)).toBe(3)
+    r.skip()
+    r.skip()
+    r.skip()
     expect(r.step()).toBe(DONE)
-    expect(Tour.encode(r.p)).toBe('~midi')
+    expect(Tour.encode(r.p)).toBe('~midi,~tools,~guide,~sections')
     expect(Tour.laterNote(r.p, false)).toBe(false)
+  })
+
+  it('without the EP-133, each offline step waits until it was opened', () => {
+    const r = run(fresh)
+    r.s = Tour.goOffline(r.s)
+    expect(r.update()).toBe(TOOLS)
+    expect(Tour.stepsFor(r.s)).toBe(3)
+    // Live tools open: ticked; the next card waits until it is closed (the UI hides the tour meanwhile).
+    expect(r.update((it) => ({ ...it, toolsOpen: true }))).toBe(GUIDE)
+    expect(r.update((it) => ({ ...it, toolsOpen: false }))).toBe(GUIDE)
+    expect(r.update((it) => ({ ...it, guideOpen: true }))).toBe(SECTIONS)
+    expect(r.update((it) => ({ ...it, guideOpen: false }))).toBe(SECTIONS)
+    expect(r.update((it) => ({ ...it, onBackups: true }))).toBe(DONE)
+    expect(Tour.encode(r.p)).toBe('tools,guide,sections')
+    // Nothing of the device's was ticked or skipped.
+    expect(handled(r.p, CONNECT) || handled(r.p, PAD) || handled(r.p, BACKUP)).toBe(false)
+  })
+
+  it("try the pads moves from the offline path to the device's steps", () => {
+    const r = run(fresh)
+    r.s = Tour.goOffline(r.s)
+    r.update()
+    // The EP-133 connects on the way: ticked, and the Connect card shows it once.
+    r.update((it) => ({ ...it, connected: true }))
+    expect(r.step()).toBe(TOOLS)
+    r.s = Tour.goDevice(r.s)
+    expect(Tour.stepsFor(r.s)).toBe(4)
+    expect(r.update()).toBe(CONNECT)
+    expect(r.p.done.has(CONNECT)).toBe(true)
+    r.s = Tour.ackConnect(r.s)
+    expect(r.update()).toBe(PAD)
+    // From the offline Done without a device: plain Connect.
+    const d = run(fresh)
+    d.s = Tour.goOffline(d.s)
+    d.update()
+    d.skip()
+    d.skip()
+    d.skip()
+    expect(d.step()).toBe(DONE)
+    d.s = Tour.goDevice(d.s)
+    expect(d.update()).toBe(CONNECT)
+    expect(d.p.done.has(CONNECT)).toBe(false)
   })
 
   it('skipping Connect skips everything that needs the device', () => {
@@ -232,8 +279,8 @@ describe('TourTest', () => {
   })
 
   it('numbers, targets and what passes touches through', () => {
-    expect(TOUR_STEPS.map((s) => Tour.number(s))).toEqual([null, null, 1, null, 2, 3, 4, null])
-    expect(TOUR_STEPS.filter((s) => Tour.passThrough(s))).toEqual([HEAR])
+    expect(TOUR_STEPS.map((s) => Tour.number(s))).toEqual([null, null, 1, null, 2, 3, 4, 1, 2, 3, null])
+    expect(TOUR_STEPS.filter((s) => Tour.passThrough(s))).toEqual([HEAR, TOOLS, GUIDE, SECTIONS])
     expect(TOUR_STEPS.filter((s) => Tour.needsDevice(s))).toEqual([PAD, BACKUP])
     expect(Tour.target(CONNECT)).toBe('top.connection')
     expect(Tour.target(PAD)).toBe('live.pads')
@@ -242,7 +289,10 @@ describe('TourTest', () => {
     expect(Tour.target(WELCOME)).toBeNull()
     expect(Tour.target(DONE)).toBeNull()
     // Every id is a coach mark the app has (Coach.kt's call sites).
-    const marks = new Set(['top.connection', 'live.pads', 'top.backup', 'top.help', 'edge.guide', 'side.more'])
+    const marks = new Set(['top.connection', 'live.pads', 'top.backup', 'top.help', 'edge.guide', 'side.more', 'top.sections'])
+    expect(Tour.target(TOOLS)).toBe('side.more')
+    expect(Tour.target(GUIDE)).toBe('edge.guide')
+    expect(Tour.target(SECTIONS)).toBe('top.sections')
     const ids = [...TOUR_STEPS.map((s) => Tour.target(s)).filter((t): t is string => t !== null), ...Tour.DONE_TAGS]
     expect(ids.every((id) => marks.has(id))).toBe(true)
     expect(Tour.resumeAt(Tour.decode('connect,pad,~hear'))).toBe(4)
