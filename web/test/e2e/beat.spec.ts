@@ -9,7 +9,11 @@
 // SOUNDS and SILENT PADS: its sound ticked, a sound picked for a silent pad with PICK
 // SOUND, both put on the pads by IMPORT; a silent pad with a name starts with a sound Arc
 // suggests, until CHANGE picks another. A card's FX and PAD SHAPING: APPLY FX switched,
-// a pad line ticked, and IMPORT applying the FX.
+// a pad line ticked, and IMPORT applying the FX. A card's sound no slot holds that the
+// saved EP-40 pack has: ticked to upload into a free slot, and IMPORT puts it on the pad.
+import { encodeWav } from '../../src/core/formats/wav'
+import { writeZip } from '../../src/core/formats/zip'
+import { tone } from '../helpers/demoData'
 import { expect, test } from './fixtures'
 
 test.use({ viewport: { width: 412, height: 915 } })
@@ -293,4 +297,49 @@ test("FX and PAD SHAPING: the card's FX old to new with APPLY FX, its pad line t
   await sheet.getByRole('button', { name: 'Import' }).click()
   await expect(sheet).toBeHidden()
   await expect(page.getByRole('status').filter({ hasText: /^Imported to A · 02\. FX/ })).toBeVisible()
+})
+
+test("SOUNDS: a card's sound the EP-133 lacks is uploaded from the saved EP-40 pack into a free slot by IMPORT", async ({ page }) => {
+  // teenage engineering's site at arc's /te/ path, serving the EP-40's pack: riddim snare in slot 100, which the demo EP-133 has free.
+  const wav = encodeWav(tone(4000, 220), 1, 46875)
+  const meta = { pak_type: 'factory', device_name: 'EP-40', device_sku: 'TE032AS006', device_version: '0.0.0', generated_at: '2023-11-24T00:00:00.000Z' }
+  const riddim = Buffer.from(
+    await writeZip(
+      [
+        { path: 'meta.json', data: new TextEncoder().encode(JSON.stringify(meta)), compress: false },
+        { path: 'sounds/100 riddim snare.wav', data: wav, compress: false },
+      ],
+      { date: 0, offsetMin: 0 },
+    ),
+  )
+  await page.route('**/te/apps/ep-sample-tool**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('.pak')) return route.fulfill({ body: riddim, contentType: 'binary/octet-stream' })
+    if (path.endsWith('.js')) return route.fulfill({ body: 'a="/apps/ep-sample-tool/assets/ep-40-factory-content-E2e40.pak"', contentType: 'text/javascript' })
+    return route.fulfill({ body: '<script type="module" src="/apps/ep-sample-tool/assets/index-E2e.js"></script>', contentType: 'text/html' })
+  })
+  await page.goto('/?demo#/settings')
+  const row = page.locator('.app__screen[data-view="settings"] .setting-row').filter({ has: page.getByText('EP-40 Riddim', { exact: true }) })
+  await row.getByRole('button', { name: 'Get', exact: true }).click()
+  await expect(page.getByText('EP-40 factory sounds saved: 1 sound.', { exact: false })).toBeVisible()
+
+  const card = ['ARC BEAT 1', 'name Riddim snare', '[A]', 'sound A2 100 riddim snare', 'A2 | .... X... .... X... |'].join('\n')
+  await page.goto('/?demo#/live')
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
+  await page.evaluate((text) => {
+    const data = new DataTransfer()
+    data.setData('text/plain', text)
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }))
+  }, card)
+  const sheet = page.getByRole('dialog', { name: 'Riddim snare' })
+  await expect(sheet).toBeVisible()
+  const sounds = sheet.getByRole('group', { name: 'Sounds' })
+  const upload = sounds.getByRole('checkbox', { name: 'A2: Upload 100 riddim snare, from the ep-40 pack, into a free slot' })
+  await expect(upload).toHaveAttribute('aria-checked', 'true')
+  await expect(upload).toContainText('Upload 100 riddim snare')
+  await expect(upload).toContainText('From the EP-40 pack, into a free slot')
+
+  await sheet.getByRole('button', { name: 'Import' }).click()
+  await expect(sheet).toBeHidden()
+  await expect(page.getByRole('status').filter({ hasText: /^Imported to A · 02 and 1 sound\./ })).toBeVisible()
 })

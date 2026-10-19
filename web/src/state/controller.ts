@@ -63,6 +63,7 @@ function arpVoiceKey(p: readonly string[]): boolean {
 import { choiceOf as pianoChoiceOf, type KeysView } from '../core/features/piano'
 import { padKey, type PhysicalPad } from '../core/features/padNotes'
 import type { PadTarget } from '../core/features/liveMirror'
+import type { Session } from '../core/protocol/session'
 import { OfflinePads, SoundSource, type OfflinePad } from '../core/features/offlinePads'
 import { backupDevice, restorePak } from '../core/backup/backup'
 import { describePak, openPak, type PakDescription, type PakSound } from '../core/backup/pak'
@@ -131,6 +132,7 @@ import {
   type BeatBlocks,
   type BeatShare,
   type DeviceKit,
+  type PackSound,
   type PlannedSound,
   type ShareParts,
 } from './beatPlan'
@@ -763,6 +765,7 @@ export class ArcController {
       const sku = this.store.get().device?.info.sku
       if (first && sku !== undefined) this.deviceKit(sku)
       void this.runSearch()
+      void this.refreshKitNames()
       this.factoryChanged()
     } catch (e) {
       this.toast(Strings.libraryFailed(errorText(e)), true)
@@ -1992,6 +1995,33 @@ export class ArcController {
       if (this.conn.session !== s) this.toast(MirrorText.EDIT_OFFLINE)
       return null
     }
+    await this.padUploaded(into, wav, t)
+    return into
+  }
+
+  /**
+   * [wav] (named after [name]) into the first free slot, then onto [t]'s
+   * pad, as a task with the progress sheet (ArcController.uploadBytesToPad
+   * with task on). The mirror's names and the pad follow ([padUploaded]).
+   * The slot, or null once a toast said why not (the task's own error, or
+   * the connection gone).
+   */
+  private async uploadBytesToPad(s: Session, name: string, wav: Uint8Array, t: PadTarget): Promise<number | null> {
+    const into = await this.tasks.runTask(Strings.UPLOADING, (onProgress, signal) => {
+      const occupied = this.store.get().browser.contents?.occupiedSlots ?? new Set(this.live.deviceSoundList().map((snd) => snd.slot))
+      return uploadToPad(s, name, wav, occupied, t, null, { onProgress, signal })
+    })
+    if (into === null) {
+      // runTask showed its own error; a connection gone while waiting needs saying.
+      if (this.conn.session !== s) this.toast(MirrorText.EDIT_OFFLINE)
+      return null
+    }
+    await this.padUploaded(into, wav, t)
+    return into
+  }
+
+  /** After [wav] went into [into] and onto [t]'s pad: the device's names read again, the pad's copy kept, and the mirror's pad follows. */
+  private async padUploaded(into: number, wav: Uint8Array, t: PadTarget): Promise<void> {
     // The new sound's name and size, and the space left (SAMPLE's "Disk low").
     await this.refreshAll(true)
     const e = this.store.get().browser.contents?.sounds.find((snd) => snd.slot === into)
@@ -2006,7 +2036,6 @@ export class ArcController {
     }
     const m = this.mirror.current
     this.mirror.assigned({ ...t, slot: t.slot ?? m?.slotAt(t.group, t.pad) ?? null }, into)
-    return into
   }
 
   /** The EP-133 was read: with offline pad changes kept, it asks whether to write them (UiState.offlinePrompt). */
@@ -3040,13 +3069,46 @@ export class ArcController {
    * whose pack its slots match (deviceKitOf: connected, or as last read), or
    * the connected device's own, else the EP-133's with no names. What a share
    * tells Claude, not the kit Live plays offline. The Kotlin deviceKit()
-   * (here deviceKit(sku) chooses Live's kit on connecting). Web delta: no
-   * pack's names are read yet (UiState.kitNames), so [names] is null.
+   * (here deviceKit(sku) chooses Live's kit on connecting).
    */
   private shareDeviceKit(): DeviceKit {
     const st = this.store.get()
     const sku = this.conn.session?.info?.sku ?? null
-    return deviceKitOf(st.mirror, this.live.deviceSoundList(), st.backups, new Map(), sku, this.live.factoryKit())
+    return deviceKitOf(st.mirror, this.live.deviceSoundList(), st.backups, this.kitNames, sku, this.live.factoryKit())
+  }
+
+  /**
+   * Each saved factory pack's sound names by slot, by its kit: what tells a
+   * card's sound from another kit's, and where IMPORT can upload one from
+   * (UiState.kitNames). Web delta: kept here, not in UiState, as no view
+   * reads it.
+   */
+  private kitNames: ReadonlyMap<FactoryKit, ReadonlyMap<number, string>> = new Map()
+  /** Each pack's sound names, read once per library entry ([kitNames]). */
+  private readonly packNames = new Map<string, ReadonlyMap<number, string>>()
+  private kitNamesGen = 0
+
+  /** ArcController.refreshFactoryNames' [kitNames]: each saved pack's names, as the library is now. A pack that can't be read is left out. */
+  private async refreshKitNames(): Promise<void> {
+    const gen = ++this.kitNamesGen
+    const backups = this.store.get().backups
+    const kits = new Map<FactoryKit, ReadonlyMap<number, string>>()
+    for (const kit of FactorySounds.savedKits(backups)) {
+      const b = FactorySounds.inLibrary(backups, kit)
+      if (b === null) continue
+      let names = this.packNames.get(b.id)
+      if (names === undefined) {
+        try {
+          names = await this.live.packNames(b)
+        } catch {
+          continue
+        }
+        this.packNames.set(b.id, names)
+      }
+      kits.set(kit, names)
+    }
+    // Only the latest read lands.
+    if (gen === this.kitNamesGen) this.kitNames = kits
   }
 
   /** The kit a share names (shareDeviceKit). */
@@ -3071,8 +3133,7 @@ export class ArcController {
     const set = soundSetOf(st.mirror, sounds, dk.names)
     const offline = st.device === null
     const project = m?.snapshot(this.deps.perfNow()).activeProject ?? null
-    // Web delta: no pack's names are read yet (UiState.kitNames), so no saved pack's sound is offered for upload.
-    const packs = new Map<FactoryKit, ReadonlyMap<number, string>>()
+    const packs = this.kitNames
     return {
       sounds: (card) => soundsUi(card, set, (pad) => m?.slotOf(pad) ?? null, (pad) => this.mirrorName(pad), offline, project, packs, dk.kit),
       fx: (card) => beatFxUi(card, this.fx.desk.fx.peek()),
@@ -3092,9 +3153,10 @@ export class ArcController {
   /**
    * IMPORT's sounds (ArcController.importBeat after the patterns): the ticked
    * pads ([soundPads], pad keys) planned again as the sounds are now, as the
-   * sheet plans them (cardPicks), and the sounds [picked] for silent pads,
-   * put on their pads (putSounds), with the pads they go on; null when none
-   * of them changes a pad now.
+   * sheet plans them (cardPicks): the saved packs' sounds to upload
+   * (connected only), and the slots to put on with the sounds [picked] for
+   * silent pads ([putPlanned]), with the pads they go on; null when none of
+   * them changes a pad now.
    */
   private putBeatSounds(
     card: BeatCard,
@@ -3104,13 +3166,71 @@ export class ArcController {
   ): { readonly pads: ReadonlySet<number>; readonly put: Promise<SoundsPut> } | null {
     const dk = this.shareDeviceKit()
     const m = this.mirror.current
-    const packs = new Map<FactoryKit, ReadonlyMap<number, string>>()
+    const packs = this.kitNames
     const names = soundSetOf(this.store.get().mirror, this.live.deviceSoundList(), dk.names)?.names ?? new Map<number, string>()
     const plan = cardPicks(card, names, foreignTo(packs, dk.kit), (pad) => m?.slotOf(pad) ?? null, packs, this.conn.session !== null).filter((p) =>
       soundPads.has(padKey(p.pick.pad)),
     )
     const picks = this.importPicks(plan, soundPads, picked)
-    return picks.length === 0 ? null : { pads: new Set(picks.map((p) => padKey(p.pad))), put: this.putSounds(entry, picks) }
+    const uploads = plan.flatMap((p): (readonly [PhysicalPad, PackSound])[] => (p.fromPack !== null && p.uploadable ? [[p.pick.pad, p.fromPack]] : []))
+    if (picks.length === 0 && uploads.length === 0) return null
+    const pads = new Set([...uploads.map(([pad]) => padKey(pad)), ...picks.map((p) => padKey(p.pad))])
+    return { pads, put: this.putPlanned(entry, picks, uploads) }
+  }
+
+  /**
+   * ArcController.putTail's sounds: the packs' sounds first ([uploads],
+   * uploaded into free slots), then the slots the EP-133 has ([picks]),
+   * unless the uploads failed. [entry] keeps the pads of both for UNDO.
+   */
+  private async putPlanned(entry: BeatUndo, picks: readonly SoundPick[], uploads: readonly (readonly [PhysicalPad, PackSound])[]): Promise<SoundsPut> {
+    const none: SoundsPut = { done: [], skipped: 0, moved: 0, failure: null }
+    const up = uploads.length === 0 ? none : await this.uploadFromPacks(entry, uploads)
+    let put = none
+    try {
+      if (picks.length > 0 && up.failure === null) put = await this.putSounds(entry, picks)
+    } finally {
+      // putSounds kept only its own pads (web addition: also when it throws).
+      if (up.done.length > 0) entry.pads = [...up.done, ...entry.pads.filter((b) => !up.done.includes(b))]
+    }
+    return { done: [...up.done, ...put.done], skipped: up.skipped + put.skipped, moved: up.moved + put.moved, failure: up.failure ?? put.failure }
+  }
+
+  /**
+   * [uploads] put on: each pack's sound read from its library entry and
+   * uploaded into a free slot of the EP-133, then onto its pad
+   * ([uploadBytesToPad]); the pads done kept for UNDO, as [putSounds] keeps
+   * its. A pad with no target, or a sound its pack no longer has, is skipped
+   * and counted. Stops at the first failure. Web delta: a recording on the
+   * pad stays where it is, as [putSounds] leaves it.
+   */
+  private async uploadFromPacks(entry: BeatUndo, uploads: readonly (readonly [PhysicalPad, PackSound])[]): Promise<SoundsPut> {
+    const s = this.conn.session
+    if (s === null) return { done: [], skipped: uploads.length, moved: 0, failure: null }
+    const done: PadBack[] = []
+    let skipped = 0
+    for (const [pad, ps] of uploads) {
+      if (entry.undone) break
+      const t = this.editTarget(pad, true)
+      const b = FactorySounds.inLibrary(this.store.get().backups, ps.kit)
+      let wav: Uint8Array | null = null
+      if (b !== null) {
+        try {
+          wav = await this.live.packWav(b, ps.slot)
+        } catch {
+          wav = null
+        }
+      }
+      if (t === null || wav === null) {
+        skipped++
+        continue
+      }
+      if ((await this.uploadBytesToPad(s, ps.name, wav, t)) === null) return { done, skipped, moved: 0, failure: ClaudeText.UPLOAD_STOPPED }
+      const back: PadBack = { pad, target: t }
+      done.push(back)
+      entry.pads = [...entry.pads, back]
+    }
+    return { done, skipped, moved: 0, failure: null }
   }
 
   /**

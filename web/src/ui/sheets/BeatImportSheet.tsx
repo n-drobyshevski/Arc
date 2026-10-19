@@ -578,8 +578,9 @@ function SoundsBlock(props: {
 /**
  * A sound line: a tick box (for a row that changes the pad), the pad, and
  * what changes: the old name struck through and the new sound after it, the
- * sound and "Already there" when the pad has it, or, amber with no box, why
- * it isn't on the user's EP-133. A sound used by its slot says what the card
+ * sound and "Already there" when the pad has it, the saved pack's sound to
+ * upload into a free slot (connected; offline it says to connect), or, amber
+ * with no box, why it isn't on the user's EP-133. A sound used by its slot says what the card
  * called it, and one picked for a silent pad says so. [chipOn] is the chip:
  * off, the rows are dimmed and can't be ticked.
  */
@@ -591,9 +592,12 @@ function SoundRow(props: { row: SoundRowUi; ticked: boolean; chipOn: boolean; on
   // A sound listed unnamed is its file name ("012.pcm") already: the slot isn't said twice.
   const now = missing ? null : pick.unverified && pick.name !== null ? pick.name : ClaudeText.soundName(pick.slot ?? wanted.slot, pick.name)
   const cardSays = row.cardSays
+  const pack = row.fromPack
   const description =
-    (missing
-      ? ClaudeText.soundRowMissing(pick.pad, wanted.slot, wanted.name)
+    (missing && pack !== null && row.uploadable
+      ? ClaudeText.soundRowUpload(pick.pad, pack.slot, pack.name, pack.kit.model)
+      : missing
+      ? ClaudeText.soundRowMissing(pick.pad, wanted.slot, wanted.name) + (pack === null ? '' : '. ' + ClaudeText.inPack(pack.kit.model))
       : pick.status === SoundStatus.SAME
         ? ClaudeText.soundRowSame(pick.pad, now ?? '')
         : ClaudeText.soundRowName(pick.pad, row.oldName, now ?? '')) + (cardSays === null ? '' : '. ' + ClaudeText.cardSays(cardSays))
@@ -604,7 +608,17 @@ function SoundRow(props: { row: SoundRowUi; ticked: boolean; chipOn: boolean; on
         {row.changes ? <span class={`beat-tick${ticked && chipOn ? ' is-on' : ''}`} /> : missing ? <span class="beat-sound__bar" /> : null}
       </span>
       <span class="t-field-label beat-sound__pad" aria-hidden="true">{ClaudeText.padLabel(pick.pad)}</span>
-      {missing ? (
+      {missing && pack !== null ? (
+        // Not on the EP-133, but in a pack Arc has: uploaded into a free slot as IMPORT goes.
+        <span class={`beat-sound__what${dim}`} aria-hidden="true">
+          {row.uploadable ? (
+            <b class="t-small beat-sheet__strong beat-sheet__clamp">{ClaudeText.upload(pack.slot, pack.name)}</b>
+          ) : (
+            <span class="t-small beat-sheet__ink beat-sheet__clamp">{ClaudeText.soundMissing(wanted.slot, wanted.name)}</span>
+          )}
+          <span class="t-tiny beat-sheet__dim beat-sheet__clamp">{row.uploadable ? ClaudeText.fromPack(pack.kit.model) : ClaudeText.inPack(pack.kit.model)}</span>
+        </span>
+      ) : missing ? (
         <span class="t-small beat-sheet__ink beat-sound__what beat-sheet__clamp" aria-hidden="true">{ClaudeText.soundMissing(wanted.slot, wanted.name)}</span>
       ) : pick.status === SoundStatus.SAME ? (
         <span class="beat-sound__what" aria-hidden="true">

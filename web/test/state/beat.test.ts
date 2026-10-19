@@ -8,6 +8,7 @@
 // picked for silent pads on the pads (on the EP-133, or offline in arc), in the same UNDO step;
 // writes that throw stop it with its error toast. The card's FX replace the project's and its
 // pad lines shape the ticked pads (on the EP-133, or as offline pad settings), in that same step.
+// A card's sound no slot holds that a saved factory pack has is uploaded into a free slot first.
 import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BeatCards, SoundStatus } from '../../src/core/features/beatCard'
@@ -21,6 +22,9 @@ import { ClaudeText } from '../../src/core/text/claudeText'
 import { MirrorText } from '../../src/core/text/mirrorText'
 import { BackupDevice, type BackupRecord } from '../../src/core/text/libraryRules'
 import { WebText } from '../../src/core/text/webText'
+import { encodeWav } from '../../src/core/formats/wav'
+import { writeZip } from '../../src/core/formats/zip'
+import { tone } from '../helpers/demoData'
 import { LIVE_PAD_SETTINGS_KEY, memoryStorage } from '../../src/platform/storage/settings'
 import type { Deps } from '../../src/state/deps'
 import { disposeAll, liveHarness, until, type LiveHarness } from './liveHarness'
@@ -333,6 +337,65 @@ describe('BEAT CARDS', () => {
     h.c.runToastAction(done.toast!.id)
     await until(h, (st) => st.toast?.text === ClaudeText.importUndone(2, 0, 0, false))
     expect(h.c.state.value.offlinePads).toBe(0)
+    expect(h.c.mirrorName(A2)).toBe('clap')
+  })
+
+  /** The EP-40's pack saved in the library, holding "mpc hh" in slot 234, and its names read. */
+  async function saveRiddim(h: LiveHarness): Promise<void> {
+    const wav = encodeWav(tone(2000, 220), 1, 46875)
+    const meta = { pak_type: 'factory', device_name: FactoryKit.EP40.model, generated_at: '2023-11-24T00:00:00.000Z' }
+    const bytes = await writeZip(
+      [
+        { path: 'meta.json', data: new TextEncoder().encode(JSON.stringify(meta)), compress: false },
+        { path: 'sounds/234 mpc hh.wav', data: wav, compress: false },
+      ],
+      { date: 0, offsetMin: 0 },
+    )
+    const record: BackupRecord = { id: '', title: 'EP-40', notes: '', createdAt: 1, source: FactoryKit.EP40.source, fileName: null, device: BackupDevice(), soundCount: 1, projectCount: 0, projects: [], slots: [234], projectSlots: {}, size: 0 }
+    await h.library.save(record, bytes, { 234: 'mpc hh' })
+    await vi.waitFor(() => expect((h.c as unknown as { kitNames: ReadonlyMap<FactoryKit, ReadonlyMap<number, string>> }).kitNames.get(FactoryKit.EP40)?.get(234)).toBe('mpc hh'))
+  }
+
+  const FROM_PACK = ['ARC BEAT 1', 'name Hats', '[A]', 'sound A2 234 mpc hh', 'A2 | x.x. x.x. x.x. x.x. |'].join('\n')
+
+  it("IMPORT uploads a card's sound no slot holds from the saved pack into a free slot, puts it on the pad, and UNDO puts the old one back", async () => {
+    const h = await liveOn()
+    await saveRiddim(h)
+    const p = h.c.pattern
+    await h.c.receiveBeat(FROM_PACK)
+    const row = p.beat.value!.sounds!.rows[0]!
+    expect(row.pick.status).toBe(SoundStatus.MISSING)
+    expect(row.fromPack).toEqual({ kit: FactoryKit.EP40, slot: 234, name: 'mpc hh' })
+    expect(row.uploadable).toBe(true)
+    expect(row.changes).toBe(true)
+    p.importBeat(false, new Set([padKey(A2)]))
+    const done = await until(h, (st) => st.toast?.text?.startsWith('Imported to') === true)
+    expect(done.toast?.text).toBe(ClaudeText.imported([[0, 2]], null, 1))
+    const into = [...h.mock.sounds].find(([, snd]) => snd.name === 'mpc hh')?.[0]
+    expect(into).toBeDefined()
+    expect(into).not.toBe(234)
+    expect(await onDevice(h, 'a', 5)).toBe(into)
+    expect(h.c.mirrorName(A2)).toBe('mpc hh')
+    // UNDO: the old sound back on the pad; the uploaded one stays on the EP-133.
+    h.c.runToastAction(done.toast!.id)
+    await until(h, (st) => st.toast?.text === ClaudeText.importUndone(1, 0, 0, false))
+    expect(await onDevice(h, 'a', 5)).toBe(5)
+    expect(h.mock.sounds.get(into!)?.name).toBe('mpc hh')
+  })
+
+  it('an upload that fails stops IMPORT with UPLOAD_STOPPED, and the other sounds are not put on', async () => {
+    const h = await liveOn()
+    await saveRiddim(h)
+    const p = h.c.pattern
+    await h.c.receiveBeat(FROM_PACK.replace('[A]', '[A]\nsound A3 2 snare\nA3 | X... .... .... .... |'))
+    const snare = p.beat.value!.sounds!.rows.find((r) => r.pick.wanted.slot === 2)!
+    expect(snare.pick.status).toBe(SoundStatus.CHANGE)
+    const before = h.c.mirrorName(snare.pad)
+    vi.spyOn(h.c as unknown as { uploadBytesToPad(): Promise<number | null> }, 'uploadBytesToPad').mockResolvedValue(null)
+    p.importBeat(false, new Set([padKey(A2), padKey(snare.pad)]))
+    const done = await until(h, (st) => st.toast?.text === ClaudeText.soundsFailed(ClaudeText.UPLOAD_STOPPED, 0))
+    expect(done.toast?.error).toBe(true)
+    expect(h.c.mirrorName(snare.pad)).toBe(before)
     expect(h.c.mirrorName(A2)).toBe('clap')
   })
 

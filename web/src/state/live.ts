@@ -778,6 +778,16 @@ export class LiveSounds {
     return (await this.pakOf(b)).sounds.get(slot)?.wav ?? null
   }
 
+  /** Each sound's name in the pack [b], by slot (ArcController.refreshFactoryNames' pakOf(...).sounds names). */
+  async packNames(b: BackupRecord): Promise<Map<number, string>> {
+    return new Map([...(await this.pakOf(b)).sounds].map(([slot, snd]): [number, string] => [slot, snd.name]))
+  }
+
+  /** The WAV of the pack [b]'s sound in [slot], if it has one (ArcController.uploadFromPacks). */
+  async packWav(b: BackupRecord, slot: number): Promise<Uint8Array | null> {
+    return (await this.pakOf(b)).sounds.get(slot)?.wav ?? null
+  }
+
   /** A library entry opened, the last one kept open; one open for the calls that overlap, a failed one not kept. */
   private pakOf(b: BackupRecord): Promise<Pak> {
     const o = this.openPak

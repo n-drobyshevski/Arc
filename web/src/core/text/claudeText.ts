@@ -343,6 +343,22 @@ export const ClaudeText = {
   /** What a row says in place of a new sound: the pad plays it already. */
   ALREADY_THERE: 'Already there',
 
+  /** A sound no slot holds that a saved factory pack has: IMPORT uploads it ("Upload 234 mpc hh", "From the EP-40 pack, into a free slot"). */
+  upload(slot: number, name: string | null): string {
+    return `Upload ${ClaudeText.soundName(slot, name)}`
+  },
+  fromPack(model: string): string {
+    return `From the ${model} pack, into a free slot`
+  },
+  inPack(model: string): string {
+    return `In the ${model} pack: connect the EP-133 to upload it`
+  },
+  soundRowUpload(pad: PhysicalPad, slot: number, name: string | null, model: string): string {
+    return `${padLabel(pad)}: ${ClaudeText.upload(slot, name)}, ${ClaudeText.fromPack(model).toLowerCase()}`
+  },
+  /** An upload that stopped part way: the pads before it keep their sounds. */
+  UPLOAD_STOPPED: 'The upload stopped',
+
   /** What a row says when the sound is nowhere in the user's list: "Not on your EP-133: 301 Rim dusty". */
   soundMissing(slot: number, name: string | null): string {
     return `Not on your EP-133: ${ClaudeText.soundName(slot, name)}`
