@@ -24,6 +24,9 @@
 // - The lit take follows the one playing through a computed, so only a change
 //   of which take that is renders the section again.
 // - DONE gives the focus back to TRIM (the trim deck takes it on opening).
+// - LiveTab builds [TakesUi] anew on each of the mirror's publishes: the deck
+//   is memoized, its callbacks kept (reading the latest props), so it renders
+//   again only when what it shows changes.
 import type { JSX } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { computed, type ReadonlySignal } from '@preact/signals'
@@ -39,7 +42,7 @@ import { Caption } from '../components/Caption'
 import { handleRovingKey } from '../components/Segmented'
 import { Disclosure } from '../components/SettingRow'
 import { DeckKey, DeckStrip, Glyph } from './DeckKeys'
-import { useIs } from './memo'
+import { memo, sameProps, useIs } from './memo'
 import { TakeTrimDeck } from './TakeTrim'
 import './Takes.css'
 
@@ -117,6 +120,41 @@ export function TakeBadge(props: { take: TakeUi | null | undefined; still?: bool
  * tapped while it is still there, else the one playing, else the newest.
  */
 export function TakesSection(props: { takes: TakesUi; take: TakeUi; still?: boolean }): JSX.Element {
+  const latest = useRef(props)
+  latest.current = props
+  const kept = useMemo(() => keptTakes(() => latest.current.takes), [])
+  const p = props.takes
+  const voice = p.onVoice !== undefined
+  const takes = useMemo<TakesUi>(
+    () => ({ ...kept, list: p.list, playing: p.playing, connected: p.connected, canShare: p.canShare, canVoice: p.canVoice, onVoice: voice ? kept.onVoice : undefined }),
+    [kept, p.list, p.playing, p.connected, p.canShare, p.canVoice, voice],
+  )
+  const state = props.take.state
+  const take = useMemo<TakeUi>(() => ({ state, onTake: () => latest.current.take.onTake() }), [state])
+  return <TakesDeck takes={takes} take={take} still={props.still === true} />
+}
+
+/** [now]'s callbacks, kept: each calls the latest one. */
+function keptTakes(now: () => TakesUi): Omit<TakesUi, 'list' | 'playing' | 'connected' | 'canShare' | 'canVoice'> {
+  return {
+    keyOf: (t) => now().keyOf(t),
+    fmtWhen: (ms) => now().fmtWhen(ms),
+    onPlay: (t) => now().onPlay(t),
+    onStop: () => now().onStop(),
+    onShare: (t) => now().onShare(t),
+    onVoice: (t) => now().onVoice?.(t),
+    onSave: (t) => now().onSave(t),
+    onToDevice: (t) => now().onToDevice(t),
+    onDelete: (t) => now().onDelete(t),
+    onDuplicate: (t) => now().onDuplicate(t),
+    trimKeyOf: (t) => now().trimKeyOf(t),
+    onTrimPlay: (t, from, to) => now().onTrimPlay(t, from, to),
+    onSetTrim: (t, trim) => now().onSetTrim(t, trim),
+    loadSound: (t) => now().loadSound(t),
+  }
+}
+
+const TakesDeck = memo(function TakesDeck(props: { takes: TakesUi; take: TakeUi; still: boolean }): JSX.Element {
   const t = props.takes
   const take = props.take
   const list = t.list
@@ -248,7 +286,7 @@ export function TakesSection(props: { takes: TakesUi; take: TakeUi; still?: bool
             lit={lit}
             number={number}
             confirming={confirming}
-            still={props.still === true}
+            still={props.still}
             onLight={(info) => {
               setLitName(info.name)
               setConfirm(null)
@@ -267,7 +305,7 @@ export function TakesSection(props: { takes: TakesUi; take: TakeUi; still?: bool
       </Disclosure>
     </section>
   )
-}
+}, sameProps)
 
 /** PLAY / STOP for the lit take (a key of its own, so that it alone follows whether that take plays). */
 function PlayKey(props: { t: TakesUi; lit: TakeInfo | null; n: number; onKey: () => void }): JSX.Element {

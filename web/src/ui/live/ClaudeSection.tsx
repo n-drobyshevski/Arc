@@ -18,6 +18,8 @@
 // - The glass waits only for a share that went: a share sheet called off
 //   doesn't (Android can't tell, once its chooser opened); a prompt copied
 //   where there is no share sheet does.
+// - Memoized on [group]: Live's tools render again on each of the mirror's
+//   publishes, and the deck reads what it shows from signals (the getters).
 import { createContext, type JSX } from 'preact'
 import { useContext, useId } from 'preact/hooks'
 import type { ClaudePrompt, SharePick } from '../../core/features/claudePrompt'
@@ -27,6 +29,7 @@ import { ClaudeText } from '../../core/text/claudeText'
 import { Caption } from '../components/Caption'
 import { Disclosure } from '../components/SettingRow'
 import { lazy } from '../lazy'
+import { memo, sameProps } from './memo'
 import './ClaudeSection.css'
 
 /** The CLAUDE section's state and what its keys do (Kotlin ClaudeUi), read as it renders. */
@@ -87,7 +90,7 @@ const ClaudeDeck = lazy('ClaudeDeck', () => import('./ClaudeDeck').then((m) => m
 export const preloadClaudeDeck = ClaudeDeck.preload
 
 /** Live tools' CLAUDE for [group] (the group shown, as the pattern's key names it). */
-export function ClaudeSection(props: { group: number }): JSX.Element | null {
+export const ClaudeSection = memo(function ClaudeSection(props: { group: number }): JSX.Element | null {
   const claude = useClaude()
   const titleId = useId()
   if (claude === null) return null
@@ -101,4 +104,4 @@ export function ClaudeSection(props: { group: number }): JSX.Element | null {
       </Disclosure>
     </section>
   )
-}
+}, sameProps)
