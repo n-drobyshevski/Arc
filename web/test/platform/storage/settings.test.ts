@@ -79,6 +79,8 @@ describe('SettingsStore', () => {
       sampleTrimSilence: false,
       samplePattern: false,
       factoryKit: 'ep133',
+      tourSteps: '',
+      tourDone: false,
     })
     expect(DEFAULT_SETTINGS).toEqual(s.settings)
   })
@@ -172,6 +174,8 @@ describe('SettingsStore', () => {
       'app.sampleTrimSilence',
       'app.samplePattern',
       'app.factoryKit',
+      'app.tourSteps',
+      'app.tourDone',
     ])
   })
 
@@ -235,6 +239,35 @@ describe('SettingsStore', () => {
     // Odd stored values read as the defaults: a size arc doesn't offer is Auto.
     expect(readSettings(JSON.stringify({ keysViewWide: 'piano', keysViewTall: 3, pianoWhites: 10 }))).toEqual(DEFAULT_SETTINGS)
     expect(readSettings(JSON.stringify({ pianoWhites: 22 })).pianoWhites).toBe(22)
+  })
+
+  it("Try arc's steps and flag: a string and a boolean, stored only once chosen", () => {
+    const storage = memoryStorage()
+    const s = new SettingsStore(storage)
+    s.update((c) => ({ ...c, tourSteps: 'connect,~pad' }))
+    expect(JSON.parse(storage.getItem(SETTINGS_KEY)!)).toEqual({ tourSteps: 'connect,~pad' })
+    s.update((c) => ({ ...c, tourDone: true, guideSeen: true }))
+    expect(s.toIndex()).toEqual({ 'app.guideSeen': 'true', 'app.tourSteps': 'connect,~pad', 'app.tourDone': 'true' })
+    expect(new SettingsStore(storage).settings).toMatchObject({ tourSteps: 'connect,~pad', tourDone: true })
+    // A value of the wrong type reads as the default.
+    expect(readSettings(JSON.stringify({ tourSteps: 3, tourDone: 'yes' }))).toMatchObject({ tourSteps: '', tourDone: false })
+  })
+
+  it('clear forgets a setting: back to its default, no longer stored nor copied to library.json', () => {
+    const storage = memoryStorage()
+    const s = new SettingsStore(storage)
+    const seen: string[] = []
+    s.subscribe((v) => seen.push(v.tourSteps))
+    s.update((c) => ({ ...c, tourSteps: 'connect', tourDone: true }))
+    expect(s.clear('tourSteps')).toBe(true)
+    expect(s.settings).toMatchObject({ tourSteps: '', tourDone: true })
+    expect(JSON.parse(storage.getItem(SETTINGS_KEY)!)).toEqual({ tourDone: true })
+    expect(s.isChosen('tourSteps')).toBe(false)
+    expect(s.toIndex()).toEqual({ 'app.tourDone': 'true' })
+    expect(seen).toEqual(['connect', ''])
+    // Nothing stored: nothing to do.
+    expect(s.clear('tourSteps')).toBe(false)
+    expect(new SettingsStore(storage).settings.tourSteps).toBe('')
   })
 
   it('writes nothing when nothing changed', () => {
@@ -333,6 +366,17 @@ describe('fromIndex', () => {
       keysNames: 'LETTERS',
       keysShowNames: false,
     })
+    expect(settingsFromIndex({ 'app.tourSteps': 'connect,pad,~hear', 'app.tourDone': 'true' }, cur)).toEqual({
+      ...cur,
+      tourSteps: 'connect,pad,~hear',
+      tourDone: true,
+    })
+    // Not the tour's progress as written (unknown or out of order), or not a boolean: the current value stays.
+    for (const v of ['nonsense', 'pad,connect', ' connect']) {
+      expect(settingsFromIndex({ 'app.tourSteps': v }, { ...cur, tourSteps: 'pad' }).tourSteps).toBe('pad')
+    }
+    expect(settingsFromIndex({ 'app.tourSteps': '' }, { ...cur, tourSteps: 'pad' }).tourSteps).toBe('')
+    expect(settingsFromIndex({ 'app.tourDone': 'yes' }, cur).tourDone).toBe(cur.tourDone)
     // Out of range or unknown: the current value stays (Android takeIf, not coerceIn).
     const odd = { 'app.keysRoot': '12', 'app.keysOctave': '9', 'app.keysScale': 'minor', 'app.keysNames': 'NUMBERS', 'app.liveKeys': 'TRUE', 'app.keysShowNames': 'no' }
     expect(settingsFromIndex(odd, cur)).toEqual(cur)

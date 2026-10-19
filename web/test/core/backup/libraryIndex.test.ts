@@ -78,4 +78,11 @@ describe('LibraryIndexTest', () => {
     const m = merge([old, newer])
     expect(m.settings).toEqual({ 'mirror.learned': '0:10,1:11,5:12', 'app.theme': 'DARK' })
   })
+
+  it("the tour's steps from an old and a new index are combined", () => {
+    const old: LibraryIndexData = { entries: [], settings: { 'app.tourSteps': 'connect,pad,~backup' } }
+    const newer: LibraryIndexData = { entries: [], settings: { 'app.tourSteps': 'backup,~hear' } }
+    const m = merge([old, newer])
+    expect(m.settings).toEqual({ 'app.tourSteps': 'connect,pad,~hear,backup' })
+  })
 })

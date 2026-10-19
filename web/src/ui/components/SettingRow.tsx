@@ -118,12 +118,15 @@ export function RowAction(props: {
   danger?: boolean
   disabled?: boolean
   describedBy?: string | undefined
+  /** The name read out where [text] alone says too little ("What's what: Show"). */
+  label?: string
 }): JSX.Element {
   return (
     <button
       type="button"
       class={`row-action${props.danger ? ' row-action--danger' : ''}`}
       disabled={props.disabled}
+      aria-label={props.label}
       aria-describedby={props.describedBy}
       onClick={props.onClick}
     >

@@ -131,6 +131,17 @@ describe('view (Root flags)', () => {
     expect(viewOf([BASE]).tab).toBe('live')
   })
 
+  it('Try arc is an overlay of its own (restored after a reload)', () => {
+    const s: Stack = [BASE, overlayLayer('tour')]
+    expect(viewOf(s).tour).toBe(true)
+    expect(viewOf(s).coach).toBe(false)
+    expect(viewOf([BASE]).tour).toBe(false)
+    expect(isLive(viewOf(s))).toBe(true)
+    expect(rootView(viewOf(s), () => true)).toBe('shell')
+    expect(keys(stackFromState(JSON.parse(JSON.stringify(stateOf(s)))))).toEqual(['tab:live', 'overlay:tour'])
+    expect(stackFromState({ arc: 1, stack: [{ kind: 'overlay', overlay: 'tours' }] })).toBeNull()
+  })
+
   it('the guide does not leave the tabs (it slides over the shell)', () => {
     expect(onTabs(viewOf([BASE, screenLayer({ kind: 'guide' })]))).toBe(true)
   })
@@ -141,6 +152,12 @@ describe('transitions', () => {
     const s: Stack = [BASE, tabLayer('backups'), overlayLayer('menu')]
     expect(keys(selectTab(s, 'device'))).toEqual(['tab:live', 'tab:device'])
     expect(keys(selectTab(s, 'live'))).toEqual(['tab:live'])
+  })
+
+  it('selectTab keeps Try arc open (its offline step picks Backups from the menu)', () => {
+    const s: Stack = [BASE, overlayLayer('tour'), overlayLayer('side'), overlayLayer('menu')]
+    expect(keys(selectTab(s, 'backups'))).toEqual(['tab:live', 'tab:backups', 'overlay:tour'])
+    expect(keys(selectTab(s, 'live'))).toEqual(['tab:live', 'overlay:tour'])
   })
 
   it('push ignores a repeat of the top layer', () => {
@@ -179,6 +196,17 @@ describe('transitions', () => {
       'tab:live',
       'screen:#/settings',
     ])
+  })
+
+  it('Back closes the tour right after the guide overlay: Live tools and the menu go first, sheets after', () => {
+    let s: Stack | null = [BASE, overlayLayer('tour'), sheetLayer('progress'), overlayLayer('side'), overlayLayer('menu'), overlayLayer('coach')]
+    const closed: string[] = []
+    while (s !== null && s.length > 1) {
+      const next: Stack | null = backStack(s)
+      closed.push(keys(s)!.find((k) => !(keys(next) ?? []).includes(k)) ?? '')
+      s = next
+    }
+    expect(closed).toEqual(['overlay:side', 'overlay:menu', 'overlay:coach', 'overlay:tour', 'overlay:sheet:progress'])
   })
 })
 
@@ -355,6 +383,23 @@ describe('Nav', () => {
     expect(nav.canBack()).toBe(true)
     await w.back()
     expect(stackKeys(nav)).toEqual(['tab:live'])
+  })
+
+  it("the app's own Back (Escape on the tour) keeps to the guard too", async () => {
+    const w = new FakeWindow('')
+    const nav = new Nav(w)
+    nav.start()
+    nav.open(overlayLayer('tour'))
+    nav.open(sheetLayer('progress'))
+    let modal = true
+    nav.setBackGuard(() => modal && nav.current.sheets.includes('progress'))
+    nav.back()
+    await nav.settled()
+    expect(stackKeys(nav)).toEqual(['tab:live', 'overlay:tour', 'overlay:sheet:progress'])
+    modal = false
+    nav.back()
+    await nav.settled()
+    expect(stackKeys(nav)).toEqual(['tab:live', 'overlay:sheet:progress'])
   })
 
   it('a typed-in hash starts a stack for it', () => {

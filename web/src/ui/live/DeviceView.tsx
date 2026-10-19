@@ -556,7 +556,8 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           </div>
 
           {ROW_Y.map((y) => COLS.map((x) => well(x, y, 130, 128)))}
-          <div role="group" aria-label={keys.on ? MirrorText.MODE_KEYS : `${MirrorText.GROUP} ${MirrorText.groupKey(group)}`}>
+          {/* Try arc's Hear step lets touches through to these (the mark is the box above, over them). */}
+          <div role="group" aria-label={keys.on ? MirrorText.MODE_KEYS : `${MirrorText.GROUP} ${MirrorText.groupKey(group)}`} data-coach-pass={keys.on ? 'live.keys' : 'live.pads'}>
             {props.pads}
           </div>
 

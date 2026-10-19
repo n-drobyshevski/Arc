@@ -64,4 +64,12 @@ class LibraryIndexTest {
         val m = LibraryIndex.merge(listOf(old, newer))
         assertEquals(mapOf("mirror.learned" to "0:10,1:11,5:12", "app.theme" to "DARK"), m.settings)
     }
+
+    @Test
+    fun `the tour's steps from an old and a new index are combined`() {
+        val old = LibraryIndexData(emptyList(), mapOf("app.tourSteps" to "connect,pad,~backup"))
+        val newer = LibraryIndexData(emptyList(), mapOf("app.tourSteps" to "backup,~hear"))
+        val m = LibraryIndex.merge(listOf(old, newer))
+        assertEquals(mapOf("app.tourSteps" to "connect,pad,~hear,backup"), m.settings)
+    }
 }

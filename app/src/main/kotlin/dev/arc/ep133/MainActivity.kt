@@ -40,6 +40,11 @@ import androidx.lifecycle.repeatOnLifecycle
 import dev.arc.ep133.backup.PakExport
 import dev.arc.ep133.backup.PakSound
 import dev.arc.ep133.controller.ArcController
+import dev.arc.ep133.features.FirstRun
+import dev.arc.ep133.features.Tour
+import dev.arc.ep133.features.TourSession
+import dev.arc.ep133.features.TourSnapshot
+import dev.arc.ep133.features.TourStep
 import dev.arc.ep133.files.Files
 import dev.arc.ep133.text.BackupRecord
 import dev.arc.ep133.text.FeatureText
@@ -48,7 +53,10 @@ import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcSheet
 import dev.arc.ep133.ui.screens.KeysSheetContent
 import dev.arc.ep133.ui.components.ArcFrame
-import dev.arc.ep133.ui.components.CoachHost
+import dev.arc.ep133.ui.components.TourActions
+import dev.arc.ep133.ui.components.TourHost
+import dev.arc.ep133.ui.components.TourSessionSaver
+import dev.arc.ep133.ui.components.TourUi
 import dev.arc.ep133.ui.components.ArcToast
 import dev.arc.ep133.ui.components.Tab
 import dev.arc.ep133.ui.components.ArcShell
@@ -646,15 +654,16 @@ class MainActivity : ComponentActivity() {
         var latencyOpen by rememberSaveable { mutableStateOf(false) }
         var settingsOpen by rememberSaveable { mutableStateOf(false) }
         var fontLicence by rememberSaveable { mutableStateOf(false) }
-        // The guide overlay: from the ? key, and once by itself on the first start.
+        // The guide overlay: from the ? key, and once by itself on the first start (when the tour doesn't).
         var coach by rememberSaveable { mutableStateOf(false) }
-        LaunchedEffect(Unit) {
-            // Kept with the settings (and so in Documents/arc); "coach_seen" is where it was before.
-            if (!controller.settings.value.guideSeen) {
-                if (!getPreferences(MODE_PRIVATE).getBoolean("coach_seen", false)) coach = true
-                controller.setGuideSeen()
-            }
-        }
+        // "Try arc": the run on screen, null while it isn't (its progress is kept in the settings).
+        var tourSession by rememberSaveable(stateSaver = TourSessionSaver) { mutableStateOf<TourSession?>(null) }
+        // While the tour shows, Live shows one group (until Live is left; never saved).
+        var forceOneGroup by rememberSaveable { mutableStateOf(false) }
+        // Its card is in the lower half: messages show at the top while it does.
+        var tourCardLow by remember { mutableStateOf(false) }
+        // What opens by itself is decided once, when the library has been read.
+        var firstRunChecked by rememberSaveable { mutableStateOf(false) }
         // The section under the top bar; the other screens stack over it without the bars.
         // Live is the home section: the app opens on it.
         var tab by rememberSaveable { mutableStateOf(Tab.LIVE) }
@@ -696,6 +705,9 @@ class MainActivity : ComponentActivity() {
             if (punchMode) controller.punchAllUp()
             punchMode = false
         }
+        // Live tools (the strip's panel) and the section list: the tour steps aside while one is open.
+        var toolsOpen by rememberSaveable { mutableStateOf(false) }
+        var menuOpen by remember { mutableStateOf(false) }
         // The mirror listens only while its tab is in front (not under the debug, settings or guide screen).
         val live = tab == Tab.LIVE && !debug && !settingsOpen && !guideOpen
         val appSettings by controller.settings.collectAsStateWithLifecycle()
@@ -712,6 +724,8 @@ class MainActivity : ComponentActivity() {
                     controller.exitSample()
                     controller.closeMirror()
                     controller.stopPlayback()
+                    forceOneGroup = false
+                    toolsOpen = false
                     liveEdit = false
                     padSheet = null
                     tempoSheet = false
@@ -730,6 +744,28 @@ class MainActivity : ComponentActivity() {
             }
             tab = t
             if (t == Tab.DEVICE) controller.refreshBrowser()
+        }
+
+        /** Opens the tour on Live, from the progress kept so far. */
+        fun openTour() {
+            val st = controller.settings.value
+            selectTab(Tab.LIVE)
+            forceOneGroup = true
+            coach = false
+            tourSession = Tour.open(Tour.decode(st.tourSteps), st.guideSeen, st.tourDone, controller.state.value.backups.size)
+        }
+
+        LaunchedEffect(state.libraryChecked) {
+            if (!state.libraryChecked || firstRunChecked) return@LaunchedEffect
+            firstRunChecked = true
+            // Kept with the settings (and so in Documents/arc); "coach_seen" is where it was before.
+            if (getPreferences(MODE_PRIVATE).getBoolean("coach_seen", false) && !controller.settings.value.guideSeen) controller.setGuideSeen()
+            val st = controller.settings.value
+            when (Tour.firstRun(st.guideSeen, st.tourDone, st.tourSteps, controller.state.value.backups.size, demo = false)) {
+                FirstRun.TOUR -> openTour()
+                FirstRun.COACH -> coach = true
+                FirstRun.NONE -> {}
+            }
         }
 
         // Keep the screen on while the progress sheet or the live mirror is open.
@@ -879,6 +915,149 @@ class MainActivity : ComponentActivity() {
                 onEraseNoteUp = controller::eraseNoteUp,
             )
         }
+
+        // Something sounds on the phone (the HEAR step's tick): collected only while the tour is open,
+        // so Live's voices otherwise stay out of this screen's recompositions.
+        var tourHeard by remember { mutableStateOf(false) }
+        LaunchedEffect(tourSession != null) {
+            if (tourSession == null) {
+                tourHeard = false
+                return@LaunchedEffect
+            }
+            controller.liveKeys.collect { tourHeard = it.isNotEmpty() }
+        }
+
+        // The tour reads the app as it is now; each change may tick its step.
+        val mirrorState = state.mirror?.state
+        val lastHit = mirrorState?.lastHit
+        val tourSnap = TourSnapshot(
+            backups = state.backups.size,
+            canRestore = state.libraryLoaded && !state.folderPicked && state.backups.isEmpty(),
+            midi = state.midiSupported,
+            connected = state.connected && state.device != null,
+            busy = state.busy,
+            hitAt = lastHit?.pad?.let { mirrorState?.pads?.get(it)?.onAt },
+            hitNamed = lastHit?.name != null,
+            heard = tourHeard,
+            toolsOpen = toolsOpen,
+            guideOpen = guideOpen,
+            onBackups = tab == Tab.BACKUPS,
+        )
+        LaunchedEffect(tourSession, tourSnap, appSettings.tourSteps, appSettings.guideSeen, appSettings.tourDone) {
+            val s = tourSession ?: return@LaunchedEffect
+            val st = controller.settings.value
+            // Finished since it opened (a restore brought back a finished tour): it closes quietly.
+            if (Tour.closes(s, st.guideSeen, st.tourDone)) {
+                tourSession = null
+                return@LaunchedEffect
+            }
+            // The same clock as the pads' lights (PadLight.onAt).
+            val (p, next) = Tour.advance(Tour.decode(st.tourSteps), s, tourSnap, System.nanoTime())
+            val text = Tour.encode(p)
+            if (text != st.tourSteps) controller.setTourSteps(text)
+            if (next != s) tourSession = next
+        }
+        val tourProgress = Tour.decode(appSettings.tourSteps)
+        val tourUi = tourSession?.let { s ->
+            val step = Tour.current(tourProgress, s, tourSnap)
+            TourUi(
+                step = step,
+                resumed = s.resumed,
+                resumeAt = Tour.resumeAt(tourProgress),
+                midi = state.midiSupported,
+                plugged = state.plugged,
+                connected = tourSnap.connected,
+                busy = state.busy,
+                needsConnect = Tour.needsDevice(step) && state.device == null,
+                canBackup = state.device != null && !state.busy,
+                canPlay = lastHit?.pad != null && tourSnap.hitNamed,
+                laterNote = Tour.laterNote(tourProgress, state.midiSupported),
+                steps = Tour.stepsFor(s, state.midiSupported),
+                offline = s.offline,
+                deviceHere = s.offline && tourSnap.connected,
+            )
+        }
+        // In what an offline step pointed at (Live tools, the guide, the section list): the tour
+        // steps aside, and its next card shows once that closes.
+        val tourAway = menuOpen || guideOpen || toolsOpen
+        // Back up's step took the user to Backups: its Done goes back to Live, where Done's tags are.
+        var tourOnBackups by rememberSaveable { mutableStateOf(false) }
+        // Each step on the section it is about, as it comes up (not while the tour has stepped aside):
+        // Back up's key is on Backups, the pads on Live, one group at a time. The offline run's Done
+        // stays where the user is.
+        LaunchedEffect(tourUi?.step, tourAway) {
+            if (tourAway) return@LaunchedEffect
+            val ui = tourUi
+            when (ui?.step) {
+                null -> tourOnBackups = false
+                TourStep.BACKUP -> if (tab != Tab.BACKUPS) {
+                    selectTab(Tab.BACKUPS)
+                    tourOnBackups = true
+                }
+                TourStep.PAD, TourStep.HEAR -> if (tab != Tab.LIVE) {
+                    selectTab(Tab.LIVE)
+                    forceOneGroup = true
+                }
+                TourStep.DONE -> {
+                    if (tourOnBackups && !ui.offline && tab == Tab.BACKUPS) {
+                        selectTab(Tab.LIVE)
+                        forceOneGroup = true
+                    }
+                    tourOnBackups = false
+                }
+                else -> {}
+            }
+        }
+        fun closeTour() {
+            tourSession = null
+        }
+        val tourActions = TourActions(
+            onStart = { tourSession = tourSession?.let(Tour::welcome) },
+            onOffline = { tourSession = tourSession?.let(Tour::goOffline) },
+            onNotNow = {
+                controller.finishTour()
+                closeTour()
+            },
+            onSkip = {
+                val s = tourSession
+                val step = tourUi?.step
+                if (s != null && step != null) {
+                    val p = Tour.decode(controller.settings.value.tourSteps)
+                    // A Connect ticked during this run is passed with Next, not skipped.
+                    if (step == TourStep.CONNECT && TourStep.CONNECT in p.done) {
+                        tourSession = Tour.ackConnect(s)
+                    } else {
+                        controller.setTourSteps(Tour.encode(Tour.skip(p, step)))
+                    }
+                }
+            },
+            onNext = { tourSession = tourSession?.let(Tour::ackConnect) },
+            onConnect = controller::connectIfNeeded,
+            onRestore = { folderLauncher.launch(dev.arc.ep133.data.ExternalLibrary.INITIAL_FOLDER) },
+            onBackup = { withNotifications { controller.backup() } },
+            onPlay = { lastHit?.pad?.let { controller.playPad(it, hold = false) } },
+            onDone = {
+                controller.finishTour()
+                closeTour()
+            },
+            onOpen = {
+                when (tourUi?.step) {
+                    TourStep.TOOLS -> {
+                        selectTab(Tab.LIVE)
+                        toolsOpen = true
+                    }
+                    TourStep.GUIDE -> guideOpen = true
+                    TourStep.SECTIONS -> selectTab(Tab.BACKUPS)
+                    else -> {}
+                }
+            },
+            onTryPads = {
+                tourSession = tourSession?.let(Tour::goDevice)
+                // The pads are on Live, one group at a time as when the tour opened.
+                selectTab(Tab.LIVE)
+                forceOneGroup = true
+            },
+        )
         val compareA = compareIds?.substringBefore('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         val compareB = compareIds?.substringAfter('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         // Also runs again after a recreation, when the result is gone.
@@ -894,7 +1073,8 @@ class MainActivity : ComponentActivity() {
             null
         }
         val keys = dev.arc.ep133.ui.screens.KeysUi(
-            on = appSettings.liveKeys,
+            // The tour points at the pads: KEYS waits until it is over.
+            on = appSettings.liveKeys && tourSession == null,
             root = appSettings.keysRoot,
             scale = appSettings.keysScale,
             octave = appSettings.keysOctave,
@@ -1144,6 +1324,15 @@ class MainActivity : ComponentActivity() {
                     wireless = liveWireless,
                     latency = controller.outputLatencyMs,
                     onReviewSamples = controller::setReviewSamples,
+                    onTryAgain = {
+                        controller.restartTour()
+                        settingsOpen = false
+                        openTour()
+                    },
+                    onShowGuide = {
+                        settingsOpen = false
+                        coach = true
+                    },
                     onRestoreFolder = { folderLauncher.launch(dev.arc.ep133.data.ExternalLibrary.INITIAL_FOLDER) },
                     // No browser installed: nothing to open.
                     onSource = { runCatching { uri.openUri(dev.arc.ep133.text.SettingsText.SOURCE_URL) } },
@@ -1219,7 +1408,21 @@ class MainActivity : ComponentActivity() {
                     onOpen = { b -> contentsId = b.id },
                     onBack = { search = false },
                 )
-            } else CoachHost(visible = coach, onDismiss = { coach = false }) {
+            } else TourHost(
+                tour = tourUi,
+                actions = tourActions,
+                // Back pauses the tour (it comes back as Welcome back); on the first card it means Not now.
+                onBack = { if (tourUi?.step == TourStep.WELCOME) tourActions.onNotNow() else closeTour() },
+                coach = coach,
+                onCardLow = { tourCardLow = it },
+                away = tourAway,
+                onCoachDismiss = {
+                    coach = false
+                    // Seen once it has been closed (also kept in Documents/arc). Opened while the
+                    // tour stepped aside, the tour's end says so: seen now, it would close the tour.
+                    if (!controller.settings.value.guideSeen && tourSession == null) controller.setGuideSeen()
+                },
+            ) {
                 ArcShell(
                     tab = tab,
                     onTab = { selectTab(it) },
@@ -1237,9 +1440,10 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                     // On a phone on its side, Live's display line rides in the top bar.
-                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, transport = liveTransport, take = liveTake, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, sample = sampleUi, punch = punches, arp = arp.line, header = sampleHeader, step = liveStep, scene = liveScene, sceneOpens = appSettings.liveOneGroup && !appSettings.liveKeys) }) else null,
+                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, transport = liveTransport, take = liveTake, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, sample = sampleUi, punch = punches, arp = arp.line, header = sampleHeader, step = liveStep, scene = liveScene, sceneOpens = (appSettings.liveOneGroup || forceOneGroup) && !keys.on) }) else null,
                     sample = sampleKey,
                     late = lateKey,
+                    onMenuOpen = { menuOpen = it },
                 ) {
                     // Back from another section returns to Live, the home section, first.
                     BackHandler(enabled = tab != Tab.LIVE) { selectTab(Tab.LIVE) }
@@ -1281,8 +1485,10 @@ class MainActivity : ComponentActivity() {
                             // collected inside Live, so a voice starting doesn't recompose the whole app.
                             voices = controller.liveKeys,
                             haptics = appSettings.haptics,
-                            oneGroup = appSettings.liveOneGroup,
+                            oneGroup = appSettings.liveOneGroup || forceOneGroup,
                             onOneGroup = controller::setLiveOneGroup,
+                            toolsOpen = toolsOpen,
+                            onToolsOpen = { toolsOpen = it },
                             follow = appSettings.liveFollow,
                             onFollow = controller::setLiveFollow,
                             onPianoRange = { pianoRange = it },
@@ -1759,7 +1965,8 @@ class MainActivity : ComponentActivity() {
                 onTimeout = controller::dismissToast,
                 action = toast?.action,
                 onAction = toast?.onAction,
-                modifier = Modifier.align(Alignment.BottomCenter),
+                // While the tour shows, at the edge away from its card (and so clear of the control it rings).
+                modifier = Modifier.align(if (tourSession != null && tourCardLow) Alignment.TopCenter else Alignment.BottomCenter),
             )
         }
     }

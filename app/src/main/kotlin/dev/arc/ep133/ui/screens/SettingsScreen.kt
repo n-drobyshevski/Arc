@@ -64,6 +64,7 @@ import dev.arc.ep133.features.FactorySounds
 import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.PadOrder
 import dev.arc.ep133.features.Piano
+import dev.arc.ep133.text.CoachText
 import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.Format
 import dev.arc.ep133.text.MirrorText
@@ -93,7 +94,8 @@ import kotlinx.coroutines.launch
 /**
  * The settings (an addition to the web version): theme, connecting, the
  * screen in Live, how many backups to keep, Live's pad numbering, note names,
- * piano size, haptics, making up for Bluetooth delay and SAMPLE's review, what arc keeps on the phone, and about arc. Each setting is
+ * piano size, haptics, making up for Bluetooth delay and SAMPLE's review, what arc keeps on the phone, help (the tour and the guide
+ * overlay), and about arc. Each setting is
  * one row (its name and control; an info key after the name for its notes), rows
  * grouped in plates. On a phone the plates are one scroll; on a wide window a
  * list of the sections sits on the left, its LED on the section in view.
@@ -133,6 +135,10 @@ fun SettingsScreen(
     onGetFactory: ((FactoryKit) -> Unit)? = null,
     /** The factory kit Live plays offline, offered once two or more kits are saved. */
     onFactoryKit: (FactoryKit) -> Unit = {},
+    /** Try arc again: the tour from the start, on Live. */
+    onTryAgain: () -> Unit = {},
+    /** What's what: the guide overlay. */
+    onShowGuide: () -> Unit = {},
     onSource: () -> Unit,
     onFontLicence: () -> Unit,
     onDebug: () -> Unit,
@@ -318,6 +324,15 @@ fun SettingsScreen(
                         textColor = c.danger,
                         enabled = (soundsSize ?: 0L) > 0L,
                     )
+                }
+            }
+        },
+        Section(SettingsText.HELP) {
+            GridPlate {
+                LinkRow(SettingsText.TRY_AGAIN, onTryAgain, note = SettingsText.TRY_AGAIN_NOTE)
+                PlateLine()
+                SettingRow(CoachText.HELP, note = SettingsText.SHOW_NOTE) {
+                    ArcKey(SettingsText.SHOW, onShowGuide, size = KeySize.Small)
                 }
             }
         },

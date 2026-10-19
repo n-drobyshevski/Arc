@@ -82,7 +82,13 @@ sound: unlike `busy`, keep every key enabled; an action just waits a moment),
 (`'none' \| 'granted' \| 'prompt' \| 'denied'`; `'prompt'` shows the "Reconnect
 library folder" banner), `canPickFolder`, `folderName` (the folder in use, for `WebText.folderNote`),
 `offlinePads` (Live's pad changes made offline and kept: the tools' Reset pads row),
-`offlinePrompt` (their count, new samples apart, while the EP-133, connected again, asks whether to write them).
+`offlinePrompt` (their count, new samples apart, while the EP-133, connected again, asks whether to write them),
+`libraryChecked` (the library was read once, or failed to: the first-run
+decision waits for it), `folderChecked` (the remembered folder was looked
+at: Try arc's Restore step waits for it), `plugged` (an EP-133 is plugged in;
+null until MIDI access was given), `midiPermission` (`'granted' \| 'prompt' \|
+'denied' \| 'unsupported'`, from the probe, then from asking), `connectNote`
+(`WebText.OTHER_TAB` after a Connect another tab refused, for Try arc's card).
 
 ## Actions
 
@@ -158,6 +164,12 @@ on the keys), `padSoundsSize(): Promise<number>` (bytes, for
 `SettingsText.padSounds(Format.bytes(n))`) and `clearPadSounds()`,
 `setHaptics(on)` (the pads' and keys' tick; show the row only where
 `platform/haptics` `supported()`), `setGuideSeen()`, `pruneCount(keep)` (for the confirm dialog), then `setKeepLast(keep)`.
+
+**Try arc**: `setTourSteps(steps)` (Tour.encode), `finishTour()` (tourDone and
+guideSeen together: Done, Not now, ×), `restartTour()` (forgets the steps,
+leaves tourDone); all three reach library.json only once there is a library
+(`Tour.syncsIndex`). `connectIfNeeded()` (the card's Connect: never
+disconnects), `demo` and `demoPress()` (?demo presses pad A for the Pad step).
 
 **Debug log**: `logText()`, `logFileName()`, `saveLog()`*, `shareLog()`*, `copyLog()`*.
 Its latency test: `liveLatency` (signal: `LatencyStats` per engine row, and each

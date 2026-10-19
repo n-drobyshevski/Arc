@@ -1,0 +1,102 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Tour.kt (TourCard) */
+
+/* The step card: the shell's colour, rounded like a sheet, lifted off the veil. */
+.tour-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius-sheet);
+  background: var(--shell);
+  color: var(--ink);
+  box-shadow: 0 2px 0 var(--plate), 0 10px 30px rgba(20, 20, 18, 0.18);
+}
+
+.tour-card__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.tour-card__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.tour-card__title {
+  margin: 0;
+  color: var(--ink);
+}
+
+/* "STEP 2 OF 4  ●●○○" */
+.tour-card__step {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  color: var(--graphite);
+}
+.tour-card__dots { display: inline-flex; gap: 5px; }
+.tour-card__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--graphite);
+}
+.tour-card__dot.is-on { background: var(--signal); border-color: var(--signal); }
+
+.tour-card__close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin: -8px -8px 0 0;
+  border-radius: var(--radius-key);
+  color: var(--graphite);
+}
+.tour-card__close svg { fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.tour-card__close:focus-visible { outline: var(--focus-ring); outline-offset: -3px; }
+
+/* Welcome: the display panel with the wordmark. */
+.tour-card__display { flex: 1 1 auto; min-width: 0; gap: 0; padding: 14px 18px 16px; }
+.tour-card__wordmark { margin: 0; color: var(--display-ink); }
+.tour-card__sub { margin: 0; color: var(--display-dim); }
+
+.tour-card__body { margin: 0; }
+.tour-card__note { margin: 0; color: var(--graphite); }
+
+.tour-card__checks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tour-card__check { display: flex; align-items: center; gap: 10px; color: var(--graphite); }
+.tour-card__check.is-done, .tour-card__check.is-next { color: var(--ink); }
+.tour-card__mark { width: 18px; text-align: center; font-weight: 800; }
+.tour-card__check.is-done .tour-card__mark { color: var(--ok); }
+.tour-card__check.is-next .tour-card__mark { color: var(--signal); }
+
+.tour-card__keys {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.tour-card__demo { align-self: flex-start; }
+
+/* Without the EP-133: the offline Done's keys, and Try the pads under its line, one above the other. */
+.tour-card__stack { display: flex; flex-direction: column; gap: 10px; }
+
+/* Pad and Hear: one row (heading, keys, ×), then one short line. */
+.tour-card--compact { gap: 6px; padding: 10px 12px 12px 16px; }
+.tour-card__row { display: flex; align-items: center; gap: 6px; }
+.tour-card__row .tour-card__title { flex: 1 1 auto; min-width: 0; }
+.tour-card--compact .tour-card__close { margin: 0 -4px 0 0; }

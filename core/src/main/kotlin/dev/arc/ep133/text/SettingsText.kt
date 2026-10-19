@@ -130,6 +130,12 @@ object SettingsText {
     fun padSoundsShort(size: String) = "$PAD_SOUNDS_SHORT \u00B7 $size"
     const val PAD_SOUNDS_SHORT_NOTE = "Copies of your pad samples, to play without the EP-133."
 
+    const val HELP = "Help"
+    const val TRY_AGAIN = "Try arc again"
+    const val TRY_AGAIN_NOTE = "A few short steps on the real screen: connect, play a pad, back up."
+    const val SHOW = "Show"
+    const val SHOW_NOTE = "Names every control on the screen."
+
     const val ABOUT = "About"
     fun version(v: String) = "arc $v"
     const val LICENCE_NOTE = "Free and open source (MIT). Not affiliated with teenage engineering."

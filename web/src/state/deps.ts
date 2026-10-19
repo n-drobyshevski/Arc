@@ -16,6 +16,8 @@
 // [Deps.padSounds] the folder PadSoundCache keeps its copies in,
 // [Deps.lastRead] Live's last read of the device (files/live-last.json) and
 // [Deps.offlinePads] its pad changes made offline (files/live-pads.json).
+//
+// ?demo (no Android counterpart): [Deps.demo] and [Deps.demoPress], for Try arc.
 
 import type { RecState } from '../core/features/takeRecorder'
 import type { LiveArpPlan, LiveSeqPlan, LiveTimeline, MicOpened, RecordedTake } from '../platform/audio/liveAudio'
@@ -427,6 +429,10 @@ export interface Deps {
   userAgent: string
   /** Settings changed in another tab (the window "storage" event). */
   onStorageChange?: ((listener: () => void) => () => void) | undefined
+  /** ?demo: the simulated EP-133 stands in for the device (Try arc then always starts, and presses a pad itself). */
+  demo?: boolean | undefined
+  /** ?demo: the simulated EP-133 plays pad A "." (a note-on with its pad push, the note-off 400 ms later). */
+  demoPress?: (() => void) | undefined
 }
 
 /**

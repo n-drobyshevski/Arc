@@ -16,6 +16,7 @@ import dev.arc.ep133.features.SwitchTime
 import dev.arc.ep133.features.Tempo
 import dev.arc.ep133.features.Timing
 import dev.arc.ep133.features.TimingSettings
+import dev.arc.ep133.features.Tour
 import dev.arc.ep133.text.LiveEngine
 import dev.arc.ep133.text.SkinChoice
 import dev.arc.ep133.text.ThemeChoice
@@ -123,6 +124,10 @@ data class AppSettings(
      * factory line, and set to the kit of each EP-133 or EP-1320 connected, so Live opens on the device used last.
      */
     val factoryKit: FactoryKit = FactoryKit.EP133,
+    /** "Try arc": the steps done and skipped so far (Tour.encode); empty before the first. */
+    val tourSteps: String = "",
+    /** "Try arc" was finished or put off with Not now: it no longer opens by itself. */
+    val tourDone: Boolean = false,
 ) {
     /** TIMING as one: interval, swing and quantize. */
     val timing: TimingSettings get() = TimingSettings(timingInterval, timingSwing, timingQuantize)
@@ -242,12 +247,15 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
         arpLatch = prefs.getBoolean("arpLatch", false),
         sceneSwitch = SwitchTime.of(prefs.getString("sceneSwitch", null) ?: "") ?: SwitchTime.DEFAULT,
         factoryKit = FactoryKit.ofId(prefs.getString("factoryKit", null)) ?: FactoryKit.EP133,
+        tourSteps = prefs.getString("tourSteps", null) ?: "",
+        tourDone = prefs.getBoolean("tourDone", false),
     )
 
     // TIMING as an earlier version kept it: one choice, OFF or a grid.
     private fun legacyTiming(): Timing? = Timing.of(prefs.getString("patternTiming", null) ?: "")
 
-    fun update(change: (AppSettings) -> AppSettings) {
+    /** Saves what [change] changed; returns whether anything did. */
+    fun update(change: (AppSettings) -> AppSettings): Boolean {
         val cur = _settings.value
         val next = change(cur)
         val before = cur.values()
@@ -256,24 +264,33 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
         // TIMING's settings go in together: an interval left unwritten would otherwise be read back from patternTiming, which OFF loses.
         if (changed.keys.any { it in TIMING_KEYS }) changed = changed + after.filterKeys { it in TIMING_KEYS }
         val engine = next.liveEngine != cur.liveEngine
-        if (changed.isEmpty() && !engine) return
+        if (changed.isEmpty() && !engine) return false
         prefs.edit {
             // Not one of [values]: not in library.json. The default isn't kept either.
             if (engine) {
                 if (next.liveEngine == LiveEngine.AUTO) remove(LIVE_ENGINE) else putString(LIVE_ENGINE, next.liveEngine.name)
             }
             for ((k, v) in changed) {
-                when (k) {
-                    "theme", "skin", "keysScale", "keysNames", "keysViewWide", "keysViewTall", "sampleSource", "sampleThreshold", "patternTiming",
-                    "timingInterval", "arpOrder", "sceneSwitch", "factoryKit", "claudePrompt", "claudePrompts" -> putString(k, v)
-                    "keepLast", "keysRoot", "keysOctave", "pianoWhites", "liveTempo", "sampleBars",
-                    "timingSwing", "arpOctaves", "arpGate" -> putInt(k, v.toInt())
-                    "sampleGainMic", "sampleGainRsp", "sampleGainUsb" -> putFloat(k, v.toFloat())
-                    else -> putBoolean(k, v.toBooleanStrict())
+                when (kind(k)) {
+                    Kind.STRING -> putString(k, v)
+                    Kind.INT -> putInt(k, v.toInt())
+                    Kind.FLOAT -> putFloat(k, v.toFloat())
+                    Kind.BOOLEAN -> putBoolean(k, v.toBooleanStrict())
                 }
             }
         }
         _settings.value = next
+        return true
+    }
+
+    /**
+     * Forgets a stored setting: its key leaves the preferences (and so
+     * library.json), and the setting goes back to its default.
+     */
+    fun clear(key: String) {
+        kind(key)
+        prefs.edit { remove(key) }
+        _settings.value = read()
     }
 
     /** As stored in library.json: only the settings that were chosen. */
@@ -282,6 +299,75 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
 
     /** Takes back what library.json held; anything missing or unreadable stays as it is. */
     fun fromIndex(map: Map<String, String>) = update { it.withIndex(map) }
+
+    /** How each setting is stored in the preferences. */
+    enum class Kind { STRING, INT, FLOAT, BOOLEAN }
+
+    companion object {
+        /** Every setting's key and how it is stored; [values] and this list the same keys. */
+        val KINDS: Map<String, Kind> = linkedMapOf(
+            "theme" to Kind.STRING,
+            "skin" to Kind.STRING,
+            "autoConnect" to Kind.BOOLEAN,
+            "keepScreenOn" to Kind.BOOLEAN,
+            "backgroundPlay" to Kind.BOOLEAN,
+            "keepLast" to Kind.INT,
+            "liveOneGroup" to Kind.BOOLEAN,
+            "liveFollow" to Kind.BOOLEAN,
+            "guideSeen" to Kind.BOOLEAN,
+            "liveKeys" to Kind.BOOLEAN,
+            "keysRoot" to Kind.INT,
+            "keysScale" to Kind.STRING,
+            "keysOctave" to Kind.INT,
+            "keysNames" to Kind.STRING,
+            "keysShowNames" to Kind.BOOLEAN,
+            "keysViewWide" to Kind.STRING,
+            "keysViewTall" to Kind.STRING,
+            "pianoWhites" to Kind.INT,
+            "haptics" to Kind.BOOLEAN,
+            "makeUpDelay" to Kind.BOOLEAN,
+            "liveTempo" to Kind.INT,
+            "shareSounds" to Kind.BOOLEAN,
+            "claudePrompt" to Kind.STRING,
+            "claudePrompts" to Kind.STRING,
+            "replaceScenes" to Kind.BOOLEAN,
+            "sampleSource" to Kind.STRING,
+            "sampleStereo" to Kind.BOOLEAN,
+            "sampleGainMic" to Kind.FLOAT,
+            "sampleGainRsp" to Kind.FLOAT,
+            "sampleGainUsb" to Kind.FLOAT,
+            "sampleThreshold" to Kind.STRING,
+            "sampleBars" to Kind.INT,
+            "reviewSamples" to Kind.BOOLEAN,
+            "sampleNormalize" to Kind.BOOLEAN,
+            "sampleTrimSilence" to Kind.BOOLEAN,
+            "samplePattern" to Kind.BOOLEAN,
+            "patternTiming" to Kind.STRING,
+            "patternCountIn" to Kind.BOOLEAN,
+            "patternAutoLength" to Kind.BOOLEAN,
+            "timingInterval" to Kind.STRING,
+            "timingSwing" to Kind.INT,
+            "timingQuantize" to Kind.BOOLEAN,
+            "arpOn" to Kind.BOOLEAN,
+            "arpOrder" to Kind.STRING,
+            "arpOctaves" to Kind.INT,
+            "arpGate" to Kind.INT,
+            "arpLatch" to Kind.BOOLEAN,
+            "sceneSwitch" to Kind.STRING,
+            "factoryKit" to Kind.STRING,
+            "tourSteps" to Kind.STRING,
+            "tourDone" to Kind.BOOLEAN,
+        )
+
+        /** A key without a kind is a mistake: it fails loudly rather than being saved as the wrong type. */
+        fun kind(key: String): Kind = KINDS[key] ?: throw IllegalArgumentException("unknown setting: $key")
+
+        /** [cur] with what library.json ([map], "app.*") held; anything missing or unreadable stays as it is. */
+        fun readIndex(cur: AppSettings, map: Map<String, String>): AppSettings = cur.withIndex(map)
+
+        /** Each setting as its key and stored text. */
+        fun values(s: AppSettings): Map<String, String> = s.values()
+    }
 }
 
 /** TIMING's preferences, written together whenever one of them changes. */
@@ -372,6 +458,8 @@ internal fun AppSettings.values(): Map<String, String> = linkedMapOf(
     "arpLatch" to arpLatch.toString(),
     "sceneSwitch" to sceneSwitch.id,
     "factoryKit" to factoryKit.id,
+    "tourSteps" to tourSteps,
+    "tourDone" to tourDone.toString(),
 )
 
 /** These settings with what library.json held ("app.*" keys) taken back; anything missing or unreadable stays as it is. */
@@ -441,4 +529,7 @@ internal fun AppSettings.withIndex(map: Map<String, String>): AppSettings = copy
     arpLatch = map["app.arpLatch"]?.toBooleanStrictOrNull() ?: arpLatch,
     sceneSwitch = map["app.sceneSwitch"]?.let(SwitchTime::of) ?: sceneSwitch,
     factoryKit = FactoryKit.ofId(map["app.factoryKit"]) ?: factoryKit,
+    // Taken as it is when it reads as the tour's progress (LibraryIndex.merge joined the folder's copies).
+    tourSteps = map["app.tourSteps"]?.takeIf { v -> Tour.encode(Tour.decode(v)) == v } ?: tourSteps,
+    tourDone = map["app.tourDone"]?.toBooleanStrictOrNull() ?: tourDone,
 )

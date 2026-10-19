@@ -54,7 +54,7 @@ describe('SettingsScreen desk nav', () => {
   it('titles every section, the saved group in the web wording', () => {
     expect(SECTIONS.map(sectionTitle)).toEqual([
       SettingsText.APPEARANCE, SettingsText.DEVICE, SettingsText.LIBRARY, SettingsText.LIVE, WebText.SAVED_HERE,
-      SettingsText.ABOUT,
+      SettingsText.HELP, SettingsText.ABOUT,
     ])
   })
 
