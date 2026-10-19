@@ -30,6 +30,8 @@ data class AppSettings(
     val skin: SkinChoice = SkinChoice.EP133,
     val autoConnect: Boolean = true,
     val keepScreenOn: Boolean = true,
+    /** The transport keeps playing with arc off the screen (a media notification and the lock screen stop it). */
+    val backgroundPlay: Boolean = true,
     /** How many backups to keep; null keeps all. */
     val keepLast: Int? = null,
     /** Live shows one group at a time, large, instead of all four. */
@@ -195,6 +197,7 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
         skin = runCatching { SkinChoice.valueOf(prefs.getString("skin", null) ?: "") }.getOrDefault(SkinChoice.EP133),
         autoConnect = prefs.getBoolean("autoConnect", true),
         keepScreenOn = prefs.getBoolean("keepScreenOn", true),
+        backgroundPlay = prefs.getBoolean("backgroundPlay", true),
         keepLast = prefs.getInt("keepLast", 0).takeIf { it > 0 },
         liveOneGroup = prefs.getBoolean("liveOneGroup", true),
         liveFollow = prefs.getBoolean("liveFollow", true),
@@ -320,6 +323,7 @@ internal fun AppSettings.values(): Map<String, String> = linkedMapOf(
     "skin" to skin.name,
     "autoConnect" to autoConnect.toString(),
     "keepScreenOn" to keepScreenOn.toString(),
+    "backgroundPlay" to backgroundPlay.toString(),
     "keepLast" to (keepLast ?: 0).toString(),
     "liveOneGroup" to liveOneGroup.toString(),
     "liveFollow" to liveFollow.toString(),
@@ -376,6 +380,7 @@ internal fun AppSettings.withIndex(map: Map<String, String>): AppSettings = copy
     skin = map["app.skin"]?.let { v -> runCatching { SkinChoice.valueOf(v) }.getOrNull() } ?: skin,
     autoConnect = map["app.autoConnect"]?.toBooleanStrictOrNull() ?: autoConnect,
     keepScreenOn = map["app.keepScreenOn"]?.toBooleanStrictOrNull() ?: keepScreenOn,
+    backgroundPlay = map["app.backgroundPlay"]?.toBooleanStrictOrNull() ?: backgroundPlay,
     keepLast = map["app.keepLast"]?.toIntOrNull()?.let { n -> n.takeIf { it > 0 } } ?: if (map.containsKey("app.keepLast")) null else keepLast,
     liveOneGroup = map["app.liveOneGroup"]?.toBooleanStrictOrNull() ?: liveOneGroup,
     liveFollow = map["app.liveFollow"]?.toBooleanStrictOrNull() ?: liveFollow,

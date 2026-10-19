@@ -122,6 +122,7 @@ fun SettingsScreen(
     onShowNames: (Boolean) -> Unit = {},
     onPianoWhites: (Int?) -> Unit = {},
     onHaptics: (Boolean) -> Unit = {},
+    onBackgroundPlay: (Boolean) -> Unit = {},
     /** Make up for Bluetooth delay (an addition), with whether Live's sound goes to Bluetooth now and the output's latency in ms, if known. */
     onMakeUpDelay: (Boolean) -> Unit = {},
     wireless: Boolean = false,
@@ -242,6 +243,8 @@ fun SettingsScreen(
                 }
                 PlateLine()
                 SwitchRow(SettingsText.HAPTICS, SettingsText.HAPTICS_NOTE, settings.haptics, onHaptics)
+                PlateLine()
+                SwitchRow(SettingsText.BACKGROUND_PLAY, SettingsText.BACKGROUND_PLAY_NOTE, settings.backgroundPlay, onBackgroundPlay)
                 PlateLine()
                 MakeUpDelayRow(settings.makeUpDelay, onMakeUpDelay, wireless, latency)
                 PlateLine()
