@@ -47,6 +47,9 @@ class PlaybackService : Service() {
     private var session: MediaSession? = null
     private var noisy = false
     private var watching = false
+
+    // The last start's id: stopping with it leaves a start that came after (PLAY again) to run.
+    private var lastStart = 0
     private val controller get() = (application as ArcApp).controller
 
     // Headphones pulled out: the beat stops rather than coming out of the speaker.
@@ -75,6 +78,7 @@ class PlaybackService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        lastStart = startId
         // Started for the foreground (as the transport starts, or PLAY on the notification): it shows at once.
         // STOP and a swipe only ask, and may come with arc in the background, where going foreground is refused.
         if (intent?.action == null || intent.action == ACTION_PLAY) {
@@ -105,7 +109,9 @@ class PlaybackService : Service() {
                         else -> {
                             // A notification left by stopped() outlives the service: it goes with it.
                             getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
-                            stopSelf()
+                            // Not a bare stopSelf(): a quick stop and play (or the EP-133's own Stop and Start) can
+                            // have a new start on its way, and stopping before it calls startForeground crashes arc.
+                            stopSelf(lastStart)
                         }
                     }
                 }

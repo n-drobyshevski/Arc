@@ -82,7 +82,7 @@ These go beyond the web version:
 
 Backups use the same layout as the official Sample Tool's `.pak`: a zip with `/meta.json`, `/sounds/NNN name.wav` and `/projects/PNN.tar`. On top of that, an `arc.json` file keeps per-sound settings like play mode, pitch and envelope.
 
-A debug screen (Settings → **Debug log**, or long-press the section tag) shows every SysEx message sent and received, and can share, save or copy the log as a text file. Its **Latency** test compares Live's audio engines on your own phone or browser (see [Measuring latency](#measuring-latency)).
+A debug screen (Settings → **Debug log**, or long-press the section tag) shows every SysEx message sent and received, and can share, save or copy the log as a text file. On Android, when arc crashed or stopped responding last time, the log starts with why (the stack trace, or Android's own account of the exit), so a crash can be reported from the phone. Its **Latency** test compares Live's audio engines on your own phone or browser (see [Measuring latency](#measuring-latency)).
 
 ## Live's FX (Android)
 

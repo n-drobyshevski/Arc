@@ -19,13 +19,17 @@ class ArcApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        CrashReport.install(this)
+        val trafficLog = TrafficLog()
         val library = Library(ArcDatabase.open(this), PakStore(filesDir), ExternalLibrary(this))
         controller = ArcController(
             context = this,
             library = library,
             midi = MidiConnector(this),
-            trafficLog = TrafficLog(),
+            trafficLog = trafficLog,
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
         )
+        // Why arc stopped last time, if it crashed: first in the debug log.
+        CrashReport.report(this, trafficLog)
     }
 }
