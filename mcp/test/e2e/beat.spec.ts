@@ -158,6 +158,47 @@ test('asks Claude to change the card and copies it', async ({ page }) => {
   expect(errors).toEqual([])
 })
 
+/** The text of the host's [n]th ui/message. */
+async function sentText(page: Page, n: number): Promise<string> {
+  const messages = await page.evaluate(async () => (await window.arcHost).messages)
+  const block = messages[n]?.content[0]
+  return block?.type === 'text' ? block.text : ''
+}
+
+test('Regenerate, Improve and a quick change send their requests', async ({ page }) => {
+  const errors = watchErrors(page)
+  const view = await show(page, HOUSE)
+  await view.getByRole('button', { name: 'Mute A7 kick' }).click()
+  await view.getByRole('button', { name: 'Regenerate' }).click()
+  await expect(view.getByText('Sent to Claude.')).toBeVisible()
+  const regen = await sentText(page, 0)
+  expect(regen).toContain('Please write a new take on the ARC BEAT card "House groove"')
+  expect(regen).toContain('A7 muted')
+  expect(regen).toContain('show_beat_card')
+
+  await view.getByRole('button', { name: 'Improve' }).click()
+  await expect.poll(() => sentText(page, 1)).toContain('Please improve the ARC BEAT card "House groove"')
+  await expect(view.getByRole('button', { name: 'Fix errors' })).toHaveCount(0)
+
+  await view.getByRole('button', { name: 'Ask Claude to change this' }).click()
+  await view.getByRole('button', { name: 'Ask Claude: busier hats' }).click()
+  await expect.poll(() => sentText(page, 2)).toContain('Please change the ARC BEAT card "House groove": busier hats')
+  expect(await page.evaluate(async () => (await window.arcHost).messages.length)).toBe(3)
+  expect(errors).toEqual([])
+})
+
+test('a broken card offers Fix errors with its lines', async ({ page }) => {
+  const errors = watchErrors(page)
+  const view = await show(page, BROKEN)
+  await expect(view.getByRole('button', { name: 'Improve' })).toHaveCount(0)
+  await view.getByRole('button', { name: 'Fix errors' }).click()
+  await expect(view.getByText('Sent to Claude.')).toBeVisible()
+  const text = await sentText(page, 0)
+  expect(text).toContain('Please fix the ARC BEAT card: line 2:')
+  expect(text).toContain('line 5:')
+  expect(errors).toEqual([])
+})
+
 test('lists a broken card’s errors by line', async ({ page }) => {
   const errors = watchErrors(page)
   const view = await show(page, BROKEN)

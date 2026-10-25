@@ -10,7 +10,11 @@ It has one tool, `show_beat_card`. Claude calls it after it writes a card, or wh
 - mute and solo on each row;
 - tempo and swing sliders, and Play/Stop with stand-in drum and bass sounds;
 - the card's errors and warnings, each with its line number;
-- **Copy card**, and **Ask Claude to change this**.
+- **Regenerate** (a new take, same tempo and feel) and **Improve** (Claude reworks the groove and says what it changed), or **Fix errors** on a card that can't be read;
+- **Ask Claude to change this**, with one-tap quick changes (busier hats, add a fill, simpler, more swing, half-time, add a bassline) or your own words;
+- **Copy card**.
+
+Every request goes into the chat as your next message, with any tempo, swing, mute or solo you changed while listening, and Claude answers with a new card in a new preview.
 
 The view says so itself: it is a preview only. arc can't import cards yet, and the sounds are stand-ins, not your EP-133's.
 

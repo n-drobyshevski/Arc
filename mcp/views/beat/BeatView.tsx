@@ -1,6 +1,7 @@
 // The beat-card view: header (name, tempo, swing), group tabs, the step grid
 // with mute and solo per row, Play/Stop, the card's problems by line, Copy
-// card and "Ask Claude to change this". It only draws and plays; main.tsx
+// card, and Regenerate, Improve (Fix errors on a broken card) and "Ask Claude
+// to change this" with quick changes. It only draws and plays; main.tsx
 // talks to the host.
 
 import type { CSSProperties, JSX } from 'preact'
@@ -196,6 +197,7 @@ export function BeatView(props: BeatViewProps): JSX.Element {
       <Actions
         card={props.card}
         name={result.name}
+        errors={result.valid ? null : result.errors}
         heard={heard}
         canMessage={props.canMessage}
         sendMessage={props.sendMessage}
@@ -435,6 +437,8 @@ function Problems(props: {
 function Actions(props: {
   card: string | null
   name: string
+  /** The card's errors when it can't be read, else null (Fix errors in place of Improve). */
+  errors: readonly BeatCardProblem[] | null
   heard: readonly string[]
   canMessage: boolean
   sendMessage: (text: string) => Promise<boolean>
@@ -455,21 +459,68 @@ function Actions(props: {
     setCopy((await props.copyText(props.card)) ? 'done' : 'failed')
   }
 
+  const sending = sent === 'sending'
+
+  /** Sends one message to Claude; every button waits while one is on its way. */
+  async function send(text: string): Promise<boolean> {
+    if (sending) return false
+    setSent('sending')
+    const ok = await props.sendMessage(text)
+    setSent(ok ? 'done' : 'failed')
+    return ok
+  }
+
   // No <form>: hosts sandbox the view without allow-forms, which blocks submit events.
   async function onSend(): Promise<void> {
-    if (!request.trim() || sent === 'sending') return
-    setSent('sending')
-    const ok = await props.sendMessage(BeatText.askMessage(props.name, request, [...props.heard]))
-    setSent(ok ? 'done' : 'failed')
-    if (ok) setRequest('')
+    if (!request.trim()) return
+    if (await send(BeatText.askMessage(props.name, request, [...props.heard]))) setRequest('')
   }
+
+  const status =
+    sent === 'done' ? (
+      <p class="beat-note" role="status">
+        {BeatText.SENT}
+      </p>
+    ) : sent === 'failed' ? (
+      <p class="beat-note" role="alert">
+        {BeatText.ASK_FAILED}
+      </p>
+    ) : null
 
   return (
     <section class="beat-actions">
       <div class="beat-buttons">
-        <button type="button" class="beat-button" disabled={props.card === null} onClick={() => void onCopy()}>
-          {copy === 'done' ? BeatText.COPIED : BeatText.COPY}
-        </button>
+        {props.canMessage && (
+          <>
+            <button
+              type="button"
+              class="beat-button"
+              disabled={sending}
+              onClick={() => void send(BeatText.regenerateMessage(props.name, [...props.heard]))}
+            >
+              {BeatText.REGENERATE}
+            </button>
+            {props.errors !== null ? (
+              <button
+                type="button"
+                class="beat-button"
+                disabled={sending}
+                onClick={() => void send(BeatText.fixMessage(props.name, props.errors ?? []))}
+              >
+                {BeatText.FIX}
+              </button>
+            ) : (
+              <button
+                type="button"
+                class="beat-button"
+                disabled={sending}
+                onClick={() => void send(BeatText.improveMessage(props.name, [...props.heard]))}
+              >
+                {BeatText.IMPROVE}
+              </button>
+            )}
+          </>
+        )}
         <button
           type="button"
           class="beat-button"
@@ -479,7 +530,11 @@ function Actions(props: {
         >
           {BeatText.ASK}
         </button>
+        <button type="button" class="beat-button" disabled={props.card === null} onClick={() => void onCopy()}>
+          {copy === 'done' ? BeatText.COPIED : BeatText.COPY}
+        </button>
       </div>
+      {!asking && status}
       {copy === 'failed' && props.card !== null && (
         <div class="beat-copy-fallback">
           <p class="beat-note" role="status">
@@ -492,6 +547,20 @@ function Actions(props: {
         <div id="beat-ask" class="beat-ask" role="group" aria-label={BeatText.ASK}>
           {props.canMessage ? (
             <>
+              <div class="beat-chips" role="group" aria-label={BeatText.TWEAKS_LABEL}>
+                {BeatText.TWEAKS.map((t) => (
+                  <button
+                    key={t.label}
+                    type="button"
+                    class="beat-chip"
+                    aria-label={BeatText.tweakAria(t.request)}
+                    disabled={sending}
+                    onClick={() => void send(BeatText.askMessage(props.name, t.request, [...props.heard]))}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
               <label for="beat-ask-text">{BeatText.ASK_LABEL}</label>
               <div class="beat-ask-row">
                 <input
@@ -507,22 +576,13 @@ function Actions(props: {
                 <button
                   type="button"
                   class="beat-button"
-                  disabled={!request.trim() || sent === 'sending'}
+                  disabled={!request.trim() || sending}
                   onClick={() => void onSend()}
                 >
                   {BeatText.SEND}
                 </button>
               </div>
-              {sent === 'done' && (
-                <p class="beat-note" role="status">
-                  {BeatText.SENT}
-                </p>
-              )}
-              {sent === 'failed' && (
-                <p class="beat-note" role="alert">
-                  {BeatText.ASK_FAILED}
-                </p>
-              )}
+              {status}
             </>
           ) : (
             <p class="beat-note">{BeatText.NO_MESSAGE}</p>

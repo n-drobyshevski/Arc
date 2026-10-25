@@ -36,6 +36,22 @@ export const ServerText = {
   VIEW_DESCRIPTION: 'A step grid that plays an ARC BEAT card with stand-in drum sounds.',
 } as const
 
+/** How many errors a "Fix errors" message lists. */
+const FIX_MAX = 10
+
+/** ` "name"` for a card with a name, else nothing. */
+function quoted(name: string): string {
+  return name ? ` "${name}"` : ''
+}
+
+/** A message to Claude: the request, what the user changed while listening, and the ask to show the new card. */
+function message(request: string, heard: string[]): string {
+  const lines = [request]
+  if (heard.length > 0) lines.push(`(In the preview I had ${heard.join(', ')}.)`)
+  lines.push('Show me the new card with show_beat_card.')
+  return lines.join('\n')
+}
+
 export const BeatText = {
   APP_NAME: 'arc beat preview',
   WAITING: 'Waiting for a beat card…',
@@ -86,12 +102,37 @@ export const BeatText = {
   SENT: 'Sent to Claude.',
   ASK_FAILED: "Couldn't send. Type your request in the chat instead.",
   NO_MESSAGE: 'This chat app does not take messages from previews. Type your request in the chat.',
+  REGENERATE: 'Regenerate',
+  IMPROVE: 'Improve',
+  FIX: 'Fix errors',
+  TWEAKS_LABEL: 'Quick changes',
+  /** One-tap changes in the Ask panel: the chip's label and the request it sends. */
+  TWEAKS: [
+    { label: 'Busier hats', request: 'busier hats' },
+    { label: 'Add a fill', request: 'add a fill in the last bar' },
+    { label: 'Simpler', request: 'make it simpler' },
+    { label: 'More swing', request: 'more swing' },
+    { label: 'Half-time', request: 'half-time feel' },
+    { label: 'Add a bassline', request: 'add a bassline' },
+  ] as readonly { readonly label: string; readonly request: string }[],
+  tweakAria: (request: string): string => `Ask Claude: ${request}`,
   /** The message the view sends: the user's request plus what they changed while listening. */
-  askMessage: (name: string, request: string, heard: string[]): string => {
-    const lines = [`Please change the ARC BEAT card${name ? ` "${name}"` : ''}: ${request.trim()}`]
-    if (heard.length > 0) lines.push(`(In the preview I had ${heard.join(', ')}.)`)
-    lines.push('Show me the new card with show_beat_card.')
-    return lines.join('\n')
+  askMessage: (name: string, request: string, heard: string[]): string =>
+    message(`Please change the ARC BEAT card${quoted(name)}: ${request.trim()}`, heard),
+  /** Regenerate: a new take on the same idea. */
+  regenerateMessage: (name: string, heard: string[]): string =>
+    message(`Please write a new take on the ARC BEAT card${quoted(name)}: same tempo and feel, a different pattern.`, heard),
+  /** Improve: the arc-beats skill's ANALYSE job, then a better card. */
+  improveMessage: (name: string, heard: string[]): string =>
+    message(
+      `Please improve the ARC BEAT card${quoted(name)}: make it groove and sound more finished, and tell me in one line each what you changed.`,
+      heard,
+    ),
+  /** Fix errors: the card's errors by line, at most FIX_MAX of them. */
+  fixMessage: (name: string, errors: readonly { line: number; msg: string }[]): string => {
+    const shown = errors.slice(0, FIX_MAX).map((e) => `line ${e.line}: ${e.msg}`)
+    if (errors.length > FIX_MAX) shown.push(`and ${errors.length - FIX_MAX} more`)
+    return message(`Please fix the ARC BEAT card${quoted(name)}: ${shown.join('; ')}`, [])
   },
   heardTempo: (n: number): string => `tempo ${n}`,
   heardSwing: (n: number): string => `swing ${n}`,

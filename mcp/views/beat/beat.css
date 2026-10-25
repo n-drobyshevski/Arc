@@ -374,6 +374,28 @@
   margin-top: 10px;
 }
 
+.beat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.beat-chip {
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid var(--arc-border);
+  border-radius: 999px;
+  background: var(--arc-bg);
+  font-size: var(--font-text-sm-size, 0.85rem);
+  cursor: pointer;
+}
+
+.beat-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .beat-ask label {
   display: block;
   font-size: var(--font-text-sm-size, 0.85rem);
