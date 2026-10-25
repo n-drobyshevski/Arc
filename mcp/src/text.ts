@@ -34,7 +34,8 @@ export const ServerText = {
     "arc's beat-card preview and key-combo guide for the EP-133 K.O. II. After you write an ARC BEAT card (the " +
     "arc-beats skill's format), or when the user pastes one, call show_beat_card with the card so the user can " +
     'see and hear it. When the user asks how to do something on the EP-133, call lookup_combo before you write ' +
-    'any key combo, and give only the combos it returns.',
+    'any key combo, and give only the combos it returns. When the user wants beat ideas or a genre to start ' +
+    'from, call browse_grooves to show the groove gallery.',
 
   BEAT_TITLE: 'Preview beat card',
   BEAT_DESCRIPTION:

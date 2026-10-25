@@ -1,8 +1,9 @@
 // Builds the beat-card view (views/beat) into one self-contained HTML file,
 // ui-dist/beat.html: scripts and styles inlined (vite-plugin-singlefile), as
-// an MCP App view runs with no network. vite.guide.config.ts builds the guide
-// view the same way with viewConfig; `npm run build:views` runs both, this one
-// first, as it empties ui-dist.
+// an MCP App view runs with no network. vite.guide.config.ts and
+// vite.grooves.config.ts build the guide and gallery views the same way with
+// viewConfig; `npm run build:views` runs all three, this one first, as it
+// empties ui-dist.
 //
 // The views import the card parser and the guide from ../web/src/core, and
 // the guide view the key caps from ../web/src/ui/components, outside this

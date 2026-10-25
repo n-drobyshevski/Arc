@@ -7,11 +7,12 @@
     "node": ">=22"
   },
   "scripts": {
-    "build:views": "vite build && vite build --config vite.guide.config.ts",
+    "build:views": "vite build && vite build --config vite.guide.config.ts && vite build --config vite.grooves.config.ts",
     "build:server": "vite build --config vite.server.config.ts",
     "typecheck": "tsc --noEmit",
     "build": "npm run build:views && npm run build:server && npm run typecheck",
     "dev": "node scripts/dev.mjs",
+    "gen:grooves": "node scripts/gen-grooves.mjs",
     "test": "vitest run",
     "e2e": "playwright test",
     "check": "npm run build && npm test"

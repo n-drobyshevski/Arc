@@ -1,12 +1,12 @@
 // A minimal MCP Apps host for the Playwright tests (beat.spec.ts,
-// guide.spec.ts), built from the SDK's host side: an MCP client to this
+// guide.spec.ts, grooves.spec.ts), built from the SDK's host side: an MCP client to this
 // package's server (/mcp, served by the Vite dev server of vite.config.ts),
 // and an AppBridge to the view in a sandboxed iframe, as Claude runs it: an
 // opaque origin (allow-scripts only), the resource's CSP enforced and no
 // unsafe-eval.
 //
 // The page shows the view of show_beat_card, or of the tool its ?tool= names
-// (lookup_combo). The test drives it through window.arcHost: show(card) and
+// (lookup_combo, browse_grooves). The test drives it through window.arcHost: show(card) and
 // call(args) send the tool input, call the tool on the server and send its
 // result to the view; messages and links record the view's ui/message and
 // ui/open-link requests.

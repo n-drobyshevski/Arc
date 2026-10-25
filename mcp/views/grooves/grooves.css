@@ -1,0 +1,258 @@
+/* The groove gallery. Tokens come from ../shared/hostTheme.css. */
+
+.grooves {
+  box-sizing: border-box;
+  max-width: 960px;
+  padding: 12px 16px 16px;
+}
+
+.grooves *,
+.grooves *::before,
+.grooves *::after {
+  box-sizing: border-box;
+}
+
+.grooves-waiting {
+  color: var(--arc-text-2);
+}
+
+.grooves button,
+.grooves input,
+.grooves textarea {
+  font: inherit;
+  color: inherit;
+}
+
+.grooves-title {
+  margin: 0;
+  font-size: var(--font-heading-sm-size, 1.15rem);
+  font-weight: var(--font-weight-semibold, 600);
+  overflow-wrap: anywhere;
+}
+
+.grooves-meta,
+.grooves-count,
+.grooves-note,
+.grooves-foot,
+.groove-meta,
+.groove-note {
+  margin: 0;
+  color: var(--arc-text-2);
+  font-size: var(--font-text-sm-size, 0.85rem);
+}
+
+.grooves-head .grooves-meta {
+  margin-top: 2px;
+}
+
+.grooves-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.grooves-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.grooves-chip {
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid var(--arc-border);
+  border-radius: 999px;
+  background: var(--arc-bg);
+  font-size: var(--font-text-sm-size, 0.85rem);
+  cursor: pointer;
+}
+
+.grooves-chip[aria-pressed='true'] {
+  border-color: var(--arc-accent);
+  background: var(--arc-accent);
+  color: #fff !important;
+}
+
+.grooves-search {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--arc-border);
+  border-radius: var(--arc-radius);
+  background: var(--arc-bg);
+}
+
+.grooves-note {
+  margin-top: 12px;
+}
+
+.grooves-foot {
+  margin-top: 12px;
+}
+
+/* One column on a phone, two from 640px. */
+.grooves-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 640px) {
+  .grooves-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.groove {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--arc-border);
+  border-radius: var(--arc-radius);
+  background: var(--arc-bg-2);
+}
+
+.groove.is-playing {
+  border-color: var(--arc-accent);
+}
+
+.groove-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.groove-name {
+  margin: 0;
+  font-size: var(--font-text-md-size, 15px);
+  font-weight: var(--font-weight-semibold, 600);
+  overflow-wrap: anywhere;
+}
+
+.groove-badge {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid var(--arc-accent);
+  border-radius: var(--arc-radius-sm);
+  color: var(--arc-accent);
+  font-family: var(--arc-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.groove-family {
+  color: var(--arc-text);
+}
+
+.groove-thumb {
+  display: block;
+  width: 100%;
+  border-radius: var(--arc-radius-sm);
+  background: var(--arc-bg);
+}
+
+.groove-thumb-lane {
+  fill: var(--arc-border);
+  fill-opacity: 0.35;
+}
+
+.groove-thumb-hits {
+  fill: var(--arc-accent);
+}
+
+.groove-feel {
+  margin: 0;
+  font-size: var(--font-text-sm-size, 0.85rem);
+  line-height: 1.45;
+}
+
+.groove-feel::first-letter {
+  text-transform: uppercase;
+}
+
+.groove-feel code,
+.groove-about code {
+  font-family: var(--arc-mono);
+  font-size: 0.9em;
+}
+
+.groove-about {
+  font-size: var(--font-text-sm-size, 0.85rem);
+  line-height: 1.45;
+}
+
+.groove-about summary {
+  width: fit-content;
+  color: var(--arc-text-2);
+  cursor: pointer;
+}
+
+.groove-about p {
+  margin: 4px 0 0;
+}
+
+.groove-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.groove-play,
+.groove-button {
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid var(--arc-border);
+  border-radius: var(--arc-radius);
+  background: var(--arc-bg);
+  font-size: var(--font-text-sm-size, 0.85rem);
+  cursor: pointer;
+}
+
+.groove-play {
+  min-width: 76px;
+  border-color: var(--arc-accent);
+  background: var(--arc-accent);
+  color: #fff !important;
+  font-weight: var(--font-weight-semibold, 600);
+}
+
+.groove-play.is-on {
+  background: transparent;
+  color: var(--arc-accent) !important;
+}
+
+.groove-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.groove-copy-fallback textarea {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px;
+  border: 1px solid var(--arc-border);
+  border-radius: var(--arc-radius-sm);
+  background: var(--arc-bg);
+  font-family: var(--arc-mono);
+  font-size: 0.8rem;
+  resize: vertical;
+}
+
+@media (max-width: 420px) {
+  .grooves {
+    padding: 10px 12px 12px;
+  }
+
+  .groove {
+    padding: 10px 12px 12px;
+  }
+}

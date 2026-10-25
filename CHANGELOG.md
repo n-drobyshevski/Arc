@@ -7,6 +7,7 @@ version fixes bugs. The version itself is set in `version.properties`.
 ## [Unreleased]
 
 ### Added
+- Claude connector: `browse_grooves`, a gallery of the arc-beats skill's 36 genre recipes in the chat, by family and search, each playable with its FX, with **Make one like this**, **Show in preview** and **Copy card**.
 - Claude connector: `lookup_combo` answers "how do I … on the EP-133" from arc's shortcut guide (the official OS 2.5 combos), drawn as the device's keys in the chat, with each entry's source.
 - **Copy for Claude** on a project's Pads, a backup's Contents and Compare (Android and web): copies the pads as `sound` lines, the sound list or the comparison as plain text the `arc-beats` skill reads. Nothing is sent anywhere by arc.
 - `mcp/`: a Claude connector (MCP server on Vercel) whose `show_beat_card` tool previews an ARC BEAT card in the chat as an interactive MCP App: step grid, mute and solo, tempo and swing, Play with stand-in sounds, problems by line, the card's `pad` shaping and FX lines (`fx`, `send`, `comp`, `sidechain`) played as an in-browser approximation with an FX switch, scenes and the `chain` played as an arrangement (Chain / Scene), and one-tap **Regenerate**, **Improve** (or **Fix errors**) and quick changes that ask Claude for a new card. Preview only; it never reaches the EP-133. The parser, `web/src/core/formats/beatCard.ts`, is a web-only addition with no Kotlin twin (like `guideData.ts`) and agrees with the skill's `beatcard.py` on every card.

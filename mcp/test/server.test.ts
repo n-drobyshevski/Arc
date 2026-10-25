@@ -1,6 +1,7 @@
 // The MCP server in-process: JSON-RPC over Web Requests to the same handler
 // the Vercel Function serves (2025-era Streamable HTTP, as Claude speaks it
-// today), plus the SDK's own client over the 2026-07-28 protocol.
+// today), plus the SDK's own client over the 2026-07-28 protocol: the three
+// tools (show_beat_card, lookup_combo, browse_grooves) and their views.
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server'
 import { describe, expect, it } from 'vitest'
@@ -11,6 +12,9 @@ import { fitBeatCard, MAX_PROBLEMS, RESULT_BUDGET } from '../src/tools/beat'
 import { BEAT_TOOL, BEAT_URI, CARD_MAX, CARD_MIN } from '../src/text'
 import { GUIDE_TOOL, GUIDE_URI, LIMIT_MAX, QUERY_MAX } from '../src/guideText'
 import { GUIDE_SECTIONS, lookupCombo } from '../src/tools/guide'
+import { FAMILIES } from '../src/grooves'
+import { GROOVES_TOOL, GROOVES_URI, LIMIT_MAX as GROOVES_MAX, QUERY_MAX as GROOVES_QUERY_MAX } from '../src/groovesText'
+import { browseGrooves } from '../src/tools/grooves'
 
 const VERSION = '2025-11-25'
 const URL_ = 'http://localhost/mcp'
@@ -63,7 +67,7 @@ describe('arc MCP server over HTTP', () => {
 
   it('lists show_beat_card with its view, read-only, taking the card', async () => {
     const { tools } = await rpc('tools/list')
-    expect(tools.map((t: { name: string }) => t.name)).toEqual([BEAT_TOOL, GUIDE_TOOL])
+    expect(tools.map((t: { name: string }) => t.name)).toEqual([BEAT_TOOL, GUIDE_TOOL, GROOVES_TOOL])
     const tool = tools[0]
     expect(tool._meta.ui.resourceUri).toBe(BEAT_URI)
     expect(tool.annotations.readOnlyHint).toBe(true)
@@ -118,6 +122,58 @@ describe('arc MCP server over HTTP', () => {
   it('refuses lookup_combo arguments outside the schema as a tool error', async () => {
     for (const args of [{ query: '' }, { query: 'resample', section: 'Drums' }, { query: 'resample', limit: LIMIT_MAX + 1 }]) {
       const r = await rpc('tools/call', { name: GUIDE_TOOL, arguments: args })
+      expect(r.isError, JSON.stringify(args)).toBe(true)
+    }
+  })
+
+  it('lists browse_grooves with its view, read-only, taking an optional query, family and limit', async () => {
+    const { tools } = await rpc('tools/list')
+    const tool = tools.find((t: { name: string }) => t.name === GROOVES_TOOL)
+    expect(tool._meta.ui.resourceUri).toBe(GROOVES_URI)
+    expect(tool.annotations.readOnlyHint).toBe(true)
+    expect(tool.description).toContain('show_beat_card')
+    expect(tool.inputSchema.required ?? []).toEqual([])
+    expect(tool.inputSchema.properties.query).toMatchObject({ type: 'string', maxLength: GROOVES_QUERY_MAX })
+    expect(tool.inputSchema.properties.family.enum).toEqual([...FAMILIES])
+    expect(tool.inputSchema.properties.limit).toMatchObject({ type: 'integer', minimum: 1, maximum: GROOVES_MAX })
+  })
+
+  it('answers browse_grooves with every groove and its card, and a text of one line each without cards', async () => {
+    const r = await rpc('tools/call', { name: GROOVES_TOOL, arguments: {} })
+    expect(r.isError).toBeFalsy()
+    expect(r.structuredContent).toEqual(JSON.parse(JSON.stringify(browseGrooves())))
+    expect(r.structuredContent.total).toBe(36)
+    expect(r.structuredContent.grooves).toHaveLength(36)
+    expect(r.structuredContent.grooves[0].card).toMatch(/^ARC BEAT 1\n/)
+    const text = r.content[0].text as string
+    expect(text.split('\n')[0]).toBe('36 grooves:')
+    expect(text).not.toContain('ARC BEAT 1')
+    expect(JSON.stringify(r).length).toBeLessThan(150_000)
+  })
+
+  it('answers browse_grooves with a query, a family and a limit', async () => {
+    const q = await rpc('tools/call', { name: GROOVES_TOOL, arguments: { query: 'acid techno' } })
+    expect(q.structuredContent.grooves.map((g: { id: string }) => g.id)).toEqual(['acid-techno'])
+    expect(q.structuredContent.query).toBe('acid techno')
+    const f = await rpc('tools/call', { name: GROOVES_TOOL, arguments: { family: 'Latin and African' } })
+    expect(f.structuredContent.grooves.map((g: { id: string }) => g.id)).toEqual(['reggaeton-and-dembow', 'afrobeats'])
+    expect(f.structuredContent.family).toBe('Latin and African')
+    const l = await rpc('tools/call', { name: GROOVES_TOOL, arguments: { query: 'techno', limit: 2 } })
+    expect(l.structuredContent.grooves).toHaveLength(2)
+    expect(l.structuredContent.total).toBeGreaterThan(2)
+    const none = await rpc('tools/call', { name: GROOVES_TOOL, arguments: { query: 'xyzzy' } })
+    expect(none.isError).toBeFalsy()
+    expect(none.structuredContent).toMatchObject({ grooves: [], total: 0 })
+  })
+
+  it('refuses browse_grooves arguments outside the schema as a tool error', async () => {
+    for (const args of [
+      { query: 'x'.repeat(GROOVES_QUERY_MAX + 1) },
+      { family: 'Polka' },
+      { limit: 0 },
+      { limit: GROOVES_MAX + 1 },
+    ]) {
+      const r = await rpc('tools/call', { name: GROOVES_TOOL, arguments: args })
       expect(r.isError, JSON.stringify(args)).toBe(true)
     }
   })
@@ -297,7 +353,7 @@ describe('arc MCP server over HTTP', () => {
 
   it('lists and serves the guide view as one HTML file with no network', async () => {
     const { resources } = await rpc('resources/list')
-    expect(resources.map((x: { uri: string }) => x.uri)).toEqual([BEAT_URI, GUIDE_URI])
+    expect(resources.map((x: { uri: string }) => x.uri)).toEqual([BEAT_URI, GUIDE_URI, GROOVES_URI])
     const { contents } = await rpc('resources/read', { uri: GUIDE_URI })
     expect(contents).toHaveLength(1)
     const html = contents[0]
@@ -313,6 +369,25 @@ describe('arc MCP server over HTTP', () => {
     // The key caps' styles and colours are inlined with it.
     expect(html.text).toContain('.cap__key--dark')
     expect(html.text).toContain('--guide-dark-face')
+  })
+
+  it('lists and serves the groove gallery as one HTML file with no network', async () => {
+    const { resources } = await rpc('resources/list')
+    expect(resources.find((x: { uri: string }) => x.uri === GROOVES_URI).mimeType).toBe(RESOURCE_MIME_TYPE)
+    const { contents } = await rpc('resources/read', { uri: GROOVES_URI })
+    expect(contents).toHaveLength(1)
+    const html = contents[0]
+    expect(html.uri).toBe(GROOVES_URI)
+    expect(html.mimeType).toBe(RESOURCE_MIME_TYPE)
+    expect(html._meta.ui.csp).toEqual({ connectDomains: [], resourceDomains: [], frameDomains: [] })
+    expect(html._meta.ui.permissions).toEqual({ clipboardWrite: {} })
+    expect(html.text).toMatch(/^<!doctype html>/i)
+    expect(html.text).toContain('<title>arc groove gallery</title>')
+    expect(html.text).toContain('<script type="module"')
+    expect(html.text).not.toMatch(/<script[^>]+src=/)
+    expect(html.text).not.toMatch(/<link[^>]+href=/)
+    // The cards come with the result, not with the view.
+    expect(html.text).not.toContain('Driving techno')
   })
 
   it('answers GET with 405: stateless, no streams', async () => {
@@ -337,6 +412,9 @@ describe('arc MCP server with the SDK client (2026-07-28)', () => {
     expect(tools.find((t) => t.name === GUIDE_TOOL)?._meta?.ui).toEqual({ resourceUri: GUIDE_URI })
     const guide = await client.callTool({ name: GUIDE_TOOL, arguments: { query: 'resample' } })
     expect((guide.structuredContent as { entries: unknown[] }).entries).toHaveLength(4)
+    expect(tools.find((t) => t.name === GROOVES_TOOL)?._meta?.ui).toEqual({ resourceUri: GROOVES_URI })
+    const grooves = await client.callTool({ name: GROOVES_TOOL, arguments: { family: 'Techno' } })
+    expect((grooves.structuredContent as { total: number }).total).toBe(12)
     await client.close()
   })
 })

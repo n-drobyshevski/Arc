@@ -18,5 +18,5 @@
     "allowImportingTsExtensions": true,
     "types": ["vite/client", "node"]
   },
-  "include": ["api", "src", "views", "test", "vite.config.ts", "vite.guide.config.ts", "vitest.config.ts", "playwright.config.ts"]
+  "include": ["api", "src", "views", "test", "vite.config.ts", "vite.guide.config.ts", "vite.grooves.config.ts", "vitest.config.ts", "playwright.config.ts"]
 }
