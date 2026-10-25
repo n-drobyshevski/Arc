@@ -3,10 +3,12 @@
 // due in the next 120 ms, at its exact AudioContext time. Tempo changes take
 // effect from the current tick on; mute and solo are read as each hit is
 // scheduled, so they apply within the lookahead. Stop cuts the synth, so
-// nothing already handed over plays on.
+// nothing already handed over plays on. Each Play builds the synth's graph of
+// the card's effect lines first (Synth.begin), and each hit goes to the synth
+// whole, so it plays through its pad's shaping and its group's bus.
 
 import { TICKS_PER_BEAT } from '../../../web/src/core/formats/beatCard'
-import type { Hit } from './model'
+import type { CardFx, Hit } from './model'
 import type { Synth } from './synth'
 
 const WAKE_MS = 25
@@ -70,6 +72,16 @@ export class Player {
     this.loops = loops
   }
 
+  /** The card's effect lines (see Synth.setFx). */
+  setFx(fx: CardFx): void {
+    this.synth.setFx(fx)
+  }
+
+  /** The FX switch (see Synth.setFxOn). */
+  setFxOn(on: boolean): void {
+    this.synth.setFxOn(on)
+  }
+
   setTempo(bpm: number): void {
     if (this.playing) {
       // Keep the place: the tick playing now stays where it is.
@@ -85,6 +97,7 @@ export class Player {
     this.anchorTime = this.ctx.currentTime + START_S
     this.anchorTick = 0
     this.doneTick = 0
+    this.synth.begin()
     this.pump()
     this.timer = setInterval(() => this.pump(), WAKE_MS)
   }
@@ -106,7 +119,7 @@ export class Player {
           const tick = start + hit.tick
           if (tick < this.doneTick || tick >= end || !this.audible(hit.pad)) continue
           const time = Math.max(this.ctx.currentTime, this.timeAt(tick))
-          this.synth.play(hit.voice, time, hit.vel, hit.gate / this.ticksPerSecond, hit.midi)
+          this.synth.play(hit, time, hit.gate / this.ticksPerSecond)
         }
       }
     }

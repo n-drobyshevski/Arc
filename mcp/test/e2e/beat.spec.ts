@@ -1,8 +1,8 @@
 // The beat view as a host shows it: the test host (host/host.ts) reads
 // ui://arc/beat.html from the server, puts it in a sandboxed iframe 360px
 // wide, and sends it a tool call of show_beat_card through the ext-apps
-// AppBridge. Checks the grid, mute, Play, Ask Claude and the error list, with
-// no page errors.
+// AppBridge. Checks the grid, mute, Play, Ask Claude, the error list, and a
+// card's effect lines and pad shaping with the FX switch, with no page errors.
 import { expect, test, type FrameLocator, type Page } from '@playwright/test'
 import { CARDS } from '../../../web/test/core/formats/beatCardFixtures'
 import type {} from './host/host'
@@ -19,6 +19,22 @@ A4 hat   | .x.x .x.x | .x.x .xxx |
 
 [B] bars 1 step 1/16
 B7 bass  | X--- ..x- X--. o... |`
+
+const FX = `ARC BEAT 1
+name FX test
+tempo 120
+fx reverb 60 40
+send A 20 B 40
+comp 40 60
+sidechain A7 B
+
+[A] bars 1 step 1/16
+A7 kick | X... X... X... X... |
+A4 hat  | .x.x .x.x .x.x .x.x |
+pad A4 pitch -7 level 80
+
+[B] bars 1 step 1/16
+B7 bass | X-.. ..x. X-.. ..x. |`
 
 const BROKEN = `ARC BEAT 1
 tempo 300
@@ -207,5 +223,62 @@ test('lists a broken card’s errors by line', async ({ page }) => {
   await expect(list).toHaveCount(2)
   await expect(list.nth(0)).toContainText('line 2')
   await expect(list.nth(1)).toContainText('line 5')
+  expect(errors).toEqual([])
+})
+
+test('plays a card’s FX and pad shaping, with the FX switch on and off', async ({ page }) => {
+  const errors = watchErrors(page)
+  const view = await show(page, FX)
+  await expect(view.getByRole('heading', { name: 'FX test' })).toBeVisible()
+  // The effect and pad lines play now: no warnings.
+  await expect(view.locator('.beat-problems')).toHaveCount(0)
+  await expect(view.locator('.beat-fx-text')).toHaveText('reverb 60/40 · sends A 20 B 40 · comp 40/60 · sidechain A7 → B')
+  const badge = view.locator('.beat-rows > li[data-pad="A4"] .beat-shape')
+  await expect(badge).toHaveText('−7 st · 80%')
+  await expect(view.getByRole('img', { name: 'A4 shaping: pitch −7 semitones, level 80' })).toBeVisible()
+  await expect(view.locator('.beat-rows > li[data-pad="A7"] .beat-shape')).toHaveCount(0)
+  await expect(view.getByText("FX are an approximation of arc's, made in the browser.", { exact: false })).toBeVisible()
+
+  const fx = view.getByRole('button', { name: 'FX', exact: true })
+  await expect(fx).toHaveAttribute('aria-pressed', 'true')
+  await view.getByRole('button', { name: 'Play' }).click()
+  await expect(view.locator('.beat-tick.is-now')).toHaveCount(1)
+  await page.waitForTimeout(500)
+  // Off and on again while playing: a crossfade.
+  await fx.click()
+  await expect(fx).toHaveAttribute('aria-pressed', 'false')
+  await page.waitForTimeout(300)
+  await fx.click()
+  await expect(fx).toHaveAttribute('aria-pressed', 'true')
+  await page.waitForTimeout(300)
+  await view.getByRole('button', { name: 'Stop' }).click()
+  await expect(view.locator('.beat-tick.is-now')).toHaveCount(0)
+
+  // Dry from the start.
+  await fx.click()
+  await expect(fx).toHaveAttribute('aria-pressed', 'false')
+  await view.getByRole('button', { name: 'Play' }).click()
+  await expect(view.locator('.beat-tick.is-now')).toHaveCount(1)
+  await page.waitForTimeout(500)
+  await view.getByRole('button', { name: 'Stop' }).click()
+  await expect(view.getByRole('button', { name: 'Play' })).toBeVisible()
+  await expect(view.getByText("This browser can't play sound here.")).toHaveCount(0)
+
+  // What was heard goes with a request.
+  await view.getByRole('button', { name: 'Regenerate' }).click()
+  await expect.poll(() => sentText(page, 0)).toContain('the FX off')
+
+  const overflow = await view.locator('html').evaluate((el) => el.scrollWidth - el.clientWidth)
+  expect(overflow).toBeLessThanOrEqual(0)
+  expect(errors).toEqual([])
+})
+
+test('a card without effect lines has no FX switch', async ({ page }) => {
+  const errors = watchErrors(page)
+  const view = await show(page, HELD)
+  await expect(view.getByRole('heading', { name: 'Held bass' })).toBeVisible()
+  await expect(view.locator('.beat-fx')).toHaveCount(0)
+  await expect(view.locator('.beat-shape')).toHaveCount(0)
+  await expect(view.getByText('FX are an approximation', { exact: false })).toHaveCount(0)
   expect(errors).toEqual([])
 })

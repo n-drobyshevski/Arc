@@ -1,8 +1,9 @@
-// The beat-card view: header (name, tempo, swing), group tabs, the step grid
-// with mute and solo per row, Play/Stop, the card's problems by line, Copy
-// card, and Regenerate, Improve (Fix errors on a broken card) and "Ask Claude
-// to change this" with quick changes. It only draws and plays; main.tsx
-// talks to the host.
+// The beat-card view: header (name, tempo, swing), the card's effect lines
+// with the FX switch, group tabs, the step grid with mute and solo per row
+// (and a badge on each pad a pad line shapes), Play/Stop, the card's problems
+// by line, Copy card, and Regenerate, Improve (Fix errors on a broken card)
+// and "Ask Claude to change this" with quick changes. It only draws and
+// plays; main.tsx talks to the host.
 
 import type { CSSProperties, JSX } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
@@ -16,7 +17,7 @@ import {
   type BeatCardResult,
 } from '../../../web/src/core/formats/beatCard'
 import { BeatText } from '../../src/text'
-import { audible, groupHits, viewGroups, type ViewGroup, type ViewRow } from './model'
+import { audible, cardFx, groupHits, hasFx, viewGroups, type ViewGroup, type ViewRow } from './model'
 import { Player } from './player'
 import { Synth } from './synth'
 
@@ -34,11 +35,13 @@ export interface BeatViewProps {
 export function BeatView(props: BeatViewProps): JSX.Element {
   const { result } = props
   const groups = useMemo(() => viewGroups(result), [result])
+  const fx = useMemo(() => cardFx(result), [result])
   const [tab, setTab] = useState(0)
   const [tempo, setTempo] = useState(result.tempo ?? DEFAULT_TEMPO)
   const [swing, setSwing] = useState(result.swing)
   const [muted, setMuted] = useState<ReadonlySet<string>>(new Set())
   const [soloed, setSoloed] = useState<ReadonlySet<string>>(new Set())
+  const [fxOn, setFxOn] = useState(true)
   const [playing, setPlaying] = useState(false)
   const [audioError, setAudioError] = useState(false)
   const [nowStep, setNowStep] = useState<number | null>(null)
@@ -51,6 +54,7 @@ export function BeatView(props: BeatViewProps): JSX.Element {
     setSwing(result.swing)
     setMuted(new Set())
     setSoloed(new Set())
+    setFxOn(true)
   }, [result])
 
   const loops = useMemo(
@@ -59,6 +63,8 @@ export function BeatView(props: BeatViewProps): JSX.Element {
   )
   useEffect(() => player.current?.setLoops(loops), [loops])
   useEffect(() => player.current?.setTempo(tempo), [tempo])
+  useEffect(() => player.current?.setFx(fx), [fx])
+  useEffect(() => player.current?.setFxOn(fxOn), [fxOn])
   useEffect(() => {
     if (player.current) player.current.audible = (pad) => audible(pad, muted, soloed)
   }, [muted, soloed])
@@ -100,6 +106,8 @@ export function BeatView(props: BeatViewProps): JSX.Element {
       await p.resume()
       p.setLoops(loops)
       p.setTempo(tempo)
+      p.setFx(fx)
+      p.setFxOn(fxOn)
       p.audible = (pad) => audible(pad, muted, soloed)
       p.start()
       setAudioError(false)
@@ -121,6 +129,7 @@ export function BeatView(props: BeatViewProps): JSX.Element {
   if (swing !== result.swing) heard.push(BeatText.heardSwing(swing))
   if (muted.size > 0) heard.push(BeatText.heardMuted([...muted]))
   if (soloed.size > 0) heard.push(BeatText.heardSolo([...soloed]))
+  if (!fxOn && hasFx(fx)) heard.push(BeatText.HEARD_FX_OFF)
 
   return (
     <main class="beat" aria-label={BeatText.APP_NAME}>
@@ -132,6 +141,21 @@ export function BeatView(props: BeatViewProps): JSX.Element {
           {BeatText.SWING.toLowerCase()} {result.swing}
         </p>
       </header>
+
+      {hasFx(fx) && (
+        <div class={`beat-fx${fxOn ? '' : ' is-off'}`}>
+          <button
+            type="button"
+            class={`beat-fx-switch${fxOn ? ' is-on' : ''}`}
+            aria-pressed={fxOn}
+            title={BeatText.FX_SWITCH}
+            onClick={() => setFxOn(!fxOn)}
+          >
+            {BeatText.FX}
+          </button>
+          <p class="beat-fx-text">{BeatText.fxSummary(fx)}</p>
+        </div>
+      )}
 
       {!result.valid && <p class="beat-invalid" role="alert">{BeatText.INVALID}</p>}
 
@@ -204,7 +228,10 @@ export function BeatView(props: BeatViewProps): JSX.Element {
         copyText={props.copyText}
       />
 
-      <p class="beat-foot">{BeatText.PREVIEW_NOTE}</p>
+      <p class="beat-foot">
+        {BeatText.PREVIEW_NOTE}
+        {hasFx(fx) && ` ${BeatText.FX_NOTE}`}
+      </p>
     </main>
   )
 }
@@ -347,6 +374,17 @@ function Grid(props: {
                   <span class={`beat-label${row.notesOnly ? ' is-notes' : ''}`} title={label}>
                     {label}
                   </span>
+                  {row.shaping && (
+                    // After the label for screen readers; on a line of its own under the head (beat.css).
+                    <span
+                      class="beat-shape"
+                      role="img"
+                      aria-label={BeatText.shapeText(row.shaping)}
+                      title={BeatText.shapeText(row.shaping)}
+                    >
+                      {BeatText.shapeBadge(row.shaping)}
+                    </span>
+                  )}
                   <button
                     type="button"
                     class={`beat-ms beat-mute${isMuted ? ' is-on' : ''}`}

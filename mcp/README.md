@@ -9,6 +9,7 @@ It has one tool, `show_beat_card`. Claude calls it after it writes a card, or wh
 - a step grid with one row per pad, shaded by velocity, with held notes drawn long and lines between bars;
 - mute and solo on each row;
 - tempo and swing sliders, and Play/Stop with stand-in drum and bass sounds;
+- the card's pad shaping (`pad` lines: pitch, level, pan, attack, release, mode) and FX (`fx` with `send`, `comp`, `sidechain`), played with Web Audio as an approximation of arc's FX, with an FX switch to hear the beat dry;
 - the card's errors and warnings, each with its line number;
 - **Regenerate** (a new take, same tempo and feel) and **Improve** (Claude reworks the groove and says what it changed), or **Fix errors** on a card that can't be read;
 - **Ask Claude to change this**, with one-tap quick changes (busier hats, add a fill, simpler, more swing, half-time, add a bassline) or your own words;

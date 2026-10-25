@@ -1,6 +1,7 @@
 // The messages the view sends to Claude: Ask, Regenerate, Improve, Fix errors
-// and the quick changes.
+// and the quick changes; the effect line and the shaped pads' badges.
 import { describe, expect, it } from 'vitest'
+import { parseBeatCard } from '../../web/src/core/formats/beatCard'
 import { BeatText } from '../src/text'
 
 const SHOW = 'Show me the new card with show_beat_card.'
@@ -39,5 +40,23 @@ describe('BeatText messages', () => {
       expect(t.request.trim()).not.toBe('')
     }
     expect(new Set(BeatText.TWEAKS.map((t) => t.label)).size).toBe(BeatText.TWEAKS.length)
+  })
+})
+
+describe('BeatText FX and pad shaping', () => {
+  const read = (...lines: string[]) => parseBeatCard(['ARC BEAT 1', ...lines, '[A] bars 1', 'A4 hat | x... |'].join('\n'))
+
+  it('sums up the effect lines in one line', () => {
+    const r = read('fx reverb 60 40', 'send A 20 B 40', 'comp 40 60', 'sidechain A7 BC')
+    expect(BeatText.fxSummary(r)).toBe('reverb 60/40 · sends A 20 B 40 · comp 40/60 · sidechain A7 → B C')
+    expect(BeatText.fxSummary(read('fx none', 'comp off', 'sidechain A7 B 25 70'))).toBe(
+      'no effect · comp off · sidechain A7 → B 25/70',
+    )
+  })
+
+  it('writes a shaped pad’s badge and its full settings', () => {
+    const pad = parseBeatCard(['ARC BEAT 1', '[A] bars 1', 'A4 hat | x... |', 'pad A4 pitch -7 level 80 pan 4 mode key'].join('\n')).pads[0]!
+    expect(BeatText.shapeBadge(pad)).toBe('−7 st · 80% · R4 · rel 15 · key')
+    expect(BeatText.shapeText(pad)).toBe('A4 shaping: pitch −7 semitones, level 80, pan R4, release 15, mode key')
   })
 })

@@ -5,14 +5,14 @@
 // 1"); its reading rules are followed one by one, the same way as the skill's
 // scripts/beatcard.py, so a card is valid here exactly when `beatcard.py
 // check` finds no error, and each problem has the same line and the same
-// reason (beatcard.py's code and wording). This is the core subset a player
-// needs: the header (name, tempo, swing), the [A]-[D] sections with their
-// grid rows, notes and sound lines.
+// reason (beatcard.py's code and wording). This is what a player needs: the
+// header (name, tempo, swing), the effect lines (fx, send, comp, sidechain),
+// the [A]-[D] sections with their grid rows, notes, sound and pad lines.
 //
-// The rest of the format is checked by the same rules but not kept: effect
-// lines (fx, send, comp, sidechain), pad lines, the chain and every scene but
-// the first. Each such line that reads fine gets a warning "not previewed
-// yet" with its line number, so a card that uses them still plays.
+// The rest of the format is checked by the same rules but not kept: the chain
+// and every scene but the first. Each such line that reads fine gets a
+// warning "not previewed yet" with its line number, so a card that uses them
+// still plays.
 //
 // Holds: a grid row keeps two arrays with one entry per step. vel[k] is the
 // velocity of the hit that starts at step k (0 for a rest or a hold) and
@@ -56,6 +56,12 @@ const FX_LIST = 'none, delay, reverb, distortion, chorus, filter or compressor'
 const FX_WORDS = ['fx', 'send', 'comp', 'sidechain']
 const PAD_SETTINGS = ['pitch', 'level', 'pan', 'attack', 'release', 'mode']
 const PLAY_MODES = ['oneshot', 'key', 'legato']
+/** The release a pad gets when its mode leaves oneshot and the line gives none: the device's key default. */
+export const KEY_RELEASE = 15
+/** The sidechain's length and shape when the line gives none, and the fx knobs'. */
+export const SIDECHAIN_LENGTH = 30
+export const SIDECHAIN_SHAPE = 50
+export const FX_KNOB = 50
 const HEADER_WORDS = ['name', 'tempo', 'swing']
 const NOTE_KEYS = ['at', 't', 'vel', 'gate', 'note', 'semi']
 const PERCENT_TEXT = '0 to 100, whole or with one decimal'
@@ -135,6 +141,60 @@ export interface BeatCardSound {
   readonly line: number
 }
 
+/** The master effect of an fx line; x and y are percent, 0..100 (50 when the line leaves them out). */
+export interface BeatCardFx {
+  readonly type: FxType
+  readonly x: number
+  readonly y: number
+}
+
+export type FxType = (typeof FX_TYPES)[number]
+
+/** Send lines, added up: each group given, A..D, with its percent; groups left out play 0. */
+export type BeatCardSends = Partial<Record<'A' | 'B' | 'C' | 'D', number>>
+
+/** A comp line that turns the compressor on: drive and speed in percent. */
+export interface BeatCardComp {
+  readonly drive: number
+  readonly speed: number
+}
+
+/** A sidechain line: the pad that ducks the groups, with the length and shape in percent. */
+export interface BeatCardSidechain {
+  /** The pad as printed (AENTER for E). */
+  readonly pad: string
+  readonly group: string
+  readonly offset: number
+  readonly note: number
+  /** The groups it ducks, A..D in order, each once (its own group may be one). */
+  readonly groups: readonly string[]
+  readonly length: number
+  readonly shape: number
+}
+
+export type PlayMode = 'oneshot' | 'key' | 'legato'
+
+/** A pad's shaping from its pad lines (merged, the later settings winning); only the settings given. */
+export interface BeatCardPad {
+  readonly group: string
+  readonly pad: string
+  readonly offset: number
+  readonly note: number
+  /** Semitones, -12..12, up to two decimals. */
+  readonly pitch?: number
+  /** 0..100 */
+  readonly level?: number
+  /** -16..16, negative is left. */
+  readonly pan?: number
+  /** Envelope ticks, 0..255. */
+  readonly attack?: number
+  /** Envelope ticks, 0..255; KEY_RELEASE when the mode left oneshot without one. */
+  readonly release?: number
+  readonly mode?: PlayMode
+  /** The pad's last pad line. */
+  readonly line: number
+}
+
 export interface BeatCardResult {
   /** No errors: the card reads (warnings allowed). */
   readonly valid: boolean
@@ -151,6 +211,13 @@ export interface BeatCardResult {
   readonly notes: readonly BeatCardNote[]
   /** Those sections' sound lines, one per pad. */
   readonly sounds: readonly BeatCardSound[]
+  /** Those sections' pad lines, one per pad, in the order the pads first got one. */
+  readonly pads: readonly BeatCardPad[]
+  /** The effect lines, project-wide; null when the card has no such line. */
+  readonly fx: BeatCardFx | null
+  readonly sends: BeatCardSends | null
+  readonly comp: BeatCardComp | 'off' | null
+  readonly sidechain: BeatCardSidechain | 'off' | null
   /** The scenes the card has (1 without scene lines); only the first is kept. */
   readonly scenes: number
 }
@@ -274,7 +341,7 @@ interface Draft {
   readonly rows: BeatCardRow[]
   readonly notes: BeatCardNote[]
   readonly sounds: Map<number, BeatCardSound>
-  readonly padLines: Map<number, number>
+  readonly pads: Map<number, BeatCardPad>
   readonly hits: Hit[]
 }
 
@@ -287,7 +354,7 @@ const draft = (group: number, number: number | null, line: number): Draft => ({
   rows: [],
   notes: [],
   sounds: new Map(),
-  padLines: new Map(),
+  pads: new Map(),
   hits: [],
 })
 
@@ -313,6 +380,10 @@ class Reader {
   private chainSteps: number[] | null = null
   private chainLine = 0
   private readonly fxSeen = new Set<string>()
+  fx: BeatCardFx | null = null
+  sends: BeatCardSends | null = null
+  comp: BeatCardComp | 'off' | null = null
+  sidechain: BeatCardSidechain | 'off' | null = null
 
   constructor(text: string) {
     this.lines = (text.startsWith('﻿') ? text.slice(1) : text).split(LINE_BREAK)
@@ -406,7 +477,7 @@ class Reader {
     } else if (key === 'pad') {
       this.err(n, 'pad-outside-section', "'pad' has to come after a section line like [A]")
     } else if (FX_WORDS.includes(key)) {
-      if (this.fxLine(n, word, key, tokens(rest))) this.later(n, `the ${key} line is`)
+      this.fxLine(n, word, key, tokens(rest))
     } else if (text.includes('|') || firstIsPad(text)) {
       this.err(n, 'row-outside-section', 'a grid row has to come after a section line like [A]')
     } else if (HEADER_WORDS.includes(key)) {
@@ -745,10 +816,10 @@ class Reader {
     })
   }
 
-  // -- effect lines (header only; checked, not kept) ------------------------
+  // -- effect lines (header only) -------------------------------------------
 
-  /** fx / send / comp / sidechain; [t] are the words after [word]. True when the line reads. */
-  private fxLine(n: number, word: string, key: string, t: string[]): boolean {
+  /** fx / send / comp / sidechain; [t] are the words after [word]. A line with a fault changes nothing. */
+  private fxLine(n: number, word: string, key: string, t: string[]): void {
     const extra = (from: number): void => {
       if (t.length > from) this.warn(n, 'fx-extra', `the ${word} line has extra words from '${t[from]}'; ignored`)
     }
@@ -759,108 +830,111 @@ class Reader {
     if (key === 'fx') {
       const effect = t.length > 0 ? FX_TYPES.find((e) => e === t[0]!.toLowerCase()) : undefined
       if (effect === undefined) {
-        this.err(
+        return this.err(
           n,
           'bad-fx',
           t.length === 0 ? `fx needs an effect: ${FX_LIST}` : `'${t[0]}' is not an effect: use ${FX_LIST}`,
         )
-        return false
       }
+      const knobs = [FX_KNOB, FX_KNOB]
       for (const [i, knob] of [
         [1, 'x'],
         [2, 'y'],
       ] as const) {
-        if (t.length > i && percent(t[i]!) === null) {
-          this.err(n, 'bad-fx-value', `fx ${knob} '${t[i]}' must be ${PERCENT_TEXT}`)
-          return false
-        }
+        if (t.length <= i) continue
+        const value = percent(t[i]!)
+        if (value === null) return this.err(n, 'bad-fx-value', `fx ${knob} '${t[i]}' must be ${PERCENT_TEXT}`)
+        knobs[i - 1] = value
       }
       extra(3)
       once('fx', 'two fx lines; the later is kept')
+      this.fx = { type: effect, x: knobs[0]!, y: knobs[1]! }
     } else if (key === 'send') {
       if (t.length === 0) {
-        this.err(n, 'bad-send', "a send line looks like 'send A 40 B 20': a group, then 0 to 100, as often as needed")
-        return false
+        return this.err(
+          n,
+          'bad-send',
+          "a send line looks like 'send A 40 B 20': a group, then 0 to 100, as often as needed",
+        )
       }
+      const line: Record<string, number> = {}
       for (let i = 0; i < t.length; i += 2) {
         const g = t[i]!
-        if (g.length !== 1 || !GROUPS.includes(g)) {
-          this.err(n, 'bad-send', `'${g}' is not a group: use A to D`)
-          return false
-        }
+        if (g.length !== 1 || !GROUPS.includes(g)) return this.err(n, 'bad-send', `'${g}' is not a group: use A to D`)
         const value = t[i + 1]
-        if (value === undefined) {
-          this.err(n, 'bad-send', `send ${g} needs a value, ${PERCENT_TEXT}`)
-          return false
-        }
-        if (percent(value) === null) {
-          this.err(n, 'bad-send', `send ${g} '${value}' must be ${PERCENT_TEXT}`)
-          return false
-        }
+        if (value === undefined) return this.err(n, 'bad-send', `send ${g} needs a value, ${PERCENT_TEXT}`)
+        const level = percent(value)
+        if (level === null) return this.err(n, 'bad-send', `send ${g} '${value}' must be ${PERCENT_TEXT}`)
+        line[g] = level
       }
+      // Send lines add up; a group given twice keeps its later value. Kept in group order.
+      const sends: Record<string, number> = { ...this.sends, ...line }
+      this.sends = Object.fromEntries([...GROUPS].flatMap((g) => (g in sends ? [[g, sends[g]!]] : [])))
     } else if (key === 'comp') {
       if (t.length === 0) {
-        this.err(n, 'bad-comp', "a comp line looks like 'comp off' or 'comp 40 60': a drive and a speed")
-        return false
+        return this.err(n, 'bad-comp', "a comp line looks like 'comp off' or 'comp 40 60': a drive and a speed")
       }
+      let comp: BeatCardComp | 'off' = 'off'
       if (t[0]!.toLowerCase() === 'off') extra(1)
       else {
-        if (percent(t[0]!) === null) {
-          this.err(n, 'bad-comp', `comp drive '${t[0]}' must be ${PERCENT_TEXT}, or use comp off`)
-          return false
+        const drive = percent(t[0]!)
+        if (drive === null) {
+          return this.err(n, 'bad-comp', `comp drive '${t[0]}' must be ${PERCENT_TEXT}, or use comp off`)
         }
-        if (t.length < 2) {
-          this.err(n, 'bad-comp', "comp needs a speed after the drive, like 'comp 40 60'")
-          return false
-        }
-        if (percent(t[1]!) === null) {
-          this.err(n, 'bad-comp', `comp speed '${t[1]}' must be ${PERCENT_TEXT}`)
-          return false
-        }
+        if (t.length < 2) return this.err(n, 'bad-comp', "comp needs a speed after the drive, like 'comp 40 60'")
+        const speed = percent(t[1]!)
+        if (speed === null) return this.err(n, 'bad-comp', `comp speed '${t[1]}' must be ${PERCENT_TEXT}`)
         extra(2)
+        comp = { drive, speed }
       }
       once('comp', 'two comp lines; the later is kept')
+      this.comp = comp
     } else {
       if (t.length === 0) {
-        this.err(
+        return this.err(
           n,
           'bad-sidechain',
           "a sidechain line looks like 'sidechain off' or 'sidechain A7 BC': the pad, then the groups it ducks",
         )
-        return false
       }
+      let side: BeatCardSidechain | 'off' = 'off'
       if (t[0]!.toLowerCase() === 'off') extra(1)
       else {
         const pad = parsePad(t[0]!)
-        if (typeof pad === 'string') {
-          this.err(n, 'bad-pad', pad)
-          return false
-        }
+        if (typeof pad === 'string') return this.err(n, 'bad-pad', pad)
         if (t.length < 2) {
-          this.err(n, 'bad-sidechain', `sidechain ${t[0]} needs the groups it ducks, like 'sidechain A7 BC'`)
-          return false
+          return this.err(n, 'bad-sidechain', `sidechain ${t[0]} needs the groups it ducks, like 'sidechain A7 BC'`)
         }
         if (!/^[A-D]+$/.test(t[1]!)) {
-          this.err(n, 'bad-sidechain', `sidechain groups '${t[1]}' must be the letters A to D, like BC`)
-          return false
+          return this.err(n, 'bad-sidechain', `sidechain groups '${t[1]}' must be the letters A to D, like BC`)
         }
+        const knobs = [SIDECHAIN_LENGTH, SIDECHAIN_SHAPE]
         for (const [i, knob] of [
           [2, 'length'],
           [3, 'shape'],
         ] as const) {
-          if (t.length > i && percent(t[i]!) === null) {
-            this.err(n, 'bad-sidechain', `sidechain ${knob} '${t[i]}' must be ${PERCENT_TEXT}`)
-            return false
-          }
+          if (t.length <= i) continue
+          const value = percent(t[i]!)
+          if (value === null) return this.err(n, 'bad-sidechain', `sidechain ${knob} '${t[i]}' must be ${PERCENT_TEXT}`)
+          knobs[i - 2] = value
         }
         extra(4)
+        side = {
+          pad: padLabel(pad.group, pad.offset),
+          group: GROUPS[pad.group]!,
+          offset: pad.offset,
+          note: note(pad),
+          groups: [...GROUPS].filter((g) => t[1]!.includes(g)),
+          length: knobs[0]!,
+          shape: knobs[1]!,
+        }
       }
       once('sidechain', 'two sidechain lines; the later is kept')
+      this.sidechain = side
     }
-    return true
   }
 
-  // -- pad lines (checked, not kept) ----------------------------------------
+  // -- pad lines ------------------------------------------------------------
 
   /** pad <pad> [pitch n] [level n] [pan n] [attack n] [release n] [mode m]. A second line for a pad merges into the first. */
   private padLine(n: number, text: string): void {
@@ -878,7 +952,8 @@ class Reader {
       )
     }
     const label = padLabel(d.group, pad.offset)
-    let given = 0
+    // The line's settings; one written twice keeps the later value.
+    const given: Record<string, number | string> = {}
     let i = 2
     while (i < t.length) {
       const word = t[i]!.toLowerCase()
@@ -916,26 +991,37 @@ class Reader {
           )
         }
       }
-      given++
+      // + 0 turns -0 into 0.
+      given[word] = word === 'mode' ? value.toLowerCase() : Number(value) + 0
       i += 2
     }
-    if (given === 0) {
+    if (Object.keys(given).length === 0) {
       return this.err(
         n,
         'bad-pad-line',
         `${label} pad: give at least one of pitch, level, pan, attack, release or mode`,
       )
     }
-    const before = d.padLines.get(pad.offset)
+    const before = d.pads.get(pad.offset)
     if (before !== undefined) {
       this.warn(
         n,
         'duplicate-pad-line',
-        `${label} already has a pad line on line ${before}; merged, the later settings win`,
+        `${label} already has a pad line on line ${before.line}; merged, the later settings win`,
       )
     }
-    d.padLines.set(pad.offset, n)
-    this.later(n, `the ${label} pad line is`)
+    const settings: Record<string, number | string | undefined> = { ...before, ...given }
+    // Leaving oneshot sets the release to the key default, unless the line gives one.
+    const leaves = given.mode !== undefined && given.mode !== 'oneshot' && (before?.mode ?? 'oneshot') === 'oneshot'
+    if (leaves && given.release === undefined) settings.release = KEY_RELEASE
+    d.pads.set(pad.offset, {
+      group: GROUPS[d.group]!,
+      pad: label,
+      offset: pad.offset,
+      note: note(pad),
+      ...Object.fromEntries(PAD_SETTINGS.flatMap((k) => (settings[k] !== undefined ? [[k, settings[k]]] : []))),
+      line: n,
+    })
   }
 
   // -- notes list -----------------------------------------------------------
@@ -1110,6 +1196,11 @@ export function parseBeatCard(text: string): BeatCardResult {
     groups,
     notes: r.kept.flatMap((d) => d.notes),
     sounds: r.kept.flatMap((d) => [...d.sounds.values()].sort((a, b) => a.line - b.line)),
+    pads: r.kept.flatMap((d) => [...d.pads.values()]),
+    fx: r.fx,
+    sends: r.sends,
+    comp: r.comp,
+    sidechain: r.sidechain,
     scenes: Math.max(1, r.sceneCount),
   }
 }
@@ -1152,6 +1243,29 @@ function rowText(g: BeatCardGroup, row: BeatCardRow): string {
 
 const problemText = (p: BeatCardProblem): string => `line ${p.line}: ${p.msg}`
 
+/** The effect lines as one line, "reverb 60 40 · send A 20 B 40 · comp 40 60 · sidechain A7 ducks B C"; '' for none. */
+function fxText(result: BeatCardResult): string {
+  const parts: string[] = []
+  if (result.fx !== null) parts.push(`${result.fx.type} ${result.fx.x} ${result.fx.y}`)
+  if (result.sends !== null) {
+    parts.push(`send ${Object.entries(result.sends).map(([g, level]) => `${g} ${level}`).join(' ')}`)
+  }
+  if (result.comp !== null) {
+    parts.push(result.comp === 'off' ? 'comp off' : `comp ${result.comp.drive} ${result.comp.speed}`)
+  }
+  const side = result.sidechain
+  if (side === 'off') parts.push('sidechain off')
+  else if (side !== null) {
+    // Length and shape only when the line changed them from 30 and 50.
+    const knobs =
+      side.length !== SIDECHAIN_LENGTH || side.shape !== SIDECHAIN_SHAPE
+        ? `, length ${side.length} shape ${side.shape}`
+        : ''
+    parts.push(`sidechain ${side.pad} ducks ${side.groups.join(' ')}${knobs}`)
+  }
+  return parts.join(' · ')
+}
+
 /**
  * How much of a long card the summary lists: at most [problems] errors and as
  * many warnings, and [notes] notes of each section, then a line saying how
@@ -1182,6 +1296,8 @@ export function summarizeBeatCard(result: BeatCardResult, limits: SummaryLimits 
     head.push(`swing ${result.swing}`)
     if (result.scenes > 1) head.push(`${result.scenes} scenes, the first shown`)
     out.push(head.join(', '))
+    const fx = fxText(result)
+    if (fx) out.push(`FX: ${fx}`)
     for (const g of result.groups) {
       const number = g.number !== null ? String(g.number).padStart(2, '0') : ''
       const swung = g.swings && result.swing > 50 ? ', swung' : ''
@@ -1189,6 +1305,13 @@ export function summarizeBeatCard(result: BeatCardResult, limits: SummaryLimits 
       out.push(`[${g.group}${number}] ${plural(g.bars, 'bar')}, step ${g.step} (${g.stepsPerBar} steps a bar)${swung}`)
       for (const s of result.sounds.filter((s) => s.group === g.group)) {
         out.push(`sound ${s.pad} ${s.slot}${s.name ? ` ${s.name}` : ''}`)
+      }
+      for (const p of result.pads.filter((p) => p.group === g.group)) {
+        const settings = PAD_SETTINGS.flatMap((k) => {
+          const value = p[k as keyof BeatCardPad]
+          return value !== undefined ? [`${k} ${value}`] : []
+        })
+        out.push(`pad ${p.pad}: ${settings.join(', ')}`)
       }
       const names = g.rows.map((row) => `${row.pad} ${row.label}`.trimEnd())
       const width = Math.max(4, ...names.map((x) => x.length))

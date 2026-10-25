@@ -32,8 +32,10 @@ describe('the skill cards', () => {
       const r = parseBeatCard(c.card)
       expect(r.valid).toBe(c.valid)
       expect(r.errors).toEqual([])
-      // beatcard.py had nothing to say about these cards; only the parts not previewed are noted.
+      // beatcard.py had nothing to say about these cards; only the parts not previewed are noted:
+      // the chain and the later scenes, never effect or pad lines.
       expect(own(r.warnings)).toEqual([])
+      if (r.scenes === 1) expect(r.warnings).toEqual([])
       expect(r.groups.length).toBeGreaterThan(0)
       for (const g of r.groups) {
         for (const row of g.rows) {
@@ -80,16 +82,16 @@ describe('the skill cards', () => {
     ])
   })
 
-  it('Breakcore arrangement: the first scene is kept, the rest noted', () => {
+  it('Breakcore arrangement: the first scene and the effects are kept, the rest noted', () => {
     const r = parseBeatCard(CARDS.find((c) => c.heading === 'Breakcore arrangement')!.card)
     expect(r.valid).toBe(true)
     expect(r.scenes).toBe(5)
     expect(r.groups.map((g) => g.group)).toEqual(['A', 'B'])
     expect(r.groups[0]!.rows.map((row) => row.pad)).toEqual(['A7', 'A4', 'AENTER'])
+    expect(r.fx).not.toBeNull()
+    expect(r.sends).not.toBeNull()
+    expect(r.comp).not.toBeNull()
     expect(r.warnings.map((w) => w.msg)).toEqual([
-      'the fx line is not previewed yet',
-      'the send line is not previewed yet',
-      'the comp line is not previewed yet',
       'the chain is not previewed yet',
       'scene 2 (Drop) is not previewed yet',
       'scene 3 (Breakdown) is not previewed yet',
@@ -251,7 +253,153 @@ describe('notes and sounds', () => {
   })
 })
 
+describe('effect lines', () => {
+  it('keeps their values, with no warning', () => {
+    const r = card('fx reverb 60 40', 'send A 20 B 40.5', 'comp 40 60', 'sidechain A7 BC 25 70', '[A]', `A7 ${ROW}`)
+    expect(r.valid).toBe(true)
+    expect(r.warnings).toEqual([])
+    expect(r.fx).toEqual({ type: 'reverb', x: 60, y: 40 })
+    expect(r.sends).toEqual({ A: 20, B: 40.5 })
+    expect(r.comp).toEqual({ drive: 40, speed: 60 })
+    expect(r.sidechain).toEqual({
+      pad: 'A7',
+      group: 'A',
+      offset: 9,
+      note: 45,
+      groups: ['B', 'C'],
+      length: 25,
+      shape: 70,
+    })
+  })
+
+  it('is null for a kind the card has no line of', () => {
+    expect(card('[A]', `A7 ${ROW}`)).toMatchObject({ fx: null, sends: null, comp: null, sidechain: null, pads: [] })
+    expect(card('send C 10', '[A]', `A7 ${ROW}`)).toMatchObject({ fx: null, sends: { C: 10 }, comp: null })
+  })
+
+  it('defaults: x and y 50, length 30 and shape 50; the groups in order, once each', () => {
+    const r = card('FX Delay', 'sidechain AE DBB', '[A]', `A7 ${ROW}`)
+    expect(r.fx).toEqual({ type: 'delay', x: 50, y: 50 })
+    expect(r.sidechain).toMatchObject({ pad: 'AENTER', offset: 2, groups: ['B', 'D'], length: 30, shape: 50 })
+    expect(card('fx filter 20', '[A]', `A7 ${ROW}`).fx).toEqual({ type: 'filter', x: 20, y: 50 })
+  })
+
+  it('adds send lines up, a group given twice keeping its later value', () => {
+    const r = card('send B 40 A 20', 'send B 10 D 5', 'send A 0', '[A]', `A7 ${ROW}`)
+    expect(r.warnings).toEqual([])
+    expect(r.sends).toEqual({ A: 0, B: 10, D: 5 })
+    expect(Object.keys(r.sends!)).toEqual(['A', 'B', 'D'])
+  })
+
+  it('keeps the later fx, comp and sidechain line, with a warning', () => {
+    const r = card(
+      'fx delay 10',
+      'comp 40 60',
+      'sidechain A7 B',
+      'fx none',
+      'comp off',
+      'sidechain off',
+      '[A]',
+      `A7 ${ROW}`,
+    )
+    expect(r).toMatchObject({ fx: { type: 'none', x: 50, y: 50 }, comp: 'off', sidechain: 'off' })
+    expect(own(r.warnings)).toEqual([
+      { line: 5, code: 'duplicate-fx' },
+      { line: 6, code: 'duplicate-comp' },
+      { line: 7, code: 'duplicate-sidechain' },
+    ])
+    expect(card('comp off x', '[A]', `A7 ${ROW}`)).toMatchObject({ comp: 'off', warnings: [{ code: 'fx-extra' }] })
+  })
+
+  it('changes nothing for a line with a fault', () => {
+    const r = card('send A 10', 'send B 101', 'comp 40 60', 'comp 40', '[A]', `A7 ${ROW}`)
+    expect(r.errors.map((e) => [e.line, e.code])).toEqual([
+      [3, 'bad-send'],
+      [5, 'bad-comp'],
+    ])
+    expect(r).toMatchObject({ sends: { A: 10 }, comp: { drive: 40, speed: 60 } })
+  })
+})
+
+describe('pad lines', () => {
+  it('keeps their settings, one entry a pad', () => {
+    const r = card('[A]', 'pad A4 pitch -7 level 80', `A7 ${ROW}`, 'pad AE pan -4 attack 3 pitch +3.25')
+    expect(r.valid).toBe(true)
+    expect(r.warnings).toEqual([])
+    expect(r.pads).toEqual([
+      { group: 'A', pad: 'A4', offset: 6, note: 42, pitch: -7, level: 80, line: 3 },
+      { group: 'A', pad: 'AENTER', offset: 2, note: 38, pitch: 3.25, pan: -4, attack: 3, line: 5 },
+    ])
+  })
+
+  it('merges a second line for a pad, the later settings winning, with a warning', () => {
+    const r = card('[B]', 'pad B7 pitch -7 level 80 level 70', 'pad B9 level 5', 'pad B7 level 90 pan -0')
+    expect(r.pads).toEqual([
+      { group: 'B', pad: 'B7', offset: 9, note: 57, pitch: -7, level: 90, pan: 0, line: 5 },
+      { group: 'B', pad: 'B9', offset: 11, note: 59, level: 5, line: 4 },
+    ])
+    expect(own(r.warnings)).toEqual([{ line: 5, code: 'duplicate-pad-line' }])
+  })
+
+  it('sets the release to 15 when the mode leaves oneshot, unless the line gives one', () => {
+    const r = card(
+      '[A]',
+      'pad A7 mode key',
+      'pad A8 Mode LEGATO release 40',
+      'pad A9 release 40',
+      'pad A9 mode key',
+      'pad A4 mode key release 30',
+      'pad A4 mode legato',
+      'pad A5 mode oneshot',
+    )
+    expect(r.valid).toBe(true)
+    expect(r.pads.map((p) => [p.pad, p.mode, p.release])).toEqual([
+      ['A7', 'key', 15],
+      ['A8', 'legato', 40],
+      ['A9', 'key', 15],
+      // key to legato doesn't leave oneshot: the release stays.
+      ['A4', 'legato', 30],
+      ['A5', 'oneshot', undefined],
+    ])
+  })
+
+  it('keeps only the first scene', () => {
+    const r = card('scene One', '[A]', 'pad A7 level 50', 'scene Two', '[A]', 'pad A9 level 60', '[B]', 'pad B7 pan 3')
+    expect(r.valid).toBe(true)
+    expect(r.pads.map((p) => [p.pad, p.level])).toEqual([['A7', 50]])
+    expect(r.warnings.map((w) => w.msg)).toEqual(['scene 2 (Two) is not previewed yet'])
+  })
+})
+
 describe('summarizeBeatCard', () => {
+  it('lists the effects in one line and each shaped pad', () => {
+    const text = summarizeBeatCard(
+      card(
+        'fx reverb 60 40',
+        'send B 40 A 20',
+        'comp 40 60',
+        'sidechain A7 CB',
+        '[A]',
+        'sound A4 200 Hat',
+        'pad A4 pitch -7 level 80',
+        `A4 ${ROW}`,
+        'pad A7 mode key',
+      ),
+    )
+    expect(text.split('\n')).toEqual([
+      'ARC BEAT card, swing 50',
+      'FX: reverb 60 40 · send A 20 B 40 · comp 40 60 · sidechain A7 ducks B C',
+      '',
+      '[A] 1 bar, step 1/16 (16 steps a bar)',
+      'sound A4 200 Hat',
+      'pad A4: pitch -7, level 80',
+      'pad A7: release 15, mode key',
+      'A4    X... .... X... ....',
+    ])
+    const off = card('comp off', 'sidechain A7 B 20 50', '[A]', `A7 ${ROW}`)
+    expect(summarizeBeatCard(off).split('\n')[1]).toBe('FX: comp off · sidechain A7 ducks B, length 20 shape 50')
+  })
+
   it('writes the grid back as a card does', () => {
     const text = summarizeBeatCard(
       card(

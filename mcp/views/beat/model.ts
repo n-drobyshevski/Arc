@@ -17,13 +17,22 @@
 // its tick for its gate, never swung. Two hits on one pad at one tick and one
 // pitch keep the louder, as the device does (the card gets a warning for
 // them); a chord's notes differ in pitch, so they all play.
+//
+// Pad shaping: a hit on a pad with a pad line carries the pad's settings as
+// the synth plays them (Shape). Pitch moves a bass or keys note by its
+// semitones and scales a drum voice's frequencies by 2^(pitch/12); level is a
+// gain, pan -1..1, attack and release seconds (ticks of about 10 ms). A pad
+// without a pad line has no shape and plays as it always has.
 
 import {
+  KEY_RELEASE,
   stepTick,
   type BeatCardGroup,
   type BeatCardNote,
+  type BeatCardPad,
   type BeatCardResult,
   type BeatCardRow,
+  type PlayMode,
 } from '../../../web/src/core/formats/beatCard'
 
 export type Voice = 'kick' | 'snare' | 'clap' | 'hat' | 'openhat' | 'perc' | 'tom' | 'bass' | 'keys'
@@ -43,6 +52,8 @@ export interface ViewRow {
   readonly noteVel: readonly number[]
   /** A row only the notes list plays. */
   readonly notesOnly: boolean
+  /** The pad's pad line (merged), or null when it has none. */
+  readonly shaping: BeatCardPad | null
 }
 
 export interface ViewGroup {
@@ -61,6 +72,63 @@ export interface Hit {
   readonly semi: number | null
   /** MIDI note the stand-in plays at, for pitched voices; null for the voice's own. */
   readonly midi: number | null
+  /** The pad's shaping; absent for a pad without a pad line. */
+  readonly shape?: Shape
+}
+
+/** A pad line as the synth plays it. */
+export interface Shape {
+  /** Frequency factor of a drum voice, 2^(pitch/12); 1 on bass and keys, whose midi carries the pitch. */
+  readonly rate: number
+  /** Gain, level / 100. */
+  readonly level: number
+  /** -1 (left) .. 1 (right): pan / 16. */
+  readonly pan: number
+  /** Fade-in, seconds. */
+  readonly attack: number
+  /** Fade-out after the gate in key and legato, seconds. */
+  readonly release: number
+  readonly mode: PlayMode
+}
+
+/** Voices that play a note's pitch; the rest are drums. */
+const PITCHED: readonly Voice[] = ['bass', 'keys']
+
+/** The note a bass or keys stand-in plays when the hit gives none (a grid hit). */
+export const OWN_MIDI = { bass: 36, keys: 60 } as const
+
+/** An envelope tick of the pad sheet, about 10 ms (beat-card.md: not verified on the device). */
+const ENVELOPE_TICK_S = 0.01
+
+/** The effect lines the synth plays; null for a kind the card has no line for. */
+export type CardFx = Pick<BeatCardResult, 'fx' | 'sends' | 'comp' | 'sidechain'>
+
+/** The card's effect lines (null for each when the result has none, as an older result may). */
+export function cardFx(card: BeatCardResult): CardFx {
+  return { fx: card.fx ?? null, sends: card.sends ?? null, comp: card.comp ?? null, sidechain: card.sidechain ?? null }
+}
+
+/** Does the card have any effect line? */
+export function hasFx(fx: CardFx): boolean {
+  return fx.fx !== null || fx.sends !== null || fx.comp !== null || fx.sidechain !== null
+}
+
+/** The pad line of [pad], or null. */
+export function padShaping(card: BeatCardResult, pad: string): BeatCardPad | null {
+  return (card.pads ?? []).find((p) => p.pad === pad) ?? null
+}
+
+/** A pad line as the synth plays it on [voice]. */
+export function shapeOf(p: BeatCardPad, voice: Voice): Shape {
+  const mode = p.mode ?? 'oneshot'
+  return {
+    rate: PITCHED.includes(voice) ? 1 : 2 ** ((p.pitch ?? 0) / 12),
+    level: (p.level ?? 100) / 100,
+    pan: (p.pan ?? 0) / 16,
+    attack: (p.attack ?? 0) * ENVELOPE_TICK_S,
+    release: (p.release ?? (mode === 'oneshot' ? 0 : KEY_RELEASE)) * ENVELOPE_TICK_S,
+    mode,
+  }
 }
 
 /** The voice a row label names, or null. Whole words, so "kick 2" and "closed hat" work. */
@@ -128,6 +196,7 @@ export function viewGroups(card: BeatCardResult): ViewGroup[] {
       len: r.len,
       noteVel: new Array<number>(g.steps).fill(0),
       notesOnly: false,
+      shaping: padShaping(card, r.pad),
     }))
     for (const n of notes) {
       let row = rows.find((r) => r.pad === n.pad)
@@ -142,6 +211,7 @@ export function viewGroups(card: BeatCardResult): ViewGroup[] {
           len: empty,
           noteVel: new Array<number>(g.steps).fill(0),
           notesOnly: true,
+          shaping: padShaping(card, n.pad),
         }
         rows.push(row)
       }
@@ -153,7 +223,15 @@ export function viewGroups(card: BeatCardResult): ViewGroup[] {
   })
 }
 
-const PITCHED: readonly Voice[] = ['bass', 'keys']
+/** [hit] with its pad's shaping: the shape, and a bass or keys note moved by the pitch. */
+function shaped(card: BeatCardResult, hit: Hit): Hit {
+  const p = padShaping(card, hit.pad)
+  if (p === null) return hit
+  const pitch = p.pitch ?? 0
+  const pitched = hit.voice === 'bass' || hit.voice === 'keys'
+  const midi = pitched && pitch !== 0 ? (hit.midi ?? OWN_MIDI[hit.voice]) + pitch : hit.midi
+  return { ...hit, midi, shape: shapeOf(p, hit.voice) }
+}
 
 /** Every hit of one section in one loop, sorted by tick, with doubles (pad, tick, semi) folded to the louder. */
 export function groupHits(card: BeatCardResult, view: ViewGroup, swing: number): Hit[] {
@@ -162,7 +240,7 @@ export function groupHits(card: BeatCardResult, view: ViewGroup, swing: number):
   const add = (h: Hit): void => {
     const key = `${h.pad}:${h.tick}:${h.semi ?? 'pad'}`
     const had = byKey.get(key)
-    if (!had || h.vel > had.vel) byKey.set(key, h)
+    if (!had || h.vel > had.vel) byKey.set(key, shaped(card, h))
   }
   for (const row of view.rows) {
     for (let k = 0; k < g.steps; k++) {

@@ -5,7 +5,9 @@ import { parseBeatCard, type BeatCardResult } from '../../web/src/core/formats/b
 import { CARDS } from '../../web/test/core/formats/beatCardFixtures'
 import {
   audible,
+  cardFx,
   groupHits,
+  hasFx,
   isBeatCardResult,
   viewGroups,
   voiceFromLabel,
@@ -123,5 +125,50 @@ describe('isBeatCardResult', () => {
     expect(isBeatCardResult(JSON.parse(JSON.stringify(card('[A] bars 1'))))).toBe(true)
     expect(isBeatCardResult({ valid: true })).toBe(false)
     expect(isBeatCardResult(null)).toBe(false)
+  })
+})
+
+describe('pad shaping', () => {
+  it('puts a pad line on its pad’s hits and leaves the other pads as they were', () => {
+    const r = card(
+      '[A] bars 1 step 1/16',
+      'A7 kick | X... .... .... .... |',
+      'A4 hat  | ..x. .... .... .... |',
+      'pad A4 pitch -12 level 80 pan -8 attack 20 mode key',
+    )
+    const view = viewGroups(r)[0]!
+    const [kick, hat] = groupHits(r, view, 50)
+    expect(kick).toEqual({ tick: 0, pad: 'A7', voice: 'kick', vel: 127, gate: 24, semi: null, midi: null })
+    expect(kick).not.toHaveProperty('shape')
+    // A drum voice an octave down plays at half its frequencies; leaving oneshot gave release 15.
+    expect(hat!.shape).toEqual({ rate: 0.5, level: 0.8, pan: -0.5, attack: 0.2, release: 0.15, mode: 'key' })
+    expect(hat!.midi).toBeNull()
+    expect(view.rows[0]!.shaping).toBeNull()
+    expect(view.rows[1]!.shaping).toMatchObject({ pad: 'A4', pitch: -12, level: 80, pan: -8, attack: 20, mode: 'key' })
+  })
+
+  it('moves a bass or keys note by the pitch, and a oneshot pad keeps no release', () => {
+    const r = card('[B] bars 1 step 1/16', 'B7 bass | X... .... .... .... |', 'pad B7 pitch 3.5', 'notes', 'B7 at 1.2.1 note E2')
+    const hits = groupHits(r, viewGroups(r)[0]!, 50)
+    // The grid hit from the bass's own C2 (36), the note from E2 (40).
+    expect(hits.map((h) => h.midi)).toEqual([39.5, 43.5])
+    expect(hits[0]!.shape).toEqual({ rate: 1, level: 1, pan: 0, attack: 0, release: 0, mode: 'oneshot' })
+  })
+
+  it('reads legato and a notes-only pad’s line', () => {
+    const r = card('[C] bars 1', 'notes', 'C7 at 1.1.1 note C4', 'pad C7 mode legato release 40')
+    const view = viewGroups(r)[0]!
+    expect(view.rows[0]!.shaping).toMatchObject({ pad: 'C7', mode: 'legato', release: 40 })
+    expect(groupHits(r, view, 50)[0]!.shape).toMatchObject({ mode: 'legato', release: 0.4 })
+  })
+})
+
+describe('effect lines', () => {
+  it('reads them from the result, null for each kind the card has none of', () => {
+    const r = card('fx delay 62 55', 'send C 30', '[A] bars 1')
+    expect(cardFx(r)).toEqual({ fx: { type: 'delay', x: 62, y: 55 }, sends: { C: 30 }, comp: null, sidechain: null })
+    expect(hasFx(cardFx(r))).toBe(true)
+    expect(hasFx(cardFx(card('[A] bars 1')))).toBe(false)
+    expect(hasFx(cardFx(card('comp off', '[A] bars 1')))).toBe(true)
   })
 })

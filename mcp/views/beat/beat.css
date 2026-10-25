@@ -46,6 +46,45 @@
   margin-top: 12px;
 }
 
+.beat-fx {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.beat-fx-switch {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 2px 10px;
+  border: 1px solid var(--arc-border);
+  border-radius: 999px;
+  background: transparent;
+  font-size: var(--font-text-sm-size, 0.85rem) !important;
+  font-weight: var(--font-weight-semibold, 600);
+  cursor: pointer;
+}
+
+.beat-fx-switch.is-on {
+  border-color: var(--arc-accent);
+  background: var(--arc-accent);
+  color: #fff !important;
+}
+
+.beat-fx-text {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--arc-text-2);
+  font-size: var(--font-text-sm-size, 0.85rem);
+}
+
+/* Switched off: the line stays, struck through. */
+.beat-fx.is-off .beat-fx-text {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
 .beat-invalid {
   margin: 8px 0 0;
   color: var(--arc-danger);
@@ -189,8 +228,10 @@
   left: 0;
   z-index: 1;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  align-content: center;
+  gap: 0 4px;
   flex: 0 0 var(--head);
   width: var(--head);
   padding: 0 6px 0 8px;
@@ -216,6 +257,19 @@
 
 .beat-label.is-notes {
   font-style: italic;
+}
+
+/* A pad line's settings: a line of its own across the row head, under the pad and buttons. */
+.beat-shape {
+  order: 1;
+  flex: 1 0 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.65rem;
+  line-height: 1.2;
+  color: var(--arc-accent);
+  font-variant-numeric: tabular-nums;
 }
 
 .beat-ms {
