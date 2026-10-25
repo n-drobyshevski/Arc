@@ -7,12 +7,15 @@
 // check` finds no error, and each problem has the same line and the same
 // reason (beatcard.py's code and wording). This is what a player needs: the
 // header (name, tempo, swing), the effect lines (fx, send, comp, sidechain),
-// the [A]-[D] sections with their grid rows, notes, sound and pad lines.
+// the [A]-[D] sections with their grid rows, notes, sound and pad lines, the
+// scenes and the chain.
 //
-// The rest of the format is checked by the same rules but not kept: the chain
-// and every scene but the first. Each such line that reads fine gets a
-// warning "not previewed yet" with its line number, so a card that uses them
-// still plays.
+// Scenes: the result's groups, notes, sounds and pads are the first scene's,
+// so a card without scene lines reads as one scene. `scenes` lists every scene
+// a card's scene lines start, with the sections each writes itself; a group a
+// scene leaves out plays the previous scene's pattern (scenePatterns works it
+// out). `chain` is the chain line's steps, scenes counted from 0 there as in
+// `scenes`; playOrder gives what plays, the chain or each scene once.
 //
 // Holds: a grid row keeps two arrays with one entry per step. vel[k] is the
 // velocity of the hit that starts at step k (0 for a rest or a hold) and
@@ -195,6 +198,27 @@ export interface BeatCardPad {
   readonly line: number
 }
 
+/** One scene of a card of scenes: what follows a scene line, its own sections and their lines. */
+export interface BeatCardScene {
+  /** Its place in `scenes`, from 0 (the card's scene number minus 1). */
+  readonly index: number
+  /** '' when the scene line gives none. */
+  readonly name: string
+  /** The scene line. */
+  readonly line: number
+  /** The sections the scene writes, in card order; the groups it leaves out play the scene before's (scenePatterns). */
+  readonly groups: readonly BeatCardGroup[]
+  readonly notes: readonly BeatCardNote[]
+  readonly sounds: readonly BeatCardSound[]
+  readonly pads: readonly BeatCardPad[]
+}
+
+/** A step of the chain line: a scene, from 0 as in `scenes`, played [passes] times (1..8). */
+export interface BeatCardChainStep {
+  readonly scene: number
+  readonly passes: number
+}
+
 export interface BeatCardResult {
   /** No errors: the card reads (warnings allowed). */
   readonly valid: boolean
@@ -205,7 +229,7 @@ export interface BeatCardResult {
   readonly tempo: number | null
   /** 50 (straight) .. 75. */
   readonly swing: number
-  /** The (first) scene's sections in card order. */
+  /** The first scene's sections in card order (all of a card's without scene lines). */
   readonly groups: readonly BeatCardGroup[]
   /** Those sections' notes lists, in card order. */
   readonly notes: readonly BeatCardNote[]
@@ -218,8 +242,15 @@ export interface BeatCardResult {
   readonly sends: BeatCardSends | null
   readonly comp: BeatCardComp | 'off' | null
   readonly sidechain: BeatCardSidechain | 'off' | null
-  /** The scenes the card has (1 without scene lines); only the first is kept. */
-  readonly scenes: number
+  /**
+   * The scenes of a card with scene lines, in card order; empty for a card without them (its one scene is the above).
+   * At most MAX_SCENES: a card with more is not valid (too-many-scenes), and the scenes past it are left out.
+   */
+  readonly scenes: readonly BeatCardScene[]
+  /** How many scenes the card has, the ones past MAX_SCENES too: 1 without scene lines. */
+  readonly sceneCount: number
+  /** The chain line's steps; null when the card has none. */
+  readonly chain: readonly BeatCardChainStep[] | null
 }
 
 // ---------------------------------------------------------------------------
@@ -246,6 +277,58 @@ export function position(tick: number): string {
   const sixteenth = Math.floor(inBeat / 24)
   const extra = inBeat - sixteenth * 24
   return `${bar + 1}.${beat + 1}.${sixteenth + 1}` + (extra ? `+${extra}` : '')
+}
+
+/**
+ * The card's scenes: those its scene lines start, or for a card without them
+ * its one scene, the result's own sections. Never empty. A result from before
+ * scenes were kept (`scenes` a count) reads as one scene too.
+ */
+export function cardScenes(result: BeatCardResult): readonly BeatCardScene[] {
+  if (Array.isArray(result.scenes) && result.scenes.length > 0) return result.scenes
+  const { groups, notes, sounds, pads } = result
+  return [{ index: 0, name: '', line: 0, groups, notes, sounds, pads }]
+}
+
+/** A pattern a scene plays: its group's section, from the scene itself or an earlier one. */
+export interface ScenePattern {
+  readonly group: BeatCardGroup
+  /** The scene whose section it is, from 0: the scene itself, or the earlier scene it is carried from. */
+  readonly scene: number
+}
+
+/**
+ * The patterns scene [i] plays: its own sections, and for each group it
+ * leaves out the pattern the scene before plays (the same pattern, not a
+ * copy). In the first scene a group it leaves out plays nothing here: Arc
+ * keeps the pattern the scene playing gives it, which a card can't know. In
+ * group order, A to D; a card without scene lines keeps its card order.
+ */
+export function scenePatterns(result: BeatCardResult, i: number): ScenePattern[] {
+  const scenes = cardScenes(result)
+  if (scenes.length === 1) return scenes[0]!.groups.map((group) => ({ group, scene: 0 }))
+  const now = new Map<number, ScenePattern>()
+  for (const scene of scenes.slice(0, i + 1)) {
+    for (const group of scene.groups) now.set(group.index, { group, scene: scene.index })
+  }
+  return [...now.values()].sort((a, b) => a.group.index - b.group.index)
+}
+
+/** How long one pass of scene [i] lasts, in ticks: its longest pattern, a bar when it plays none. */
+export function sceneTicks(result: BeatCardResult, i: number): number {
+  return Math.max(TICKS_PER_BAR, ...scenePatterns(result, i).map((p) => p.group.length))
+}
+
+/**
+ * The steps Arc plays: the chain line's, or each scene once in card order
+ * when the card has none (or none that names its scenes). The order loops at
+ * its end. Steps naming a scene the card doesn't have are left out.
+ */
+export function playOrder(result: BeatCardResult): BeatCardChainStep[] {
+  const count = cardScenes(result).length
+  const chain = (result.chain ?? []).filter((s) => s.scene >= 0 && s.scene < count)
+  if (chain.length > 0) return chain.map(({ scene, passes }) => ({ scene, passes }))
+  return Array.from({ length: count }, (_, scene) => ({ scene, passes: 1 }))
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +428,13 @@ interface Draft {
   readonly hits: Hit[]
 }
 
+/** A scene being read: its scene line (0 for a card's one implicit scene) and its sections. */
+interface SceneDraft {
+  readonly name: string
+  readonly line: number
+  readonly drafts: Draft[]
+}
+
 const draft = (group: number, number: number | null, line: number): Draft => ({
   group,
   number,
@@ -364,8 +454,8 @@ class Reader {
   name = ''
   tempo: number | null = null
   swing = 50
-  /** The first scene's sections. */
-  readonly kept: Draft[] = []
+  /** The scenes read so far, each with its sections; one implicit scene until the first scene line. */
+  scenes: SceneDraft[] = [{ name: '', line: 0, drafts: [] }]
   private current: Draft | null = null
   /** The section line couldn't be read: its lines are skipped. */
   private skip = false
@@ -377,7 +467,7 @@ class Reader {
   sceneCount = 0
   /** The line of the first section, when no scene line came before it. */
   private firstSection = 0
-  private chainSteps: number[] | null = null
+  chainSteps: BeatCardChainStep[] | null = null
   private chainLine = 0
   private readonly fxSeen = new Set<string>()
   fx: BeatCardFx | null = null
@@ -395,10 +485,6 @@ class Reader {
 
   warn(line: number, code: string, msg: string): void {
     this.problems.push({ p: { line, code, msg }, error: false })
-  }
-
-  later(line: number, what: string): void {
-    this.warn(line, 'not-previewed', `${what} not previewed yet`)
   }
 
   read(): void {
@@ -587,7 +673,7 @@ class Reader {
     return bad
   }
 
-  /** Ends the section being read: doubles folded, the limit checked, the pattern kept when it is the first scene's. */
+  /** Ends the section being read: doubles folded, the limit checked, the pattern added to its scene. */
   private close(): void {
     const d = this.current
     if (d === null) return
@@ -597,8 +683,7 @@ class Reader {
     if (d.hits.length > MAX_NOTES) {
       this.err(d.line, 'too-many-notes', `[${GROUPS[d.group]}] has ${d.hits.length} notes, the most is ${MAX_NOTES}`)
     }
-    // A later scene's sections are checked but not kept: the scene line has the warning.
-    if (!this.dropped && this.sceneCount <= 1) this.kept.push(d)
+    if (!this.dropped && this.sceneCount <= MAX_SCENES) this.scenes[this.scenes.length - 1]!.drafts.push(d)
   }
 
   /** Two hits on one pad at one tick count as one: the louder stays, with a warning. */
@@ -632,8 +717,6 @@ class Reader {
         'section-before-scene',
         'a section comes before the first scene line: once a card has scenes, every section belongs to one',
       )
-      // The sections read so far belonged to no scene: they are not the first scene's.
-      this.kept.length = 0
     }
     this.sceneCount++
     this.seenGroups = new Map()
@@ -645,7 +728,13 @@ class Reader {
       this.warn(n, 'long-scene-name', `the scene name is longer than ${NAME_MAX} characters; shortened`)
       name = trim([...name].slice(0, NAME_MAX).join(''))
     }
-    if (this.sceneCount > 1) this.later(n, `scene ${this.sceneCount}${name ? ` (${name})` : ''} is`)
+    // A scene past MAX_SCENES is read for its problems but not kept (close drops its sections), so
+    // the result stays as small as a card of MAX_SCENES scenes however many scene lines it has.
+    if (this.sceneCount > MAX_SCENES) return
+    const scene = { name, line: n, drafts: [] }
+    // The sections read before the first scene line belonged to no scene: they are not the first scene's.
+    if (this.sceneCount === 1) this.scenes = [scene]
+    else this.scenes.push(scene)
   }
 
   /** chain <step> ...: a scene number from 1, with its passes as in 2x4 (1 to 8). A line with a fault changes nothing. */
@@ -655,7 +744,7 @@ class Reader {
       return this.err(n, 'late-chain', `'${word}' belongs before the first scene`)
     const t = tokens(text.slice(word.length))
     if (t.length === 0) return this.err(n, 'empty-chain', 'chain needs at least one scene, as in chain 1 2x2 3')
-    const steps: number[] = []
+    const steps: BeatCardChainStep[] = []
     for (const tok of t) {
       const m = /^([0-9]{1,6})(?:[xX]([0-9]{1,6}))?$/.exec(tok)
       if (!m) {
@@ -671,7 +760,7 @@ class Reader {
       if (passes < PASSES_MIN || passes > PASSES_MAX) {
         return this.err(n, 'bad-passes', `chain step '${tok}': passes must be ${PASSES_MIN} to ${PASSES_MAX}`)
       }
-      steps.push(scene)
+      steps.push({ scene: scene - 1, passes })
     }
     if (steps.length > CHAIN_MAX_STEPS) {
       return this.err(n, 'chain-too-long', `the chain has ${steps.length} steps, the most is ${CHAIN_MAX_STEPS}`)
@@ -691,15 +780,15 @@ class Reader {
         'a chain needs scenes: start each scene with a scene line',
       )
     }
-    const i = this.chainSteps.findIndex((scene) => scene > this.sceneCount)
+    const i = this.chainSteps.findIndex((step) => step.scene >= this.sceneCount)
     if (i >= 0) {
       const what = plural(this.sceneCount, 'scene')
       this.err(
         this.chainLine,
         'chain-unknown-scene',
-        `chain step ${i + 1} names scene ${this.chainSteps[i]}, but the card has ${what}`,
+        `chain step ${i + 1} names scene ${this.chainSteps[i]!.scene + 1}, but the card has ${what}`,
       )
-    } else this.later(this.chainLine, 'the chain is')
+    }
   }
 
   // -- grid rows ------------------------------------------------------------
@@ -1167,7 +1256,32 @@ export function parseBeatCard(text: string): BeatCardResult {
   // Stable, as beatcard.py and Arc's reader sort them.
   const problems = [...r.problems].sort((a, b) => a.p.line - b.p.line)
   const errors = problems.filter((x) => x.error).map((x) => x.p)
-  const groups = r.kept.map((d): BeatCardGroup => {
+  const scenes = r.scenes.map((s, index): BeatCardScene => ({ index, name: s.name, line: s.line, ...sections(s.drafts) }))
+  const { groups, notes, sounds, pads } = scenes[0]!
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings: problems.filter((x) => !x.error).map((x) => x.p),
+    name: r.name,
+    tempo: r.tempo,
+    swing: r.swing,
+    groups,
+    notes,
+    sounds,
+    pads,
+    fx: r.fx,
+    sends: r.sends,
+    comp: r.comp,
+    sidechain: r.sidechain,
+    scenes: r.sceneCount > 0 ? scenes : [],
+    sceneCount: Math.max(1, r.sceneCount),
+    chain: r.chainSteps,
+  }
+}
+
+/** A scene's sections as the result keeps them: the groups, then their notes, sounds and pads in card order. */
+function sections(drafts: readonly Draft[]): Pick<BeatCardScene, 'groups' | 'notes' | 'sounds' | 'pads'> {
+  const groups = drafts.map((d): BeatCardGroup => {
     const stepTicks = STEP_TICKS[d.step]
     const stepsPerBar = TICKS_PER_BAR / stepTicks
     return {
@@ -1187,21 +1301,10 @@ export function parseBeatCard(text: string): BeatCardResult {
     }
   })
   return {
-    valid: errors.length === 0,
-    errors,
-    warnings: problems.filter((x) => !x.error).map((x) => x.p),
-    name: r.name,
-    tempo: r.tempo,
-    swing: r.swing,
     groups,
-    notes: r.kept.flatMap((d) => d.notes),
-    sounds: r.kept.flatMap((d) => [...d.sounds.values()].sort((a, b) => a.line - b.line)),
-    pads: r.kept.flatMap((d) => [...d.pads.values()]),
-    fx: r.fx,
-    sends: r.sends,
-    comp: r.comp,
-    sidechain: r.sidechain,
-    scenes: Math.max(1, r.sceneCount),
+    notes: drafts.flatMap((d) => d.notes),
+    sounds: drafts.flatMap((d) => [...d.sounds.values()].sort((a, b) => a.line - b.line)),
+    pads: drafts.flatMap((d) => [...d.pads.values()]),
   }
 }
 
@@ -1268,12 +1371,14 @@ function fxText(result: BeatCardResult): string {
 
 /**
  * How much of a long card the summary lists: at most [problems] errors and as
- * many warnings, and [notes] notes of each section, then a line saying how
- * many more there are. The counts stay whole. No limit by default.
+ * many warnings, [notes] notes of each section (and four sections' worth in
+ * all, however many scenes the card has) and [scenes] scenes, then a line
+ * saying how many more there are. The counts stay whole. No limit by default.
  */
 export interface SummaryLimits {
   readonly problems?: number
   readonly notes?: number
+  readonly scenes?: number
 }
 
 /** The first [max] lines of [lines], then "… and 3 more errors" for the rest. */
@@ -1282,49 +1387,90 @@ function capped(lines: readonly string[], max: number, what: string, indent = ''
   return [...lines.slice(0, max), `${indent}… and ${plural(lines.length - max, `more ${what}`)}`]
 }
 
-/** The card as plain text: a heading, each section's grid, notes and sounds, then the problems by line. */
+/** The chain as a card writes it: "1x2 2 3x4", scenes from 1, passes only when more than 1. */
+export function chainText(chain: readonly BeatCardChainStep[]): string {
+  return chain.map((s) => (s.passes === 1 ? String(s.scene + 1) : `${s.scene + 1}x${s.passes}`)).join(' ')
+}
+
+/** A scene's heading: 'Scene 4 "Build", B from scene 3' (the groups it carries from the scenes before). */
+function sceneHeading(result: BeatCardResult, scene: BeatCardScene): string {
+  const from = new Map<number, string[]>()
+  for (const p of scenePatterns(result, scene.index)) {
+    if (p.scene !== scene.index) from.set(p.scene, [...(from.get(p.scene) ?? []), p.group.group])
+  }
+  const carried = [...from].sort((a, b) => a[0] - b[0]).map(([s, letters]) => `${letters.join(' ')} from scene ${s + 1}`)
+  const head = `Scene ${scene.index + 1}${scene.name ? ` "${scene.name}"` : ''}`
+  if (carried.length > 0) return `${head}, ${carried.join(', ')}`
+  return scene.groups.length > 0 ? head : `${head}, no sections`
+}
+
+/** The card as plain text: a heading, each section's grid, notes and sounds (scene by scene, then the chain), then the problems by line. */
 export function summarizeBeatCard(result: BeatCardResult, limits: SummaryLimits = {}): string {
   const maxProblems = limits.problems ?? Infinity
   const maxNotes = limits.notes ?? Infinity
+  // Four sections' worth of notes in all: what a card without scenes can list.
+  let notesLeft = maxNotes * 4
   const out: string[] = []
+  const section = (scene: Pick<BeatCardScene, 'notes' | 'sounds' | 'pads'>, g: BeatCardGroup): void => {
+    const number = g.number !== null ? String(g.number).padStart(2, '0') : ''
+    const swung = g.swings && result.swing > 50 ? ', swung' : ''
+    out.push(`[${g.group}${number}] ${plural(g.bars, 'bar')}, step ${g.step} (${g.stepsPerBar} steps a bar)${swung}`)
+    for (const s of scene.sounds.filter((s) => s.group === g.group)) {
+      out.push(`sound ${s.pad} ${s.slot}${s.name ? ` ${s.name}` : ''}`)
+    }
+    for (const p of scene.pads.filter((p) => p.group === g.group)) {
+      const settings = PAD_SETTINGS.flatMap((k) => {
+        const value = p[k as keyof BeatCardPad]
+        return value !== undefined ? [`${k} ${value}`] : []
+      })
+      out.push(`pad ${p.pad}: ${settings.join(', ')}`)
+    }
+    const names = g.rows.map((row) => `${row.pad} ${row.label}`.trimEnd())
+    const width = Math.max(4, ...names.map((x) => x.length))
+    g.rows.forEach((row, i) => out.push(`${names[i]!.padEnd(width)}  ${rowText(g, row)}`))
+    const notes = scene.notes.filter((x) => x.group === g.group)
+    if (notes.length > 0) {
+      out.push('notes:')
+      const lines = notes.map((x) => {
+        const what = x.semi === null ? 'pad hit' : `KEYS ${x.key ?? `semi ${x.semi}`}`
+        return `  ${x.pad} at ${position(x.tick)}  vel ${x.vel}  gate ${x.gate} ticks  ${what}`
+      })
+      const shown = Math.min(maxNotes, notesLeft)
+      notesLeft -= Math.min(shown, lines.length)
+      out.push(...capped(lines, shown, 'note', '  '))
+    }
+  }
   if (!result.valid) {
     out.push(`This card can't be read: ${plural(result.errors.length, 'error')}.`)
     out.push(...capped(result.errors.map(problemText), maxProblems, 'error'))
   } else {
+    const scenes = Array.isArray(result.scenes) ? result.scenes : []
     const head = [result.name ? `"${result.name}"` : 'ARC BEAT card']
     if (result.tempo !== null) head.push(`${result.tempo} BPM`)
     head.push(`swing ${result.swing}`)
-    if (result.scenes > 1) head.push(`${result.scenes} scenes, the first shown`)
+    if (scenes.length > 0) head.push(plural(scenes.length, 'scene'))
     out.push(head.join(', '))
     const fx = fxText(result)
     if (fx) out.push(`FX: ${fx}`)
-    for (const g of result.groups) {
-      const number = g.number !== null ? String(g.number).padStart(2, '0') : ''
-      const swung = g.swings && result.swing > 50 ? ', swung' : ''
+    if (scenes.length === 0) {
+      for (const g of result.groups) {
+        out.push('')
+        section(result, g)
+      }
+    } else {
+      const maxScenes = limits.scenes ?? Infinity
+      for (const scene of scenes.slice(0, maxScenes)) {
+        out.push('')
+        out.push(sceneHeading(result, scene))
+        for (const g of scene.groups) section(scene, g)
+      }
+      if (scenes.length > maxScenes) out.push('', `… and ${plural(scenes.length - maxScenes, 'more scene')}`)
       out.push('')
-      out.push(`[${g.group}${number}] ${plural(g.bars, 'bar')}, step ${g.step} (${g.stepsPerBar} steps a bar)${swung}`)
-      for (const s of result.sounds.filter((s) => s.group === g.group)) {
-        out.push(`sound ${s.pad} ${s.slot}${s.name ? ` ${s.name}` : ''}`)
-      }
-      for (const p of result.pads.filter((p) => p.group === g.group)) {
-        const settings = PAD_SETTINGS.flatMap((k) => {
-          const value = p[k as keyof BeatCardPad]
-          return value !== undefined ? [`${k} ${value}`] : []
-        })
-        out.push(`pad ${p.pad}: ${settings.join(', ')}`)
-      }
-      const names = g.rows.map((row) => `${row.pad} ${row.label}`.trimEnd())
-      const width = Math.max(4, ...names.map((x) => x.length))
-      g.rows.forEach((row, i) => out.push(`${names[i]!.padEnd(width)}  ${rowText(g, row)}`))
-      const notes = result.notes.filter((x) => x.group === g.group)
-      if (notes.length > 0) {
-        out.push('notes:')
-        const lines = notes.map((x) => {
-          const what = x.semi === null ? 'pad hit' : `KEYS ${x.key ?? `semi ${x.semi}`}`
-          return `  ${x.pad} at ${position(x.tick)}  vel ${x.vel}  gate ${x.gate} ticks  ${what}`
-        })
-        out.push(...capped(lines, maxNotes, 'note', '  '))
-      }
+      out.push(
+        result.chain !== null
+          ? `Chain: ${chainText(result.chain)}`
+          : 'No chain line: the scenes play in order, once each.',
+      )
     }
   }
   if (result.warnings.length > 0) {

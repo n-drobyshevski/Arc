@@ -1,10 +1,16 @@
 // Web only (no Kotlin twin, like guideData): beatCard.ts against the arc-beats
 // skill's own cards and against what its scripts/beatcard.py says about them
-// (recorded in beatCardFixtures.ts), plus the grid, notes and sound rules of
-// references/beat-card.md.
+// (recorded in beatCardFixtures.ts), plus the grid, notes, sound, scene and
+// chain rules of references/beat-card.md.
 import { describe, expect, it } from 'vitest'
 import {
+  cardScenes,
+  chainText,
+  MAX_SCENES,
   parseBeatCard,
+  playOrder,
+  scenePatterns,
+  sceneTicks,
   stepTick,
   summarizeBeatCard,
   swingOffset,
@@ -17,9 +23,9 @@ const ROW = '| X... .... X... .... |'
 
 const card = (...lines: string[]): BeatCardResult => parseBeatCard(['ARC BEAT 1', ...lines].join('\n'))
 
-/** The problems as beatcard.py lists them: its own, without beatCard.ts's "not previewed yet". */
+/** The problems as beatcard.py's fixtures record them: line and code. */
 const own = (ps: readonly BeatCardProblem[]): { line: number; code: string }[] =>
-  ps.filter((p) => p.code !== 'not-previewed').map(({ line, code }) => ({ line, code }))
+  ps.map(({ line, code }) => ({ line, code }))
 
 describe('the skill cards', () => {
   it('has every card of genres.md, ep40-kit.md and beat-card.md', () => {
@@ -32,10 +38,8 @@ describe('the skill cards', () => {
       const r = parseBeatCard(c.card)
       expect(r.valid).toBe(c.valid)
       expect(r.errors).toEqual([])
-      // beatcard.py had nothing to say about these cards; only the parts not previewed are noted:
-      // the chain and the later scenes, never effect or pad lines.
-      expect(own(r.warnings)).toEqual([])
-      if (r.scenes === 1) expect(r.warnings).toEqual([])
+      // beatcard.py had nothing to say about these cards, and every part of them is kept.
+      expect(r.warnings).toEqual([])
       expect(r.groups.length).toBeGreaterThan(0)
       for (const g of r.groups) {
         for (const row of g.rows) {
@@ -48,7 +52,8 @@ describe('the skill cards', () => {
 
   it('beat-card.md: the example card', () => {
     const r = parseBeatCard(CARDS.find((c) => c.source === 'beat-card.md')!.card)
-    expect(r).toMatchObject({ valid: true, name: 'Lazy boom bap', tempo: 92, swing: 58, scenes: 1 })
+    expect(r).toMatchObject({ valid: true, name: 'Lazy boom bap', tempo: 92, swing: 58, scenes: [], sceneCount: 1 })
+    expect(r.chain).toBeNull()
     const [a] = r.groups
     expect(a).toMatchObject({
       group: 'A',
@@ -82,22 +87,43 @@ describe('the skill cards', () => {
     ])
   })
 
-  it('Breakcore arrangement: the first scene and the effects are kept, the rest noted', () => {
+  it('Breakcore arrangement: every scene, the chain and the effects, with no warning', () => {
     const r = parseBeatCard(CARDS.find((c) => c.heading === 'Breakcore arrangement')!.card)
     expect(r.valid).toBe(true)
-    expect(r.scenes).toBe(5)
-    expect(r.groups.map((g) => g.group)).toEqual(['A', 'B'])
+    expect(r.warnings).toEqual([])
+    expect(r.sceneCount).toBe(5)
+    expect(r.scenes.map((s) => [s.index, s.name, s.line, s.groups.map((g) => g.group).join('')])).toEqual([
+      [0, 'Intro', 10, 'AB'],
+      [1, 'Drop', 21, 'AB'],
+      [2, 'Breakdown', 37, 'AB'],
+      [3, 'Build', 46, 'A'],
+      [4, 'Drop 2', 52, 'AB'],
+    ])
+    expect(r.chain).toEqual([
+      { scene: 0, passes: 2 },
+      { scene: 1, passes: 2 },
+      { scene: 2, passes: 1 },
+      { scene: 3, passes: 1 },
+      { scene: 4, passes: 2 },
+    ])
+    expect(chainText(r.chain!)).toBe('1x2 2x2 3 4 5x2')
+    // The top level is the first scene.
+    expect(r.groups).toEqual(r.scenes[0]!.groups)
+    expect(r.notes).toEqual(r.scenes[0]!.notes)
     expect(r.groups[0]!.rows.map((row) => row.pad)).toEqual(['A7', 'A4', 'AENTER'])
+    expect(r.scenes[1]!.groups[0]!.rows.map((row) => row.pad)).toEqual(['A7', 'A8', 'A9', 'A5', 'A4', 'AENTER'])
+    expect(r.scenes[2]!.notes.map((n) => [n.tick, n.key])).toEqual([
+      [0, 'E1'],
+      [384, 'G1'],
+    ])
+    // Build leaves B out: it plays Breakdown's bass.
+    expect(scenePatterns(r, 3).map((p) => [p.group.group, p.scene, p.group.line])).toEqual([
+      ['A', 3, 47],
+      ['B', 2, 41],
+    ])
     expect(r.fx).not.toBeNull()
     expect(r.sends).not.toBeNull()
     expect(r.comp).not.toBeNull()
-    expect(r.warnings.map((w) => w.msg)).toEqual([
-      'the chain is not previewed yet',
-      'scene 2 (Drop) is not previewed yet',
-      'scene 3 (Breakdown) is not previewed yet',
-      'scene 4 (Build) is not previewed yet',
-      'scene 5 (Drop 2) is not previewed yet',
-    ])
   })
 })
 
@@ -363,11 +389,203 @@ describe('pad lines', () => {
     ])
   })
 
-  it('keeps only the first scene', () => {
+  it('keeps each scene’s pad lines with it, the first scene’s on top', () => {
     const r = card('scene One', '[A]', 'pad A7 level 50', 'scene Two', '[A]', 'pad A9 level 60', '[B]', 'pad B7 pan 3')
     expect(r.valid).toBe(true)
+    expect(r.warnings).toEqual([])
     expect(r.pads.map((p) => [p.pad, p.level])).toEqual([['A7', 50]])
-    expect(r.warnings.map((w) => w.msg)).toEqual(['scene 2 (Two) is not previewed yet'])
+    expect(r.scenes[1]!.pads.map((p) => p.pad)).toEqual(['A9', 'B7'])
+  })
+})
+
+describe('scenes and the chain', () => {
+  const A = (row: string): string => `A7 kick | ${row} |`
+
+  it('keeps every scene with its name, line and own sections', () => {
+    const r = card(
+      'scene Intro',
+      '[A]',
+      A('X... .... .... ....'),
+      'scene',
+      '[B] bars 2',
+      'notes',
+      'B7 at 2.1.1 note E1',
+      'sound B7 400 Bass',
+      'scene Drop',
+      '[A]',
+      A('X.X. X.X. X.X. X.X.'),
+      '[C]',
+      'C7 | X... .... .... .... |',
+    )
+    expect(r.valid).toBe(true)
+    expect(r.warnings).toEqual([])
+    expect(r.sceneCount).toBe(3)
+    expect(r.scenes.map((s) => [s.index, s.name, s.line])).toEqual([
+      [0, 'Intro', 2],
+      [1, '', 5],
+      [2, 'Drop', 10],
+    ])
+    expect(r.scenes.map((s) => s.groups.map((g) => g.group))).toEqual([['A'], ['B'], ['A', 'C']])
+    expect(r.scenes[1]!.notes.map((n) => [n.pad, n.tick, n.key])).toEqual([['B7', 384, 'E1']])
+    expect(r.scenes[1]!.sounds.map((s) => [s.pad, s.slot])).toEqual([['B7', 400]])
+    // The top level stays the first scene's; with no chain line, each scene once.
+    expect(r.groups.map((g) => g.group)).toEqual(['A'])
+    expect(r.notes).toEqual([])
+    expect(r.chain).toBeNull()
+    expect(playOrder(r)).toEqual([
+      { scene: 0, passes: 1 },
+      { scene: 1, passes: 1 },
+      { scene: 2, passes: 1 },
+    ])
+  })
+
+  it('a group a scene leaves out plays the scene before’s pattern, the first scene’s plays nothing', () => {
+    const r = card(
+      'scene',
+      '[B]',
+      'B7 | X... .... .... .... |',
+      'scene',
+      '[A] bars 2',
+      A('X... .... .... .... | X... .... .... ....'),
+      'scene',
+      '[B]',
+      'B9 | x... .... .... .... |',
+      'scene',
+    )
+    expect(r.valid).toBe(true)
+    const of = (i: number): [string, number][] => scenePatterns(r, i).map((p) => [p.group.group, p.scene])
+    expect(of(0)).toEqual([['B', 0]])
+    expect(of(1)).toEqual([
+      ['A', 1],
+      ['B', 0],
+    ])
+    expect(of(2)).toEqual([
+      ['A', 1],
+      ['B', 2],
+    ])
+    expect(of(3)).toEqual(of(2))
+    // The same pattern, not a copy.
+    expect(scenePatterns(r, 3)[1]!.group).toBe(r.scenes[2]!.groups[0])
+    // A pass lasts as long as the scene's longest pattern.
+    expect([0, 1, 2, 3].map((i) => sceneTicks(r, i))).toEqual([384, 768, 768, 768])
+  })
+
+  it('reads a card without scene lines as its one scene', () => {
+    const r = card('[B]', 'B7 | X... .... .... .... |', '[A] bars 3', A(Array(3).fill('X... .... .... ....').join(' | ')))
+    expect(r).toMatchObject({ scenes: [], sceneCount: 1, chain: null })
+    expect(cardScenes(r)).toEqual([{ index: 0, name: '', line: 0, groups: r.groups, notes: r.notes, sounds: r.sounds, pads: r.pads }])
+    // Card order, as the sections come.
+    expect(scenePatterns(r, 0).map((p) => p.group.group)).toEqual(['B', 'A'])
+    expect(sceneTicks(r, 0)).toBe(3 * 384)
+    expect(playOrder(r)).toEqual([{ scene: 0, passes: 1 }])
+    // A result from before scenes were kept counts them instead.
+    expect(cardScenes({ ...r, scenes: 1 as unknown as [] })).toHaveLength(1)
+  })
+
+  it('keeps at most MAX_SCENES scenes, reading the later ones for their problems only', () => {
+    const scene = (i: number): string[] => [`scene s${i}`, '[A]', A('X... .... .... ....')]
+    const r = card(...Array.from({ length: 18 }, (_, i) => scene(i)).flat(), '[A]', A('X... .... ....'))
+    expect(own(r.errors)).toEqual([
+      { line: 50, code: 'too-many-scenes' },
+      { line: 56, code: 'duplicate-group' },
+      { line: 57, code: 'step-count' },
+    ])
+    expect(r.sceneCount).toBe(18)
+    expect(r.scenes).toHaveLength(MAX_SCENES)
+    expect(r.scenes.at(-1)!.name).toBe('s15')
+    // The later scenes' sections go nowhere, not into the last scene kept.
+    expect(r.scenes.every((s) => s.groups.length === 1)).toBe(true)
+  })
+
+  it('reads chain steps with 1 pass by default, a later chain line replacing the earlier', () => {
+    const scenes = ['scene', '[A]', A('X... .... .... ....'), 'scene', '[A]', A('x... .... .... ....'), 'scene']
+    const r = card('chain 1x2 2 3X8', ...scenes)
+    expect(r.valid).toBe(true)
+    expect(r.chain).toEqual([
+      { scene: 0, passes: 2 },
+      { scene: 1, passes: 1 },
+      { scene: 2, passes: 8 },
+    ])
+    expect(playOrder(r)).toEqual(r.chain)
+    const twice = card('chain 1 2', 'chain 2x4 2 1', ...scenes)
+    expect(twice.chain).toEqual([
+      { scene: 1, passes: 4 },
+      { scene: 1, passes: 1 },
+      { scene: 0, passes: 1 },
+    ])
+    expect(own(twice.warnings)).toEqual([{ line: 3, code: 'duplicate-chain' }])
+    // A chain line with a fault changes nothing.
+    expect(card('chain 1x2', 'chain 1x9', ...scenes).chain).toEqual([{ scene: 0, passes: 2 }])
+  })
+
+  it('keeps a chain that names a scene the card lacks, but plays only the scenes it has', () => {
+    const r = card('chain 1 4 2', 'scene', '[A]', A('X... .... .... ....'), 'scene')
+    expect(own(r.errors)).toEqual([{ line: 2, code: 'chain-unknown-scene' }])
+    expect(r.errors[0]!.msg).toBe('chain step 2 names scene 4, but the card has 2 scenes')
+    expect(playOrder(r)).toEqual([
+      { scene: 0, passes: 1 },
+      { scene: 1, passes: 1 },
+    ])
+  })
+
+  it('sums up each scene with what it carries, then the chain', () => {
+    const r = card(
+      'name Arr',
+      'chain 1x2 2',
+      'scene Intro',
+      '[A]',
+      A('X... .... X... ....'),
+      '[B]',
+      'notes',
+      'B7 at 1.1.1 note E1',
+      'scene',
+      '[A]',
+      A('X.X. X.X. X.X. X.X.'),
+    )
+    expect(summarizeBeatCard(r).split('\n')).toEqual([
+      '"Arr", swing 50, 2 scenes',
+      '',
+      'Scene 1 "Intro"',
+      '[A] 1 bar, step 1/16 (16 steps a bar)',
+      'A7 kick  X... .... X... ....',
+      '[B] 1 bar, step 1/16 (16 steps a bar)',
+      'notes:',
+      '  B7 at 1.1.1  vel 127  gate 24 ticks  KEYS E1',
+      '',
+      'Scene 2, B from scene 1',
+      '[A] 1 bar, step 1/16 (16 steps a bar)',
+      'A7 kick  X.X. X.X. X.X. X.X.',
+      '',
+      'Chain: 1x2 2',
+    ])
+    const plain = card('scene', '[A]', A('X... .... .... ....'), 'scene', 'scene')
+    expect(summarizeBeatCard(plain).split('\n').slice(5)).toEqual([
+      '',
+      'Scene 2, A from scene 1',
+      '',
+      'Scene 3, A from scene 1',
+      '',
+      'No chain line: the scenes play in order, once each.',
+    ])
+    expect(summarizeBeatCard(card('scene', 'scene', '[A]', A('X... .... .... ....'))).split('\n')[2]).toBe(
+      'Scene 1, no sections',
+    )
+  })
+
+  it('lists scenes and notes up to the limits: four sections’ worth of notes in all', () => {
+    const notes = (g: string): string[] => [`[${g}]`, 'notes', `${g}7 at 1.1.1`, `${g}7 at 1.2.1`, `${g}7 at 1.3.1`]
+    const r = card(...['A', 'B', 'C', 'D', 'A', 'B'].flatMap((g, i) => (i % 2 === 0 ? ['scene', ...notes(g)] : notes(g))))
+    expect(r.valid).toBe(true)
+    const text = summarizeBeatCard(r, { notes: 2, scenes: 2 }).split('\n')
+    // 8 notes in all: 2 of A, 2 of B, 2 of C, 2 of D; scene 3's are past the limit.
+    expect(text.filter((l) => l.startsWith('  ') && l.includes(' at '))).toHaveLength(8)
+    expect(text.filter((l) => l.includes('… and 1 more note'))).toHaveLength(4)
+    expect(text).toContain('… and 1 more scene')
+    expect(text).not.toContain('Scene 3')
+    expect(text.at(-1)).toBe('No chain line: the scenes play in order, once each.')
+    const all = summarizeBeatCard(r, { notes: 2 }).split('\n')
+    expect(all.filter((l) => l.startsWith('  ') && l.includes(' at '))).toHaveLength(8)
+    expect(all.filter((l) => l.includes('… and 3 more notes'))).toHaveLength(2)
   })
 })
 

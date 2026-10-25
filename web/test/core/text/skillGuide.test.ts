@@ -5,6 +5,8 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import * as GuideText from '../../../src/core/text/guideText'
+// @ts-expect-error: a plain .mjs script, without types
+import { PREFIX } from '../../../scripts/gen-skill-guide.mjs'
 
 const script = fileURLToPath(new URL('../../../scripts/gen-skill-guide.mjs', import.meta.url))
 const md = execFileSync(process.execPath, [script, '--stdout'], { encoding: 'utf8' })
@@ -34,5 +36,17 @@ describe('skill guide', () => {
     expect(md).toContain('- **Steps:** 1. hold a pad, 2. press SHIFT and C, 3. press SHIFT and D')
     expect(md).toContain('- **Steps:** 1. hold SHIFT, 2. turn KNOB X\n- **Or:** 1. hold SHIFT, 2. turn KNOB Y')
     expect(md).toContain('- **Steps:** 1. hold MAIN, 2. press the number pads (1 to 9)')
+  })
+
+  it('ids from guideId are the skill guide\'s, and the script\'s prefixes are GUIDE_IDS', () => {
+    expect(PREFIX).toEqual(GuideText.GUIDE_IDS)
+    expect(Object.keys(GuideText.GUIDE_IDS)).toEqual(GuideText.sections.map((s) => s.title))
+    const ids = GuideText.sections.flatMap((s, i) => s.entries.map((_, j) => GuideText.guideId(i, j)))
+    expect(ids.length).toBe(100)
+    expect(new Set(ids).size).toBe(100)
+    expect(ids).toEqual([...md.matchAll(/^### ([A-Z]+-\d+) /gm)].map((h) => h[1]))
+    expect([ids[0], ids[20], ids.at(-1)]).toEqual(['SND-1', 'SMP-1', 'SYS-18'])
+    expect(() => GuideText.guideId(0, 20)).toThrow(RangeError)
+    expect(() => GuideText.guideId(5, 0)).toThrow(RangeError)
   })
 })

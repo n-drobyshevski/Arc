@@ -1,0 +1,25 @@
+/*
+ * The key-cap colours of the shortcut guide, for
+ * web/src/ui/components/GuideKeys.css: the --guide-* tokens copied from
+ * web/src/ui/theme/tokens.css ("Guide key caps (GuideKeys.kt)"). They are the
+ * EP-133's own colours, fixed in the app's light and dark themes alike, so
+ * they stay fixed here too: whatever the host's theme, the caps look like the
+ * device. Keep them in step with tokens.css.
+ *
+ * Only --guide-divider follows the theme in tokens.css (keyEdge at 70%); here
+ * it is the host's border colour at 70% (--arc-border, hostTheme.css).
+ */
+
+:root {
+  --guide-light-face: #DAD9D5;
+  --guide-light-edge: #A9A8A2;
+  --guide-light-ink: #55575A;
+  --guide-dark-face: #4A4B4D;
+  --guide-dark-edge: #1E1F21;
+  --guide-dark-ink: #EDECE8;
+  --guide-hold-face: #B8E2EE;
+  --guide-hold-ink: #1D6577;
+  --guide-close-face: #8C8D8F;
+  --guide-close-edge: #5E5F61;
+  --guide-divider: color-mix(in srgb, var(--arc-border) 70%, transparent);
+}

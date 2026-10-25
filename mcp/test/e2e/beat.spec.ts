@@ -1,13 +1,15 @@
 // The beat view as a host shows it: the test host (host/host.ts) reads
 // ui://arc/beat.html from the server, puts it in a sandboxed iframe 360px
 // wide, and sends it a tool call of show_beat_card through the ext-apps
-// AppBridge. Checks the grid, mute, Play, Ask Claude, the error list, and a
-// card's effect lines and pad shaping with the FX switch, with no page errors.
+// AppBridge. Checks the grid, mute, Play, Ask Claude, the error list, a
+// card's effect lines and pad shaping with the FX switch, and a card of
+// scenes played as its chain and scene by scene, with no page errors.
 import { expect, test, type FrameLocator, type Page } from '@playwright/test'
 import { CARDS } from '../../../web/test/core/formats/beatCardFixtures'
 import type {} from './host/host'
 
 const HOUSE = CARDS.find((c) => c.heading === 'House')!.card
+const ARRANGEMENT = CARDS.find((c) => c.heading === 'Breakcore arrangement')!.card
 
 const HELD = `ARC BEAT 1
 name Held bass
@@ -280,5 +282,93 @@ test('a card without effect lines has no FX switch', async ({ page }) => {
   await expect(view.locator('.beat-fx')).toHaveCount(0)
   await expect(view.locator('.beat-shape')).toHaveCount(0)
   await expect(view.getByText('FX are an approximation', { exact: false })).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('plays a card of scenes: the chain, a scene picked by hand, and back', async ({ page }) => {
+  const errors = watchErrors(page)
+  const view = await show(page, ARRANGEMENT)
+  await expect(view.getByRole('heading', { name: 'Breakcore track' })).toBeVisible()
+  // Every scene and the chain play now: no warnings, no "only the first scene" note.
+  await expect(view.locator('.beat-problems')).toHaveCount(0)
+  await expect(view.getByText('only the first', { exact: false })).toHaveCount(0)
+
+  const chips = view.getByRole('group', { name: 'Scenes' }).getByRole('button')
+  await expect(chips).toHaveCount(5)
+  for (const [i, name] of ['Scene 1: Intro', 'Scene 2: Drop', 'Scene 3: Breakdown', 'Scene 4: Build', 'Scene 5: Drop 2'].entries()) {
+    await expect(chips.nth(i)).toHaveAccessibleName(name)
+  }
+  const chain = view.getByRole('button', { name: 'Chain', exact: true })
+  const scene = view.getByRole('button', { name: 'Scene', exact: true })
+  const where = view.locator('.beat-where')
+  // The card has a chain line: Chain, from the first scene.
+  await expect(chain).toHaveAttribute('aria-pressed', 'true')
+  await expect(scene).toHaveAttribute('aria-pressed', 'false')
+  await expect(chips.nth(0)).toHaveAttribute('aria-pressed', 'true')
+  await expect(where).toHaveText('Chain 1x2 2x2 3 4 5x2')
+  await expect(view.locator('[aria-current]')).toHaveCount(0)
+
+  // 240 BPM: a bar a second, so Intro's two passes of 2 bars last 4 s.
+  await view.getByLabel('Tempo').fill('240')
+  await view.getByRole('button', { name: 'Play' }).click()
+  await expect(chips.nth(0)).toHaveAttribute('aria-current', 'true')
+  await expect(where).toHaveText(/^Intro · pass [12]\/2 · step 1\/5$/)
+  await expect(view.locator('.beat-tick.is-now')).toHaveCount(1)
+  // The chain moves on to Drop, and the grid follows it.
+  await expect(chips.nth(1)).toHaveAttribute('aria-current', 'true')
+  await expect(chips.nth(0)).not.toHaveAttribute('aria-current', 'true')
+  await expect(chips.nth(1)).toHaveAttribute('aria-pressed', 'true')
+  await expect(where).toHaveText(/^Drop · pass [12]\/2 · step 2\/5$/)
+  await expect(view.locator('.beat-rows > li[data-pad="A8"]')).toHaveCount(1)
+
+  // Picking Build switches to Scene; Build is heard from the next bar line.
+  await chips.nth(3).click()
+  await expect(scene).toHaveAttribute('aria-pressed', 'true')
+  await expect(chain).toHaveAttribute('aria-pressed', 'false')
+  await expect(chips.nth(3)).toHaveAttribute('aria-pressed', 'true')
+  await expect(chips.nth(3)).toHaveAttribute('aria-current', 'true')
+  await expect(where).toHaveText('Build · on loop')
+  await expect(view.locator('[aria-current]')).toHaveCount(1)
+  // Build leaves B out: it plays Breakdown's bass.
+  const b = view.getByRole('tab', { name: /^B/ })
+  await expect(b).toContainText('from scene 3')
+  await b.click()
+  await expect(view.getByText('This scene leaves B out: it plays the pattern of scene 3 (Breakdown).')).toBeVisible()
+  await expect(view.locator('.beat-tick.is-now')).toHaveCount(1)
+
+  // The chips work from the keyboard.
+  await chips.nth(4).focus()
+  await page.keyboard.press('Enter')
+  await expect(chips.nth(4)).toHaveAttribute('aria-pressed', 'true')
+  await expect(chips.nth(4)).toHaveAttribute('aria-current', 'true')
+  await expect(where).toHaveText('Drop 2 · on loop')
+
+  // What was heard goes with a request.
+  await view.getByRole('button', { name: 'Regenerate' }).click()
+  await expect.poll(() => sentText(page, 0)).toContain('scene 5 (Drop 2) on loop')
+
+  // Back to the chain: it goes on from Drop 2's step, then loops to Intro.
+  await chain.click()
+  await expect(chain).toHaveAttribute('aria-pressed', 'true')
+  await expect(where).toHaveText(/^Drop 2 · pass [12]\/2 · step 5\/5$/)
+  await expect(chips.nth(0)).toHaveAttribute('aria-current', 'true')
+
+  await view.getByRole('button', { name: 'Stop' }).click()
+  await expect(view.getByRole('button', { name: 'Play' })).toBeVisible()
+  await expect(view.locator('[aria-current]')).toHaveCount(0)
+  await expect(view.locator('.beat-tick.is-now')).toHaveCount(0)
+  await expect(view.getByText("This browser can't play sound here.")).toHaveCount(0)
+
+  const overflow = await view.locator('html').evaluate((el) => el.scrollWidth - el.clientWidth)
+  expect(overflow).toBeLessThanOrEqual(0)
+  expect(errors).toEqual([])
+})
+
+test('a card without scenes has no scene strip', async ({ page }) => {
+  const errors = watchErrors(page)
+  const view = await show(page, HOUSE)
+  await expect(view.getByRole('heading', { name: 'House groove' })).toBeVisible()
+  await expect(view.locator('.beat-scenes')).toHaveCount(0)
+  await expect(view.getByRole('button', { name: 'Chain', exact: true })).toHaveCount(0)
   expect(errors).toEqual([])
 })

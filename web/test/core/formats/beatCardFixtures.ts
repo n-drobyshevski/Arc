@@ -4,7 +4,7 @@
 // and beat-card.md, copied word for word. ERROR_CARDS: small broken cards.
 // `valid`, `errors` and `warnings` are what the skill's scripts/beatcard.py says
 // (`beatcard.py check --json`, run when these were copied; vitest never runs
-// Python). Warnings leave out beatCard.ts's own "not previewed yet" ones.
+// Python).
 
 export interface CardFixture {
   readonly source: string

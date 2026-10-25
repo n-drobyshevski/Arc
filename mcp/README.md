@@ -1,10 +1,15 @@
 # arc MCP server
 
-A small [MCP](https://modelcontextprotocol.io) server that lets Claude show an **ARC BEAT card** as an interactive preview right in the chat. ARC BEAT cards are the plain-text EP-133 K.O. II beats that the `arc-beats` skill writes.
+A small [MCP](https://modelcontextprotocol.io) server that lets Claude show an **ARC BEAT card** as an interactive preview right in the chat, and look up the EP-133's key combos. ARC BEAT cards are the plain-text EP-133 K.O. II beats that the `arc-beats` skill writes.
 
-It has one tool, `show_beat_card`. Claude calls it after it writes a card, or when you paste one. You get an [MCP App](https://github.com/modelcontextprotocol/ext-apps) view with:
+It has two tools, `show_beat_card` and `lookup_combo`.
+
+## show_beat_card
+
+`show_beat_card` Claude calls it after it writes a card, or when you paste one. You get an [MCP App](https://github.com/modelcontextprotocol/ext-apps) view with:
 
 - the beat's name, tempo and swing;
+- for a card with scenes, a strip of its scenes and a **Chain / Scene** switch: Chain plays the card's `chain` (or every scene once) with its passes, Scene loops the one you pick; groups a scene leaves out play the previous scene's pattern, marked "from scene N";
 - tabs for the groups A–D the card uses;
 - a step grid with one row per pad, shaded by velocity, with held notes drawn long and lines between bars;
 - mute and solo on each row;
@@ -22,6 +27,10 @@ The view says so itself: it is a preview only. arc can't import cards yet, and t
 Hosts without MCP Apps, such as Claude Code, get the tool's plain-text summary instead: each section's grid, then the problems by line.
 
 The card is read by the same parser arc's web app will use, `web/src/core/formats/beatCard.ts`. A card is valid here exactly when the skill's `beatcard.py check` finds it valid.
+
+## lookup_combo
+
+`lookup_combo` answers "how do I … on the EP-133" from arc's shortcut guide: the 100 key combinations of teenage engineering's official guide for OS 2.5, in arc's words, each with its source. Claude calls it before it writes any key combo. It finds the entries that contain every word of the question (or, failing that, the ones matching the most words), optionally in one section, and shows them as cards with the keys drawn as on the device (arc's own `GuideKeys`), the guide's notes, **Official guide**, **Show more like this** and, for sequencer entries, **Make a beat that uses this**. Entries carry the same ids as the skill's guide (`SND-1`, `SMP-3`, …). When nothing matches it says so, so Claude doesn't invent a combo. Hosts without MCP Apps get the entries as text.
 
 ## Privacy
 

@@ -6,6 +6,9 @@ on:
       - 'mcp/**'
       - 'web/src/core/formats/beatCard.ts'
       - 'web/src/core/features/padNotes.ts'
+      - 'web/src/core/text/guide*.ts'
+      - 'web/src/core/util/kotlinText.ts'
+      - 'web/src/ui/components/GuideKeys.*'
       - 'web/test/core/formats/beatCardFixtures.ts'
       - '.github/workflows/mcp.yml'
   push:
@@ -14,6 +17,9 @@ on:
       - 'mcp/**'
       - 'web/src/core/formats/beatCard.ts'
       - 'web/src/core/features/padNotes.ts'
+      - 'web/src/core/text/guide*.ts'
+      - 'web/src/core/util/kotlinText.ts'
+      - 'web/src/ui/components/GuideKeys.*'
       - 'web/test/core/formats/beatCardFixtures.ts'
       - '.github/workflows/mcp.yml'
   workflow_dispatch:

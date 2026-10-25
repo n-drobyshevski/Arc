@@ -1,0 +1,196 @@
+/*
+ * The guide view. Tokens come from ../shared/hostTheme.css (--arc-*) and the
+ * key caps' colours from ../shared/guideTokens.css (--guide-*). The caps'
+ * own styles are the app's (web/src/ui/components/GuideKeys.css, imported by
+ * GuideKeys.tsx); the other tokens they read are the app's names, set below
+ * from the host's.
+ */
+
+.guide {
+  /* What GuideKeys.css reads besides --guide-*: the app's tokens.css names, mapped to the host's. */
+  --ink: var(--arc-text);
+  --graphite: var(--arc-text-2);
+  --signal: var(--arc-accent);
+  --on-signal: #fff;
+  --font-mono: var(--arc-mono);
+  --size-small: var(--font-text-sm-size, 0.85rem);
+  --space-3: 3px;
+  --space-6: 6px;
+  --space-8: 8px;
+  --radius-key: 8px;
+  --focus-ring: 2px solid var(--arc-ring);
+  --focus-offset: 2px;
+
+  box-sizing: border-box;
+  max-width: 760px;
+  padding: 12px 16px 16px;
+}
+
+.guide *,
+.guide *::before,
+.guide *::after {
+  box-sizing: border-box;
+}
+
+/* The app's text style for small text, which ComboView's notes and joiners use. */
+.guide .t-small {
+  font-size: var(--size-small);
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.guide-waiting {
+  color: var(--arc-text-2);
+}
+
+.guide-title {
+  margin: 0;
+  font-size: var(--font-heading-sm-size, 1.15rem);
+  font-weight: var(--font-weight-semibold, 600);
+  overflow-wrap: anywhere;
+}
+
+.guide-meta,
+.guide-note,
+.guide-foot {
+  margin: 0;
+  color: var(--arc-text-2);
+  font-size: var(--font-text-sm-size, 0.85rem);
+}
+
+.guide-head .guide-meta {
+  margin-top: 2px;
+}
+
+.guide-note {
+  margin-top: 8px;
+}
+
+.guide-foot {
+  margin-top: 12px;
+}
+
+.guide-none {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--arc-border);
+  border-radius: var(--arc-radius);
+  background: var(--arc-bg-2);
+}
+
+.guide-none-title {
+  margin: 0 0 4px;
+  font-weight: var(--font-weight-semibold, 600);
+}
+
+.guide-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.guide-entry {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--guide-divider);
+  border-radius: var(--arc-radius);
+  background: var(--arc-bg-2);
+}
+
+.guide-entry-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0;
+  font-size: var(--font-text-sm-size, 0.85rem);
+}
+
+.guide-id {
+  padding: 1px 6px;
+  border-radius: var(--arc-radius-sm);
+  background: var(--guide-dark-face);
+  color: var(--guide-dark-ink);
+  font-family: var(--arc-mono);
+  font-weight: 700;
+}
+
+.guide-section {
+  color: var(--arc-text-2);
+}
+
+.guide-action {
+  margin: 0;
+  font-size: var(--font-text-md-size, 15px);
+  font-weight: var(--font-weight-medium, 500);
+  line-height: 1.4;
+}
+
+.guide-combo {
+  max-width: 100%;
+  padding: 2px 0 4px;
+}
+
+.guide-keys,
+.guide-entry-note {
+  margin: 0;
+  color: var(--arc-text-2);
+  font-size: var(--font-text-sm-size, 0.85rem);
+}
+
+.guide-keys {
+  font-family: var(--arc-mono);
+}
+
+.guide-keys-only {
+  color: var(--arc-text);
+  font-size: var(--font-text-md-size, 15px);
+}
+
+.guide-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.guide button {
+  font-family: inherit;
+  color: inherit;
+}
+
+.guide-button {
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid var(--arc-border);
+  border-radius: var(--arc-radius);
+  background: var(--arc-bg);
+  font-size: var(--font-text-sm-size, 0.85rem);
+  cursor: pointer;
+}
+
+.guide-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.guide-url {
+  font-family: var(--arc-mono);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+@media (max-width: 420px) {
+  .guide {
+    padding: 10px 12px 12px;
+  }
+
+  .guide-entry {
+    padding: 10px 12px 12px;
+  }
+}

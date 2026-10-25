@@ -154,6 +154,103 @@
   color: var(--arc-text-2);
 }
 
+/* The scene strip: play mode, a chip per scene (wrapping, never wider than the view), where the chain is. */
+.beat-scenes {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.beat-mode {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--arc-border);
+  border-radius: 999px;
+}
+
+.beat-mode-button {
+  min-height: 28px;
+  padding: 2px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  font-size: var(--font-text-sm-size, 0.85rem) !important;
+  font-weight: var(--font-weight-semibold, 600);
+  cursor: pointer;
+}
+
+.beat-mode-button.is-on {
+  background: var(--arc-accent);
+  color: #fff !important;
+}
+
+.beat-scene-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.beat-scene {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--arc-border);
+  border-radius: var(--arc-radius);
+  background: transparent;
+  cursor: pointer;
+}
+
+/* The scene heard: its light is on, like the device's. */
+.beat-scene::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--arc-border);
+}
+
+.beat-scene.is-on {
+  border-color: var(--arc-accent);
+  background: var(--arc-bg-2);
+}
+
+.beat-scene.is-heard::before {
+  background: var(--arc-accent);
+  box-shadow: 0 0 6px var(--arc-accent);
+}
+
+.beat-scene-number {
+  flex: 0 0 auto;
+  font-weight: var(--font-weight-bold, 700);
+  font-variant-numeric: tabular-nums;
+}
+
+.beat-scene-name {
+  min-width: 0;
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--arc-text-2);
+  font-size: var(--font-text-sm-size, 0.85rem);
+}
+
+.beat-where {
+  margin: 0;
+  color: var(--arc-text-2);
+  font-size: var(--font-text-sm-size, 0.85rem);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
 .beat-tabs {
   display: flex;
   gap: 6px;
@@ -184,6 +281,12 @@
 
 .beat-tab-info {
   color: var(--arc-text-2);
+  font-size: var(--font-text-xs-size, 0.75rem);
+}
+
+/* A group the scene carries from an earlier one. */
+.beat-tab-from {
+  color: var(--arc-accent);
   font-size: var(--font-text-xs-size, 0.75rem);
 }
 

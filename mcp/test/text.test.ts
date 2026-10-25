@@ -1,5 +1,6 @@
 // The messages the view sends to Claude: Ask, Regenerate, Improve, Fix errors
-// and the quick changes; the effect line and the shaped pads' badges.
+// and the quick changes; the effect line and the shaped pads' badges; the
+// scene strip's words.
 import { describe, expect, it } from 'vitest'
 import { parseBeatCard } from '../../web/src/core/formats/beatCard'
 import { BeatText } from '../src/text'
@@ -58,5 +59,27 @@ describe('BeatText FX and pad shaping', () => {
     const pad = parseBeatCard(['ARC BEAT 1', '[A] bars 1', 'A4 hat | x... |', 'pad A4 pitch -7 level 80 pan 4 mode key'].join('\n')).pads[0]!
     expect(BeatText.shapeBadge(pad)).toBe('−7 st · 80% · R4 · rel 15 · key')
     expect(BeatText.shapeText(pad)).toBe('A4 shaping: pitch −7 semitones, level 80, pan R4, release 15, mode key')
+  })
+})
+
+describe('BeatText scenes', () => {
+  it('names a scene by its name, else its number', () => {
+    expect(BeatText.sceneName(1, 'Drop')).toBe('Drop')
+    expect(BeatText.sceneName(2, '')).toBe('Scene 3')
+    expect(BeatText.sceneChip(1, 'Drop')).toBe('Scene 2: Drop')
+    expect(BeatText.sceneChip(2, '')).toBe('Scene 3')
+  })
+
+  it('says where the chain is, or its order when stopped', () => {
+    expect(BeatText.chainPosition(1, 'Drop', 2, 4, 2, 5)).toBe('Drop · pass 2/4 · step 3/5')
+    expect(BeatText.scenePosition(0, '')).toBe('Scene 1 · on loop')
+    expect(BeatText.chainOrder([{ scene: 0, passes: 2 }, { scene: 1, passes: 1 }])).toBe('Chain 1x2 2')
+    expect(BeatText.chainOrder(null)).toBe('Chain: each scene once, in order')
+    expect(BeatText.fromScene(2)).toBe('from scene 3')
+  })
+
+  it('tells Claude the scene heard', () => {
+    expect(BeatText.regenerateMessage('Arr', [BeatText.heardScene(1, 'Drop')])).toContain('(In the preview I had scene 2 (Drop) on loop.)')
+    expect(BeatText.heardChain(2, '')).toBe('the chain playing, at scene 3')
   })
 })

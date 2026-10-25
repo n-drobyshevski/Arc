@@ -44,6 +44,34 @@ export const NO_MATCHES = 'Nothing matches.'
 
 export { sections }
 
+/*
+ * Entry ids (an addition to the web version): the arc-beats Claude skill and
+ * arc's MCP lookup_combo tool cite an entry as its section's prefix and its
+ * place in that section, counting from 1 (SND-1 … SYS-18).
+ * scripts/gen-skill-guide.mjs, which writes the skill's guide, keeps its own
+ * copy of this mapping (it reads guideData.ts as text); a test checks the two
+ * agree.
+ */
+
+/** Id prefix of each section title, in the guide's order. */
+export const GUIDE_IDS: Readonly<Record<string, string>> = {
+  Sounds: 'SND',
+  Sampling: 'SMP',
+  Sequencer: 'SEQ',
+  'Effects and performance': 'FX',
+  'Projects and system': 'SYS',
+}
+
+/** The id of entry [entryIndex] (from 0) of section [sectionIndex] (from 0) of [sections]: "SMP-3". */
+export function guideId(sectionIndex: number, entryIndex: number): string {
+  const section = sections[sectionIndex]
+  const prefix = section !== undefined ? GUIDE_IDS[section.title] : undefined
+  if (section === undefined || prefix === undefined || entryIndex < 0 || entryIndex >= section.entries.length) {
+    throw new RangeError(`no guide entry ${sectionIndex}/${entryIndex}`)
+  }
+  return `${prefix}-${entryIndex + 1}`
+}
+
 /** Short tab labels for the sections. */
 export function tab(section: GuideSection): string {
   switch (section.title) {

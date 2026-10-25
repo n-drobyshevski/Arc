@@ -10,6 +10,8 @@
 import {
   SIDECHAIN_LENGTH,
   SIDECHAIN_SHAPE,
+  chainText,
+  type BeatCardChainStep,
   type BeatCardComp,
   type BeatCardFx,
   type BeatCardPad,
@@ -29,8 +31,10 @@ export const CARD_MAX = 20000
 
 export const ServerText = {
   INSTRUCTIONS:
-    "arc's beat-card preview for the EP-133 K.O. II. After you write an ARC BEAT card (the arc-beats skill's " +
-    'format), or when the user pastes one, call show_beat_card with the card so the user can see and hear it.',
+    "arc's beat-card preview and key-combo guide for the EP-133 K.O. II. After you write an ARC BEAT card (the " +
+    "arc-beats skill's format), or when the user pastes one, call show_beat_card with the card so the user can " +
+    'see and hear it. When the user asks how to do something on the EP-133, call lookup_combo before you write ' +
+    'any key combo, and give only the combos it returns.',
 
   BEAT_TITLE: 'Preview beat card',
   BEAT_DESCRIPTION:
@@ -57,6 +61,16 @@ function quoted(name: string): string {
 /** A pad's pitch as the badge writes it: −7, +3.5, 0 (a real minus sign). */
 function semitones(n: number): string {
   return `${n < 0 ? '−' : n > 0 ? '+' : ''}${Math.abs(n)}`
+}
+
+/** A scene as the view names it: its name, else "Scene 3" (index from 0). */
+function sceneName(index: number, name: string): string {
+  return name || `Scene ${index + 1}`
+}
+
+/** A scene in a message to Claude: "scene 2 (Drop)". */
+function sceneRef(index: number, name: string): string {
+  return `scene ${index + 1}${name ? ` (${name})` : ''}`
 }
 
 /** A pad's pan as the pad sheet writes it: L4, R4, C. */
@@ -103,7 +117,30 @@ export const BeatText = {
   notesPlayed: (n: number): string =>
     `${n} note${n === 1 ? '' : 's'} from the notes list play${n === 1 ? 's' : ''} too; off-grid ones show on the nearest step.`,
   KEYS_NOTES: 'KEYS notes play at their pitch on bass and keys rows; drum rows ignore the pitch.',
-  scenes: (n: number): string => `The card has ${n} scenes; only the first plays here.`,
+
+  /** The scene strip: a chip per scene, the play mode and where the chain is. */
+  SCENES: 'Scenes',
+  sceneName,
+  /** A chip's label: "Scene 2: Drop", or "Scene 3" for a scene without a name. */
+  sceneChip: (index: number, name: string): string => `Scene ${index + 1}${name ? `: ${name}` : ''}`,
+  PLAY_MODE: 'Play mode',
+  CHAIN: 'Chain',
+  SCENE: 'Scene',
+  CHAIN_TITLE: 'Play the chain: each scene for its passes, then the next, looping at the end',
+  SCENE_TITLE: 'Loop the selected scene',
+  /** Where the chain is: "Drop · pass 2/4 · step 3/5". */
+  chainPosition: (index: number, name: string, pass: number, passes: number, step: number, steps: number): string =>
+    `${sceneName(index, name)} · pass ${pass}/${passes} · step ${step + 1}/${steps}`,
+  /** A scene looping by hand: "Drop · on loop". */
+  scenePosition: (index: number, name: string): string => `${sceneName(index, name)} · on loop`,
+  /** The chain, stopped: "Chain 1x2 2x2 3", or each scene once without a chain line. */
+  chainOrder: (chain: readonly BeatCardChainStep[] | null): string =>
+    chain !== null && chain.length > 0 ? `Chain ${chainText(chain)}` : 'Chain: each scene once, in order',
+  /** A tab's mark for a group the scene leaves out: it plays an earlier scene's pattern. */
+  fromScene: (index: number): string => `from scene ${index + 1}`,
+  carried: (group: string, index: number, name: string): string =>
+    `This scene leaves ${group} out: it plays the pattern of ${sceneRef(index, name)}.`,
+  EMPTY_SCENE: 'This scene has no sections.',
 
   /** The FX switch's text and tooltip; it shows only when the card has effect lines. */
   FX: 'FX',
@@ -208,4 +245,7 @@ export const BeatText = {
   heardMuted: (pads: string[]): string => `${pads.join(' ')} muted`,
   heardSolo: (pads: string[]): string => `${pads.join(' ')} soloed`,
   HEARD_FX_OFF: 'the FX off',
+  /** The scene heard, for a card of several: looped by hand, or where the chain was. */
+  heardScene: (index: number, name: string): string => `${sceneRef(index, name)} on loop`,
+  heardChain: (index: number, name: string): string => `the chain playing, at ${sceneRef(index, name)}`,
 } as const

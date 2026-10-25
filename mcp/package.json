@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build:views": "vite build",
+    "build:views": "vite build && vite build --config vite.guide.config.ts",
     "build:server": "vite build --config vite.server.config.ts",
     "typecheck": "tsc --noEmit",
     "build": "npm run build:views && npm run build:server && npm run typecheck",

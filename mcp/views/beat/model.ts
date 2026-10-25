@@ -23,9 +23,20 @@
 // semitones and scales a drum voice's frequencies by 2^(pitch/12); level is a
 // gain, pan -1..1, attack and release seconds (ticks of about 10 ms). A pad
 // without a pad line has no shape and plays as it always has.
+//
+// Scenes: sceneCard gives one scene as a card of its own, the patterns its
+// groups play (beatCard.ts scenePatterns: its own sections, or the ones it
+// carries from the scenes before) with each section's notes, sound and pad
+// lines, so the rows, voices and hits above work per scene unchanged. A card
+// without scene lines is its own one scene. sceneSteps and chainSteps turn the
+// scenes into what the player plays: one scene looped, or the chain.
 
 import {
   KEY_RELEASE,
+  cardScenes,
+  playOrder,
+  scenePatterns,
+  sceneTicks,
   stepTick,
   type BeatCardGroup,
   type BeatCardNote,
@@ -34,6 +45,7 @@ import {
   type BeatCardRow,
   type PlayMode,
 } from '../../../web/src/core/formats/beatCard'
+import type { Loop, Step } from './player'
 
 export type Voice = 'kick' | 'snare' | 'clap' | 'hat' | 'openhat' | 'perc' | 'tom' | 'bass' | 'keys'
 
@@ -277,4 +289,49 @@ export function isBeatCardResult(x: unknown): x is BeatCardResult {
   if (typeof x !== 'object' || x === null) return false
   const r = x as Record<string, unknown>
   return typeof r.valid === 'boolean' && Array.isArray(r.groups) && Array.isArray(r.errors) && Array.isArray(r.notes)
+}
+
+/**
+ * Scene [i] of [card] as a card of its own: the groups are the patterns the
+ * scene plays, each with its own section's notes, sound and pad lines. A card
+ * without scene lines is returned as it is.
+ */
+export function sceneCard(card: BeatCardResult, i: number): BeatCardResult {
+  const scenes = cardScenes(card)
+  if (scenes.length === 1) return card
+  const patterns = scenePatterns(card, i)
+  const from = <T extends { readonly group: string }>(list: (s: (typeof scenes)[number]) => readonly T[]): T[] =>
+    patterns.flatMap((p) => list(scenes[p.scene]!).filter((x) => x.group === p.group.group))
+  return {
+    ...card,
+    groups: patterns.map((p) => p.group),
+    notes: from((s) => s.notes),
+    sounds: from((s) => s.sounds),
+    pads: from((s) => s.pads),
+  }
+}
+
+/** The sections of scene [i] as the player loops them. */
+export function sceneLoops(card: BeatCardResult, i: number, swing: number): Loop[] {
+  const scene = sceneCard(card, i)
+  return viewGroups(scene).map((v) => ({ length: v.group.length, hits: groupHits(scene, v, swing) }))
+}
+
+/** Scene [i] looped by hand: one step that never ends. */
+export function sceneSteps(card: BeatCardResult, i: number, swing: number): Step[] {
+  return [{ scene: i, loops: sceneLoops(card, i, swing), length: sceneTicks(card, i), passes: Infinity }]
+}
+
+/** The chain's steps (each scene once, in order, without a chain line), each scene's loops built once. */
+export function chainSteps(card: BeatCardResult, swing: number): Step[] {
+  const loops = new Map<number, Loop[]>()
+  return playOrder(card).map(({ scene, passes }) => {
+    if (!loops.has(scene)) loops.set(scene, sceneLoops(card, scene, swing))
+    return { scene, loops: loops.get(scene)!, length: sceneTicks(card, scene), passes }
+  })
+}
+
+/** The first step of [steps] that plays [scene], else 0: where Play starts the chain (beat-card.md, "Chains in Arc"). */
+export function firstStepOf(steps: readonly Step[], scene: number): number {
+  return Math.max(0, steps.findIndex((s) => s.scene === scene))
 }

@@ -1,11 +1,11 @@
-// The beat view in a browser (test/e2e/*.spec.ts): a test host page
-// (test/e2e/host) embeds the view the server serves and drives it with the
+// The beat and guide views in a browser (test/e2e/*.spec.ts): a test host
+// page (test/e2e/host) embeds a view the server serves and drives it with the
 // ext-apps AppBridge, as Claude would.
 //
 //   npm run e2e                                          (CI: after `npx playwright install chromium`)
 //   CHROMIUM_PATH=/opt/pw-browsers/chromium npm run e2e  (a Chromium already on the machine)
 //
-// The webServer builds the view and the server, then serves the host and /mcp
+// The webServer builds the views and the server, then serves the host and /mcp
 // on 127.0.0.1:4174. Vitest never sees these files: it only collects *.test.ts.
 import { defineConfig, devices } from '@playwright/test'
 

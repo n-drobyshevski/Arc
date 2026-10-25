@@ -19,8 +19,13 @@ const dataFile = fileURLToPath(new URL('../src/core/text/guideData.ts', import.m
 const outDir = fileURLToPath(new URL('../dist-skill/', import.meta.url))
 const outFile = outDir + 'ep133-guide.md'
 
-/** Id prefix for each section title, in the guide's order. */
-const PREFIX = {
+/**
+ * Id prefix for each section title, in the guide's order. The same as GUIDE_IDS
+ * in src/core/text/guideText.ts, which the app and the MCP server use; this
+ * script can't import that TypeScript file, so test/core/text/skillGuide.test.ts
+ * checks the two agree.
+ */
+export const PREFIX = {
   Sounds: 'SND',
   Sampling: 'SMP',
   Sequencer: 'SEQ',

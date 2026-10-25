@@ -1,11 +1,15 @@
-// A minimal MCP Apps host for the Playwright test (beat.spec.ts), built from
-// the SDK's host side: an MCP client to this package's server (/mcp, served by
-// the Vite dev server of vite.config.ts), and an AppBridge to the view in a
-// sandboxed iframe, as Claude runs it: an opaque origin (allow-scripts only),
-// the resource's CSP enforced and no unsafe-eval.
+// A minimal MCP Apps host for the Playwright tests (beat.spec.ts,
+// guide.spec.ts), built from the SDK's host side: an MCP client to this
+// package's server (/mcp, served by the Vite dev server of vite.config.ts),
+// and an AppBridge to the view in a sandboxed iframe, as Claude runs it: an
+// opaque origin (allow-scripts only), the resource's CSP enforced and no
+// unsafe-eval.
 //
-// The test drives it through window.arcHost: show(card) sends the tool input,
-// calls show_beat_card on the server and sends its result to the view.
+// The page shows the view of show_beat_card, or of the tool its ?tool= names
+// (lookup_combo). The test drives it through window.arcHost: show(card) and
+// call(args) send the tool input, call the tool on the server and send its
+// result to the view; messages and links record the view's ui/message and
+// ui/open-link requests.
 
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import {
@@ -18,7 +22,8 @@ import {
   type McpUiResourceMeta,
 } from '@modelcontextprotocol/ext-apps/app-bridge'
 
-const TOOL = 'show_beat_card'
+const params = new URLSearchParams(location.search)
+const TOOL = params.get('tool') ?? 'show_beat_card'
 
 /** The CSP a host builds from the resource's csp (here: nothing outside the document). */
 function cspFor(csp: McpUiResourceCsp | undefined): string {
@@ -55,18 +60,19 @@ async function start() {
   )
   const iframe = document.createElement('iframe')
   iframe.id = 'view'
-  iframe.title = 'Beat card'
+  iframe.title = TOOL
   iframe.setAttribute('sandbox', 'allow-scripts')
   iframe.setAttribute('allow', buildAllowAttribute(ui?.permissions))
 
   const messages: McpUiMessageRequest['params'][] = []
+  const links: string[] = []
   const bridge = new AppBridge(
     client,
     { name: 'arc-test-host', version: '1.0.0' },
     { openLinks: {}, serverTools: {}, logging: {}, message: { text: {} }, sandbox: { csp: ui?.csp, permissions: ui?.permissions } },
     {
       hostContext: {
-        theme: new URLSearchParams(location.search).get('theme') === 'light' ? 'light' : 'dark',
+        theme: params.get('theme') === 'light' ? 'light' : 'dark',
         platform: 'web',
         displayMode: 'inline',
         availableDisplayModes: ['inline'],
@@ -75,8 +81,12 @@ async function start() {
       },
     },
   )
-  bridge.onmessage = async (params) => {
-    messages.push(params)
+  bridge.onmessage = async (message) => {
+    messages.push(message)
+    return {}
+  }
+  bridge.onopenlink = async ({ url }) => {
+    links.push(url)
     return {}
   }
   bridge.onsizechange = ({ height }) => {
@@ -92,16 +102,20 @@ async function start() {
   await initialized
   status.textContent = 'ready'
 
+  /** What a host does for one call of the tool: input, the call, its result. */
+  async function call(args: Record<string, unknown>) {
+    await bridge.sendToolInput({ arguments: args })
+    const result = await client.callTool({ name: TOOL, arguments: args })
+    await bridge.sendToolResult(result as Parameters<AppBridge['sendToolResult']>[0])
+    return result
+  }
+
   return {
     messages,
-    /** What a host does for one call of the tool: input, the call, its result. */
-    async show(card: string) {
-      const args = { card }
-      await bridge.sendToolInput({ arguments: args })
-      const result = await client.callTool({ name: TOOL, arguments: args })
-      await bridge.sendToolResult(result as Parameters<AppBridge['sendToolResult']>[0])
-      return result
-    },
+    links,
+    call,
+    /** show_beat_card with [card]. */
+    show: (card: string) => call({ card }),
   }
 }
 

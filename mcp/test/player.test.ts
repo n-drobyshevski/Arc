@@ -1,11 +1,12 @@
-// views/beat/player.ts and synth.ts against a fake AudioContext: Stop silences
-// what the lookahead already handed to the synth, not only what comes next;
-// each effect's graph, the sends, the sidechain's ducks, pad shaping and the
+// views/beat/player.ts and synth.ts against a fake AudioContext: the steps of
+// a chain or of a scene looped by hand, their passes, cues and position; Stop
+// silences what the lookahead already handed to the synth, not only what comes
+// next; each effect's graph, the sends, the sidechain's ducks, pad shaping and the
 // FX switch, and a browser without the nodes an effect needs.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseBeatCard } from '../../web/src/core/formats/beatCard'
 import { cardFx, groupHits, viewGroups, type CardFx, type Hit, type Shape } from '../views/beat/model'
-import { Player } from '../views/beat/player'
+import { Player, type Step } from '../views/beat/player'
 import { Synth } from '../views/beat/synth'
 
 /** An AudioParam that records its calls. */
@@ -495,5 +496,181 @@ describe('Player with effect lines', () => {
     player.stop()
     vi.runAllTimers()
     expect(conv.disconnected).toBe(true)
+  })
+})
+
+describe('Player steps', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  /** A player on a synth that only records what it is handed: [pad, time, seconds] per hit. */
+  function setupSteps() {
+    const ctx = new FakeContext()
+    const played: [string, number, number][] = []
+    const synth = {
+      ctx,
+      play: (h: Hit, time: number, seconds: number) => void played.push([h.pad, Number(time.toFixed(3)), Number(seconds.toFixed(3))]),
+      begin: () => undefined,
+      cut: () => undefined,
+      setFx: () => undefined,
+      setFxOn: () => undefined,
+    }
+    const player = new Player(synth as unknown as Synth)
+    player.setTempo(120) // 192 ticks a second: a bar is 2 s
+    /** Lets the clock run for [s] seconds, the timer waking as in a browser. */
+    const run = (s: number): void => {
+      for (let t = 0; t < s - 1e-9; t += 0.025) {
+        ctx.currentTime = Number((ctx.currentTime + 0.025).toFixed(3))
+        vi.advanceTimersByTime(25)
+      }
+    }
+    const at = (s: number): void => run(s - ctx.currentTime)
+    return { ctx, played, player, run, at }
+  }
+
+  /** A scene of one bar whose pad [pad] plays on the first step (and [extra] on the third). */
+  const step = (scene: number, pad: string, passes: number, extra?: string): Step => ({
+    scene,
+    loops: [{ length: 384, hits: [hit(pad), ...(extra ? [{ ...hit(extra), tick: 192, gate: 384 }] : [])] }],
+    length: 384,
+    passes,
+  })
+
+  it('plays the chain’s passes, moves on at the step’s last tick and loops', () => {
+    const { played, player, at, ctx } = setupSteps()
+    player.setSteps([step(0, 'A7', 2), step(1, 'A9', 1)])
+    player.start()
+    at(7)
+    expect(played.map(([pad, time]) => [pad, time])).toEqual([
+      ['A7', 0.06],
+      ['A7', 2.06],
+      ['A9', 4.06],
+      ['A7', 6.06],
+    ])
+    // Heard now, not scheduled ahead: at 7 s the loop is back at step 1, pass 1.
+    expect(player.position()).toMatchObject({ scene: 0, step: 0, steps: 2, pass: 1, passes: 2 })
+    expect(player.position()!.tick).toBeCloseTo((7 - 6.06) * 192)
+    ctx.currentTime = 4.0
+    expect(player.position()).toMatchObject({ scene: 0, step: 0, pass: 2, passes: 2 })
+    ctx.currentTime = 4.1
+    expect(player.position()).toMatchObject({ scene: 1, step: 1, pass: 1, passes: 1 })
+  })
+
+  it('ends a note held past its pass with the pass', () => {
+    const { played, player, at } = setupSteps()
+    player.setSteps([step(0, 'A7', 1, 'B7')])
+    player.start()
+    at(1.5)
+    // B7 starts half a bar in, with a gate of a bar: cut to the half bar left.
+    expect(played).toContainEqual(['B7', 1.06, 1])
+  })
+
+  it('cues another scene for the next bar line, gaplessly', () => {
+    const { played, player, at } = setupSteps()
+    player.setSteps([step(0, 'A7', Infinity)])
+    player.start()
+    at(0.5)
+    player.setSteps([step(1, 'A9', Infinity)])
+    at(1)
+    // Still the first scene, heard and scheduled, until the bar line.
+    expect(player.position()).toMatchObject({ scene: 0, pass: null, passes: null })
+    at(4.5)
+    expect(played.map(([pad, time]) => [pad, time])).toEqual([
+      ['A7', 0.06],
+      ['A9', 2.06],
+      ['A9', 4.06],
+    ])
+    expect(player.position()).toMatchObject({ scene: 1, step: 0, steps: 1 })
+  })
+
+  it('keeps the place of the scene playing when only the mode changes', () => {
+    const { played, player, at } = setupSteps()
+    const chain = [step(0, 'A7', 2), step(1, 'A9', 1)]
+    player.setSteps(chain)
+    player.start()
+    // In the chain's second pass of scene 1: loop it by hand. Nothing is cued; it plays on.
+    at(2.5)
+    player.setSteps([step(0, 'A7', Infinity)])
+    at(5)
+    expect(played.map(([pad]) => pad)).toEqual(['A7', 'A7', 'A7'])
+    expect(player.position()).toMatchObject({ scene: 0, pass: null })
+    // Back to the chain: it starts with the pass playing now (from 4.06 s), so A9 comes after two more.
+    player.setSteps(chain, 0)
+    at(8.5)
+    expect(played.map(([pad, time]) => [pad, time])).toEqual([
+      ['A7', 0.06],
+      ['A7', 2.06],
+      ['A7', 4.06],
+      ['A7', 6.06],
+      ['A9', 8.06],
+    ])
+  })
+
+  it('keeps the place of a scene looped by hand whose sections are out of step: the chain waits for the next pass', () => {
+    const { played, player, at } = setupSteps()
+    const loops = [
+      { length: 384 * 3, hits: [hit('A7')] },
+      { length: 384 * 2, hits: [hit('B7')] },
+    ]
+    player.setLoops(loops)
+    player.start()
+    // In the second pass (bars 4 to 6), B is a bar into its loop: the chain step can't start at bar 4.
+    at(8.5)
+    player.setSteps([{ scene: 0, loops, length: 384 * 3, passes: 4 }])
+    at(14.5)
+    expect(player.position()).toMatchObject({ scene: 0, pass: 1, passes: 4 })
+    // B every 2 bars from 0, then from the chain's pass at bar 6 (12 s); A every 3 bars throughout.
+    expect(played.filter(([pad]) => pad === 'B7').map(([, t]) => t)).toEqual([0.06, 4.06, 8.06, 12.06])
+    expect(played.filter(([pad]) => pad === 'A7').map(([, t]) => t)).toEqual([0.06, 6.06, 12.06])
+    // In the first pass the sections are all in step: the chain takes over at once, from the pass start.
+    const first = setupSteps()
+    first.player.setLoops(loops)
+    first.player.start()
+    first.at(2.5)
+    first.player.setSteps([{ scene: 0, loops, length: 384 * 3, passes: 4 }])
+    first.at(3)
+    expect(first.player.position()).toMatchObject({ scene: 0, pass: 1, passes: 4 })
+  })
+
+  it('takes new hits for the same steps at once (swing), with no cue', () => {
+    const { played, player, at } = setupSteps()
+    player.setSteps([step(0, 'A7', 2), step(1, 'A9', 1)])
+    player.start()
+    at(1)
+    player.setSteps([step(0, 'A6', 2), step(1, 'A9', 1)])
+    at(3)
+    expect(played.map(([pad]) => pad)).toEqual(['A7', 'A6'])
+    expect(player.position()).toMatchObject({ scene: 0, pass: 2 })
+  })
+
+  it('Stop forgets where it was; a scene cued and not yet heard is what the next Play plays', () => {
+    const { played, player, at } = setupSteps()
+    player.setSteps([step(0, 'A7', Infinity)])
+    player.start()
+    at(0.5)
+    player.setSteps([step(1, 'A9', Infinity)])
+    player.stop()
+    expect(player.position()).toBeNull()
+    at(1)
+    player.start()
+    at(1.2)
+    expect(played.map(([pad, time]) => [pad, time])).toEqual([
+      ['A7', 0.06],
+      ['A9', 1.06],
+    ])
+    expect(player.position()).toMatchObject({ scene: 1 })
+  })
+
+  it('setLoops loops sections on their own lengths, as before scenes', () => {
+    const { played, player, at } = setupSteps()
+    player.setLoops([
+      { length: 384 * 3, hits: [hit('A7')] },
+      { length: 384 * 2, hits: [hit('B7')] },
+    ])
+    player.start()
+    at(8.5)
+    // Polymeter: B every 2 bars, A every 3, never restarted together.
+    expect(played.filter(([pad]) => pad === 'B7').map(([, t]) => t)).toEqual([0.06, 4.06, 8.06])
+    expect(played.filter(([pad]) => pad === 'A7').map(([, t]) => t)).toEqual([0.06, 6.06])
   })
 })

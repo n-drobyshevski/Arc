@@ -1,9 +1,18 @@
 // The beat-card view: header (name, tempo, swing), the card's effect lines
-// with the FX switch, group tabs, the step grid with mute and solo per row
-// (and a badge on each pad a pad line shapes), Play/Stop, the card's problems
-// by line, Copy card, and Regenerate, Improve (Fix errors on a broken card)
-// and "Ask Claude to change this" with quick changes. It only draws and
-// plays; main.tsx talks to the host.
+// with the FX switch, Play/Stop, the scene strip of a card of scenes (a chip
+// per scene, Chain or Scene play mode, where the chain is), group tabs, the
+// step grid with mute and solo per row (and a badge on each pad a pad line
+// shapes), the card's problems by line, Copy card, and Regenerate, Improve
+// (Fix errors on a broken card) and "Ask Claude to change this" with quick
+// changes. It only draws and plays; main.tsx talks to the host.
+//
+// Scenes: the grid shows the selected scene's patterns, a group it carries
+// from an earlier scene marked "from scene N". Chain plays the chain (each
+// scene once, in order, without a chain line), and the selection follows the
+// scene heard; Scene loops the selected scene. Picking a scene while the
+// chain plays switches to Scene, as Arc does. The lit chip, the position line
+// and the playhead follow the audio clock (Player.position), so a scene cued
+// for the next bar lights when it is heard.
 
 import type { CSSProperties, JSX } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
@@ -13,16 +22,36 @@ import {
   TEMPO_MAX,
   TEMPO_MIN,
   TICKS_PER_BEAT,
+  cardScenes,
+  scenePatterns,
   type BeatCardProblem,
   type BeatCardResult,
+  type BeatCardScene,
 } from '../../../web/src/core/formats/beatCard'
 import { BeatText } from '../../src/text'
-import { audible, cardFx, groupHits, hasFx, viewGroups, type ViewGroup, type ViewRow } from './model'
+import {
+  audible,
+  cardFx,
+  chainSteps,
+  firstStepOf,
+  hasFx,
+  sceneCard,
+  sceneSteps,
+  viewGroups,
+  type ViewGroup,
+  type ViewRow,
+} from './model'
 import { Player } from './player'
 import { Synth } from './synth'
 
 /** A card without a tempo line plays at this one. */
 const DEFAULT_TEMPO = 120
+
+type Mode = 'chain' | 'scene'
+
+/** Chain when the card has a chain line and scenes to play it with, else Scene. */
+const defaultMode = (result: BeatCardResult): Mode =>
+  result.chain != null && cardScenes(result).length > 1 ? 'chain' : 'scene'
 
 export interface BeatViewProps {
   readonly card: string | null
@@ -34,9 +63,23 @@ export interface BeatViewProps {
 
 export function BeatView(props: BeatViewProps): JSX.Element {
   const { result } = props
-  const groups = useMemo(() => viewGroups(result), [result])
+  const scenes = useMemo(() => cardScenes(result), [result])
+  const many = scenes.length > 1
+  const [selected, setSelected] = useState(0)
+  const [mode, setMode] = useState<Mode>(() => defaultMode(result))
+  const scene = Math.min(selected, scenes.length - 1)
+  const chain = many && mode === 'chain'
+  const shownCard = useMemo(() => sceneCard(result, scene), [result, scene])
+  const groups = useMemo(() => viewGroups(shownCard), [shownCard])
+  // The scene each group's pattern comes from, for the groups the scene carries.
+  const carried = useMemo(() => {
+    const from = new Map<string, number>()
+    for (const p of scenePatterns(result, scene)) if (p.scene !== scene) from.set(p.group.group, p.scene)
+    return from
+  }, [result, scene])
+  const playable = useMemo(() => scenes.some((s) => scenePatterns(result, s.index).length > 0), [result, scenes])
   const fx = useMemo(() => cardFx(result), [result])
-  const [tab, setTab] = useState(0)
+  const [tab, setTab] = useState('')
   const [tempo, setTempo] = useState(result.tempo ?? DEFAULT_TEMPO)
   const [swing, setSwing] = useState(result.swing)
   const [muted, setMuted] = useState<ReadonlySet<string>>(new Set())
@@ -45,11 +88,16 @@ export function BeatView(props: BeatViewProps): JSX.Element {
   const [playing, setPlaying] = useState(false)
   const [audioError, setAudioError] = useState(false)
   const [nowStep, setNowStep] = useState<number | null>(null)
+  /** The scene heard now and where the chain is, while playing. */
+  const [heardScene, setHeardScene] = useState<number | null>(null)
+  const [where, setWhere] = useState<string | null>(null)
   const player = useRef<Player | null>(null)
 
   // A new card starts over.
   useEffect(() => {
-    setTab(0)
+    setSelected(0)
+    setMode(defaultMode(result))
+    setTab('')
     setTempo(result.tempo ?? DEFAULT_TEMPO)
     setSwing(result.swing)
     setMuted(new Set())
@@ -57,11 +105,16 @@ export function BeatView(props: BeatViewProps): JSX.Element {
     setFxOn(true)
   }, [result])
 
-  const loops = useMemo(
-    () => groups.map((v) => ({ length: v.group.length, hits: groupHits(result, v, swing) })),
-    [groups, result, swing],
+  // What plays: the chain, or the selected scene looped (all a card without scenes has). The chain's
+  // steps don't depend on the selection, which follows the scene heard.
+  const loopScene = chain ? -1 : scene
+  const steps = useMemo(
+    () => (loopScene < 0 ? chainSteps(result, swing) : sceneSteps(result, loopScene, swing)),
+    [result, swing, loopScene],
   )
-  useEffect(() => player.current?.setLoops(loops), [loops])
+  // The chain starts from the first step with the scene showing.
+  const from = chain ? firstStepOf(steps, scene) : 0
+  useEffect(() => player.current?.setSteps(steps, from), [steps])
   useEffect(() => player.current?.setTempo(tempo), [tempo])
   useEffect(() => player.current?.setFx(fx), [fx])
   useEffect(() => player.current?.setFxOn(fxOn), [fxOn])
@@ -70,24 +123,51 @@ export function BeatView(props: BeatViewProps): JSX.Element {
   }, [muted, soloed])
   useEffect(() => () => player.current?.stop(), [])
 
-  const shown = groups[Math.min(tab, groups.length - 1)]
+  const shown = groups.find((v) => v.group.group === tab) ?? groups[0]
+  /** The scene the shown group's pattern comes from, when the scene carries it. */
+  const shownFrom = shown ? carried.get(shown.group.group) : undefined
+  const sceneName = scenes[scene]!.name
 
-  // The playhead of the shown section, once a frame while playing.
+  // The playhead of the shown section, the scene heard and where the chain is, once a frame while playing.
   useEffect(() => {
-    if (!playing || !shown) {
+    if (!playing) {
       setNowStep(null)
+      setHeardScene(null)
+      setWhere(null)
       return
     }
     let frame = 0
-    const g = shown.group
     const draw = (): void => {
-      const tick = player.current?.now() ?? null
-      setNowStep(tick === null || tick < 0 ? null : Math.floor((tick % g.length) / g.stepTicks))
+      const at = player.current?.position() ?? null
+      setHeardScene(at?.scene ?? null)
+      if (at === null) setWhere(null)
+      else {
+        const name = scenes[at.scene]?.name ?? ''
+        setWhere(
+          at.pass === null
+            ? BeatText.scenePosition(at.scene, name)
+            : BeatText.chainPosition(at.scene, name, at.pass, at.passes ?? 1, at.step, at.steps),
+        )
+      }
+      const g = shown?.group
+      const here = at !== null && g !== undefined && at.scene === scene && at.tick >= 0
+      setNowStep(here ? Math.floor((at.tick % g.length) / g.stepTicks) : null)
       frame = requestAnimationFrame(draw)
     }
     frame = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(frame)
-  }, [playing, shown])
+  }, [playing, shown, scene, scenes])
+
+  // The chain playing: the grid follows the scene heard.
+  useEffect(() => {
+    if (chain && playing && heardScene !== null) setSelected(heardScene)
+  }, [chain, playing, heardScene])
+
+  /** A scene picked by hand: shown, and looped instead of the chain while it plays (as Arc turns its chain off). */
+  function pick(i: number): void {
+    setSelected(i)
+    if (chain && playing) setMode('scene')
+  }
 
   async function togglePlay(): Promise<void> {
     if (player.current?.playing) {
@@ -104,7 +184,7 @@ export function BeatView(props: BeatViewProps): JSX.Element {
       }
       const p = player.current
       await p.resume()
-      p.setLoops(loops)
+      p.setSteps(steps, from)
       p.setTempo(tempo)
       p.setFx(fx)
       p.setFxOn(fxOn)
@@ -130,6 +210,10 @@ export function BeatView(props: BeatViewProps): JSX.Element {
   if (muted.size > 0) heard.push(BeatText.heardMuted([...muted]))
   if (soloed.size > 0) heard.push(BeatText.heardSolo([...soloed]))
   if (!fxOn && hasFx(fx)) heard.push(BeatText.HEARD_FX_OFF)
+  if (many && !chain) heard.push(BeatText.heardScene(scene, sceneName))
+  else if (chain && playing && heardScene !== null) {
+    heard.push(BeatText.heardChain(heardScene, scenes[heardScene]?.name ?? ''))
+  }
 
   return (
     <main class="beat" aria-label={BeatText.APP_NAME}>
@@ -159,7 +243,7 @@ export function BeatView(props: BeatViewProps): JSX.Element {
 
       {!result.valid && <p class="beat-invalid" role="alert">{BeatText.INVALID}</p>}
 
-      {groups.length > 0 && shown && (
+      {playable && (
         <>
           <div class="beat-controls">
             <button
@@ -191,27 +275,54 @@ export function BeatView(props: BeatViewProps): JSX.Element {
           </div>
           {audioError && <p class="beat-note" role="alert">{BeatText.NO_AUDIO}</p>}
 
-          <Tabs groups={groups} selected={groups.indexOf(shown)} onSelect={setTab} />
-          <div
-            class="beat-panel"
-            role="tabpanel"
-            id={`beat-panel-${shown.group.group}`}
-            aria-labelledby={`beat-tab-${shown.group.group}`}
-          >
-            <Grid
-              view={shown}
-              nowStep={nowStep}
-              muted={muted}
-              soloed={soloed}
-              onMute={(pad) => setMuted((m) => toggle(m, pad))}
-              onSolo={(pad) => setSoloed((s) => toggle(s, pad))}
+          {many && (
+            <Scenes
+              scenes={scenes}
+              selected={scene}
+              heard={playing ? heardScene : null}
+              mode={mode}
+              where={where ?? (chain ? BeatText.chainOrder(result.chain) : BeatText.scenePosition(scene, sceneName))}
+              onMode={setMode}
+              onPick={pick}
             />
-            {shown.notes > 0 && <p class="beat-note">{BeatText.notesPlayed(shown.notes)}</p>}
-            {result.notes.some((n) => n.group === shown.group.group && n.semi !== null) && (
-              <p class="beat-note">{BeatText.KEYS_NOTES}</p>
-            )}
-          </div>
-          {result.scenes > 1 && <p class="beat-note">{BeatText.scenes(result.scenes)}</p>}
+          )}
+
+          {shown ? (
+            <>
+              <Tabs
+                groups={groups}
+                selected={groups.indexOf(shown)}
+                carried={carried}
+                onSelect={(i) => setTab(groups[i]!.group.group)}
+              />
+              <div
+                class="beat-panel"
+                role="tabpanel"
+                id={`beat-panel-${shown.group.group}`}
+                aria-labelledby={`beat-tab-${shown.group.group}`}
+              >
+                {shownFrom !== undefined && (
+                  <p class="beat-note">
+                    {BeatText.carried(shown.group.group, shownFrom, scenes[shownFrom]?.name ?? '')}
+                  </p>
+                )}
+                <Grid
+                  view={shown}
+                  nowStep={nowStep}
+                  muted={muted}
+                  soloed={soloed}
+                  onMute={(pad) => setMuted((m) => toggle(m, pad))}
+                  onSolo={(pad) => setSoloed((s) => toggle(s, pad))}
+                />
+                {shown.notes > 0 && <p class="beat-note">{BeatText.notesPlayed(shown.notes)}</p>}
+                {shownCard.notes.some((n) => n.group === shown.group.group && n.semi !== null) && (
+                  <p class="beat-note">{BeatText.KEYS_NOTES}</p>
+                )}
+              </div>
+            </>
+          ) : (
+            <p class="beat-note">{BeatText.EMPTY_SCENE}</p>
+          )}
         </>
       )}
 
@@ -263,7 +374,73 @@ function Slider(props: {
   )
 }
 
-function Tabs(props: { groups: readonly ViewGroup[]; selected: number; onSelect: (i: number) => void }): JSX.Element {
+/**
+ * The scene strip: Chain or Scene, a chip per scene (pressed: shown; current:
+ * heard), and where the chain is. Plain toggle buttons, so Tab and
+ * Enter or Space reach and pick each one.
+ */
+function Scenes(props: {
+  scenes: readonly BeatCardScene[]
+  selected: number
+  heard: number | null
+  mode: Mode
+  where: string
+  onMode: (mode: Mode) => void
+  onPick: (i: number) => void
+}): JSX.Element {
+  const modes: [Mode, string, string][] = [
+    ['chain', BeatText.CHAIN, BeatText.CHAIN_TITLE],
+    ['scene', BeatText.SCENE, BeatText.SCENE_TITLE],
+  ]
+  return (
+    <section class="beat-scenes" aria-label={BeatText.SCENES}>
+      <div class="beat-mode" role="group" aria-label={BeatText.PLAY_MODE}>
+        {modes.map(([m, label, title]) => (
+          <button
+            key={m}
+            type="button"
+            class={`beat-mode-button${props.mode === m ? ' is-on' : ''}`}
+            aria-pressed={props.mode === m}
+            title={title}
+            onClick={() => props.onMode(m)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div class="beat-scene-chips" role="group" aria-label={BeatText.SCENES}>
+        {props.scenes.map((s) => {
+          const on = s.index === props.selected
+          const heard = s.index === props.heard
+          return (
+            <button
+              key={s.index}
+              type="button"
+              class={`beat-scene${on ? ' is-on' : ''}${heard ? ' is-heard' : ''}`}
+              aria-pressed={on}
+              aria-current={heard ? 'true' : undefined}
+              aria-label={BeatText.sceneChip(s.index, s.name)}
+              title={BeatText.sceneChip(s.index, s.name)}
+              onClick={() => props.onPick(s.index)}
+            >
+              <span class="beat-scene-number">{s.index + 1}</span>
+              {s.name && <span class="beat-scene-name">{s.name}</span>}
+            </button>
+          )
+        })}
+      </div>
+      <p class="beat-where">{props.where}</p>
+    </section>
+  )
+}
+
+function Tabs(props: {
+  groups: readonly ViewGroup[]
+  selected: number
+  /** The scene, from 0, each carried group's pattern comes from. */
+  carried: ReadonlyMap<string, number>
+  onSelect: (i: number) => void
+}): JSX.Element {
   const refs = useRef<(HTMLButtonElement | null)[]>([])
   const n = props.groups.length
   const move = (i: number): void => {
@@ -305,6 +482,9 @@ function Tabs(props: { groups: readonly ViewGroup[]; selected: number; onSelect:
           >
             <span class="beat-tab-letter">{g.group}</span>
             <span class="beat-tab-info">{BeatText.groupTab(g.bars, g.step)}</span>
+            {props.carried.has(g.group) && (
+              <span class="beat-tab-from">{BeatText.fromScene(props.carried.get(g.group)!)}</span>
+            )}
           </button>
         )
       })}

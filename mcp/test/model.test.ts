@@ -1,14 +1,19 @@
 // views/beat/model.ts: the rows, stand-in voices and hits the beat view draws
-// and plays, from parsed cards.
+// and plays, from parsed cards, scene by scene, and the steps of a chain.
 import { describe, expect, it } from 'vitest'
 import { parseBeatCard, type BeatCardResult } from '../../web/src/core/formats/beatCard'
 import { CARDS } from '../../web/test/core/formats/beatCardFixtures'
 import {
   audible,
   cardFx,
+  chainSteps,
+  firstStepOf,
   groupHits,
   hasFx,
   isBeatCardResult,
+  sceneCard,
+  sceneLoops,
+  sceneSteps,
   viewGroups,
   voiceFromLabel,
   voiceFromPad,
@@ -170,5 +175,76 @@ describe('effect lines', () => {
     expect(hasFx(cardFx(r))).toBe(true)
     expect(hasFx(cardFx(card('[A] bars 1')))).toBe(false)
     expect(hasFx(cardFx(card('comp off', '[A] bars 1')))).toBe(true)
+  })
+})
+
+describe('scenes', () => {
+  const breakcore = parseBeatCard(CARDS.find((c) => c.heading === 'Breakcore arrangement')!.card)
+
+  it('a card without scene lines is its own one scene, playing as before', () => {
+    const house = parseBeatCard(CARDS.find((c) => c.heading === 'House')!.card)
+    expect(sceneCard(house, 0)).toBe(house)
+    const loops = viewGroups(house).map((v) => ({ length: v.group.length, hits: groupHits(house, v, 52) }))
+    expect(sceneSteps(house, 0, 52)).toEqual([{ scene: 0, loops, length: 384, passes: Infinity }])
+    expect(chainSteps(house, 52)).toEqual([{ ...sceneSteps(house, 0, 52)[0], passes: 1 }])
+  })
+
+  it('a scene plays its own sections and the ones it carries, each with its own lines', () => {
+    const r = card(
+      'scene',
+      '[A]',
+      'A7 kick | X... .... .... .... |',
+      '[B]',
+      'sound B7 400 Bass',
+      'pad B7 pitch -5',
+      'notes',
+      'B7 at 1.1.1 note E1',
+      'scene Two',
+      '[A]',
+      'pad A7 level 50',
+      'A7 kick | X.X. .... .... .... |',
+    )
+    const two = sceneCard(r, 1)
+    expect(two.groups.map((g) => [g.group, g.line])).toEqual([
+      ['A', 11],
+      ['B', 5],
+    ])
+    expect(two.notes.map((n) => n.line)).toEqual([9])
+    expect(two.sounds.map((x) => x.pad)).toEqual(['B7'])
+    expect(two.pads.map((p) => [p.pad, p.level ?? p.pitch])).toEqual([
+      ['A7', 50],
+      ['B7', -5],
+    ])
+    const [a, b] = sceneLoops(r, 1, 50)
+    expect(a!.hits.map((h) => [h.tick, h.shape?.level])).toEqual([
+      [0, 0.5],
+      [48, 0.5],
+    ])
+    // The carried bass: its note moved by its pad line's pitch, E1 (28) down 5.
+    expect(b!.hits.map((h) => [h.pad, h.midi])).toEqual([['B7', 23]])
+    // Scene one's kick has no pad line.
+    expect(sceneLoops(r, 0, 50)[0]!.hits[0]!.shape).toBeUndefined()
+  })
+
+  it('builds the chain’s steps: each scene once, its passes and its longest pattern', () => {
+    const steps = chainSteps(breakcore, 50)
+    expect(steps.map((s) => [s.scene, s.passes, s.length, s.loops.length])).toEqual([
+      [0, 2, 768, 2],
+      [1, 2, 768, 2],
+      [2, 1, 768, 2],
+      [3, 1, 768, 2],
+      [4, 2, 768, 2],
+    ])
+    // Build plays Breakdown's bass.
+    expect(steps[3]!.loops[1]).toEqual(sceneLoops(breakcore, 2, 50)[1])
+    expect(firstStepOf(steps, 3)).toBe(3)
+    expect(firstStepOf(steps, 9)).toBe(0)
+    const once = parseBeatCard(['ARC BEAT 1', 'scene', '[A] bars 2', 'A7 | X... .... .... .... | .... .... .... .... |', 'scene', 'scene'].join('\n'))
+    expect(chainSteps(once, 50).map((s) => [s.scene, s.passes, s.length])).toEqual([
+      [0, 1, 768],
+      [1, 1, 768],
+      [2, 1, 768],
+    ])
+    expect(sceneSteps(once, 2, 50)[0]).toMatchObject({ scene: 2, passes: Infinity, length: 768 })
   })
 })

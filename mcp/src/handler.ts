@@ -1,7 +1,8 @@
 // The server bundle's entry (vite.server.config.ts → dist/server.js), which
-// api/mcp.js and scripts/dev.mjs load: the handler with the built view.
+// api/mcp.js and scripts/dev.mjs load: the handler with the built views.
 
 import { BEAT_HTML } from './beatHtml'
+import { GUIDE_HTML } from './guideHtml'
 import { createArcHandler } from './server'
 
-export const handler = createArcHandler(BEAT_HTML)
+export const handler = createArcHandler({ beat: BEAT_HTML, guide: GUIDE_HTML })

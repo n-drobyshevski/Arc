@@ -19,15 +19,25 @@
 // not bound the result (a card of short lines can list thousands of problems,
 // a long notes list thousands of notes). fitBeatCard keeps the result small:
 // the text lists at most MAX_PROBLEMS errors and as many warnings and
-// MAX_NOTE_LINES notes a section, and structuredContent keeps as many
-// problems and only the notes that fit in RESULT_BUDGET, with `cut` saying
-// how many it left out. The view then keeps its own parse of the tool's
-// input, which is whole (views/beat/main.tsx).
+// MAX_NOTE_LINES notes a section (four sections' worth in all, however many
+// scenes), and structuredContent keeps as many problems and only the notes
+// that fit in RESULT_BUDGET, the later scenes' first, with `cut` saying how
+// many it left out. A card of scenes holds its first scene twice (on top and
+// as scenes[0]), so when even no notes fit, the later scenes lose their
+// sections, the last first (`cut.scenes`); the parser keeps at most
+// MAX_SCENES scenes, however many scene lines a card that isn't valid has, so
+// that list stays short too. The view then keeps its own parse
+// of the tool's input, which is whole (views/beat/main.tsx).
 
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server'
 import type { McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
-import { parseBeatCard, summarizeBeatCard, type BeatCardResult } from '../../../web/src/core/formats/beatCard'
+import {
+  parseBeatCard,
+  summarizeBeatCard,
+  type BeatCardResult,
+  type BeatCardScene,
+} from '../../../web/src/core/formats/beatCard'
 import { BEAT_TOOL, BEAT_URI, CARD_MAX, CARD_MIN, ServerText } from '../text'
 
 /**
@@ -53,6 +63,8 @@ export interface BeatCardCut {
   readonly errors: number
   readonly warnings: number
   readonly notes: number
+  /** The scenes, the last ones, whose sections were left out; only when there are any. */
+  readonly scenes?: number
 }
 
 /** The tool's answer: the summary text and structuredContent, `cut` set when something was left out. */
@@ -60,34 +72,64 @@ export function fitBeatCard(result: BeatCardResult): { text: string; structured:
   const text = summarizeBeatCard(result, { problems: MAX_PROBLEMS, notes: MAX_NOTE_LINES })
   const errors = result.errors.slice(0, MAX_PROBLEMS)
   const warnings = result.warnings.slice(0, MAX_PROBLEMS)
-  const shown = (notes: number) => ({
-    ...result,
-    errors,
-    warnings,
-    notes: result.notes.slice(0, notes),
-    cut: {
-      errors: result.errors.length - errors.length,
-      warnings: result.warnings.length - warnings.length,
-      notes: result.notes.length - notes,
-    },
-  })
-  const fits = (notes: number): boolean => JSON.stringify(shown(notes)).length <= RESULT_BUDGET
-  // The longest run of notes that fits. Only notes are cut: the most grid rows CARD_MAX holds
-  // (every pad twice, 8 bars of 1/32) come to about 105k with their text, under the hosts' limit.
-  let notes = result.notes.length
-  if (!fits(notes)) {
+  const scenes = result.scenes
+  // Every note once: the top level's (the first scene's), then the later scenes'.
+  const total = result.notes.length + scenes.slice(1).reduce((n, s) => n + s.notes.length, 0)
+  /** The result with the first [whole] scenes' sections and the first [notes] notes in that order. */
+  const shown = (whole: number, notes: number) => {
+    let left = notes
+    const take = <T>(list: readonly T[]): T[] => {
+      const n = Math.min(left, list.length)
+      left -= n
+      return list.slice(0, n)
+    }
+    const top = take(result.notes)
+    const kept = scenes.map(
+      (s, i): BeatCardScene =>
+        i >= whole
+          ? { ...s, groups: [], notes: [], sounds: [], pads: [] }
+          : { ...s, notes: i === 0 ? s.notes.slice(0, top.length) : take(s.notes) },
+    )
+    const keptNotes = top.length + kept.slice(1).reduce((n, s) => n + s.notes.length, 0)
+    const dropped = scenes.length - Math.min(whole, scenes.length)
+    return {
+      ...result,
+      errors,
+      warnings,
+      notes: top,
+      scenes: kept,
+      cut: {
+        errors: result.errors.length - errors.length,
+        warnings: result.warnings.length - warnings.length,
+        notes: total - keptNotes,
+        ...(dropped > 0 ? { scenes: dropped } : {}),
+      },
+    }
+  }
+  const fits = (whole: number, notes: number): boolean => JSON.stringify(shown(whole, notes)).length <= RESULT_BUDGET
+  /** The largest n in 0..max with ok(n), ok being true up to some n and false after; 0 when none is. */
+  const most = (max: number, ok: (n: number) => boolean): number => {
     let lo = 0
-    let hi = notes
+    let hi = max
     while (lo < hi) {
       const mid = Math.ceil((lo + hi) / 2)
-      if (fits(mid)) lo = mid
+      if (ok(mid)) lo = mid
       else hi = mid - 1
     }
-    notes = lo
+    return lo
   }
-  const structured = shown(notes)
+  // The longest run of notes that fits, then, if none does, the most scenes that keep their sections.
+  // Only notes and later scenes are cut: the most grid rows CARD_MAX holds (every pad twice, 8 bars
+  // of 1/32) come to about 105k with their text, under the hosts' limit.
+  let whole = scenes.length
+  let notes = total
+  if (!fits(whole, notes)) {
+    if (!fits(whole, 0)) whole = most(scenes.length, (w) => fits(w, 0))
+    notes = most(total, (n) => fits(whole, n))
+  }
+  const structured = shown(whole, notes)
   const { cut } = structured
-  if (cut.errors + cut.warnings + cut.notes === 0) return { text, structured: result }
+  if (cut.errors + cut.warnings + cut.notes + (cut.scenes ?? 0) === 0) return { text, structured: result }
   return { text, structured }
 }
 
