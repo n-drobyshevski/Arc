@@ -7,11 +7,14 @@
 // Also the two mounts of Root (MainActivity.kt): the Device tab's read-only
 // sheet ('pads:device:<n>', from the browser's projectPads) and the opened
 // backup's playable sheet ('pads:backup:<id>:<n>', from the backup's pak).
+// Both copy the pads for Claude (ShareText.kit) with the sounds they name.
 import { Fragment, type JSX } from 'preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import { read as readPads, type PadGroup } from '../../core/features/projectPads'
 import { FeatureText } from '../../core/text/featureText'
+import { ShareText } from '../../core/text/shareText'
 import { Strings } from '../../core/text/strings'
+import { APP_VERSION } from '../../version'
 import { useController, useNav } from '../AppContext'
 import { Caption } from '../components/Caption'
 import { GridPlate, PlateLine } from '../components/GridPlate'
@@ -30,6 +33,8 @@ export interface PadsSheetContentProps {
   /** Null: read-only (the Device tab). */
   onPad: ((slot: number) => void) | null
   onDone: () => void
+  /** Copy for Claude (ShareText.kit); null hides the key. */
+  onCopy?: (() => void) | null
   /** Id of the title, for the sheet's aria-labelledby. */
   titleId?: string
 }
@@ -100,6 +105,9 @@ export function PadsSheetContent(props: PadsSheetContentProps): JSX.Element {
           </Fragment>
         )
       })}
+      {props.onCopy != null && groups.length > 0 && (
+        <Key text={ShareText.COPY} onClick={props.onCopy} size="small" block class="pads-sheet__copy" />
+      )}
       <Key text={Strings.DONE} onClick={props.onDone} variant="quiet" block class="pads-sheet__done" />
     </>
   )
@@ -162,6 +170,7 @@ export function DevicePadsSheet(props: { view: NavView }): JSX.Element {
           playingSlot={null}
           onPad={null}
           onDone={close}
+          onCopy={() => void c.copyForClaude(ShareText.kit(APP_VERSION, project, groups, names, c.padOrder(), ShareText.FROM_DEVICE))}
         />
       )}
     </Sheet>
@@ -181,6 +190,7 @@ export function BackupPadsSheet(props: { view: NavView; backupId: string }): JSX
   const pak = state.contents?.backupId === backupId ? state.contents.pak : null
   const tar = project !== null ? pak?.projects.get(project) ?? null : null
   const groups = useMemo(() => (tar ? readPads(tar) : null), [tar])
+  const title = state.backups.find((b) => b.id === backupId)?.title ?? ''
   const playingPrefix = `backup:${backupId}:`
   const rest = playing?.startsWith(playingPrefix) ? playing.slice(playingPrefix.length) : null
   const playingSlot = rest !== null && /^\d+$/.test(rest) ? Number(rest) : null
@@ -205,6 +215,10 @@ export function BackupPadsSheet(props: { view: NavView; backupId: string }): JSX
             else void c.playBackupSound(slot)
           }}
           onDone={close}
+          onCopy={() => {
+            const names = new Map([...(pak?.sounds.values() ?? [])].map((s) => [s.slot, s.name]))
+            void c.copyForClaude(ShareText.kit(APP_VERSION, project, groups, names, c.padOrder(), ShareText.fromBackup(title)))
+          }}
         />
       )}
     </Sheet>

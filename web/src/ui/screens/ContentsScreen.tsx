@@ -2,7 +2,8 @@
 //
 // What is inside a saved backup (an addition to the web version): its sounds,
 // which play on the phone and export as WAV files, and its projects, which
-// export as their own .pak with the sounds they use. No device needed.
+// export as their own .pak with the sounds they use. No device needed. The
+// sound list copies for Claude (ShareText.sounds) from the header.
 //
 // Web deltas: the LazyColumn is a plain column (the page scrolls). A row is a
 // plate whose main part is a <button aria-expanded> (the keys beside and under
@@ -16,6 +17,7 @@ import { projectSlots } from '../../core/backup/pakExport'
 import { FeatureText } from '../../core/text/featureText'
 import { Format } from '../../core/text/format'
 import type { BackupRecord } from '../../core/text/libraryRules'
+import { ShareText } from '../../core/text/shareText'
 import { Strings } from '../../core/text/strings'
 import type { ContentsUi } from '../../state/types'
 import { Key } from '../components/Key'
@@ -36,6 +38,8 @@ export interface ContentsScreenProps {
   onBack: () => void
   /** The project's pads sheet (a navigation layer 'pads:backup:<id>:<n>'). */
   onPads: (n: number) => void
+  /** Copy the backup's sound list for Claude; shown once the backup is open. */
+  onCopy: () => void
 }
 
 /** A project of the backup and the backup's sounds its pads use. */
@@ -157,6 +161,7 @@ export function ContentsScreen(props: ContentsScreenProps): JSX.Element {
       <div class="contents__column">
         <header class="contents__head">
           <h1 id={titleId} class="t-heading contents__title">{b.title}</h1>
+          {pak !== null && <Key text={ShareText.COPY} variant="quiet" size="small" onClick={props.onCopy} />}
           <Key text={Strings.DONE} variant="quiet" size="small" onClick={props.onBack} />
         </header>
         {body}

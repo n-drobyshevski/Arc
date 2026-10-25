@@ -34,8 +34,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import dev.arc.ep133.features.PadGroup
 import dev.arc.ep133.text.FeatureText
+import dev.arc.ep133.text.ShareText
 import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcKey
+import dev.arc.ep133.ui.components.KeySize
 import dev.arc.ep133.ui.components.KeyStyle
 import dev.arc.ep133.ui.components.OneLine
 import dev.arc.ep133.ui.theme.ArcType
@@ -45,6 +47,7 @@ import dev.arc.ep133.ui.theme.LocalArcColors
  * Which sound sits on each pad of a project (an addition to the web version).
  * Pads are laid out by their number in the project file, three to a row; how
  * those numbers map to the pads on the device is not known, and the note says so.
+ * [onCopy] copies the pads for Claude ([ShareText.kit]); null hides the key.
  */
 @Composable
 fun ColumnScope.PadsSheetContent(
@@ -54,6 +57,7 @@ fun ColumnScope.PadsSheetContent(
     playingSlot: Int?,
     onPad: ((Int) -> Unit)?,
     onDone: () -> Unit,
+    onCopy: (() -> Unit)? = null,
 ) {
     val c = LocalArcColors.current
     Text(title, style = ArcType.heading, color = c.ink)
@@ -87,6 +91,9 @@ fun ColumnScope.PadsSheetContent(
                 }
             }
         }
+    }
+    if (onCopy != null && groups.isNotEmpty()) {
+        ArcKey(ShareText.COPY, onCopy, Modifier.fillMaxWidth().padding(top = 6.dp), size = KeySize.Small)
     }
     ArcKey(Strings.DONE, onDone, Modifier.fillMaxWidth().padding(top = 6.dp), style = KeyStyle.Quiet)
 }

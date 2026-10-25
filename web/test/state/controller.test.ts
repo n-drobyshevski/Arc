@@ -8,6 +8,7 @@ import { encodeWav } from '../../src/core/formats/wav'
 import { TrafficLog } from '../../src/core/protocol/trafficLog'
 import { RestoreSelection } from '../../src/core/text/libraryRules'
 import { SettingsText, ThemeChoice } from '../../src/core/text/settingsText'
+import { ShareText } from '../../src/core/text/shareText'
 import { Strings } from '../../src/core/text/strings'
 import { WebText } from '../../src/core/text/webText'
 import { NullPlayer } from '../../src/platform/audio/player'
@@ -616,6 +617,17 @@ describe('library', () => {
     h.c.dismissToast(h.c.state.value.toast!.id)
     expect(h.c.state.value.toast).toBeNull()
     await sleep(0)
+  })
+  it('copies a text for Claude, or says the clipboard failed', async () => {
+    const h = await harness()
+    const copied: string[] = []
+    h.deps.clipboard = { writeText: async (t) => { copied.push(t) } }
+    await h.c.copyForClaude('kit')
+    expect(copied).toEqual(['kit'])
+    expect(lastToast(h)).toMatchObject({ text: ShareText.COPIED, error: false })
+    h.deps.clipboard = undefined
+    await h.c.copyForClaude('kit')
+    expect(lastToast(h)).toMatchObject({ text: Strings.SAVE_FAILED, error: true })
   })
 })
 
