@@ -43,6 +43,7 @@ These go beyond the web version:
     - arc pairs that with the note to learn which pad is which, then names the sample from the project's pads. One press of a key, in any group, names that key in every group, and arc remembers it; nothing is guessed, and two pads of one group hit together don't count.
     - Community notes disagree on how project files number the pads, so the page has a switch to count them from the top or from the bottom.
 - **Settings:** the gear at the top right. Theme (system, light or dark); whether arc connects by itself when an EP-133 is plugged in; whether the screen stays on in Live; how many backups to keep (all, 5, 10 or 20: after each backup or import the oldest beyond that are deleted, here and in Documents/arc, and lowering it asks first); Live's pad numbering and forgetting learned sample names; the version, source, font licence and the debug log. The settings are saved in Documents/arc with the library, so they come back after a reinstall.
+- **Copy for Claude:** a **Copy for Claude** key on a project's **Pads**, a backup's **Contents** and **Compare** puts plain text on the clipboard for a chat with Claude: the pads as `sound A7 12 Kick` lines (with the pads that have no sound), the sound list as `slot name` lines, or what changed between two backups. It is the text the `arc-beats` skill reads, so Claude can write beats for the sounds actually on your pads. arc sends nothing anywhere itself: the text goes only where you paste it. Pad letters follow Live's pad numbering setting, which community notes disagree on, and the text says so.
 - **Shortcut guide:** 100 EP-133 key combinations in tabs by section, with search, laid out like a printed guide: each combination drawn as the device's keys (pale keys, dark keys, pads, knobs and the fader), with HOLD, DIAL, TURN and MOVE badges, and what it does below. A test checks that every key drawn is named in that entry's text from the official guide. Every entry is paraphrased from teenage engineering's official user guide for OS 2.5, and links to the section it comes from. Combos the guide doesn't document are left out.
 
 Backups use the same layout as the official Sample Tool's `.pak`: a zip with `/meta.json`, `/sounds/NNN name.wav` and `/projects/PNN.tar`. On top of that, an `arc.json` file keeps per-sound settings like play mode, pitch and envelope.
@@ -89,6 +90,7 @@ npm run dev        # http://localhost:5173, add ?demo for the simulated device
 npm run check      # typecheck, unit tests (Vitest), production build
 npm run e2e        # Playwright smoke test of the built app in Chromium (once: npx playwright install chromium)
 npm run gen:guide  # regenerate src/core/text/guideData.ts from core's GuideText.kt
+npm run gen:skill  # write dist-skill/ep133-guide.md for the arc-beats skill from guideData.ts
 ```
 
 [`web/README.md`](web/README.md) has the layout of the code and how it maps to the Kotlin. [`.github/workflows/web.yml`](.github/workflows/web.yml) runs the typecheck, tests, build and smoke test on every pull request and push to `main` that touches `web/`.
@@ -98,6 +100,12 @@ npm run gen:guide  # regenerate src/core/text/guideData.ts from core's GuideText
 The Vercel project `arc` builds from `vercel.json` at the repository root: it installs and builds `web/` and serves `web/dist`. The same file sets the cache headers for `sw.js`, the manifest and `assets/`, allows MIDI for the site, and sets a strict Content-Security-Policy that also keeps arc out of other sites' frames. A push to `main` deploys to production at https://arc-pi-mauve.vercel.app; a push to any other branch gets its own preview deployment. Production builds show the version exactly (`0.2.0`), previews and local builds add `-dev`. The version comes from `version.properties`, as for Android, and `.pak` files name it the same way (`arc 0.2.0`).
 
 **Status:** the web app has been tested against the simulator (unit tests and the Playwright smoke test with `?demo`), not yet with a physical EP-133. The open questions under [Status](#status-what-is-verified-and-what-still-needs-a-real-device) apply to it too, plus WebMIDI's own: how Chrome splits incoming SysEx, and whether the upload window survives Chrome's MIDI send buffer.
+
+## Claude connector (`mcp/`)
+
+[`mcp/`](mcp/) is a small MCP server, deployed as its own Vercel project, with one tool, `show_beat_card`. When Claude writes an ARC BEAT card (with the `arc-beats` skill) or you paste one, the tool shows it in the chat as an interactive [MCP App](https://github.com/modelcontextprotocol/ext-apps): a step grid per group, mute and solo, tempo and swing, Play with stand-in drum sounds, the card's problems by line, **Copy card** and **Ask Claude to change this**. Hosts without MCP Apps, such as Claude Code, get a plain-text summary. It is a preview only: arc can't import cards yet, and an MCP App can't reach the EP-133 (chat apps give their app frames no MIDI). The server only sees the card text and stores nothing. The card parser is `web/src/core/formats/beatCard.ts`, kept in step with the skill's `beatcard.py`, so a later card import in arc can use it. [`mcp/README.md`](mcp/README.md) has deploy steps and how to add the connector in Claude.
+
+The skill's EP-133 guide is generated from arc's: `npm run gen:skill` in `web/` writes `web/dist-skill/ep133-guide.md` from `src/core/text/guideData.ts`. [`docs/arc-beats-skill-changes.md`](docs/arc-beats-skill-changes.md) lists what the skill says about arc that needs correcting, and its web-search rule.
 
 ## Build
 
@@ -179,6 +187,8 @@ app/    Android: MIDI transport, foreground service, Room library (with a sound-
 reference/   the web version (read only, the spec)
 web/    the browser app: a TypeScript port of core/ and app/ (Vite, Preact), see web/README.md
 vercel.json  Vercel build and headers for web/
+mcp/    the Claude connector: an MCP server with the show_beat_card app view (its own Vercel project), see mcp/README.md
+docs/   notes for the arc-beats skill
 ```
 
 Each core file is a port of the matching JS file and says so at the top. The UI follows `reference/styles.css`: a grey shell, pale keys whose bottom edge presses down, one orange key (#FF4C00) and a dark display panel. Light and dark themes come from the same tokens.

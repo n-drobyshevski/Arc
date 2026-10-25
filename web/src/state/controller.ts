@@ -56,6 +56,7 @@ import { FeatureText } from '../core/text/featureText'
 import { DATE_TIME_PATTERN, DAY_PATTERN, date as formatDate } from '../core/text/format'
 import { BackupDevice, fileNameFor, importTitle, toPrune, type BackupRecord, type RestoreSelection } from '../core/text/libraryRules'
 import { SettingsText, type ThemeChoice } from '../core/text/settingsText'
+import { ShareText } from '../core/text/shareText'
 import { Strings } from '../core/text/strings'
 import { WebText } from '../core/text/webText'
 import { ktTrim } from '../core/util/kotlinText'
@@ -1240,6 +1241,18 @@ export class ArcController {
       if (!cb) throw new Error(Strings.SAVE_FAILED)
       await cb.writeText(text)
       this.toast(Strings.DEBUG_COPIED)
+    } catch (e) {
+      this.toast(errorText(e), true)
+    }
+  }
+
+  /** Copies a "Copy for Claude" text (ShareText) and says so (MainActivity.copyForClaude). */
+  async copyForClaude(text: string): Promise<void> {
+    try {
+      const cb = this.deps.clipboard
+      if (!cb) throw new Error(Strings.SAVE_FAILED)
+      await cb.writeText(text)
+      this.toast(ShareText.COPIED)
     } catch (e) {
       this.toast(errorText(e), true)
     }

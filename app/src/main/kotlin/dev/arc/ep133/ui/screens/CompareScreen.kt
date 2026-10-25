@@ -25,6 +25,7 @@ import dev.arc.ep133.controller.PakCompareUi
 import dev.arc.ep133.features.ChangeKind
 import dev.arc.ep133.text.BackupRecord
 import dev.arc.ep133.text.FeatureText
+import dev.arc.ep133.text.ShareText
 import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcKey
 import dev.arc.ep133.ui.components.KeySize
@@ -50,6 +51,7 @@ fun ColumnScope.ComparePickerContent(
 /**
  * What changed between two saved backups, older to newer: sounds and
  * projects added, removed and changed, and the pads a changed project moved.
+ * A finished comparison copies for Claude ([ShareText.compare]) from the header.
  */
 @Composable
 fun CompareScreen(
@@ -58,9 +60,12 @@ fun CompareScreen(
     compare: PakCompareUi?,
     fmtDay: (Long) -> String,
     onBack: () -> Unit,
+    /** Copy the comparison for Claude, given the header line; shown once it is done. */
+    onCopy: (fromTo: String, compare: PakCompareUi) -> Unit = { _, _ -> },
 ) {
     val c = LocalArcColors.current
     BackHandler(onBack = onBack)
+    val fromTo = FeatureText.compareHeader(old.title, fmtDay(old.createdAt), new.title, fmtDay(new.createdAt))
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             Modifier
@@ -73,14 +78,14 @@ fun CompareScreen(
             item {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(FeatureText.COMPARE_BACKUPS, style = ArcType.heading, color = c.ink, modifier = Modifier.weight(1f))
+                    if (compare != null && compare.result != null && compare.error == null) {
+                        ArcKey(ShareText.COPY, { onCopy(fromTo, compare) }, size = KeySize.Small, style = KeyStyle.Quiet)
+                    }
                     ArcKey(Strings.DONE, onBack, size = KeySize.Small, style = KeyStyle.Quiet)
                 }
             }
             item {
-                Text(
-                    FeatureText.compareHeader(old.title, fmtDay(old.createdAt), new.title, fmtDay(new.createdAt)),
-                    style = ArcType.body15, color = c.graphite,
-                )
+                Text(fromTo, style = ArcType.body15, color = c.graphite)
             }
             val r = compare?.result
             when {

@@ -1,0 +1,413 @@
+/* The beat-card view. Tokens come from ../shared/hostTheme.css. */
+
+.beat {
+  box-sizing: border-box;
+  max-width: 760px;
+  padding: 12px 16px 16px;
+}
+
+.beat *,
+.beat *::before,
+.beat *::after {
+  box-sizing: border-box;
+}
+
+.beat-waiting {
+  color: var(--arc-text-2);
+}
+
+.beat-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.beat-name {
+  margin: 0;
+  font-size: var(--font-heading-sm-size, 1.15rem);
+  font-weight: var(--font-weight-semibold, 600);
+  overflow-wrap: anywhere;
+}
+
+.beat-meta,
+.beat-note,
+.beat-foot {
+  margin: 0;
+  color: var(--arc-text-2);
+  font-size: var(--font-text-sm-size, 0.85rem);
+}
+
+.beat-note {
+  margin-top: 6px;
+}
+
+.beat-foot {
+  margin-top: 12px;
+}
+
+.beat-invalid {
+  margin: 8px 0 0;
+  color: var(--arc-danger);
+}
+
+.beat button,
+.beat input[type='text'],
+.beat textarea {
+  font: inherit;
+  color: inherit;
+}
+
+.beat-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 12px;
+}
+
+.beat-play,
+.beat-button {
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 1px solid var(--arc-border);
+  border-radius: var(--arc-radius);
+  background: var(--arc-bg-2);
+  cursor: pointer;
+}
+
+.beat-play {
+  min-width: 88px;
+  border-color: var(--arc-accent);
+  background: var(--arc-accent);
+  color: #fff !important;
+  font-weight: var(--font-weight-semibold, 600);
+}
+
+.beat-play.is-on {
+  background: transparent;
+  color: var(--arc-accent) !important;
+}
+
+.beat-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.beat-slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 140px;
+  min-width: 0;
+  font-size: var(--font-text-sm-size, 0.85rem);
+}
+
+.beat-slider input {
+  flex: 1;
+  min-width: 60px;
+  accent-color: var(--arc-accent);
+}
+
+.beat-slider output {
+  min-width: 4.5em;
+  font-variant-numeric: tabular-nums;
+  color: var(--arc-text-2);
+}
+
+.beat-tabs {
+  display: flex;
+  gap: 6px;
+  margin-top: 14px;
+  overflow-x: auto;
+}
+
+.beat-tab {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--arc-border);
+  border-radius: var(--arc-radius);
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.beat-tab.is-on {
+  border-color: var(--arc-accent);
+  background: var(--arc-bg-2);
+}
+
+.beat-tab-letter {
+  font-weight: var(--font-weight-bold, 700);
+}
+
+.beat-tab-info {
+  color: var(--arc-text-2);
+  font-size: var(--font-text-xs-size, 0.75rem);
+}
+
+.beat-panel {
+  margin-top: 8px;
+}
+
+/* The grid scrolls sideways inside itself, never the page; row heads stay put. */
+.beat-grid-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--arc-border);
+  border-radius: var(--arc-radius);
+  background: var(--arc-bg-2);
+}
+
+.beat-grid {
+  --cell: 14px;
+  --head: 152px;
+  display: inline-block;
+  min-width: 100%;
+  padding: 4px 6px 6px 0;
+}
+
+.beat-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.beat-row {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+}
+
+.beat-row.is-silent .beat-cells {
+  opacity: 0.3;
+}
+
+.beat-row-head {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 var(--head);
+  width: var(--head);
+  padding: 0 6px 0 8px;
+  background: var(--arc-bg-2);
+}
+
+.beat-pad {
+  flex: 0 0 auto;
+  font-family: var(--arc-mono);
+  font-size: var(--font-text-sm-size, 0.85rem);
+  font-weight: var(--font-weight-semibold, 600);
+}
+
+.beat-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-text-sm-size, 0.85rem);
+  color: var(--arc-text-2);
+}
+
+.beat-label.is-notes {
+  font-style: italic;
+}
+
+.beat-ms {
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--arc-border);
+  border-radius: var(--arc-radius-sm);
+  background: var(--arc-bg);
+  font-size: 0.75rem !important;
+  font-weight: var(--font-weight-bold, 700);
+  cursor: pointer;
+}
+
+.beat-mute.is-on {
+  border-color: var(--arc-danger);
+  background: var(--arc-danger);
+  color: var(--arc-bg) !important;
+}
+
+.beat-solo.is-on {
+  border-color: var(--arc-accent);
+  background: var(--arc-accent);
+  color: #fff !important;
+}
+
+.beat-cells {
+  display: grid;
+  grid-template-columns: repeat(var(--steps), var(--cell));
+  grid-auto-rows: 20px;
+  gap: 0;
+}
+
+.beat-cell {
+  position: relative;
+  margin: 0 1px;
+  border-radius: 3px;
+  background: var(--arc-bg);
+}
+
+/* Beat and bar lines sit in the gap before the step. */
+.beat-cell.at-beat::before,
+.beat-cell.at-bar::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  bottom: -5px;
+  left: -1.5px;
+  width: 1px;
+  background: var(--arc-border);
+}
+
+.beat-cell.at-bar::before {
+  background: var(--arc-text-2);
+}
+
+.beat-cell.at-bar[data-step='0']::before {
+  display: none;
+}
+
+.beat-cell.is-hit {
+  background: color-mix(in srgb, var(--arc-accent) calc(25% + var(--v) * 75%), transparent);
+}
+
+/* A held hit runs over its '-' steps, thinner after the attack. */
+.beat-cell.is-held {
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--arc-accent) calc(25% + var(--v) * 75%), transparent) var(--cell),
+    color-mix(in srgb, var(--arc-accent) calc(15% + var(--v) * 40%), transparent) var(--cell)
+  );
+}
+
+.beat-cell.is-note {
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--arc-accent) calc(30% + var(--v) * 70%), transparent) 35%,
+    var(--arc-bg) 40%
+  );
+}
+
+.beat-ruler {
+  min-height: 16px;
+}
+
+.beat-ruler .beat-cells {
+  grid-auto-rows: 14px;
+}
+
+.beat-tick {
+  margin: 0 1px;
+  font-size: 0.65rem;
+  line-height: 14px;
+  color: var(--arc-text-2);
+  font-variant-numeric: tabular-nums;
+  border-bottom: 2px solid transparent;
+}
+
+.beat-tick.is-now {
+  border-bottom-color: var(--arc-accent);
+}
+
+.beat-problems {
+  margin-top: 12px;
+  font-size: var(--font-text-sm-size, 0.85rem);
+}
+
+.beat-problems summary {
+  cursor: pointer;
+  font-weight: var(--font-weight-semibold, 600);
+}
+
+.beat-problems.is-error summary {
+  color: var(--arc-danger);
+}
+
+.beat-problems.is-warning summary {
+  color: var(--arc-warning);
+}
+
+.beat-problems ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.beat-line {
+  font-family: var(--arc-mono);
+  color: var(--arc-text-2);
+}
+
+.beat-actions {
+  margin-top: 14px;
+}
+
+.beat-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.beat-copy-fallback textarea {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px;
+  border: 1px solid var(--arc-border);
+  border-radius: var(--arc-radius-sm);
+  background: var(--arc-bg);
+  font-family: var(--arc-mono);
+  font-size: 0.8rem;
+  resize: vertical;
+}
+
+.beat-ask {
+  margin-top: 10px;
+}
+
+.beat-ask label {
+  display: block;
+  font-size: var(--font-text-sm-size, 0.85rem);
+}
+
+.beat-ask-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.beat-ask-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--arc-border);
+  border-radius: var(--arc-radius);
+  background: var(--arc-bg);
+}
+
+@media (max-width: 420px) {
+  .beat {
+    padding: 10px 12px 12px;
+  }
+
+  .beat-grid {
+    --head: 128px;
+    --cell: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .beat-tick.is-now {
+    border-bottom-color: transparent;
+  }
+}

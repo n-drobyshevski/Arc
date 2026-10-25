@@ -40,6 +40,7 @@ import dev.arc.ep133.files.Files
 import dev.arc.ep133.text.BackupRecord
 import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.LibraryRules
+import dev.arc.ep133.text.ShareText
 import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcSheet
 import dev.arc.ep133.ui.components.ArcFrame
@@ -321,6 +322,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Copies a "Copy for Claude" text ([ShareText]); it stays well under the clipboard's limit. */
+    private fun copyForClaude(text: String) {
+        try {
+            getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(ShareText.COPY, text))
+            controller.toast(ShareText.COPIED)
+        } catch (e: RuntimeException) {
+            controller.toast(e.message ?: e.toString(), error = true)
+        }
+    }
+
     @Composable
     private fun Root() {
         val state by controller.state.collectAsStateWithLifecycle()
@@ -491,6 +502,11 @@ class MainActivity : ComponentActivity() {
                         compareIds = null
                         controller.closeCompare()
                     },
+                    onCopy = { fromTo, done ->
+                        done.result?.let {
+                            copyForClaude(ShareText.compare(Arc.APP_VERSION, fromTo, it, done.oldNames, done.newNames, controller.padOrder()))
+                        }
+                    },
                 )
             } else if (contentsBackup != null) {
                 ContentsScreen(
@@ -509,6 +525,12 @@ class MainActivity : ComponentActivity() {
                         controller.closeContents()
                     },
                     onPads = { n -> padsFor = "backup:${contentsBackup.id}:$n" },
+                    onCopy = {
+                        state.contents?.takeIf { it.backupId == contentsBackup.id }?.pak?.let { pak ->
+                            val names = pak.sounds.values.associate { it.slot to it.name }
+                            copyForClaude(ShareText.sounds(Arc.APP_VERSION, names, ShareText.fromBackup(contentsBackup.title)))
+                        }
+                    },
                 )
                 val pak = state.contents?.takeIf { it.backupId == contentsBackup.id }?.pak
                 val padsProject = padsFor?.takeIf { it.startsWith("backup:${contentsBackup.id}:") }?.substringAfterLast(':')?.toIntOrNull()
@@ -528,6 +550,12 @@ class MainActivity : ComponentActivity() {
                                 if (playing == playingPrefix + slot) controller.stopPlayback() else controller.playBackupSound(slot)
                             },
                             onDone = { padsFor = null },
+                            onCopy = {
+                                val names = pak?.sounds?.values?.associate { it.slot to it.name } ?: emptyMap()
+                                copyForClaude(
+                                    ShareText.kit(Arc.APP_VERSION, n, g, names, controller.padOrder(), ShareText.fromBackup(contentsBackup.title)),
+                                )
+                            },
                         )
                     }
                 }
@@ -676,6 +704,9 @@ class MainActivity : ComponentActivity() {
                                 playingSlot = null,
                                 onPad = null,
                                 onDone = { padsFor = null },
+                                onCopy = {
+                                    copyForClaude(ShareText.kit(Arc.APP_VERSION, n, g, names, controller.padOrder(), ShareText.FROM_DEVICE))
+                                },
                             )
                         }
                     }

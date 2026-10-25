@@ -3,6 +3,7 @@
 .pads-sheet__title { color: var(--ink); }
 .pads-sheet__note { color: var(--graphite); }
 .pads-sheet__group { padding-top: var(--space-6); }
+.pads-sheet__copy,
 .pads-sheet__done { margin-top: var(--space-6); }
 
 .pad-grid__row {

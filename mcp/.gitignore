@@ -1,0 +1,8 @@
+node_modules/
+ui-dist/
+.vercel/
+.next/
+test-results/
+playwright-report/
+*.tsbuildinfo
+dist/

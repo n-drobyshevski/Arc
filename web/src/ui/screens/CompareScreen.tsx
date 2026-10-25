@@ -2,6 +2,7 @@
 //
 // What changed between two saved backups, older to newer: sounds and
 // projects added, removed and changed, and the pads a changed project moved.
+// A finished comparison copies for Claude (ShareText.compare) from the header.
 //
 // ComparePickerContent (the same Kotlin file) is the compare picker sheet's
 // body; it lives in ui/sheets/ComparePicker.tsx.
@@ -14,6 +15,7 @@ import { useId, useLayoutEffect, useRef } from 'preact/hooks'
 import { ChangeKind, type PakCompareResult } from '../../core/features/pakCompare'
 import { FeatureText } from '../../core/text/featureText'
 import type { BackupRecord } from '../../core/text/libraryRules'
+import { ShareText } from '../../core/text/shareText'
 import { Strings } from '../../core/text/strings'
 import type { PakCompareUi } from '../../state/types'
 import { Key } from '../components/Key'
@@ -28,6 +30,8 @@ export interface CompareScreenProps {
   compare: PakCompareUi | null
   fmtDay: (ms: number) => string
   onBack: () => void
+  /** Copy the comparison for Claude, given the header line; shown once it is done. */
+  onCopy: (fromTo: string, compare: PakCompareUi) => void
 }
 
 /** One row (Kotlin Line(slot, name, details)). */
@@ -106,6 +110,7 @@ export function CompareScreen(props: CompareScreenProps): JSX.Element {
   }, [])
 
   const r = compare?.result ?? null
+  const fromTo = FeatureText.compareHeader(old.title, props.fmtDay(old.createdAt), props.new.title, props.fmtDay(props.new.createdAt))
   let body: JSX.Element
   if (compare?.error != null) {
     body = <p class="t-body15 compare__error" role="alert">{compare.error}</p>
@@ -132,11 +137,12 @@ export function CompareScreen(props: CompareScreenProps): JSX.Element {
       <div class="compare__column">
         <header class="compare__head">
           <h1 id={titleId} class="t-heading compare__title">{FeatureText.COMPARE_BACKUPS}</h1>
+          {r !== null && compare !== null && compare.error == null && (
+            <Key text={ShareText.COPY} variant="quiet" size="small" onClick={() => props.onCopy(fromTo, compare)} />
+          )}
           <Key text={Strings.DONE} variant="quiet" size="small" onClick={props.onBack} />
         </header>
-        <p class="t-body15 compare__dim">
-          {FeatureText.compareHeader(old.title, props.fmtDay(old.createdAt), props.new.title, props.fmtDay(props.new.createdAt))}
-        </p>
+        <p class="t-body15 compare__dim">{fromTo}</p>
         {body}
       </div>
     </div>

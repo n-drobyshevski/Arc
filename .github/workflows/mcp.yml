@@ -1,0 +1,62 @@
+name: MCP
+
+on:
+  pull_request:
+    paths:
+      - 'mcp/**'
+      - 'web/src/core/formats/beatCard.ts'
+      - 'web/src/core/features/padNotes.ts'
+      - 'web/test/core/formats/beatCardFixtures.ts'
+      - '.github/workflows/mcp.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'mcp/**'
+      - 'web/src/core/formats/beatCard.ts'
+      - 'web/src/core/features/padNotes.ts'
+      - 'web/test/core/formats/beatCardFixtures.ts'
+      - '.github/workflows/mcp.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: mcp-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build, typecheck, test and browser-test the MCP server
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: mcp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mcp/package-lock.json
+
+      - run: npm ci
+      # Builds the view (ui-dist/beat.html) and the server bundle (dist/server.js),
+      # typechecks, then runs the in-process server tests.
+      - run: npm run check
+
+      # The view in Chromium under a test host (test/e2e/host) using the ext-apps AppBridge.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: mcp-playwright-report
+          path: |
+            mcp/playwright-report
+            mcp/test-results
+          retention-days: 14
+          if-no-files-found: ignore

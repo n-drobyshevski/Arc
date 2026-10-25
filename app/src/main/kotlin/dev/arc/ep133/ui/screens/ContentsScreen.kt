@@ -30,6 +30,7 @@ import dev.arc.ep133.controller.ContentsUi
 import dev.arc.ep133.text.BackupRecord
 import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.Format
+import dev.arc.ep133.text.ShareText
 import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcKey
 import dev.arc.ep133.ui.components.KeySize
@@ -41,7 +42,8 @@ import dev.arc.ep133.ui.theme.LocalArcColors
 /**
  * What is inside a saved backup (an addition to the web version): its sounds,
  * which play on the phone and export as WAV files, and its projects, which
- * export as their own .pak with the sounds they use. No device needed.
+ * export as their own .pak with the sounds they use. No device needed. The
+ * sound list copies for Claude ([ShareText.sounds]) from the header.
  */
 @Composable
 fun ContentsScreen(
@@ -56,6 +58,8 @@ fun ContentsScreen(
     onSaveProject: (Int) -> Unit,
     onBack: () -> Unit,
     onPads: (Int) -> Unit = {},
+    /** Copy the backup's sound list for Claude; shown once the backup is open. */
+    onCopy: () -> Unit = {},
 ) {
     val c = LocalArcColors.current
     BackHandler(onBack = onBack)
@@ -75,6 +79,7 @@ fun ContentsScreen(
             item {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     OneLine(b.title, ArcType.heading, c.ink, Modifier.weight(1f))
+                    if (pak != null) ArcKey(ShareText.COPY, onCopy, size = KeySize.Small, style = KeyStyle.Quiet)
                     ArcKey(Strings.DONE, onBack, size = KeySize.Small, style = KeyStyle.Quiet)
                 }
             }

@@ -15,12 +15,13 @@ import { Component, type ComponentChildren, type JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { MirrorText } from './core/text/mirrorText'
 import { SettingsText } from './core/text/settingsText'
+import { ShareText } from './core/text/shareText'
 import { Strings } from './core/text/strings'
 import { WebText } from './core/text/webText'
 import { attachDrop, isPakName } from './platform/files/pick'
 import type { ArcController } from './state/controller'
 import { emptyMirrorState, type MirrorUi, type TaskUi } from './state/types'
-import { APP_BUILD } from './version'
+import { APP_BUILD, APP_VERSION } from './version'
 import { AppProvider, useController, useNav } from './ui/AppContext'
 import {
   Nav,
@@ -191,6 +192,10 @@ function Root(): JSX.Element {
         compare={pc && pc.oldId === older.id && pc.newId === newer.id ? pc : null}
         fmtDay={(ms) => c.fmtDay(ms)}
         onBack={closeScreen(screenLayer({ kind: 'compare', a: v.compare[0], b: v.compare[1] }))}
+        onCopy={(fromTo, done) => {
+          if (done.result === null) return
+          void c.copyForClaude(ShareText.compare(APP_VERSION, fromTo, done.result, done.oldNames, done.newNames, c.padOrder()))
+        }}
       />
     )
   } else if (view === 'contents' && contentsBackup) {
@@ -208,6 +213,12 @@ function Root(): JSX.Element {
         onSaveProject={(n) => void c.saveProject(b, n)}
         onBack={closeScreen(screenLayer({ kind: 'contents', id: b.id }))}
         onPads={(n) => nav.open(sheetLayer(`pads:backup:${b.id}:${n}`))}
+        onCopy={() => {
+          const pak = state.contents?.backupId === b.id ? state.contents.pak : null
+          if (pak === null) return
+          const names = new Map([...pak.sounds.values()].map((s) => [s.slot, s.name]))
+          void c.copyForClaude(ShareText.sounds(APP_VERSION, names, ShareText.fromBackup(b.title)))
+        }}
       />
     )
     // The backup's pads sheet (v.sheets 'pads:backup:<id>:<n>', playable).
